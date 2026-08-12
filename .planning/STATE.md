@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-03-PLAN.md — load-path sentinel + executed BOOT-02/BOOT-05 proofs
-last_updated: "2026-08-12T18:35:30.242Z"
+stopped_at: Completed 01-04-PLAN.md — BOOT-01 effectiveness + BOOT-08 pinning gates
+last_updated: "2026-08-12T18:45:41.617Z"
 last_activity: 2026-08-12
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 3
+  completed_plans: 4
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 4 of 10
+Plan: 5 of 10
 Status: Ready to execute
 Last activity: 2026-08-12
 
-Progress: [███░░░░░░░] 30%
+Progress: [████░░░░░░] 40%
 
 ## Performance Metrics
 
@@ -55,6 +55,7 @@ Progress: [███░░░░░░░] 30%
 | Phase 01 P01 | 15m | 3 tasks | 10 files |
 | Phase 01 P02 | 20m | 2 tasks | 6 files |
 | Phase 01 P03 | 18m | 3 tasks | 3 files |
+| Phase 01 P04 | 18m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -76,6 +77,9 @@ Recent decisions affecting current work:
 - [Phase 01]: a negative control must be paired with a positive on the same fixture — case 4's no--a absence is only meaningful because adding -a and nothing else flips it back to present on the same fresh PI_CODING_AGENT_DIR
 - [Phase 01]: PI_CODING_AGENT_DIR relocates trust.json (dist/config.js:397,412-418) — every load-path test uses a fresh one so verdicts come from the gate, not from this machine's saved decisions
 - [Phase 01]: the sentinel extension registers a command and a dead-endpoint provider and never a tool — BOOT-10's boundary rule dogfooded on the first commit of real code
+- [Phase 01]: npx and npm run export the resolved config as npm_config_* and npm ranks env above every .npmrc — supply-chain probes must strip npm_config_* or they measure the launcher, not the control
+- [Phase 01]: user-scope npm hardening is asserted as a MECHANISM against a throwaway agent dir; the live machine-state check belongs to bin/bootstrap.sh --assert-hardening and stays OUTSTANDING until then
+- [Phase 01]: isPinnedPackageSpec is exported from tests/unit/pinning.test.ts for Phase 7 to import — no production module exists yet and a second regex is how the two drift apart
 
 ### Pending Todos
 
@@ -117,8 +121,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-12T18:35:30.234Z
-Stopped at: Completed 01-03-PLAN.md — load-path sentinel + executed BOOT-02/BOOT-05 proofs
+Last session: 2026-08-12T18:45:41.606Z
+Stopped at: Completed 01-04-PLAN.md — BOOT-01 effectiveness + BOOT-08 pinning gates
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
