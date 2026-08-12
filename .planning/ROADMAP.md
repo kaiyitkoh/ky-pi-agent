@@ -35,7 +35,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 **Depends on**: Nothing (first phase)
 **Requirements**: BOOT-01, BOOT-02, BOOT-03, BOOT-04, BOOT-05, BOOT-06, BOOT-07, BOOT-08, BOOT-09, BOOT-10, SAFE-16
 **Success Criteria** (what must be TRUE):
-  1. `npm config get ignore-scripts` returns `true` on a freshly bootstrapped machine, asserted by the bootstrap script *before* it runs its first `pi install` — a pinning policy applied afterwards is applied to code that already ran.
+  1. A **project-scoped** `.npmrc` sets `ignore-scripts=true`, and the bootstrap script asserts it holds *before* it runs its first `pi install` — a pinning policy applied afterwards is applied to code that already ran. Scoped rather than global by explicit decision: global would break legitimate native builds machine-wide. README and the runbook state the residual gap (a `pi install` from another directory is unprotected) and the setup step for macOS or any second machine.
   2. `pi install https://github.com/kaiyitkoh/ky-pi-agent` on a clean profile loads a hello-world extension, and `cd ky-pi-agent && pi` loads the same extension from `.pi/` with `/reload` working.
   3. CI is green on `windows-latest` and `macos-latest`: every shipped script is POSIX `sh`, checks out with LF on both platforms, and actually executes rather than merely building.
   4. Bootstrap against an unpublished pinned Pi version stops with a message naming the version and the fallback, instead of failing obscurely — versions below 0.74.0 are already gone from npm.

@@ -13,7 +13,7 @@
 
 ### Bootstrap & Supply Chain
 
-- [ ] **BOOT-01**: `~/.npmrc` sets `ignore-scripts=true` before any `pi install` runs, verified by an assertion in the bootstrap script — `pi install` executes npm lifecycle scripts with no `--ignore-scripts` on any code path
+- [ ] **BOOT-01**: A **project-scoped** `.npmrc` in the repo sets `ignore-scripts=true`, asserted by the bootstrap script before its first `pi install` — `pi install` executes npm lifecycle scripts with no `--ignore-scripts` on any code path. Deliberately **not** global: `ignore-scripts` in `~/.npmrc` breaks packages with legitimate native builds machine-wide. The tradeoff is that a `pi install` run from another directory is unprotected; README and the runbook must state this, including the setup step when installing on macOS or any second machine.
 - [ ] **BOOT-02**: User can install the harness on a clean machine with `pi install https://github.com/kaiyitkoh/ky-pi-agent`
 - [ ] **BOOT-03**: User can bootstrap a cold machine with `bin/bootstrap.sh` — installs Pi, verifies `bash`/`git`/`aws`/`glab`/`gh` presence, writes the env-var template, makes idempotent marked-region edits
 - [ ] **BOOT-04**: Bootstrap fails loudly with an actionable message if the pinned Pi version has been unpublished from npm (versions below 0.74.0 are already gone)

@@ -190,7 +190,8 @@ Compounding this: DeepSeek cache reads are ~50× cheaper than fresh input, so a 
 | Route via `ctx.modelRegistry.complete()`, `setModel` at idle, and subagents — not a virtual provider | Verified at source as the mechanism Pi's own `summarize.ts`/`handoff.ts` use; avoids losing the `/model` picker and cost accounting | — Pending |
 | Test with `fauxProvider()` rather than live credentials | Makes the credential-dependent surface testable on a machine with no API keys | — Pending |
 | Prefer Pi's own bundled examples over third-party extensions where they cover the need | Zero supply-chain risk, guaranteed current against an API that ships every 2–3 days | — Pending |
-| Harden `~/.npmrc` before the first `pi install` | `pi install` runs npm lifecycle scripts; arbitrary code executes before the trust prompt | — Pending |
+| Project-scoped `.npmrc` with `ignore-scripts=true`, not global | `pi install` runs npm lifecycle scripts; arbitrary code executes before the trust prompt. Scoped because global `ignore-scripts` breaks legitimate native builds machine-wide. Residual gap — a `pi install` from another directory is unprotected — is documented rather than hidden | — Pending |
+| Autonomous runs build and mark live checks outstanding | The 8 [RUNBOOK] requirements need credentials the dev machine lacks; blocking on them would stall progress, while silently passing them would repeat the project's original failure of building on unverified assumptions | — Pending |
 | Qoder demoted from routable model to delegate tool | No inference endpoint exists — verified at `docs.qoder.com/llms.txt` | — Pending |
 | GitHub Actions matrix for macOS verification | macOS cannot be tested locally; free on public repos; the alternative is shipping unverified | — Pending |
 
