@@ -208,17 +208,157 @@ Deferred. Tracked but not in the current roadmap.
 
 ## Traceability
 
-Populated during roadmap creation.
+Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.md`.
+
+| Phase | Name |
+|-------|------|
+| 1 | Bootstrap, Packaging & Supply Chain |
+| 2 | Diagnostics — The Instrument |
+| 3 | Providers & Credentials |
+| 4 | Safety & Deployment Guardrails |
+| 5 | Routing & Capability Guards |
+| 6 | Walking Skeleton — `/quick` & the Evidence Gate |
+| 7 | Composed Extensions, Pinned & Reviewed |
+| 8 | Quality Gates & Engineering Quality |
+| 9 | Ceremonial Workflows |
+| 10 | Context Budget & Progressive Disclosure |
+| 11 | Terminal UI |
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| (pending roadmap) | | |
+| BOOT-01 | Phase 1 | Pending |
+| BOOT-02 | Phase 1 | Pending |
+| BOOT-03 | Phase 1 | Pending |
+| BOOT-04 | Phase 1 | Pending |
+| BOOT-05 | Phase 1 | Pending |
+| BOOT-06 | Phase 1 | Pending |
+| BOOT-07 | Phase 1 | Pending |
+| BOOT-08 | Phase 1 | Pending |
+| BOOT-09 | Phase 1 | Pending |
+| BOOT-10 | Phase 1 | Pending |
+| DIAG-01 | Phase 2 | Pending |
+| DIAG-02 | Phase 2 | Pending |
+| DIAG-03 | Phase 2 | Pending |
+| DIAG-04 | Phase 2 | Pending |
+| DIAG-05 | Phase 2 | Pending |
+| DIAG-06 | Phase 2 | Pending |
+| DIAG-07 | Phase 2 | Pending |
+| DIAG-08 | Phase 2 | Pending |
+| PROV-01 | Phase 3 | Pending |
+| PROV-02 | Phase 3 | Pending |
+| PROV-03 | Phase 3 | Pending |
+| PROV-04 | Phase 3 | Pending |
+| PROV-05 | Phase 3 | Pending |
+| PROV-06 | Phase 3 | Pending |
+| PROV-07 | Phase 3 | Pending |
+| PROV-08 | Phase 3 | Pending |
+| PROV-09 | Phase 3 | Pending |
+| PROV-10 | Phase 3 | Pending |
+| SAFE-01 | Phase 4 | Pending |
+| SAFE-02 | Phase 4 | Pending |
+| SAFE-03 | Phase 4 | Pending |
+| SAFE-04 | Phase 4 | Pending |
+| SAFE-05 | Phase 4 | Pending |
+| SAFE-06 | Phase 4 | Pending |
+| SAFE-07 | Phase 4 | Pending |
+| SAFE-08 | Phase 4 | Pending |
+| SAFE-09 | Phase 4 | Pending |
+| SAFE-10 | Phase 4 | Pending |
+| SAFE-11 | Phase 4 | Pending |
+| SAFE-12 | Phase 4 | Pending |
+| SAFE-13 | Phase 4 | Pending |
+| SAFE-14 | Phase 4 | Pending |
+| SAFE-15 | Phase 4 | Pending |
+| SAFE-16 | Phase 1 | Pending |
+| SAFE-17 | Phase 4 | Pending |
+| ROUTE-01 | Phase 5 | Pending |
+| ROUTE-02 | Phase 5 | Pending |
+| ROUTE-03 | Phase 5 | Pending |
+| ROUTE-04 | Phase 5 | Pending |
+| ROUTE-05 | Phase 5 | Pending |
+| ROUTE-06 | Phase 5 | Pending |
+| ROUTE-07 | Phase 5 | Pending |
+| ROUTE-08 | Phase 5 | Pending |
+| ROUTE-09 | Phase 5 | Pending |
+| ROUTE-10 | Phase 5 | Pending |
+| ROUTE-11 | Phase 5 | Pending |
+| EXT-01 | Phase 7 | Pending |
+| EXT-02 | Phase 7 | Pending |
+| EXT-03 | Phase 7 | Pending |
+| EXT-04 | Phase 7 | Pending |
+| EXT-05 | Phase 7 | Pending |
+| EXT-06 | Phase 7 | Pending |
+| EXT-07 | Phase 7 | Pending |
+| EXT-08 | Phase 7 | Pending |
+| EXT-09 | Phase 7 | Pending |
+| EXT-10 | Phase 7 | Pending |
+| GATE-01 | Phase 8 | Pending |
+| GATE-02 | Phase 8 | Pending |
+| GATE-03 | Phase 8 | Pending |
+| GATE-04 | Phase 8 | Pending |
+| GATE-05 | Phase 8 | Pending |
+| GATE-06 | Phase 8 | Pending |
+| GATE-07 | Phase 6 | Pending |
+| GATE-08 | Phase 8 | Pending |
+| GATE-09 | Phase 8 | Pending |
+| GATE-10 | Phase 8 | Pending |
+| QUAL-01 | Phase 8 | Pending |
+| QUAL-02 | Phase 8 | Pending |
+| QUAL-03 | Phase 9 | Pending |
+| QUAL-04 | Phase 8 | Pending |
+| QUAL-05 | Phase 8 | Pending |
+| QUAL-06 | Phase 8 | Pending |
+| QUAL-07 | Phase 8 | Pending |
+| QUAL-08 | Phase 9 | Pending |
+| QUAL-09 | Phase 8 | Pending |
+| FLOW-01 | Phase 6 | Pending |
+| FLOW-02 | Phase 9 | Pending |
+| FLOW-03 | Phase 9 | Pending |
+| FLOW-04 | Phase 9 | Pending |
+| FLOW-05 | Phase 9 | Pending |
+| FLOW-06 | Phase 9 | Pending |
+| FLOW-07 | Phase 9 | Pending |
+| FLOW-08 | Phase 9 | Pending |
+| FLOW-09 | Phase 9 | Pending |
+| FLOW-10 | Phase 9 | Pending |
+| FLOW-11 | Phase 6 | Pending |
+| CTX-01 | Phase 10 | Pending |
+| CTX-02 | Phase 10 | Pending |
+| CTX-03 | Phase 10 | Pending |
+| CTX-04 | Phase 10 | Pending |
+| CTX-05 | Phase 10 | Pending |
+| CTX-06 | Phase 10 | Pending |
+| UI-01 | Phase 11 | Pending |
+| UI-02 | Phase 11 | Pending |
+| UI-03 | Phase 11 | Pending |
+| UI-04 | Phase 11 | Pending |
+| UI-05 | Phase 11 | Pending |
 
 **Coverage:**
-- v1 requirements: 105 total
-- Mapped to phases: 0
-- Unmapped: 105 ⚠️
+- v1 requirements: **107 total** — corrected from 105. The earlier count predated the QUAL-01…09 Engineering Quality group. Counted by category: BOOT 10 · DIAG 8 · PROV 10 · SAFE 17 · ROUTE 11 · EXT 10 · GATE 10 · QUAL 9 · FLOW 11 · CTX 6 · UI 5.
+- Mapped to phases: **107**
+- Unmapped: **0** ✓
+- Duplicates: **0** ✓ — every requirement maps to exactly one phase
+
+**Per-phase counts:** P1: 11 · P2: 8 · P3: 10 · P4: 16 · P5: 11 · P6: 3 · P7: 10 · P8: 16 · P9: 11 · P10: 6 · P11: 5 = 107
+
+**Placement notes where a requirement crosses a category boundary:**
+
+| Requirement | Placed in | Why not the obvious phase |
+|-------------|-----------|---------------------------|
+| SAFE-16 (`gh` unauthenticated) | Phase 1 | `/share` cannot be blocked by any extension — built-in commands are matched before extension commands. The only control is machine state, set at bootstrap, and it must hold from session one. The runbook sentence is appended in Phase 3. |
+| GATE-07 (evidence gate on exit codes) | Phase 6 | It is the "evidence" leg of the walking skeleton's route → guard → execute → evidence → commit path, and it interacts with the Phase 2 prose-tool-call detector to fabricate evidence if built late. |
+| FLOW-11 (CI line budgets) | Phase 6 | The budget must constrain the ceremonial workflows *before* they are written. GSD's 1,169-line "quick" is the counterexample. |
+| QUAL-01, QUAL-02 (anti-pattern rules) | Phase 8 | They run inside the existing deterministic gate stage — same stage, no extra model round trip. |
+| QUAL-03 (Root Cause section) | Phase 9 | It is a SPEC.md section gated the same way as Verified Codebase Facts, so it belongs with the spec workflow. |
+| QUAL-04…07 (classification, approval, debt record, design pass) | Phase 8 | Extra structure on the review pass already being paid for, not an extra call. |
+| QUAL-08 (gate depth scales) | Phase 9 | The `/quick`-vs-full split is a workflow property; it can only be expressed once both workflows exist. |
+| QUAL-09 (quality-layer cost per turn) | Phase 8 | It extends the Phase 2 JSONL schema, but the number is unfillable until the quality layer exists. |
+
+**[RUNBOOK] distribution (8 of 107):** Phase 2 — DIAG-01, DIAG-05 · Phase 3 — PROV-03, PROV-04, PROV-07, PROV-10 · Phase 4 — SAFE-01 · Phase 5 — ROUTE-11 · Phase 8 — GATE-10 (main-loop half) · Phase 10 — CTX-05.
+
+*Note: GATE-10 and DIAG-01/05 carry both [FAUX] and [RUNBOOK] tags — the offline half is verifiable on the dev machine, the live half is not.*
 
 ---
 *Requirements defined: 2026-08-13*
-*Last updated: 2026-08-13 after initial definition*
+*Last updated: 2026-08-13 — traceability populated from ROADMAP.md; total corrected 105 → 107*
