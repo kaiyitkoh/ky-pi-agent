@@ -129,3 +129,24 @@ scratch/
 *.tmp
 *.bak
 *.orig
+
+# ---------------------------------------------------------------------------
+# Supply-chain control files (must be committed)
+#
+# These negations are LAST on purpose: git applies the final matching rule, so
+# they must come after the blanket `.npmrc` rule above.
+#
+# `pi install` runs npm lifecycle scripts with no `--ignore-scripts` on any
+# code path (pi 0.84.1 src/core/package-manager.ts:1750, :1778, :1829), while
+# Pi installs *itself* with `--ignore-scripts` (src/config.ts:174). The two
+# re-included `.npmrc` files below are the controls that close that gap for
+# the two npm scopes this repo owns. If either is swallowed by .gitignore it
+# never reaches a clone and BOOT-01 ships as a no-op.
+#
+# Only these two ROOTED paths are re-included. Nested and user `.npmrc` files
+# stay ignored because they can carry `_authToken` / `_auth` / `_password`.
+# ---------------------------------------------------------------------------
+.pi/npm/*
+.pi/git/
+!/.npmrc
+!/.pi/npm/.npmrc
