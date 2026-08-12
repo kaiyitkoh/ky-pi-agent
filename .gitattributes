@@ -1,0 +1,31 @@
+# Normalise line endings. This project targets Windows (Git Bash) and macOS and
+# ships POSIX sh. A shell script checked out with CRLF fails on macOS with a
+# misleading "bad interpreter" error, so shell and TypeScript are pinned to LF
+# in the working tree regardless of platform.
+
+* text=auto eol=lf
+
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.ts    text eol=lf
+*.js    text eol=lf
+*.mjs   text eol=lf
+*.cjs   text eol=lf
+*.json  text eol=lf
+*.md    text eol=lf
+*.yml   text eol=lf
+*.yaml  text eol=lf
+
+# Windows-only helpers keep CRLF.
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# Binary — never touch.
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.ico   binary
+*.pdf   binary
+*.zip   binary
+*.tgz   binary
