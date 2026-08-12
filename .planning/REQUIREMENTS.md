@@ -13,14 +13,14 @@
 
 ### Bootstrap & Supply Chain
 
-- [ ] **BOOT-01**: A **project-scoped** `.npmrc` in the repo sets `ignore-scripts=true`, asserted by the bootstrap script before its first `pi install` — `pi install` executes npm lifecycle scripts with no `--ignore-scripts` on any code path. Deliberately **not** global: `ignore-scripts` in `~/.npmrc` breaks packages with legitimate native builds machine-wide. The tradeoff is that a `pi install` run from another directory is unprotected; README and the runbook must state this, including the setup step when installing on macOS or any second machine.
+- [x] **BOOT-01**: A **project-scoped** `.npmrc` in the repo sets `ignore-scripts=true`, asserted by the bootstrap script before its first `pi install` — `pi install` executes npm lifecycle scripts with no `--ignore-scripts` on any code path. Deliberately **not** global: `ignore-scripts` in `~/.npmrc` breaks packages with legitimate native builds machine-wide. The tradeoff is that a `pi install` run from another directory is unprotected; README and the runbook must state this, including the setup step when installing on macOS or any second machine.
 - [ ] **BOOT-02**: User can install the harness on a clean machine with `pi install https://github.com/kaiyitkoh/ky-pi-agent`
 - [ ] **BOOT-03**: User can bootstrap a cold machine with `bin/bootstrap.sh` — installs Pi, verifies `bash`/`git`/`aws`/`glab`/`gh` presence, writes the env-var template, makes idempotent marked-region edits
 - [ ] **BOOT-04**: Bootstrap fails loudly with an actionable message if the pinned Pi version has been unpublished from npm (versions below 0.74.0 are already gone)
 - [ ] **BOOT-05**: `cd ky-pi-agent && pi` loads the harness from `.pi/` so the repo dogfoods itself, with `/reload` working
 - [ ] **BOOT-06**: All shell code is POSIX `sh` and all shipped scripts check out LF on both platforms
 - [ ] **BOOT-07**: CI runs the full test suite on `windows-latest` and `macos-latest`, giving real macOS verification without a Mac
-- [ ] **BOOT-08**: Every third-party dependency is pinned to an exact version, with a committed lockfile
+- [x] **BOOT-08**: Every third-party dependency is pinned to an exact version, with a committed lockfile
 - [ ] **BOOT-09**: No credential can be committed — `.gitignore` covers every runtime state and secret path, verified by a test
 - [ ] **BOOT-10**: `CONTRIBUTING.md` states the boundary rule: a new capability defaults to command or skill; registering a tool requires justifying its per-request schema cost
 
@@ -226,14 +226,14 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BOOT-01 | Phase 1 | Pending |
+| BOOT-01 | Phase 1 | Complete |
 | BOOT-02 | Phase 1 | Pending |
 | BOOT-03 | Phase 1 | Pending |
 | BOOT-04 | Phase 1 | Pending |
 | BOOT-05 | Phase 1 | Pending |
 | BOOT-06 | Phase 1 | Pending |
 | BOOT-07 | Phase 1 | Pending |
-| BOOT-08 | Phase 1 | Pending |
+| BOOT-08 | Phase 1 | Complete |
 | BOOT-09 | Phase 1 | Pending |
 | BOOT-10 | Phase 1 | Pending |
 | DIAG-01 | Phase 2 | Pending |

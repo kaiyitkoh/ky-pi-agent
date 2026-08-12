@@ -48,7 +48,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 Plans:
 **Wave 1**
 
-- [ ] 01-01-PLAN.md — Unblock `.npmrc` in `.gitignore`, ship the two committed supply-chain controls, `package.json`/`tsconfig`/`vitest` with exact pins and a lockfile, repo skeleton
+- [x] 01-01-PLAN.md — Unblock `.npmrc` in `.gitignore`, ship the two committed supply-chain controls, `package.json`/`tsconfig`/`vitest` with exact pins and a lockfile, repo skeleton
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -270,7 +270,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Bootstrap, Packaging & Supply Chain | 0/10 | Planned | - |
+| 1. Bootstrap, Packaging & Supply Chain | 1/10 | In Progress|  |
 | 2. Diagnostics — The Instrument | 0/TBD | Not started | - |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
