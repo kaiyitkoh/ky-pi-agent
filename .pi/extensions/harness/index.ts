@@ -1,0 +1,84 @@
+/**
+ * ky-pi-agent — Phase 1 load-path sentinel.
+ *
+ * PURPOSE. This extension exists to be *observable*, and for nothing else. It
+ * is the only credential-free, TTY-free way found to prove that Pi actually
+ * loaded an extension: `pi --list-models` renders the models of every provider
+ * registered by a loaded extension, so a provider whose model id is a unique
+ * string turns "did it load?" into an exit code.
+ *   [VERIFIED: pi 0.84.1 docs/extensions.md:1709 — registerProvider calls made
+ *    during the factory are queued and flushed once the runner binds its
+ *    context, which is what makes them visible to --list-models.]
+ *
+ * LIFETIME. Remove or gate this once Phase 3 lands real providers, or the
+ * dead-endpoint model will clutter the `/model` picker for no benefit.
+ *
+ * BOUNDARY RULE (BOOT-10), dogfooded on the first commit of real code. This
+ * file registers a COMMAND and a PROVIDER. It must NEVER register a tool. A
+ * tool's name, description and complete JSON Schema are serialised into
+ * `tools[]` on every single provider request
+ *   [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:1337-1370],
+ * whereas a command costs exactly zero per-turn tokens — commands are never
+ * rendered into the system prompt
+ *   [VERIFIED: pi 0.84.1 src/core/system-prompt.ts has no reference to
+ *    registered commands; they are read only by interactive-mode.ts:626,694].
+ * Plan 09's test greps `.pi/extensions/**` for the tool-registration call and
+ * fails the build if it appears.
+ *
+ * LAYOUT. `.pi/extensions/<dir>/index.ts` is one of the four auto-discovered
+ * shapes [CITED: docs/extensions.md:115-120], which is the documented
+ * precondition for `/reload` hot-reload [CITED: docs/extensions.md:7]. Do not
+ * add a build step — jiti loads this `.ts` directly and a `dist/` breaks
+ * `/reload`. Do not add a `.gitignore` anywhere under `.pi/extensions/`: the
+ * package-discovery path honours one (package-manager.ts:571) while the
+ * project-local path does not (loader.ts:652-684), so one would make BOOT-05
+ * pass and BOOT-02 fail with no error message anywhere.
+ */
+import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+
+/**
+ * The sentinel string every load-path assertion greps for.
+ *
+ * Exported so tests import it instead of duplicating a literal — a duplicated
+ * literal is how an assertion silently stops matching the thing it checks.
+ */
+export const SELFTEST_MODEL_ID = "ky-harness-selftest";
+
+/** Provider name under which the sentinel model is registered. */
+export const SELFTEST_PROVIDER_ID = "ky-harness";
+
+/**
+ * Deliberately dead endpoint. Port 1 is unassignable; nothing listens there and
+ * nothing ever should. The sentinel model is never routed to, so no credential
+ * and no real host is involved.
+ */
+const DEAD_ENDPOINT = "http://127.0.0.1:1/v1";
+
+export default function (pi: ExtensionAPI): void {
+	// A command, not a tool. Zero per-turn tokens. See BOUNDARY RULE above.
+	pi.registerCommand("ky-hello", {
+		description: "ky-pi-agent liveness check",
+		handler: async (_args, ctx) => {
+			ctx.ui.notify(`ky-pi-agent loaded (sentinel: ${SELFTEST_MODEL_ID})`, "info");
+		},
+	});
+
+	// Observable-only provider. Its sole job is to put SELFTEST_MODEL_ID into
+	// `pi --list-models` output so both load paths can be asserted by exit code.
+	pi.registerProvider(SELFTEST_PROVIDER_ID, {
+		baseUrl: DEAD_ENDPOINT,
+		apiKey: "unused",
+		api: "openai-completions",
+		models: [
+			{
+				id: SELFTEST_MODEL_ID,
+				name: SELFTEST_MODEL_ID,
+				reasoning: false,
+				input: ["text"],
+				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+				contextWindow: 8192,
+				maxTokens: 1024,
+			},
+		],
+	});
+}
