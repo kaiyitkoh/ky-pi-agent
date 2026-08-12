@@ -1203,22 +1203,25 @@ Dev machine runs it with `--warn-only`; the work-laptop runbook runs it bare.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED)
 
 1. **Does a `pi install` into a hardened `~/.pi/agent/npm` leave the `.npmrc` intact across install, update and remove?**
    - Known: Pi only writes `package.json`/`.gitignore` there when absent, and never removes the directory (`package-manager.ts:1975-1996`).
    - Unclear: whether `npm uninstall --prefix` or a future Pi version prunes the directory.
    - Recommendation: bootstrap re-asserts on every run (already specified), and `--check-only` makes it cheap to re-verify. No blocker.
+   - **RESOLVED:** implemented in `01-05` — `bin/bootstrap.sh` gains `--check-only` (non-mutating re-verification, exits 0 on a clean CI runner, byte-identical stdout across runs) and `--assert-hardening` (exits 1 with `ignore-scripts` on stderr if any scope is ineffective). Bootstrap re-asserts hardening on every full run, so the `.npmrc` is restored regardless of what `install`, `update` or `remove` did to it.
 
 2. **Should the repo also ship `.pi/npm/.npmrc` for project-scope installs?**
    - Known: project-scope installs use `--prefix <repo>/.pi/npm` (`package-manager.ts:2004`), which the repo-root `.npmrc` does not cover.
    - Unclear: whether this project will ever use `pi install -l`.
    - Recommendation: ship it. One file, closes a whole row of the coverage matrix, and `docs/packages.md:43` notes Pi auto-installs missing *project* packages on startup after trust — which is exactly the unattended case worth covering.
+   - **RESOLVED:** implemented in `01-01` Task 1 — `.pi/npm/.npmrc` is a shipped, committed file (`files_modified`), re-included via the `!/.pi/npm/.npmrc` negation, and verified by `npm config get ignore-scripts --prefix "$PWD/.pi/npm"` returning `true`.
 
 3. **How should the `.pi/git/` ignore rule interact with Pi's own auto-written `.gitignore`?**
    - Known: Pi writes `*\n!.gitignore\n` into install roots it creates (`package-manager.ts:1988-1996`).
    - Unclear: only whether that file is created before or after the first thing lands in it.
    - Recommendation: add the explicit rule anyway. Redundant is correct here.
+   - **RESOLVED:** implemented in `01-01` Task 1 — the `.gitignore` supply-chain section appends `.pi/git/` as an explicit rule, and the task's automated verify asserts `git check-ignore -q .pi/git/github.com/a/b` exits 0.
 
 ---
 
