@@ -40,8 +40,19 @@ Decimal phases appear between their surrounding integers in numeric order.
   3. CI is green on `windows-latest` and `macos-latest`: every shipped script is POSIX `sh`, checks out with LF on both platforms, and actually executes rather than merely building.
   4. Bootstrap against an unpublished pinned Pi version stops with a message naming the version and the fallback, instead of failing obscurely — versions below 0.74.0 are already gone from npm.
   5. A test proves no credential or runtime-state path is committable, `gh` is left unauthenticated (the only real control over `/share`), and `CONTRIBUTING.md` states the boundary rule: a new capability defaults to command or skill; registering a tool requires justifying its per-request schema cost.
-**Plans**: TBD
-**Research**: Not needed — packaging, manifest, install surfaces and Windows shell resolution are fully specified at source.
+**Plans**: 10 plans in 5 waves
+Plans:
+- [ ] 01-01-PLAN.md — Unblock `.npmrc` in `.gitignore`, ship the two committed supply-chain controls, `package.json`/`tsconfig`/`vitest` with exact pins and a lockfile, repo skeleton
+- [ ] 01-02-PLAN.md — Test helpers (git-ignore oracle, Pi runner, PATH stub factory), the malicious-postinstall fixture, and the bidirectional ignore-policy test (BOOT-09)
+- [ ] 01-03-PLAN.md — Sentinel extension and executed proofs for both load paths, including the trust-gate negative control (BOOT-02, BOOT-05)
+- [ ] 01-04-PLAN.md — Supply-chain coverage test across three npm scopes with a live postinstall attack, plus the pinning lint (BOOT-01, BOOT-08)
+- [ ] 01-05-PLAN.md — `bin/bootstrap.sh` (POSIX sh, four modes) and the unpublished-version gate test (BOOT-03, BOOT-04)
+- [ ] 01-06-PLAN.md — Bootstrap idempotence and the recorded-argv proof that hardening precedes any install (BOOT-03, BOOT-01 ordering)
+- [ ] 01-07-PLAN.md — `scripts/check-gh-unauthenticated.sh` and its stubbed bidirectional classifier test (SAFE-16)
+- [ ] 01-08-PLAN.md — CI workflow: SHA-pinned actions, shellcheck on Ubuntu, executing matrix on Windows + macOS, plus LF and workflow lints (BOOT-06, BOOT-07)
+- [ ] 01-09-PLAN.md — `CONTRIBUTING.md` boundary rule and the test that proves the phase does not break it (BOOT-10)
+- [ ] 01-10-PLAN.md — README residual-gap statement, `docs/RUNBOOK.md` with three OUTSTANDING entries, and the outstanding-status guard
+**Research**: Complete — `01-RESEARCH.md` (HIGH confidence, executed at source). Three findings reshaped the phase: `.gitignore:56` made BOOT-01 a no-op; a repo-root `.npmrc` does not cover Pi's npm install path (`--prefix` wins over cwd, attack executed); Pi installs itself with `--ignore-scripts` but never its extensions.
 
 ### Phase 2: Diagnostics — The Instrument
 **Goal**: Every claim the rest of the project makes about which model ran, what parameters reached it, and what it cost becomes checkable rather than assumed.
@@ -210,7 +221,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Bootstrap, Packaging & Supply Chain | 0/TBD | Not started | - |
+| 1. Bootstrap, Packaging & Supply Chain | 0/10 | Planned | - |
 | 2. Diagnostics — The Instrument | 0/TBD | Not started | - |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
