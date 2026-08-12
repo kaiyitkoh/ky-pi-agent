@@ -1,0 +1,48 @@
+{
+  "name": "ky-pi-agent",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "A personalised Pi coding-agent harness that makes cheap models reliable.",
+  "license": "MIT",
+  "keywords": [
+    "pi-package"
+  ],
+  "engines": {
+    "node": ">=22.19.0"
+  },
+  "pi": {
+    "extensions": [
+      "./.pi/extensions"
+    ],
+    "skills": [
+      "./.pi/skills"
+    ],
+    "prompts": [
+      "./.pi/prompts"
+    ],
+    "themes": [
+      "./.pi/themes"
+    ]
+  },
+  "scripts": {
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "typecheck": "tsc --noEmit"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-agent-core": "*",
+    "@earendil-works/pi-ai": "*",
+    "@earendil-works/pi-coding-agent": "*",
+    "@earendil-works/pi-tui": "*",
+    "typebox": "*"
+  },
+  "devDependencies": {
+    "@earendil-works/pi-ai": "0.84.1",
+    "@earendil-works/pi-coding-agent": "0.84.1",
+    "@types/node": "24.12.4",
+    "typebox": "1.3.7",
+    "typescript": "5.9.3",
+    "vitest": "4.1.9"
+  }
+}
