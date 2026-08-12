@@ -108,6 +108,20 @@
 - [ ] **GATE-09**: Advisor escalation lets the executor consult a stronger model at a decision point via `callModel()` **[FAUX]**
 - [ ] **GATE-10**: Per-role thinking budgets apply on the nested path (reviewer, advisor, summariser); main-loop budgets apply only if the wire inspector proved the parameters land **[FAUX]** + **[RUNBOOK]**
 
+### Engineering Quality
+
+The harness must produce root-cause fixes that scale, not symptom patches. Exhortation in `AGENTS.md` is explicitly **not** the mechanism — agents ignore comprehensive instructions, so this is enforced structurally. Gate depth scales with the work so the quality layer never becomes the bottleneck.
+
+- [ ] **QUAL-01**: Deterministic anti-pattern rules (ast-grep + lint) detect magic numbers where a constant belongs, special-casing on a literal input value, copy-paste duplication, swallowed exceptions, `TODO`/`FIXME` shipped as a fix, and N+1 query shapes **[FAUX]**
+- [ ] **QUAL-02**: Those rules run inside the existing deterministic gate stage, adding no model round trip and no measurable wall-clock **[FAUX]**
+- [ ] **QUAL-03**: For any change framed as a fix, SPEC.md carries a **Root Cause** section naming the cause with `file:line` evidence and stating why the change addresses the cause rather than the symptom — gated the same way as Verified Codebase Facts **[FAUX]**
+- [ ] **QUAL-04**: The reviewer classifies every change as **root-cause / symptomatic / workaround** with written justification, as extra structure on the review pass already being paid for — not an extra call **[FAUX]**
+- [ ] **QUAL-05**: Any change classified symptomatic or workaround stops the workflow and requires the user's explicit approval before it can ship **[FAUX]**
+- [ ] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
+- [ ] **QUAL-07**: A design-level review pass covering algorithmic complexity, scalability, and abstraction fit fires **conditionally** — on signals (diff spans many files, a loop wraps a query, a data model or public interface changes) or on explicit `/escalate` — never on every task **[FAUX]**
+- [ ] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]**
+- [ ] **QUAL-09**: The wall-clock and token cost added by the quality layer is recorded per turn in the JSONL, so the correctness/latency balance is a measured number and can be tuned rather than guessed **[FAUX]**
+
 ### Workflows
 
 - [ ] **FLOW-01**: `/quick` executes trivial work with no ceremony, in **≤80 lines**, enforced by a CI line-budget test
@@ -183,6 +197,8 @@ Deferred. Tracked but not in the current roadmap.
 | Approval gate between every phase | Approval fatigue is permission-prompt fatigue by another name. |
 | `--auto` self-answering clarification | Structurally defeats a grilling workflow — converts "user doesn't know what they want" into "the model guessed and nobody noticed". |
 | Mode-flag matrices with precedence rules | A documented precedence order between flags is itself the smell. |
+| Exhortation as the quality mechanism | "Write robust, long-term, scalable code" in `AGENTS.md` is the weakest possible lever — Fowler's team documented agents ignoring comprehensive specs. `AGENTS.md` may carry the standard as context, but QUAL-01…09 are the enforcement. |
+| Design-level review on every task | Would make the harness the bottleneck it exists to remove. Fires on signals or `/escalate` only. |
 | A build step | Pi loads `.ts` through jiti. A build breaks `/reload` for zero gain. |
 | `@sinclair/typebox` | Legacy scoped fork; produces schemas Pi cannot validate. Use unscoped `typebox`. |
 | `@gotgenes/pi-subagents-worktrees` | Bridges a third subagents package and silently no-ops otherwise. Both candidate packages have worktrees natively. |
@@ -199,9 +215,9 @@ Populated during roadmap creation.
 | (pending roadmap) | | |
 
 **Coverage:**
-- v1 requirements: 96 total
+- v1 requirements: 105 total
 - Mapped to phases: 0
-- Unmapped: 96 ⚠️
+- Unmapped: 105 ⚠️
 
 ---
 *Requirements defined: 2026-08-13*
