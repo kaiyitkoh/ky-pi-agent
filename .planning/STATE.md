@@ -69,10 +69,24 @@ Items acknowledged and carried forward from previous milestone close:
 |----------|------|--------|-------------|
 | *(none)* | | | |
 
+## Standing Operating Policy — Autonomous Run
+
+Set by the user on 2026-08-13 before an unattended overnight run. **In force until the v1.0 milestone completes.**
+
+1. **Delegate to subagents.** Planning, execution, and review run in spawned agents, not inline. The orchestrator context must stay lean across an 11-phase run — it will not survive otherwise.
+2. **Code review after every phase**, in a spawned agent, checking end-to-end that no bugs or regressions were introduced. Not advisory: findings get fixed before advancing.
+3. **Do not ask the user anything until the milestone is done.** Two standing pre-authorisations:
+   - Verification `human_needed` caused by `[RUNBOOK]` items → build it, write the runbook entry, mark the live check **outstanding** (never "passed"), continue.
+   - Verification `gaps_found` → this means something was genuinely *not built*, which is not the same as not-yet-verified-live and is **not** covered by the above. Close the gap; do not silently advance.
+4. **Follow Pi's own documentation and bundled examples** over third-party blog posts or extension READMEs. Verify against published TypeScript (recoverable from `dist/**/*.js.map` `sourcesContent`) and cite `file:line`. Mark anything unverifiable as UNVERIFIED rather than asserting it.
+5. **`workflow.skip_discuss` is `true`** — each phase uses its ROADMAP goal and success criteria as the spec. Grey-area implementation choices are at Claude's discretion, guided by the ROADMAP criteria and `.planning/research/`.
+
+Everything the user cares about is already captured in PROJECT.md (Key Decisions, Constraints), REQUIREMENTS.md (107 requirements with `[FAUX]`/`[RUNBOOK]` tags), and ROADMAP.md (per-phase success criteria and Carried-Forward Unknowns). Those are the contract — build to them.
+
 ## Session Continuity
 
 Last session: 2026-08-13
-Stopped at: ROADMAP.md and STATE.md written; REQUIREMENTS.md traceability populated
+Stopped at: Roadmap approved and committed. Phase 1 CONTEXT.md written and committed (auto-generated, discuss skipped). Autonomous run started, then paused for a context clear before planning began.
 Resume file: None
 
-Next: `/gsd:plan-phase 1`
+Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
