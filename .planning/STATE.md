@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-01-PLAN.md — .npmrc controls, manifest, toolchain, skeleton
-last_updated: "2026-08-12T18:12:03.815Z"
-last_activity: 2026-08-13 -- Phase 01 Plan 01 complete (npmrc controls, manifest, toolchain, skeleton)
+stopped_at: Completed 01-02-PLAN.md — test harness helpers + BOOT-09 bidirectional ignore policy
+last_updated: "2026-08-12T18:24:24.210Z"
+last_activity: 2026-08-13 -- Phase 01 Plan 02 complete (test harness helpers, BOOT-09 ignore policy)
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 1
+  completed_plans: 2
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 2 of 10
+Plan: 3 of 10
 Status: Ready to execute
-Last activity: 2026-08-13 -- Phase 01 Plan 01 complete (npmrc controls, manifest, toolchain, skeleton)
+Last activity: 2026-08-13 -- Phase 01 Plan 02 complete (test harness helpers, BOOT-09 bidirectional ignore policy, evil-postinstall fixture)
 
-Progress: [█░░░░░░░░░] 10%
+Progress: [██░░░░░░░░] 20%
 
 ## Performance Metrics
 
@@ -53,6 +53,7 @@ Progress: [█░░░░░░░░░] 10%
 
 *Updated after each plan completion*
 | Phase 01 P01 | 15m | 3 tasks | 10 files |
+| Phase 01 P02 | 20m | 2 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,9 @@ Recent decisions affecting current work:
 - [Roadmap]: A skeletal `/quick` is pulled forward to Phase 6 as a walking skeleton, exercising route → guard → execute → evidence → commit before any ceremonial workflow is built on it.
 - [Phase 01]: .pi/npm ignored in contents form (.pi/npm/*) so !/.pi/npm/.npmrc can re-include the control file — git cannot re-include a file under an excluded directory
 - [Phase 01]: peerDependencies stay at range * per docs/packages.md:171 — peers are jiti-aliased to Pi's bundled copies; the exact pin lives in devDependencies + package-lock.json
+- [Phase 01]: git check-ignore needs --no-index, not just -q — the index masks ignore rules for tracked paths, which would have made the entire MUST_BE_COMMITTABLE half of the BOOT-09 test a vacuous pass
+- [Phase 01]: test helpers throw rather than skip when a prerequisite binary is missing — a skipped load-path test is a green CI run that verified nothing
+- [Phase 01]: on Windows a PATH stub cannot simulate gh SUCCESS inside Pi (Pi spawns gh with shell:false; Node returns EINVAL on .cmd since CVE-2024-27980) — write SAFE-16 as the not-authenticated assertion
 
 ### Pending Todos
 
@@ -109,8 +113,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-12T18:12:03.805Z
-Stopped at: Completed 01-01-PLAN.md — .npmrc controls, manifest, toolchain, skeleton
+Last session: 2026-08-12T18:24:24.201Z
+Stopped at: Completed 01-02-PLAN.md — test harness helpers + BOOT-09 bidirectional ignore policy
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

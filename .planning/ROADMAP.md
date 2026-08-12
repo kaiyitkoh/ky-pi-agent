@@ -52,7 +52,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 01-02-PLAN.md — Test helpers (git-ignore oracle, Pi runner, PATH stub factory), the malicious-postinstall fixture, and the bidirectional ignore-policy test (BOOT-09)
+- [x] 01-02-PLAN.md — Test helpers (git-ignore oracle, Pi runner, PATH stub factory), the malicious-postinstall fixture, and the bidirectional ignore-policy test (BOOT-09)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -270,7 +270,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Bootstrap, Packaging & Supply Chain | 1/10 | In Progress|  |
+| 1. Bootstrap, Packaging & Supply Chain | 2/10 | In Progress|  |
 | 2. Diagnostics — The Instrument | 0/TBD | Not started | - |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
