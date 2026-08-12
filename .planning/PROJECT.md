@@ -28,8 +28,8 @@ If the routing is elegant, the UI is beautiful, and the workflows are sophistica
 - [ ] Session modes (`/cheap`, `/balanced`, `/max`) swapping the whole role→model map, plus per-invocation `/escalate`
 - [ ] AWS Bedrock provider working with IAM Identity Center SSO, including detection of expired credentials with an actionable message (not an opaque provider error)
 - [ ] Alibaba DashScope as a custom OpenAI-compatible provider in `models.json` — **not** Pi's built-in `qwen-token-plan` provider, which uses a different host and a different key namespace (`sk-sp-` prepaid) incompatible with pay-as-you-go `sk-` keys
-- [ ] Qoder via its **official** Personal Access Token + Agent SDK / Cloud Agents API — never via an unofficial bypass proxy
-- [ ] Provider fallback chains on quota/transient/unavailable errors (Qoder → Aliyun), using a maintained extension
+- [ ] Qoder as a **delegate tool only** via its official Agent SDK — Qoder exposes no inference endpoint (verified via `docs.qoder.com/llms.txt`; Cloud Agents is task orchestration, the SDK is a hosted agent loop), so it cannot be a model in the routing map. Hands off a whole task, folds the result back. Never via an unofficial bypass proxy.
+- [ ] Provider fallback chains on quota/transient/unavailable errors within Bedrock/DashScope, using a maintained extension as a stopgap the authored router later absorbs
 - [ ] Credentials blank-but-ready: every provider structurally complete in-repo, secrets resolved at runtime via `auth.json` `$ENV_VAR` / `!command` interpolation. Nothing secret ever committed.
 
 **Diagnostics (blocks trusting any routing decision)**
@@ -100,7 +100,9 @@ If the routing is elegant, the UI is beautiful, and the workflows are sophistica
 
 - **MCP** — not part of the user's workflow; one less layer. Note this compounds with Pi having no web tool, so a web extension becomes mandatory.
 - **Auto-learned / semantic memory** — stale facts fail invisibly. `AGENTS.md` is inspectable and diffable.
-- **Qoder via unofficial proxy** — the Pi-specific proxy advertises WAF bypass and signature forging; Qoder's ToS §3.2.6/§3.2.9/§3.2.10 bar this, §2.4 permits suspension without notice, §15.2 makes termination irreversible. The official PAT + Agent SDK provides the same capacity with no exposure.
+- **Qoder via unofficial proxy** — the Pi-specific proxy advertises WAF bypass and signature forging; Qoder's ToS §3.2.6/§3.2.9/§3.2.10 bar this, §2.4 permits suspension without notice, §15.2 makes termination irreversible.
+- **Qoder as a routable model** — not technically possible. No inference endpoint exists. Delegate tool only.
+- **A virtual provider for routing** (`pi.registerProvider`) in v1 — its unique benefit is automatic per-turn routing, which this project explicitly rejected, and it costs the `/model` picker, `PI_MODEL` accuracy, and cost accounting. `pi-router`, `pi-smart-router` and `pi-model-auto` all take this path; we deliberately do not.
 - **Forking a subagent extension** — ~15 releases/month upstream makes a fork permanent unpaid maintenance.
 - **Hosted observability SaaS** (Braintrust, LangSmith) — violates zero-spend; Braintrust self-hosting is Enterprise-only.
 - **Self-hosted Langfuse** — needs Postgres + ClickHouse; violates the low-infra constraint. Local JSONL instead.
@@ -112,11 +114,44 @@ If the routing is elegant, the UI is beautiful, and the workflows are sophistica
 
 **Where the user is coming from.** Heavy daily Claude Code user, driving it with `--dangerously-skip-permissions` because Anthropic earned that trust over many sessions. Uses the GSD skill suite for almost everything. Tried DeepSeek under the Claude Code harness via Alibaba Cloud and got poor results; diagnosed it as bad harness/model pairing. Specific complaint: *"DeepSeek doesn't think enough and misses a lot of bugs that Opus or Sonnet would have caught."*
 
-**That diagnosis is unproven and may be a configuration bug.** Adversarial research found: Pi's Bedrock adapter returns `undefined` for thinking configuration on non-Anthropic models — extended thinking is only *requested* for Claude on Bedrock. DeepSeek's API documents `reasoning_effort` nested inside a `thinking` object while Pi sends it top-level, and Pi's DeepSeek `thinkingLevelMap` never emits `low`. Qwen on DashScope requires `compat.thinkingFormat: "qwen"` to enable thinking at all. `deepseek-chat` and `deepseek-reasoner` were retired 2026-07-24; current models are `deepseek-v4-flash` / `deepseek-v4-pro`, where thinking is a request parameter rather than a model choice. There is also a documented DeepSeek agentic failure mode — emitting tool calls as prose in `content` instead of `tool_calls` roughly 11% of the time — that thinking budgets do not address. **Per-role thinking budgets must not be built until the wire inspector proves the parameters reach the provider.**
+**That diagnosis is unproven, and research narrowed the likely causes considerably.** Four researchers verified against Pi's published TypeScript (recovered from npm tarballs and sourcemaps), not documentation.
 
-**A second plausible cause of the same symptom: context pollution.** Pi's base system prompt is ~400 tokens. Every extension that registers a tool or prompt snippet adds to it on *every turn*. With Opus this is invisible; with DeepSeek Flash a bloated system prompt is a credible cause of "doesn't think enough, misses things." Hence progressive disclosure as an architectural principle rather than a nicety.
+*Falsified — do not act on these:*
+- The claim that Pi sends DeepSeek's `reasoning_effort` at the wrong nesting level. Two researchers independently confirmed Pi emits `{"thinking":{"type":"enabled"},"reasoning_effort":"high"}`, exactly as DeepSeek's Thinking Mode guide specifies.
 
-**Pi's actual shape.** Seven built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) — not four, as widely repeated; the four are an internal default in `system-prompt.ts`. Pi's docs state verbatim that it "intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash." There is **no sandbox and no permission system** — Pi's default is effectively permanent bypass mode. The `tool_call` hook can block, but it is a string matcher over commands, trivially defeated (`g=push; git $g`, `sh -c`, heredocs). It is a mistake-catcher, not a security boundary. Pi ships a release every 2–3 days; the package registry holds 5,562 packages.
+*Confirmed at source:*
+- Pi's Bedrock adapter returns `undefined` for thinking configuration on every non-Claude model (`bedrock-converse-stream.ts`, `buildAdditionalModelRequestFields`). Extended thinking is only requested for Claude on Bedrock.
+- Bedrock Converse populates no reasoning-token usage, so thinking-token cost is unmeasurable there.
+- Bedrock DeepSeek is R1/V3/V3.2 only — no V4 — and R1 supports no tool calling, making it unusable as an executor.
+- DeepSeek emits tool calls as prose in `content` instead of `tool_calls` roughly 11% of the time (DeepSeek-V3 issue #1244, still open and titled for V4-Pro). Thinking budgets do not address this; `strict` schema mode is the documented mitigation.
+- DeepSeek silently ignores `temperature`/`top_p`/penalties in thinking mode, and thinking is on by default.
+- Pi's `detectCompat` has **no Alibaba/DashScope/Qwen branch**, so a custom DashScope provider silently receives `thinkingFormat: "openai"` (Qwen never thinks) and `requiresReasoningContentOnAssistantMessages: false` (DeepSeek returns 400 on the *second* turn of any tool sequence). This is the strongest candidate for the user's original bad experience.
+- Pi's built-in `qwen-token-plan` provider uses a different host and a `sk-sp-` prepaid key namespace; a pay-as-you-go DashScope `sk-` key will not work with it.
+
+*Unresolved:* whether Pi correctly restricts DeepSeek V4 to `high`/`max` thinking levels, or wrongly filters out a supported `low` tier. Two researchers reached opposite conclusions. Settle before relying on a cheap thinking tier.
+
+**Per-role thinking budgets must still not be built until the wire inspector proves the parameters reach the provider** — but the reason is now the Bedrock non-Claude gap and the DashScope compat gap, not a wire-format bug.
+
+**The strongest remaining hypothesis: context pollution.** Measured by importing Pi's own `buildSystemPrompt` and tool factories: the floor is **~1,850 tokens/turn** — ~756 for the system prompt with 7 tools, plus ~1,106 for the tool JSON schemas in the request payload. The dominant term is the payload `tools[]` array, which `promptSnippet` discipline does nothing about; `pi.setActiveTools()` is the only real lever, and the `context` hook **cannot** strip tool definitions. Every extension registering a tool adds to this on *every turn*. With Opus it is invisible; with DeepSeek Flash it is a credible cause of "doesn't think enough, misses things."
+
+Compounding this: DeepSeek cache reads are ~50× cheaper than fresh input, so a single volatile token in the system prompt (a timestamp, a live statusline value) invalidates the cached prefix and costs 50× on the whole prefix every turn. Progressive disclosure is therefore an economic constraint, not an aesthetic one.
+
+**Pi's actual shape.** Seven built-in tools (`read`, `bash`, `edit`, `write`, `grep`, `find`, `ls`) — not four, as widely repeated; the four are an internal default in `system-prompt.ts`. Pi's docs state verbatim that it "intentionally does not include built-in MCP, sub-agents, permission popups, plan mode, to-dos, or background bash." There is **no sandbox and no permission system** — Pi's default is effectively permanent bypass mode. Pi ships a release every 2–3 days; the package registry holds 5,562 packages.
+
+**Assets in Pi itself that reduce what must be built or installed:**
+- `fauxProvider()` in `@earendil-works/pi-ai` — a scripted mock provider with `setResponses()`, call counting, and controllable streaming rate. Public API, undocumented outside the `.d.ts`. This makes the entire credential-dependent surface testable without API keys, which is decisive given the development machine has none.
+- Pi's own tarball ships a 390-line plan-mode implementation and 60+ extension examples. Zero supply-chain risk, guaranteed API-current, preferred over third-party wherever they cover the need.
+- `ctx.modelRegistry.complete(model, context, options)` — in-process nested LLM call to any model, no session mutation, per-call reasoning effort. This is what makes role→model routing achievable.
+
+**Safety-relevant mechanics discovered in source:**
+- The `tool_call` hook as a string matcher is trivially defeated (`g=push; git $g`, `sh -c`, heredocs). `unbash@4.0.10` — a zero-dep bash parser at 35.8M downloads/month — is the fix; read how `@ramtinj95/pi-infra-command-guard` applies it rather than installing that package (it drags in `openai` and `tree-sitter`).
+- `pi install` runs **npm lifecycle scripts** with no `--ignore-scripts` on any path, and the pnpm branch sets `--config.strict-dep-builds=false`. Arbitrary code executes before the extension loader or the trust prompt. Mitigated by one line in `~/.npmrc`, which must precede the first install.
+- Confirm dialogs **fail closed headless** — `noOpUIContext.confirm` returns `false` — so a guard written as `if (ctx.hasUI && !ok) block` fails **open** under `-p`/RPC. Requires an explicit CI test.
+- Project-scoped extensions do not load in subagents (no UI ⇒ no trust), so safety guards must be user-scoped.
+- Extensions can mutate tool input after approval with no re-validation, making extension load order part of the security model.
+- `/share` cannot be blocked by any extension — built-in commands are matched before extension commands and before the `input` event. The only control is `gh` auth state.
+- Provider hooks wire only into the main agent's `streamFn`; nested `complete()` calls bypass them, forcing a single `callModel()` chokepoint.
+- `pi-sandbox`, the only genuinely robust guard, is macOS/Linux only. On Windows the honest ceiling is a mistake-catcher.
 
 **The deployment fact that dominates safety design.** In the user's work repo, merging to `main` immediately deploys to AWS. `main` is not a branch — it is a deploy trigger. Terraform is owned by an infra team, so a merged `.tf` change *is* an infra change.
 
@@ -151,7 +186,12 @@ If the routing is elegant, the UI is beautiful, and the workflows are sophistica
 | Compose subagents, never fork | ~15 upstream releases/month makes a fork permanent unpaid maintenance | — Pending |
 | Progressive disclosure as an architectural principle | Resolves "don't overcomplicate" without cutting features; directly targets a plausible cause of the cheap-model symptom | — Pending |
 | Repo *and* Pi package, not either/or | A `package.json` costs one file, a bootstrap script one more; choosing means being worse at one for no saving | — Pending |
-| UI layer sequenced last | Genuinely wanted and motivating, but must not block a working daily driver | — Pending |
+| UI layer sequenced last | Genuinely wanted and motivating, but must not block a working daily driver; also gated by cache economics — volatile system-prompt tokens cost 50× on the whole prefix | — Pending |
+| Route via `ctx.modelRegistry.complete()`, `setModel` at idle, and subagents — not a virtual provider | Verified at source as the mechanism Pi's own `summarize.ts`/`handoff.ts` use; avoids losing the `/model` picker and cost accounting | — Pending |
+| Test with `fauxProvider()` rather than live credentials | Makes the credential-dependent surface testable on a machine with no API keys | — Pending |
+| Prefer Pi's own bundled examples over third-party extensions where they cover the need | Zero supply-chain risk, guaranteed current against an API that ships every 2–3 days | — Pending |
+| Harden `~/.npmrc` before the first `pi install` | `pi install` runs npm lifecycle scripts; arbitrary code executes before the trust prompt | — Pending |
+| Qoder demoted from routable model to delegate tool | No inference endpoint exists — verified at `docs.qoder.com/llms.txt` | — Pending |
 | GitHub Actions matrix for macOS verification | macOS cannot be tested locally; free on public repos; the alternative is shipping unverified | — Pending |
 
 ## Evolution
@@ -172,4 +212,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-12 after initialization*
+*Last updated: 2026-08-13 after domain research — corrected assumptions on DeepSeek wire format, Qoder capability, and context budget*
