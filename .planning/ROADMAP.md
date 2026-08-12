@@ -56,7 +56,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 01-03-PLAN.md — Sentinel extension and executed proofs for both load paths, including the trust-gate negative control (BOOT-02, BOOT-05)
+- [x] 01-03-PLAN.md — Sentinel extension and executed proofs for both load paths, including the trust-gate negative control (BOOT-02, BOOT-05)
 - [ ] 01-04-PLAN.md — Supply-chain coverage test across three npm scopes with a live postinstall attack, plus the pinning lint (BOOT-01, BOOT-08)
 - [ ] 01-05-PLAN.md — `bin/bootstrap.sh` (POSIX sh, four modes) and the unpublished-version gate test (BOOT-03, BOOT-04)
 - [ ] 01-07-PLAN.md — `scripts/check-gh-unauthenticated.sh` and its stubbed bidirectional classifier test (SAFE-16)
@@ -270,7 +270,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Bootstrap, Packaging & Supply Chain | 2/10 | In Progress|  |
+| 1. Bootstrap, Packaging & Supply Chain | 3/10 | In Progress|  |
 | 2. Diagnostics — The Instrument | 0/TBD | Not started | - |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |

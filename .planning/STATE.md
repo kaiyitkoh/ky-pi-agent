@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-02-PLAN.md — test harness helpers + BOOT-09 bidirectional ignore policy
-last_updated: "2026-08-12T18:24:24.210Z"
-last_activity: 2026-08-13 -- Phase 01 Plan 02 complete (test harness helpers, BOOT-09 ignore policy)
+stopped_at: Completed 01-03-PLAN.md — load-path sentinel + executed BOOT-02/BOOT-05 proofs
+last_updated: "2026-08-12T18:35:30.242Z"
+last_activity: 2026-08-12
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 2
+  completed_plans: 3
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 3 of 10
+Plan: 4 of 10
 Status: Ready to execute
-Last activity: 2026-08-13 -- Phase 01 Plan 02 complete (test harness helpers, BOOT-09 bidirectional ignore policy, evil-postinstall fixture)
+Last activity: 2026-08-12
 
-Progress: [██░░░░░░░░] 20%
+Progress: [███░░░░░░░] 30%
 
 ## Performance Metrics
 
@@ -54,6 +54,7 @@ Progress: [██░░░░░░░░] 20%
 *Updated after each plan completion*
 | Phase 01 P01 | 15m | 3 tasks | 10 files |
 | Phase 01 P02 | 20m | 2 tasks | 6 files |
+| Phase 01 P03 | 18m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -72,6 +73,9 @@ Recent decisions affecting current work:
 - [Phase 01]: git check-ignore needs --no-index, not just -q — the index masks ignore rules for tracked paths, which would have made the entire MUST_BE_COMMITTABLE half of the BOOT-09 test a vacuous pass
 - [Phase 01]: test helpers throw rather than skip when a prerequisite binary is missing — a skipped load-path test is a green CI run that verified nothing
 - [Phase 01]: on Windows a PATH stub cannot simulate gh SUCCESS inside Pi (Pi spawns gh with shell:false; Node returns EINVAL on .cmd since CVE-2024-27980) — write SAFE-16 as the not-authenticated assertion
+- [Phase 01]: a negative control must be paired with a positive on the same fixture — case 4's no--a absence is only meaningful because adding -a and nothing else flips it back to present on the same fresh PI_CODING_AGENT_DIR
+- [Phase 01]: PI_CODING_AGENT_DIR relocates trust.json (dist/config.js:397,412-418) — every load-path test uses a fresh one so verdicts come from the gate, not from this machine's saved decisions
+- [Phase 01]: the sentinel extension registers a command and a dead-endpoint provider and never a tool — BOOT-10's boundary rule dogfooded on the first commit of real code
 
 ### Pending Todos
 
@@ -113,8 +117,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-12T18:24:24.201Z
-Stopped at: Completed 01-02-PLAN.md — test harness helpers + BOOT-09 bidirectional ignore policy
+Last session: 2026-08-12T18:35:30.234Z
+Stopped at: Completed 01-03-PLAN.md — load-path sentinel + executed BOOT-02/BOOT-05 proofs
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
