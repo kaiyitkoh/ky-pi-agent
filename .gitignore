@@ -1,0 +1,131 @@
+# ---------------------------------------------------------------------------
+# Dependencies
+# ---------------------------------------------------------------------------
+node_modules/
+.pnpm-store/
+.yarn/
+jspm_packages/
+
+# ---------------------------------------------------------------------------
+# Build output
+# ---------------------------------------------------------------------------
+dist/
+build/
+out/
+coverage/
+*.tsbuildinfo
+tsconfig.tsbuildinfo
+.tsc-cache/
+
+# ---------------------------------------------------------------------------
+# Logs and diagnostics
+# ---------------------------------------------------------------------------
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+lerna-debug.log*
+*.jsonl
+!.gitkeep
+
+# ---------------------------------------------------------------------------
+# Secrets, credentials, local overrides
+# Public repo: no credential may ever be committed. Err toward over-excluding.
+# ---------------------------------------------------------------------------
+.env
+.env.*
+!.env.example
+*.env
+auth.json
+auth.*.json
+credentials.json
+*.local.json
+*.local.js
+*.local.ts
+*.local
+secrets/
+.secrets/
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa*
+id_ed25519*
+.npmrc
+.netrc
+
+# Cloud / infra credential artifacts
+.aws/
+.terraform/
+*.tfstate
+*.tfstate.*
+*.tfvars
+!*.tfvars.example
+kubeconfig
+*.kubeconfig
+
+# ---------------------------------------------------------------------------
+# Pi runtime state (sessions can contain source code, prompts and secrets)
+# ---------------------------------------------------------------------------
+.pi/sessions/
+.pi/cache/
+.pi/logs/
+.pi/state/
+.pi/*.local.json
+.pi/auth.json
+
+# ---------------------------------------------------------------------------
+# OS cruft
+# ---------------------------------------------------------------------------
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+.AppleDouble
+.LSOverride
+Icon?
+Thumbs.db
+Thumbs.db:encryptable
+ehthumbs.db
+ehthumbs_vista.db
+Desktop.ini
+$RECYCLE.BIN/
+*.lnk
+
+# ---------------------------------------------------------------------------
+# Editors and IDEs
+# ---------------------------------------------------------------------------
+.vscode/
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
+.history/
+*.sublime-workspace
+*.sublime-project
+.vim/
+.nvim/
+
+# ---------------------------------------------------------------------------
+# Test / tooling caches
+# ---------------------------------------------------------------------------
+.cache/
+.parcel-cache/
+.eslintcache
+.vitest/
+.nyc_output/
+*.tgz
+
+# ---------------------------------------------------------------------------
+# Temporary / scratch
+# ---------------------------------------------------------------------------
+tmp/
+temp/
+scratch/
+*.tmp
+*.bak
+*.orig
