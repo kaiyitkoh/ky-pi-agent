@@ -92,7 +92,7 @@ Plans:
 **Wave 1**
 
 - [x] 02-01-PLAN.md — Wave 0 test helpers: the `onPayload`-emitting faux wrapper, the in-memory `createAgentSession` factory, and the torn-safe JSONL reader
-- [ ] 02-02-PLAN.md — Entry-point/module discriminator for the BOOT-05 layout gate, plus `redact.ts` and its both-directions test (DIAG-07)
+- [x] 02-02-PLAN.md — Entry-point/module discriminator for the BOOT-05 layout gate, plus `redact.ts` and its both-directions test (DIAG-07)
 
 **Wave 2** *(blocked on Wave 1 completion)*
 

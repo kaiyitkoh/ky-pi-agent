@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-01-PLAN.md — three Wave 0 test helpers, Pitfall-1 guard proven live by falsification
-last_updated: "2026-08-13T03:57:24.428Z"
-last_activity: 2026-08-13 -- Phase 02 Plan 01 complete (Wave 0 test helpers)
+stopped_at: Completed 02-02-PLAN.md — BOOT-05 layout gate discriminates entry points from modules; the redactor lands, proven both directions and bounded
+last_updated: "2026-08-13T04:13:16.163Z"
+last_activity: 2026-08-13 -- Phase 02 Plan 02 complete (layout-gate discriminator + redactor)
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 11
-  percent: 52
+  completed_plans: 12
+  percent: 57
 ---
 
 # Project State
@@ -26,13 +26,13 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 Status: Executing Phase 02
-Last activity: 2026-08-13 -- Phase 02 Plan 01 complete (Wave 0 test helpers)
+Last activity: 2026-08-13 -- Phase 02 Plan 02 complete (layout-gate discriminator + redactor)
 
-Progress: [█████░░░░░] 52% (11 of 21 plans complete)
+Progress: [██████░░░░] 57% (12 of 21 plans complete)
 
-**Read that 52% carefully.** The denominator is *plans written so far* — Phase 1's
+**Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
 percentage will fall. The honest phase-level figure is **1 of 11 phases complete**.
 
@@ -67,6 +67,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 01 P09 | 20m | 2 tasks | 2 files |
 | Phase 01 P10 | 25m | 3 tasks | 3 files |
 | Phase 02 P01 | 20m | 3 tasks | 4 files |
+| Phase 02 P02 | 12m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -118,6 +119,10 @@ Recent decisions affecting current work:
 - [Phase 02]: the extension under test loads at USER scope (<agentDir>/extensions/<name>/index.ts) — project-scoped .pi/extensions is gated behind project trust, which resolves false headless with no UI to answer it
 - [Phase 02]: the faux session cwd is always a temp dir outside this repo — from inside it Pi walks up and loads the 49 KB CLAUDE.md into every faux request (12,725 input tokens for a one-word prompt), so any token measurement would be measuring the harness
 - [Phase 02]: two JSONL readers, not one — readTornSafe reports a torn line as data because DIAG-08 is a measurement, and readJsonl throws so a writer bug in a test-authored file stays loud; the difference is asserted on the same fixture
+- [Phase 02]: an extension entry point is a file with a default export at statement position — the BOOT-05 layout gate now partitions .pi/extensions/ into entry points (must sit at an auto-discovered path) and imported modules (must sit under <dir>/), closing PATTERNS blocker B1 without widening the regex
+- [Phase 02]: the wire payload never carries the API key (RESEARCH §1.3, 12 verified onPayload call sites) — so the redactor matches secret-SHAPED values as well as credential-named header keys; the real hazard is a .env or *.tfstate the model read into messages[]
+- [Phase 02]: a word boundary is added to the sk- and pt- patterns only, against RESEARCH's literal list — risk-assessment-documents is sk- plus 24 token characters, and a redactor that mangles ordinary paths fails DIAG-07's negative control as surely as one that leaks
+- [Phase 02]: DIAG-07 stays Pending after plan 02-02 — the requirement names redaction at capture AND gitignored paths, and this plan ships only the redactor; nothing calls it until wire.ts (02-05)
 
 ### Pending Todos
 
@@ -163,8 +168,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T03:57:24.418Z
-Stopped at: Completed 02-01-PLAN.md — three Wave 0 test helpers, Pitfall-1 guard proven live by falsification
+Last session: 2026-08-13T04:13:16.154Z
+Stopped at: Completed 02-02-PLAN.md — BOOT-05 layout gate discriminates entry points from modules; the redactor lands, proven both directions and bounded
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
