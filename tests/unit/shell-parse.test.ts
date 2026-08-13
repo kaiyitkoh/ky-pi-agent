@@ -230,6 +230,13 @@ const SHELL_RUNNER_TABLE: readonly ShellRunnerRow[] = [
 		expected: "ok",
 		why: "corpus row for Plan 11 (SAFE-15): echo/tee are not shell runners, so this benign pipeline is correctly NOT refused even though its text mentions git push",
 	},
+	{
+		label: "eval with a literal guarded verb (Plan 11 regression -- EV-08)",
+		cmd: 'eval "git push"',
+		expected: "refused",
+		cause: "shell-runner",
+		why: "Plan 11's evasion corpus found this came back allow before eval was added to SHELL_RUNNERS -- eval executes its argument as shell code in the current shell, the same shape as sh -c, just without a fork",
+	},
 ];
 
 describe("SAFE-02/SAFE-03 -- shell-runner table is non-empty (vacuous-pass guard)", () => {

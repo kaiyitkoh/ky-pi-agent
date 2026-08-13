@@ -167,6 +167,18 @@ export const SHELL_RUNNERS = new Set([
 	"node",
 	"perl",
 	"ruby",
+	// `eval STRING` executes STRING as shell code in the CURRENT shell (no
+	// subprocess) -- the same "hides a guarded verb inside a quoted argument"
+	// shape as `sh -c "..."`, just without a fork. Found missing from this set
+	// by Plan 11's evasion corpus (`eval "git push"` came back `allow`, proven
+	// by direct execution against `evaluate()` before this fix landed) --
+	// EV-08 in `tests/fixtures/evasion-corpus.ts`. Adding it here closes the
+	// LITERAL case (`eval "git push"`); it does NOT close the
+	// variable-indirection case (`CMD="git push"; eval "$CMD"`), where the
+	// guarded verb text is absent from eval's own raw segment entirely -- that
+	// residual gap is published in `docs/SAFETY.md` (EV-09), not silently
+	// claimed as fixed by this line.
+	"eval",
 ]);
 
 /**
