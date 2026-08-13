@@ -154,6 +154,49 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 	});
 });
 
+describe("the rows-written counter is per PROCESS, not per module instance", () => {
+	it("is shared by two separate instances of this module", async () => {
+		// WHY THIS IS NOT AN ACADEMIC CASE. Pi loads each extension through jiti,
+		// which keeps its own module registry, so `.pi/extensions/foo` importing
+		// `call-model.ts` and the diagnostics entry point importing `index.ts` hold
+		// two separate copies of this file in one process. That was OBSERVED during
+		// plan 02-07 — it is why `wire.ts`'s request counter lives on `globalThis`
+		// and why `turns-log.test.ts` and `prose-retry.test.ts` read bytes on disk
+		// instead of this number. With a module-level `let`, Phase 5 or Phase 8
+		// importing `call-model.ts` (its documented cross-phase contract) would
+		// increment a counter `/budget` never reads, and `/budget` would print a
+		// figure that silently excludes every nested-call row.
+		//
+		// A distinct query suffix is what makes the bundler hand back a SECOND
+		// instance of the same source, standing in for jiti's separate registry.
+		const first = (await import("../../.pi/extensions/diagnostics/index.ts")) as typeof import("../../.pi/extensions/diagnostics/index.ts");
+		const second = (await import(
+			"../../.pi/extensions/diagnostics/index.ts?second-module-instance"
+		)) as typeof import("../../.pi/extensions/diagnostics/index.ts");
+
+		// THE VACUOUS-PASS GUARD. If the loader deduplicated the two specifiers there
+		// would be one instance, the assertion below would be trivially true, and the
+		// whole case would pass just as happily against a module-level `let`.
+		expect(
+			second.noteRowWritten === first.noteRowWritten,
+			"the two imports resolved to the SAME module instance, so this case cannot distinguish a " +
+				"process-wide counter from a module-level one and proves nothing. Fix the specifier " +
+				"rather than deleting the assertion",
+		).toBe(false);
+
+		const before = first.rowsWrittenThisSession();
+		second.noteRowWritten();
+
+		expect(
+			first.rowsWrittenThisSession(),
+			"a row counted by one instance must be visible to the other. `/budget` runs in Pi's " +
+				"instance and reports this number, so a counter that only some append paths reach is " +
+				"exactly the thing the export exists to prevent: a number that looks like a " +
+				"measurement and is not",
+		).toBe(before + 1);
+	});
+});
+
 describe("the extension entry point registers session_start and prunes there", () => {
 	it("registers session_start plus the wire hooks, and running it writes the row", async () => {
 		await withTempLogCwd(async (cwd) => {

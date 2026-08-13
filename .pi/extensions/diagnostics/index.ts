@@ -189,8 +189,34 @@ export const MODEL_UNAVAILABLE_EVENT = "diagnostics.model_unavailable";
  */
 export const PROSE_RETRY_FORCES_TOOL_CHOICE = false;
 
-/** Rows this process has written. Read through {@link rowsWrittenThisSession}. */
-let rowsWritten = 0;
+/**
+ * Where the rows-written counter lives, so it is PER PROCESS and not per module
+ * instance.
+ *
+ * THE SAME OBSERVED FAILURE THAT FORCED `wire.ts`'s `COUNTER_KEY`, applied to the
+ * counter that has exactly the same exposure. Pi loads each extension through
+ * jiti, which keeps its own module registry, so `.pi/extensions/foo` importing
+ * `call-model.ts` and the diagnostics entry point importing `index.ts` can hold
+ * two separate copies of this module in one process. That is not hypothetical: it
+ * was OBSERVED between a test file's import graph and Pi's jiti graph while plan
+ * 02-07 was being written, which is why the request counter was moved to
+ * `globalThis` and why `turns-log.test.ts:196-201` and
+ * `prose-retry.test.ts:216-219` both read bytes on disk instead of this number.
+ *
+ * A module-level `let` here meant that when Phase 5 or Phase 8 imports
+ * `call-model.ts` — its documented cross-phase contract — the `noteRowWritten`
+ * it calls belonged to whichever instance its own import graph produced, and
+ * `/budget`, running in Pi's instance, printed a count that excluded every nested
+ * row. That is precisely the failure {@link noteRowWritten} says the export exists
+ * to prevent: a counter that only some append paths increment reports a number
+ * that looks like a measurement and is not.
+ *
+ * With the value on `globalThis`, `call-model.ts` importing `noteRowWritten`
+ * directly is harmless — every instance of this module reads and writes the one
+ * slot — so the import is left alone rather than turned into another injected
+ * parameter on an exported cross-phase signature.
+ */
+const ROWS_WRITTEN_KEY = "__kypiDiagnosticsRowsWritten";
 
 /**
  * Prose-tool-call retries spent in the CURRENT agent run. Reset on `agent_start`.
@@ -211,9 +237,13 @@ let proseRetriesThisRun = 0;
  * thought to open. A silently dead instrument is indistinguishable from a quiet
  * session, and that ambiguity is the failure this phase exists to eliminate.
  * [threat T-02-03-05]
+ *
+ * Reads the PROCESS-WIDE slot — see {@link ROWS_WRITTEN_KEY} for the jiti
+ * duplication that makes a module-level `let` the wrong place for it.
  */
 export function rowsWrittenThisSession(): number {
-	return rowsWritten;
+	const value = (globalThis as Record<string, unknown>)[ROWS_WRITTEN_KEY];
+	return typeof value === "number" ? value : 0;
 }
 
 /**
@@ -222,9 +252,11 @@ export function rowsWrittenThisSession(): number {
  * Exported because the sibling modules added later in this phase append rows
  * too, and a counter that only some append paths increment is worse than no
  * counter: it reports a number that looks like a measurement and is not.
+ * `call-model.ts` imports this directly; {@link ROWS_WRITTEN_KEY} is what makes
+ * that safe across module instances.
  */
 export function noteRowWritten(): void {
-	rowsWritten += 1;
+	(globalThis as Record<string, unknown>)[ROWS_WRITTEN_KEY] = rowsWrittenThisSession() + 1;
 }
 
 /**
