@@ -220,11 +220,24 @@ describe("SAFE-16 -- the /share control classifier", () => {
 		// No `gh` binary means Pi's spawnSync at :5856 cannot succeed either, so
 		// /share takes its error branch. Nothing to warn about.
 		expect(run.status, `stdout: ${run.stdout}\nstderr: ${run.stderr}`).toBe(0);
-		expect(run.stdout).toMatch(/cannot upload/);
 
-		// And the narrowed PATH really was narrow -- if the real `gh` had leaked
-		// through, the script would have taken the authenticated branch on this
-		// machine and exited 1 above.
-		expect(run.ghCalls).toEqual([]);
+		// THIS pair is the real control, and it is discriminating: `gh` is
+		// genuinely authenticated on this development machine, so if the narrowed
+		// PATH had leaked the script would have taken the authenticated branch and
+		// exited 1 with "gh IS authenticated" on stderr. Asserting the
+		// not-installed message specifically -- rather than the substring
+		// "cannot upload", which the authenticated branch also contains -- is what
+		// distinguishes "gh was absent" from "gh answered".
+		expect(run.stdout).toMatch(/OK: gh is not installed; \/share cannot upload\./);
+		expect(run.stderr).not.toMatch(/gh IS authenticated/);
+
+		// NOT asserted: `expect(run.ghCalls).toEqual([])`. It cannot fail. With
+		// `ghExitCode: null` no stub is written and no `logTo` is wired, so the
+		// log file cannot exist and `ghCalls` is `[]` by construction whether or
+		// not the real `gh` ran. Nor can it be repaired by always writing a
+		// logging stub: the leak this is meant to catch is the REAL `gh`, and the
+		// real `gh` writes to no log either, so an empty log would still be
+		// consistent with the leak. Stated rather than deleted silently, so the
+		// next reader does not re-add it thinking it is missing coverage.
 	}, TIMEOUT_MS);
 });
