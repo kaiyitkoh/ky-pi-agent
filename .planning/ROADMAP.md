@@ -203,7 +203,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 04-09-PLAN.md — bootstrap user-scope install and the real `pi --mode json` headless deny
+- [x] 04-09-PLAN.md — bootstrap user-scope install and the real `pi --mode json` headless deny
 
 **Wave 7** *(blocked on Wave 6 completion)*
 

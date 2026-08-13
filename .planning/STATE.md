@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-08-PLAN.md
-last_updated: "2026-08-13T21:49:45.075Z"
+stopped_at: Completed 04-09-PLAN.md
+last_updated: "2026-08-13T22:39:32.062Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 44
-  completed_plans: 40
+  completed_plans: 41
   percent: 27
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 04 (safety-deployment-guardrails) — EXECUTING
-Plan: 9 of 12
+Plan: 10 of 12
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 93%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -102,6 +102,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 04 P06 | 25min | 2 tasks | 2 files |
 | Phase 04 P07 | 45min | 2 tasks | 4 files |
 | Phase 04 P08 | 50min | 2 tasks | 4 files |
+| Phase 04 P09 | 44min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -235,6 +236,7 @@ Recent decisions affecting current work:
 - [Phase 04]: safety/index.ts: wrapped-tool delegate calls omit ctx (4 args, not 5) -- matches AgentTool.execute's real declared type at pi-agent-core/dist/types.d.ts:348
 - [Phase 04]: safety/index.ts: classifyAtWrapper() (never throws) and wrapperOutcome() (writes exactly one audit row, then returns or throws) are split to avoid a double-audit-row bug found and fixed before the first commit
 - [Phase 04]: approve_ky_command's schema cost was MEASURED (1099 bytes -> 275 tokens via diagnostics/budget.ts's chars/4 estimator), not estimated, per CONTRIBUTING.md boundary rule (b)
+- [Phase 04]: headless-deny.test.ts scripts the spawned pi process's model turn via an in-process fauxProvider driver extension, not a cross-process loopback HTTP server — the loopback composition RESEARCH.md suggested hung deterministically (5/5) when spawned from inside vitest while succeeding outside it; fauxProvider registered inside the spawned process itself has no network dependency and was reliable across 7 consecutive runs
 
 ### Pending Todos
 
@@ -282,8 +284,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T21:49:45.067Z
-Stopped at: Completed 04-08-PLAN.md
+Last session: 2026-08-13T22:39:32.052Z
+Stopped at: Completed 04-09-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
