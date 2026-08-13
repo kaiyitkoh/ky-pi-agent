@@ -1,9 +1,7 @@
 /**
- * SAFE-03 — bash command parsing: the fail-closed node-type deny predicate.
- *
- * Task 2 of this plan (04-03) extends this file with wrapper resolution
- * (SAFE-02); this Task 1 version implements only {@link canonicalise}'s
- * refusal half plus a minimal, wrapper-unaware invocation extraction.
+ * SAFE-02 / SAFE-03 — bash command parsing: a fail-closed node-type deny
+ * predicate, followed by wrapper resolution to a canonical invocation so
+ * policy (a later plan) evaluates `git push`, never `env` or `sudo`.
  *
  * ---------------------------------------------------------------------------
  * WHY THE DENY PREDICATE IS A NODE-TYPE CHECK, NOT `errors.length`
@@ -72,6 +70,36 @@
  * differ. Documented as a deviation in `04-03-SUMMARY.md`.
  *
  * ---------------------------------------------------------------------------
+ * WHY THE `env`/`sudo` OPTION GRAMMARS ARE TABULATED, NOT GUESSED
+ * ---------------------------------------------------------------------------
+ * `04-RESEARCH.md` Pitfall 2's exact failure mode: `sudo -u root git push`
+ * resolving to executable `root` because `-u`'s value argument was treated
+ * as the executable. `ENV_VALUE_OPTIONS`/`SUDO_VALUE_OPTIONS` below name
+ * every flag that consumes the NEXT word as its value (`-u`, `-C`, ...);
+ * everything else recognised is boolean. Getting one flag's arity wrong
+ * either fails to resolve the wrapper (stops too early) or over-consumes
+ * past the real command (stops too late) — both are silent, not loud, which
+ * is exactly why `tests/unit/shell-parse.test.ts` pins `-u` and `-C` with
+ * dedicated regression fixtures rather than trusting the table by inspection.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY A SHELL RUNNER CARRYING A GUARDED VERB IS DENIED OUTRIGHT
+ * ---------------------------------------------------------------------------
+ * `sh -c "git push"` resolves its own executable to `sh`, which is not
+ * itself a guarded verb — the guarded verb is hidden inside `sh`'s script
+ * argument. Recursively re-parsing that argument as a second nested script
+ * is effort `04-RESEARCH.md`'s Anti-Patterns section explicitly says this
+ * phase does not need to spend, and the reference implementation
+ * (`@ramtinj95/pi-infra-command-guard`, read but not installed per CLAUDE.md)
+ * does not do it either. Instead: if the resolved executable is a member of
+ * {@link SHELL_RUNNERS} AND the RAW segment text matches
+ * {@link GUARDED_VERB_PATTERN}, deny outright (cause `"shell-runner"`) —
+ * never route to approval, because SAFE-03's contract is fail-closed, not
+ * fail-to-approval, for anything this guard cannot classify with confidence.
+ * `sh -c "ls"` is NOT denied: it is a shell runner, but its segment text
+ * contains no guarded verb.
+ *
+ * ---------------------------------------------------------------------------
  * PURITY (matches `.pi/extensions/diagnostics/redact.ts`'s contract)
  * ---------------------------------------------------------------------------
  * No `ctx`, no filesystem, no `child_process`, no default export (a
@@ -114,20 +142,38 @@ const EXPANSION_PART_TYPES = new Set(["SimpleExpansion", "ParameterExpansion"]);
 
 /**
  * Executables this project applies additional policy to. Matched with a word
- * boundary so `git` does not also match `digit`, `magit`, etc. Used here for
- * the command-position expansion rule (see module docstring); Task 2 reuses
- * this same pattern, unchanged, for the shell-runner check — one pattern,
- * one source of truth, per `04-RESEARCH.md` Pattern 2. Not yet exported:
- * Task 1's acceptance criteria does not require it, and Task 2 exports it
- * alongside `SHELL_RUNNERS`.
+ * boundary so `git` does not also match `digit`, `magit`, etc. Used for the
+ * command-position expansion rule (module docstring) AND, unchanged, for the
+ * shell-runner denial below — one pattern, one source of truth, per
+ * `04-RESEARCH.md` Pattern 2.
  */
-const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl)\b/i;
+export const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl)\b/i;
+
+/**
+ * Shell/interpreter runners that can hide a guarded verb inside a script
+ * argument (`sh -c "git push"`, `xargs git push`). Resolving to one of these
+ * does not by itself deny — only combined with {@link GUARDED_VERB_PATTERN}
+ * matching the raw segment text (see {@link findShellRunnerDenial}).
+ */
+export const SHELL_RUNNERS = new Set([
+	"sh",
+	"bash",
+	"zsh",
+	"dash",
+	"fish",
+	"xargs",
+	"python",
+	"python3",
+	"node",
+	"perl",
+	"ruby",
+]);
 
 /**
  * Every cause {@link canonicalise} can return, as a runtime-checkable list —
- * this is what `tests/unit/shell-deny-list.test.ts` iterates to prove every
- * cause is reachable by at least one fixture. Task 2 appends `"shell-runner"`
- * once wrapper resolution can detect it.
+ * this is what `tests/unit/shell-deny-list.test.ts` and
+ * `tests/unit/shell-parse.test.ts` iterate to prove every cause is reachable
+ * by at least one fixture.
  */
 export const SHELL_REFUSAL_CAUSES = [
 	"command-substitution",
@@ -136,6 +182,7 @@ export const SHELL_REFUSAL_CAUSES = [
 	"heredoc",
 	"background",
 	"unresolved-expansion-in-command-position",
+	"shell-runner",
 	"parse-error",
 ] as const;
 
@@ -148,25 +195,101 @@ const CAUSE_BY_DENIED_TYPE: Record<string, ShellRefusalCause> = {
 };
 
 // ---------------------------------------------------------------------------
+// Wrapper-resolution vocabulary (SAFE-02) — tabulated, not derived, per
+// `04-RESEARCH.md` Pitfall 2 (see module docstring).
+// ---------------------------------------------------------------------------
+
+/** `env` flags that take no value argument. */
+const ENV_BOOLEAN_OPTIONS = new Set(["-i", "--ignore-environment", "-0", "--null", "-v", "--verbose", "--debug"]);
+
+/** `env` flags that consume the NEXT word as their value — `-C`/`--chdir` is the directory override. */
+const ENV_VALUE_OPTIONS = new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]);
+
+/** `sudo` flags that take no value argument. */
+const SUDO_BOOLEAN_OPTIONS = new Set([
+	"-i",
+	"--login",
+	"-n",
+	"--non-interactive",
+	"-S",
+	"--stdin",
+	"-E",
+	"--preserve-env",
+	"-H",
+	"--set-home",
+	"-b",
+	"--background",
+	"-k",
+	"--reset-timestamp",
+	"-v",
+	"--validate",
+	"-A",
+	"--askpass",
+]);
+
+/** `sudo` flags that consume the NEXT word as their value — `-u`/`--user` is the Pitfall-2 regression case. */
+const SUDO_VALUE_OPTIONS = new Set([
+	"-u",
+	"--user",
+	"-g",
+	"--group",
+	"-p",
+	"--prompt",
+	"-h",
+	"--host",
+	"-C",
+	"--close-from",
+	"-D",
+	"--chdir",
+	"-R",
+	"--chroot",
+	"-T",
+	"--command-timeout",
+	"-U",
+	"--other-user",
+]);
+
+/**
+ * Bare pass-through wrappers: the wrapper name is consumed, then any
+ * following words that LOOK like flags (start with `-`) are skipped
+ * generically — none of these take a separate value argument in the forms
+ * this project's fixtures exercise (`stdbuf -o0 git push` packs its value
+ * into one token, so a generic flag-skip resolves it correctly without a
+ * dedicated option table).
+ */
+const PASSTHROUGH_WRAPPERS = new Set([
+	"nohup",
+	"chronic",
+	"setsid",
+	"time",
+	"nice",
+	"stdbuf",
+	"command",
+	"builtin",
+	"toybox",
+	"busybox",
+]);
+
+// ---------------------------------------------------------------------------
 // Verdict shape (mirrors the discriminated-verdict style of
 // `.pi/extensions/providers/sso.ts`'s `SsoVerdict`)
 // ---------------------------------------------------------------------------
 
-/**
- * One command's canonical form. In this Task 1 version, `wrappers` is always
- * `[]` and `cwdOverride` is always absent — Task 2 replaces the extraction
- * function this interface feeds with real wrapper resolution.
- */
+/** One command's canonical form after wrapper resolution — what policy evaluates. */
 export interface CanonicalInvocation {
-	/** The executable word as unbash resolved it (quoting resolved; wrapper resolution is Task 2). */
+	/** The real executable, with every wrapper (`sudo`, `env`, `nohup`, ...) resolved away. */
 	readonly executable: string;
-	/** Arguments after the executable. Quote-resolved (`Word.value`), not raw text. */
+	/** Arguments AFTER the resolved executable. Quote-resolved (`Word.value`), not raw text. */
 	readonly args: readonly string[];
-	/** Wrapper names encountered, in order. Always `[]` until Task 2. */
+	/** Wrapper names encountered, in the order they appeared (e.g. `["sudo"]`, `["env"]`). */
 	readonly wrappers: readonly string[];
-	/** The raw source slice for this one command segment — what a guarded-verb check tests against. */
+	/** The raw source slice for this one command segment — what {@link GUARDED_VERB_PATTERN} tests against. */
 	readonly rawSegment: string;
-	/** Directory the invocation targets, if resolvable. Always absent until Task 2. */
+	/**
+	 * Directory the invocation actually targets, if resolvable: `git -C`/`--git-dir`
+	 * takes precedence (it is the ONLY value a later `HEAD == main` oracle can
+	 * trust), falling back to an `env -C`/`--chdir` wrapper directory when present.
+	 */
 	readonly cwdOverride?: string;
 }
 
@@ -384,6 +507,8 @@ function describeCause(cause: ShellRefusalCause, command: string): string {
 			return `"${command}" backgrounds the command (&), which this guard cannot observe complete before returning`;
 		case "unresolved-expansion-in-command-position":
 			return `"${command}" resolves its executable or a guarded verb's subcommand from an unresolved shell variable`;
+		case "shell-runner":
+			return `"${command}" hands a guarded verb to a shell runner (${[...SHELL_RUNNERS].join(", ")}) as a script argument`;
 		case "parse-error":
 			return `"${command}" did not parse cleanly; this catch-all denies rather than falls through to allow`;
 		default: {
@@ -393,11 +518,106 @@ function describeCause(cause: ShellRefusalCause, command: string): string {
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Wrapper resolution (SAFE-02)
+// ---------------------------------------------------------------------------
+
+interface ResolvedWrappers {
+	readonly wrappers: string[];
+	readonly cwdOverride: string | undefined;
+	/** Index into `values[]` of the first word AFTER every recognised wrapper. */
+	readonly index: number;
+}
+
 /**
- * Task 1's minimal invocation extraction: one entry per `Command` node found
- * anywhere in the parsed tree, executable/args taken directly from unbash's
- * quote-resolved `Word.value` with NO wrapper resolution. Task 2 replaces
- * this function's body with real `sudo`/`env`/`nohup`/`-C` handling.
+ * Walk `values` (the command name followed by its suffix words, all
+ * quote-resolved) consuming recognised wrapper executables and their option
+ * grammars, stopping at the first word that is not itself a wrapper. That
+ * word — `values[index]` — is the real executable.
+ */
+function resolveWrappers(values: readonly string[]): ResolvedWrappers {
+	const wrappers: string[] = [];
+	let cwdOverride: string | undefined;
+	let i = 0;
+
+	while (i < values.length) {
+		const word = values[i];
+		const lower = word.toLowerCase();
+
+		if (lower === "env") {
+			wrappers.push("env");
+			i += 1;
+			while (i < values.length && values[i].startsWith("-")) {
+				const flag = values[i];
+				if (ENV_VALUE_OPTIONS.has(flag)) {
+					if (flag === "-C" || flag === "--chdir") {
+						cwdOverride = values[i + 1];
+					}
+					i += 2;
+				} else if (ENV_BOOLEAN_OPTIONS.has(flag)) {
+					i += 1;
+				} else {
+					// Unrecognised env flag: stop consuming rather than guess past it
+					// (Pitfall 2's exact failure mode is over-consuming into the real
+					// command). The unresolved word becomes the "executable" below,
+					// which is a safe, inert failure -- never a silent bypass.
+					break;
+				}
+			}
+			continue;
+		}
+
+		if (lower === "sudo") {
+			wrappers.push("sudo");
+			i += 1;
+			while (i < values.length && values[i].startsWith("-")) {
+				const flag = values[i];
+				if (SUDO_VALUE_OPTIONS.has(flag)) {
+					i += 2;
+				} else if (SUDO_BOOLEAN_OPTIONS.has(flag)) {
+					i += 1;
+				} else {
+					break;
+				}
+			}
+			continue;
+		}
+
+		if (PASSTHROUGH_WRAPPERS.has(lower)) {
+			wrappers.push(lower);
+			i += 1;
+			while (i < values.length && values[i].startsWith("-")) {
+				i += 1;
+			}
+			continue;
+		}
+
+		break;
+	}
+
+	return { wrappers, cwdOverride, index: i };
+}
+
+/** `git -C <dir>` / `git --git-dir <dir>` / `git --git-dir=<dir>` — the ONLY cwd override a later `HEAD == main` oracle can trust. */
+function extractGitCwdOverride(executable: string, args: readonly string[]): string | undefined {
+	if (executable.toLowerCase() !== "git") {
+		return undefined;
+	}
+	for (let i = 0; i < args.length; i += 1) {
+		const arg = args[i];
+		if (arg === "-C" || arg === "--git-dir") {
+			return args[i + 1];
+		}
+		if (arg.startsWith("--git-dir=")) {
+			return arg.slice("--git-dir=".length);
+		}
+	}
+	return undefined;
+}
+
+/**
+ * One entry per `Command` node found anywhere in the parsed tree, wrapper
+ * indirection resolved so policy evaluates the real executable.
  */
 function extractInvocations(
 	script: ParsedScript,
@@ -417,14 +637,33 @@ function extractInvocations(
 			// — nothing executes here, so there is no invocation to canonicalise.
 			continue;
 		}
+		const values = [node.name.value, ...node.suffix.map((w) => w.value)];
+		const resolved = resolveWrappers(values);
+		const executable = values[resolved.index] ?? "";
+		const args = values.slice(resolved.index + 1);
+		const cwdOverride = extractGitCwdOverride(executable, args) ?? resolved.cwdOverride;
+
 		invocations.push({
-			executable: node.name.value,
-			args: node.suffix.map((w) => w.value),
-			wrappers: [],
+			executable,
+			args,
+			wrappers: resolved.wrappers,
 			rawSegment: sourceText.slice(node.pos, node.end),
+			...(cwdOverride !== undefined ? { cwdOverride } : {}),
 		});
 	}
 	return invocations;
+}
+
+/**
+ * Deny outright when a resolved invocation hands a guarded verb to a shell
+ * runner as a script argument — see the module docstring's "shell runner"
+ * section for why this is a substring check over raw text, not a recursive
+ * re-parse.
+ */
+function findShellRunnerDenial(invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined {
+	return invocations.find(
+		(inv) => SHELL_RUNNERS.has(inv.executable.toLowerCase()) && GUARDED_VERB_PATTERN.test(inv.rawSegment),
+	);
 }
 
 // ---------------------------------------------------------------------------
@@ -433,8 +672,10 @@ function extractInvocations(
 
 /**
  * Parse `command` with `unbash`, fail closed on any of the node classes named
- * in {@link SHELL_REFUSAL_CAUSES}, and otherwise resolve one canonical
- * invocation per command segment found anywhere in the parsed tree.
+ * in {@link SHELL_REFUSAL_CAUSES}, and otherwise resolve wrapper indirection
+ * to a canonical invocation per command segment (one per `Command` node found
+ * anywhere in the parsed tree — `g=push; git $g` and `cd /tmp && git push`
+ * each yield their own entries, never only the first).
  */
 export function canonicalise(command: string): ShellVerdict {
 	let script: ParsedScript;
@@ -456,5 +697,12 @@ export function canonicalise(command: string): ShellVerdict {
 		return { kind: "refused", cause, detail: describeCause(cause, command) };
 	}
 
-	return { kind: "ok", invocations: extractInvocations(script, command, commandNodes) };
+	const invocations = extractInvocations(script, command, commandNodes);
+
+	const shellRunnerHit = findShellRunnerDenial(invocations);
+	if (shellRunnerHit !== undefined) {
+		return { kind: "refused", cause: "shell-runner", detail: describeCause("shell-runner", command) };
+	}
+
+	return { kind: "ok", invocations };
 }

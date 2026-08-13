@@ -177,13 +177,29 @@ describe("SAFE-03 -- canonicalise() node-type deny predicate", () => {
 	}
 });
 
-describe("SAFE-03 -- every distinct cause is reachable by at least one fixture", () => {
-	it("SHELL_REFUSAL_CAUSES is fully covered by the table above", () => {
+/**
+ * `"shell-runner"` is deliberately excluded from this file's coverage set: it
+ * can only fire after wrapper resolution (Task 2), and its paired
+ * refused/not-refused fixtures (`sh -c "git push"` vs `sh -c "ls"`) live in
+ * `tests/unit/shell-parse.test.ts`, which asserts it directly. Every OTHER
+ * cause `shell.ts` exports must still be reachable from this file alone.
+ */
+const CAUSES_COVERED_BY_THIS_FILE: readonly ShellRefusalCause[] = SHELL_REFUSAL_CAUSES.filter(
+	(c) => c !== "shell-runner",
+);
+
+describe("SAFE-03 -- every distinct cause this file is responsible for is reachable by at least one fixture", () => {
+	it("CAUSES_COVERED_BY_THIS_FILE is fully covered by the table above", () => {
+		expect(
+			CAUSES_COVERED_BY_THIS_FILE.length,
+			"SHELL_REFUSAL_CAUSES minus shell-runner must be non-empty, or this guard proves nothing",
+		).toBeGreaterThan(0);
 		const observed = new Set(TABLE.map((r) => r.cause).filter((c): c is ShellRefusalCause => c !== undefined));
-		for (const cause of SHELL_REFUSAL_CAUSES) {
-			expect(observed.has(cause), `cause "${cause}" is exported but no fixture row produces it -- a branch no test exercises`).toBe(
-				true,
-			);
+		for (const cause of CAUSES_COVERED_BY_THIS_FILE) {
+			expect(
+				observed.has(cause),
+				`cause "${cause}" is exported but no fixture row in THIS file produces it -- a branch no test exercises`,
+			).toBe(true);
 		}
 	});
 });
