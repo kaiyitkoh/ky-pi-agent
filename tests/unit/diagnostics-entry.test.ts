@@ -24,6 +24,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { describe, expect, it } from "vitest";
 
+import { BUDGET_COMMAND_NAME } from "../../.pi/extensions/diagnostics/budget.ts";
 import diagnostics, {
 	SESSION_START_EVENT,
 	rowsWrittenThisSession,
@@ -157,12 +158,20 @@ describe("the extension entry point registers session_start and prunes there", (
 	it("registers session_start plus the wire hooks, and running it writes the row", async () => {
 		await withTempLogCwd(async (cwd) => {
 			const registered: string[] = [];
+			const commands: string[] = [];
 			const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
 
+			// `registerCommand` is on the stub because plan 02-10 added `/budget`.
+			// Without it the entry point throws a TypeError here and the eight-hook
+			// assertion below never runs -- a stub that models only half the API
+			// turns a real regression into a crash nobody reads.
 			const pi = {
 				on(event: string, fn: (e: unknown, c: ExtensionContext) => unknown) {
 					registered.push(event);
 					handlers.set(event, fn);
+				},
+				registerCommand(name: string) {
+					commands.push(name);
 				},
 			} as unknown as ExtensionAPI;
 
@@ -196,6 +205,16 @@ describe("the extension entry point registers session_start and prunes there", (
 				"turn_end",
 				"agent_start",
 			]);
+
+			expect(
+				commands,
+				"the diagnostics subsystem registers exactly one command, `/budget` (DIAG-06), and " +
+					"nothing else. It is a COMMAND deliberately: a command costs zero per-turn tokens " +
+					"while the other kind of registration serialises a full JSON Schema into every " +
+					"provider request, so a report ABOUT per-turn token cost would become one " +
+					"[threat T-02-10-05]. `tests/unit/contributing-boundary.test.ts` holds the " +
+					"complementary negative half across all of `.pi/extensions/`",
+			).toEqual([BUDGET_COMMAND_NAME]);
 
 			expect(
 				handler,

@@ -9,8 +9,11 @@
  *
  * LIFETIME. Permanent. It grows across this phase: plan 02-05 added the wire
  * capture, 02-08 the per-turn rows, 02-09 the prose-tool-call retry and 02-10
- * the `/budget` command. Today it registers `session_start`, the three
- * main-loop provider hooks, the three turn hooks, and `agent_start`.
+ * the `/budget` command. Today it registers eight hooks — `session_start`, the
+ * three main-loop provider hooks, the three turn hooks and `agent_start` — plus
+ * exactly one COMMAND, `/budget`. The hook count and the command are both
+ * asserted in `tests/unit/diagnostics-entry.test.ts`, so neither can grow
+ * unnoticed.
  *
  * THE TURN ROW IS BUILT FROM THE HOOKS THAT ALWAYS FIRE. `turn_start` supplies
  * the clock, `message_end` the finalized assistant message, `turn_end` the turn
@@ -53,6 +56,12 @@
  *   prose.ts      — the prose-tool-call PREDICATE. Its EFFECT — the row,
  *                   the capped follow-up and the exhaustion record —
  *                   lives in the `message_end` handler below.       DIAG-05.
+ *   budget.ts     — `/budget`: the system-prompt slicer, the budget
+ *                   computation and the command registration. A
+ *                   COMMAND, so it costs zero per-turn tokens — and it
+ *                   could not be anything else, because
+ *                   `getSystemPromptOptions()` exists only on the
+ *                   command context (RESEARCH §7.1).                DIAG-06.
  *
  * THE PROSE RETRY IS A FOLLOW-UP MESSAGE, NOT A FABRICATED TOOL CALL. The
  * alternative — returning `{ message }` from `message_end` with the parsed
@@ -93,6 +102,7 @@ import type {
 	TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
+import { registerBudgetCommand } from "./budget.ts";
 import { appendJsonl, pruneLogs } from "./jsonl.ts";
 import { isProseToolCall, proseToolCallName } from "./prose.ts";
 import { redactString } from "./redact.ts";
@@ -598,4 +608,17 @@ export default function (pi: ExtensionAPI): void {
 			proseRetriesThisRun = 0;
 		}),
 	);
+
+	// DIAG-06 — `/budget`, the only registration in this subsystem that is not a
+	// hook. It reports the system-prompt decomposition, the active tool schemas,
+	// the provider-reported cache-read-versus-input figures, and
+	// `rowsWrittenThisSession()` — so a session that recorded nothing says so on
+	// screen instead of leaving a reader to infer it from a file they never
+	// opened (RESEARCH Pitfall 5). [threat T-02-10-04]
+	//
+	// Both counters are passed IN for the same reason `registerWireHooks` takes
+	// them: this file imports `budget.ts`, and an import back the other way would
+	// make the pair a cycle. It also keeps there being exactly ONE counter, which
+	// is what makes the printed number match the file.
+	registerBudgetCommand(pi, rowsWrittenThisSession, noteRowWritten);
 }
