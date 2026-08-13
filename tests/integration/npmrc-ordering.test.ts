@@ -136,6 +136,178 @@ function piStub(logTo: string): StubSpec {
 	return { exitCode: 0, logTo };
 }
 
+/**
+ * BOOT-01 (sanitiser) -- `npm_config_*` in the environment can never produce a
+ * pass for a scope that has no file behind it.
+ *
+ * npm ranks environment config ABOVE every `.npmrc`, and `npm run`/`npx` export
+ * the whole resolved config into their children. So a probe that does not strip
+ * `npm_config_*` measures its own launcher rather than the file under test, and
+ * `--assert-hardening` would certify a control it never exercised.
+ *
+ * This has now been a live defect TWICE, and neither time did a test catch it:
+ *
+ *   01-06  the strip was lower-case only. A Node runner hands children the keys
+ *          UPPER-cased, and Windows env names are case-insensitive, so
+ *          `NPM_CONFIG_IGNORE_SCRIPTS=true` sailed through.
+ *   CR-03-era review (CR-01)  the strip's character class was `[A-Za-z0-9_]`,
+ *          which excludes `-`. `npm_config_ignore-scripts=true` -- npm's own
+ *          canonical spelling -- matched nothing, was neither unset nor
+ *          reported, and `--assert-hardening` printed "All npm scopes are
+ *          hardened" for an empty directory. `unset` cannot fix that one: under
+ *          `dash` a special-builtin error kills the shell even inside
+ *          `|| true` (rc=2), so the script must REFUSE instead.
+ *
+ * The reason neither was caught is that the only coverage was incidental --
+ * `case 1` below happens to run under vitest, which happens to export
+ * `NPM_CONFIG_IGNORE_SCRIPTS`. That is a property of the launcher, not an
+ * assertion. Run the suite from a runner that does not export those keys and
+ * the guard silently evaporates. Hence this table: one row per poison shape,
+ * asserted explicitly.
+ *
+ * Two-directional, per the repo's own rule that every control assertion ships
+ * with the case that must fail:
+ *   - unhardened dir + poison  -> MUST exit 1 (no false certification)
+ *   - hardened dir + strippable poison -> MUST exit 0 (the strip really strips;
+ *     without this, a script that failed unconditionally would pass the first)
+ *   - hardened dir + un-unsettable poison -> MUST exit 1 AND name the key (the
+ *     refusal is deliberate, not an accident of the directory being empty)
+ */
+describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent control", () => {
+	afterEach(() => {
+		for (const dir of scratch) {
+			try {
+				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+			} catch {
+				// A leftover temp dir is noise, not a failure.
+			}
+		}
+		scratch = [];
+	});
+
+	/** A `PI_CODING_AGENT_DIR` whose npm root really does carry the control. */
+	function hardenedAgentDir(): string {
+		const dir = tempDir("kypi-agentdir-");
+		mkdirSync(join(dir, "npm"), { recursive: true });
+		writeFileSync(join(dir, "npm", ".npmrc"), "ignore-scripts=true\n", "utf-8");
+		return dir;
+	}
+
+	/**
+	 * Every shape npm honours. `strippable` records whether a POSIX shell can
+	 * `unset` the name at all -- which is what decides between "strip it and
+	 * carry on" and "refuse, because we cannot".
+	 */
+	const POISON: ReadonlyArray<{
+		readonly key: string;
+		readonly why: string;
+		readonly strippable: boolean;
+	}> = [
+		{
+			key: "npm_config_ignore_scripts",
+			why: "the form `npm run` and `npx` export on POSIX",
+			strippable: true,
+		},
+		{
+			key: "NPM_CONFIG_IGNORE_SCRIPTS",
+			why: "the form a Node test runner exports; the 01-06 defect",
+			strippable: true,
+		},
+		{
+			key: "NpM_CoNfIg_IgNoRe_ScRiPtS",
+			why: "Windows env names are case-insensitive, so mixed case is equally effective",
+			strippable: true,
+		},
+		{
+			key: "npm_config_ignore-scripts",
+			why: "npm's own canonical spelling; no shell can unset it, so it must REFUSE",
+			strippable: false,
+		},
+		{
+			key: "NPM_CONFIG_IGNORE-SCRIPTS",
+			why: "the upper-cased hyphen form -- both defects at once",
+			strippable: false,
+		},
+	];
+
+	for (const { key, why, strippable } of POISON) {
+		it(`refuses to certify an empty npm root when ${key} is set (${why})`, () => {
+			const run = runBootstrap(["--assert-hardening"], {
+				agentDir: tempDir("kypi-agentdir-"),
+				env: { ...(process.env as Record<string, string>), [key]: "true" },
+			});
+
+			expect(
+				run.status,
+				`\`${key}=true\` produced a PASS for a directory containing no .npmrc. ` +
+					`npm ranks environment config above every file, so this is a certificate ` +
+					`for a control that was never exercised.\nstdout:\n${run.stdout}\nstderr:\n${run.stderr}`,
+			).toBe(1);
+			expect(
+				run.stdout,
+				"a refusal must never also print the all-clear",
+			).not.toContain("All npm scopes are hardened");
+		}, TIMEOUT_MS);
+	}
+
+	for (const { key, why } of POISON.filter((p) => p.strippable)) {
+		it(`strips ${key} and lets the FILE answer (${why})`, () => {
+			// The paired positive. Without it the row above is satisfied by a
+			// script that fails whenever any npm_config_* is present -- which is
+			// not a sanitiser, it is a brick, and it would break every run under
+			// `npm test`. Note the poison says `false` here: if it were NOT
+			// stripped, npm would answer `false` and the run would exit 1.
+			const run = runBootstrap(["--assert-hardening"], {
+				agentDir: hardenedAgentDir(),
+				env: { ...(process.env as Record<string, string>), [key]: "false" },
+			});
+
+			expect(
+				run.status,
+				`\`${key}=false\` outranked a .npmrc that says true, so the strip did not ` +
+					`happen.\nstdout:\n${run.stdout}\nstderr:\n${run.stderr}`,
+			).toBe(0);
+			expect(run.stdout).toContain("All npm scopes are hardened");
+		}, TIMEOUT_MS);
+	}
+
+	for (const { key, why } of POISON.filter((p) => !p.strippable)) {
+		it(`refuses even a HARDENED root when ${key} is set (${why})`, () => {
+			// The discriminating case. The empty-directory rows above would also
+			// pass if the refusal were merely the ordinary "no .npmrc here"
+			// failure. This one has a real, correct control file on disk, so the
+			// only thing that can produce a non-zero exit is the sanitiser
+			// deliberately refusing -- and it must say which key it choked on,
+			// because the operator cannot `unset` these and needs to know why.
+			const run = runBootstrap(["--assert-hardening"], {
+				agentDir: hardenedAgentDir(),
+				env: { ...(process.env as Record<string, string>), [key]: "true" },
+			});
+
+			expect(
+				run.status,
+				`\`${key}\` cannot be unset by any POSIX shell, so every assertion after it ` +
+					`is about the environment rather than the files. The script must refuse.\n` +
+					`stdout:\n${run.stdout}\nstderr:\n${run.stderr}`,
+			).toBe(1);
+			expect(
+				run.stderr.toLowerCase(),
+				"the refusal must name the offending variable, or it is unactionable",
+			).toContain(key.toLowerCase());
+			expect(run.stdout).not.toContain("All npm scopes are hardened");
+		}, TIMEOUT_MS);
+	}
+
+	it("passes on a hardened root with no poison at all (the baseline is live)", () => {
+		// Anchors the whole table: if this failed, every "exits 1" row above
+		// would be vacuous, because the run would exit 1 for reasons unrelated
+		// to any environment variable.
+		const run = runBootstrap(["--assert-hardening"], { agentDir: hardenedAgentDir() });
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain("All npm scopes are hardened");
+	}, TIMEOUT_MS);
+});
+
 describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any install", () => {
 	afterEach(() => {
 		for (const dir of scratch) {
