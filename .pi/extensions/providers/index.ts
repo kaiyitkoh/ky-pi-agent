@@ -232,6 +232,36 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 
+			// ONLY BEDROCK REACHES THE AWS CREDENTIAL CHAIN IN THIS HARNESS, and
+			// the remedy this handler prescribes is meaningless for any other
+			// vendor's error text. Without this check the classifier fires on ANY
+			// provider: a DashScope or DeepSeek body that quotes an upstream
+			// `CredentialsProviderError`, or merely contains the phrase
+			// `SSO session`, is replaced wholesale with "run aws sso login" — and
+			// per the deliberate Trap-T4 design the ORIGINAL TEXT IS DISCARDED
+			// from `errorMessage`, surviving only on `diagnostics[]`, which nothing
+			// renders. The user is then told to re-authenticate to AWS because a
+			// different vendor failed, with no way to see what that vendor said.
+			//
+			// `provider` is a required field on `AssistantMessage` [VERIFIED:
+			// pi-ai 0.84.1 dist/types.d.ts:299] and the Bedrock adapter assigns it
+			// when it builds `output`, BEFORE the try block whose catch sets
+			// `errorMessage` [VERIFIED: dist/api/bedrock-converse-stream.js:22-25,
+			// :218], so it is populated on exactly the path this handler reads.
+			//
+			// A RELATED EDGE THIS DOES NOT FIX, RECORDED RATHER THAN HIDDEN: when
+			// the user authenticates through `AWS_BEARER_TOKEN_BEDROCK` (pi-ai
+			// amazon-bedrock.js:63, which returns no `env`) there is no profile at
+			// all, yet an expired bearer token still produces an
+			// `ExpiredTokenException` and this handler prescribes
+			// `aws sso login --profile <profile>`. The placeholder and its RB-03-03
+			// pointer are what the user gets, which is a weak answer to the right
+			// question; distinguishing the two credential shapes needs a live
+			// Bedrock failure to observe and is RB-03-03's business.
+			if (message.provider !== BEDROCK_PROVIDER_ID) {
+				return;
+			}
+
 			const verdict = classifySso(original);
 			if (verdict.kind !== "sso-credential") {
 				// A transient failure keeps its text AND its retries. See the

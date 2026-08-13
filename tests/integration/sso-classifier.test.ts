@@ -79,6 +79,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
 	AWS_PROFILE_ENV,
 	AWS_SSO_LOGIN_PREFIX,
+	BEDROCK_PROVIDER_ID,
 	NON_SSO_FIXTURES,
 	PROFILE_PLACEHOLDER,
 	PROFILE_TEMPLATE_SENTINEL,
@@ -198,17 +199,36 @@ async function withEnv<T>(name: string, value: string | undefined, fn: () => Pro
 	}
 }
 
+/**
+ * A provider id that is emphatically not Bedrock, for the WR-05 control.
+ *
+ * The second hop of the fallback chain, so it is a vendor this harness really
+ * does talk to — the negative control is about a REAL neighbour, not an
+ * invented one.
+ */
+const NON_BEDROCK_PROVIDER_ID = "dashscope";
+
 /** Drive one session whose first provider response is an error carrying `errorText`. */
 async function drive(options: {
 	errorText: string;
 	profile: string | undefined;
 	/** Extra scripted responses after the error, for the retrying control. */
 	then?: FauxResponseStep[];
+	/**
+	 * Which provider the faux message reports itself as coming from.
+	 *
+	 * Defaults to Bedrock because that is the ONLY provider whose failures this
+	 * handler is allowed to rewrite (WR-05). Before that gate existed, every run
+	 * in this file was implicitly a non-Bedrock run and passed anyway — which is
+	 * exactly how the over-reach went unnoticed.
+	 */
+	providerId?: string;
 }): Promise<Capture> {
 	return await withEnv(AWS_PROFILE_ENV, options.profile, async () =>
 		withFauxSession(
 			{
 				extensionSource: probeSource(),
+				providerId: options.providerId ?? BEDROCK_PROVIDER_ID,
 				responses: [
 					fauxAssistantMessage("", {
 						stopReason: "error",
@@ -267,6 +287,7 @@ let ssoRuns: SsoRun[];
 let placeholderRun: Capture;
 let notAProfileRuns: { label: string; value: string; capture: Capture }[];
 let control: Capture;
+let foreignProviderRuns: SsoRun[];
 
 describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 	beforeAll(async () => {
@@ -290,6 +311,23 @@ describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 				label,
 				value,
 				capture: await drive({ errorText: SSO_FIXTURES[0].text, profile: value }),
+			});
+		}
+
+		// THE WR-05 CONTROL: the same credential text, from a vendor that is not
+		// Bedrock. Every string here is one this repository wrote for AWS, but a
+		// provider body that quotes an upstream `CredentialsProviderError` or
+		// merely contains `SSO session` is entirely plausible from DashScope or
+		// DeepSeek, and the handler used to rewrite it.
+		foreignProviderRuns = [];
+		for (const fixture of SSO_FIXTURES) {
+			foreignProviderRuns.push({
+				fixture,
+				capture: await drive({
+					errorText: fixture.text,
+					profile: FIXTURE_PROFILE,
+					providerId: NON_BEDROCK_PROVIDER_ID,
+				}),
 			});
 		}
 
@@ -600,6 +638,71 @@ describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 			"the second scripted response was never consumed, so the retry did not actually reach " +
 				"the provider",
 		).toBe(0);
+	});
+
+	it("case 6b — WR-05: the SAME credential text from a non-Bedrock provider survives byte-identical", () => {
+		// THE PAIRED NEGATIVE FOR EVERY POSITIVE ABOVE. Cases 1-5 drive these six
+		// strings through a provider registered as `amazon-bedrock` and assert the
+		// rewrite. This case drives the identical strings through `dashscope` and
+		// asserts the opposite, so the handler's provider gate is exercised in both
+		// directions rather than only on the branch that fires.
+		//
+		// WHY IT MATTERS MORE THAN A COSMETIC OVER-REACH: the rewrite DISCARDS the
+		// original text from `errorMessage` by design (Trap T4), keeping it only on
+		// `diagnostics[]`, which nothing renders. So a false positive does not just
+		// give bad advice — it destroys the only copy of what the provider actually
+		// said, and tells the user to re-authenticate to AWS because DeepSeek or
+		// DashScope failed.
+		expect(
+			foreignProviderRuns.length,
+			"no non-Bedrock run was driven, so the provider gate is never exercised on the " +
+				"branch where it must NOT fire",
+		).toBeGreaterThanOrEqual(6);
+
+		for (const { fixture, capture } of foreignProviderRuns) {
+			const message = firstError(capture.settled);
+			expect(
+				message,
+				`the non-Bedrock run for ${JSON.stringify(fixture.text.slice(0, 40))} produced no ` +
+					"error-stopped message, so this row asserts nothing",
+			).toBeDefined();
+
+			expect(
+				message?.provider,
+				"the fixture did not actually come from a non-Bedrock provider, so this whole " +
+					"case is a second copy of the positive runs",
+			).toBe(NON_BEDROCK_PROVIDER_ID);
+
+			expect(
+				message?.errorMessage,
+				`a ${NON_BEDROCK_PROVIDER_ID} failure was rewritten into an AWS re-authentication ` +
+					"instruction. The user is told to run `aws sso login` because a different vendor " +
+					"failed, and the vendor's own text is GONE from errorMessage -- it survives only " +
+					"on diagnostics[], which nothing renders [WR-05]",
+			).toBe(fixture.text);
+
+			expect(
+				(message?.diagnostics ?? []).some((entry) => entry.type === SSO_DIAGNOSTIC_TYPE),
+				"the non-Bedrock message carries the classifier's diagnostic, so the handler ran " +
+					"its effect on a provider it must not touch -- the gate is wrong even where the " +
+					"text happened to survive",
+			).toBe(false);
+		}
+
+		// THE PAIRED POSITIVE, RESTATED HERE ON PURPOSE. Without it a handler that
+		// rewrote NOTHING at all would satisfy every assertion above.
+		const bedrockMessage = firstError(ssoRuns[0]?.capture.settled ?? []);
+		expect(
+			bedrockMessage?.provider,
+			"the positive runs are not coming from Bedrock either, so the gate is untested in " +
+				"the direction where it must fire and this case proves only that nothing is ever " +
+				"rewritten",
+		).toBe(BEDROCK_PROVIDER_ID);
+		expect(
+			bedrockMessage?.errorMessage,
+			"the same fixture from Bedrock was NOT rewritten, so the provider gate rejects " +
+				"everything and PROV-05 is unmet",
+		).not.toBe(SSO_FIXTURES[0]?.text);
 	});
 
 	it("case 7 — the exclusion rule holds pattern by pattern, in both directions", () => {

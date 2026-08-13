@@ -129,6 +129,21 @@ export interface FauxSessionOptions {
 	cwdFiles?: Record<string, string>;
 	/** Payload builder forwarded to `wrapFauxWithPayload`. */
 	buildPayload?: FixturePayloadBuilder;
+	/**
+	 * Provider id the faux provider registers under. Default: faux's own.
+	 *
+	 * WHY THIS SEAM EXISTS. `AssistantMessage.provider` is a required field
+	 * [pi-ai 0.84.1 dist/types.d.ts:299] and an extension may legitimately gate
+	 * on it — the SSO classifier does, because its remedy is meaningless for a
+	 * non-AWS vendor (WR-05). A test for such a gate has to be able to say which
+	 * provider the message came from, in BOTH directions, or the gate is only
+	 * ever exercised on the branch that returns early.
+	 *
+	 * `registerNativeProvider` replaces a built-in of the same id, so passing
+	 * `"amazon-bedrock"` here yields a faux provider under that id whose auth
+	 * still resolves empty. Nothing is dialled and no credential is read.
+	 */
+	providerId?: string;
 }
 
 export interface FauxSessionHandle {
@@ -240,7 +255,9 @@ export async function createFauxSession(
 			);
 		}
 
-		const faux = fauxProvider({ models });
+		const faux = fauxProvider(
+			opts.providerId === undefined ? { models } : { models, provider: opts.providerId },
+		);
 		faux.setResponses(opts.responses ?? [fauxAssistantMessage("ok")]);
 
 		const modelRuntime = await ModelRuntime.create({
