@@ -44,14 +44,27 @@ function depMap(field: string): Record<string, string> {
  * must not "fix" it:
  *
  *   - `docs/packages.md:171` mandates the `"*"` range for peers.
- *   - Peers are never installed by us. jiti aliases every one of them to Pi's
- *     own bundled copy at load time (`loader.ts:118-140`), so the version that
+ *   - At RUNTIME none of them is ours: jiti aliases every one to Pi's own
+ *     bundled copy at load time (`loader.ts:118-140`), so the version that
  *     actually executes is the host's, whatever we wrote here.
  *   - Bundling or pinning them creates a SECOND module instance and breaks
  *     `instanceof` across the extension boundary.
- *   - The exact version we develop and test against is pinned in
- *     `devDependencies` and locked in `package-lock.json`. That is where the
- *     BOOT-08 obligation is discharged. [RESEARCH.md 8.3 tension 1]
+ *
+ * What this comment USED to say, and what is false: "Peers are never installed
+ * by us." npm 7+ installs the root project's own `peerDependencies`, and
+ * `npm install --omit=dev` -- the exact command Pi runs inside a clone of this
+ * repo (`package-manager.ts:1829`) -- adds 101 packages to a fresh clone,
+ * including four of the five peers (`pi-coding-agent` alone is resolved through
+ * the devDependency edge and marked `dev` in the lock), plus the AWS SDK,
+ * `openai` and `@anthropic-ai/sdk` [VERIFIED: executed 2026-08-13, fresh clone,
+ * npm 11.13.0]. Every consumer of `pi install <this repo url>` downloads them.
+ *
+ * So the BOOT-08 obligation for these five is discharged by
+ * `package-lock.json`, and ONLY by it -- the lock's non-dev entries are the one
+ * thing standing between a `"*"` range and "whatever is latest today". That is
+ * asserted below rather than assumed. `devDependencies` pins what the
+ * development machine builds against, which is a different guarantee.
+ * [RESEARCH.md 8.3 tension 1]
  */
 const PEER_NAMES = [
 	"@earendil-works/pi-agent-core",
@@ -170,6 +183,61 @@ describe("BOOT-08.2 -- the resolved tree is under version control", () => {
 		// [RESEARCH.md "Standard Stack" > Alternatives considered]
 		expect(existsSync(join(ROOT, "npm-shrinkwrap.json"))).toBe(false);
 		expect(trackedFiles("npm-shrinkwrap.json")).toEqual([]);
+	});
+
+	/**
+	 * The lock's NON-DEV `@earendil-works/*` entries are the whole pin for the
+	 * `"*"` peers.
+	 *
+	 * `npm install --omit=dev` in a clone installs the root's peerDependencies
+	 * -- 101 packages, four of the five peers among them
+	 * [VERIFIED: executed 2026-08-13, fresh clone, npm 11.13.0]. `"*"` means
+	 * "whatever is latest" the instant the lock stops constraining it, so this
+	 * is where the BOOT-08 obligation for those packages actually lives. Only
+	 * non-dev entries are checked: a dev-only tree is not what a consumer of
+	 * `pi install <url>` receives.
+	 */
+	const PI_FAMILY_PIN = "0.84.1";
+
+	interface LockEntry {
+		readonly version?: string;
+		readonly dev?: boolean;
+	}
+
+	const lockPackages = (readJson("package-lock.json").packages ?? {}) as Record<string, LockEntry>;
+
+	/** Non-dev `node_modules/@earendil-works/<pkg>` entries, path -> version. */
+	const runtimePiEntries = Object.entries(lockPackages).filter(
+		([path, entry]) => /^node_modules\/@earendil-works\/[^/]+$/.test(path) && entry.dev !== true,
+	);
+
+	it("locks at least one non-dev @earendil-works entry", () => {
+		// Without this, the loop below passes over an empty set -- the exact
+		// vacuity this file exists to avoid. A lock format change that renames
+		// `packages` would otherwise go unnoticed.
+		expect(
+			runtimePiEntries.length,
+			"no non-dev @earendil-works entry in package-lock.json; either the lock " +
+				"format changed or `npm install --omit=dev` no longer installs the peers, " +
+				"and in both cases the claim in CONTRIBUTING.md needs re-verifying",
+		).toBeGreaterThan(0);
+	});
+
+	for (const [path, entry] of runtimePiEntries) {
+		it(`locks ${path} at ${PI_FAMILY_PIN}`, () => {
+			expect(
+				entry.version,
+				`${path} is what a consumer's \`npm install --omit=dev\` downloads, and the ` +
+					`manifest range for it is "*". The lockfile is the only pin it has.`,
+			).toBe(PI_FAMILY_PIN);
+		});
+	}
+
+	it("locks the non-dev typebox at the audited pin", () => {
+		const typebox = lockPackages["node_modules/typebox"];
+		expect(typebox, "typebox is a `\"*\"` peer and must be present in the lock").toBeDefined();
+		expect(typebox?.dev).not.toBe(true);
+		expect(typebox?.version).toBe(REQUIRED_DEV_PINS.typebox);
 	});
 });
 

@@ -65,12 +65,34 @@ Every third-party dependency is pinned to an exact version, and
 the rule above and it is not. `docs/packages.md:171` mandates the `"*"` range
 for exactly five host-provided packages — `@earendil-works/pi-ai`,
 `@earendil-works/pi-agent-core`, `@earendil-works/pi-coding-agent`,
-`@earendil-works/pi-tui`, `typebox` — and mandates not bundling them. They are
-not installed at runtime: jiti aliases every one of them to Pi's own bundled
-copies (`pi/src/core/extensions/loader.ts:118-139`). Bundling any of them
-creates a second module instance and breaks type and instance identity across
-the extension boundary. The exact pin lives in `devDependencies` and in
-`package-lock.json`, which is where it belongs.
+`@earendil-works/pi-tui`, `typebox` — and mandates not bundling them. At
+*runtime* none of them is ours: jiti aliases every one to Pi's own bundled copy
+(`pi/src/core/extensions/loader.ts:118-139`), so the version that executes is
+the host's whatever we wrote here, and bundling any of them creates a second
+module instance that breaks type and instance identity across the extension
+boundary.
+
+**They are, however, downloaded.** npm 7+ installs the root project's own
+`peerDependencies`, and `npm install --omit=dev` — the exact command Pi runs
+inside a clone of this repo (`package-manager.ts:1829`) — adds **101 packages**
+to a fresh clone, including four of the five peers (`typebox`,
+`@earendil-works/pi-ai`, `@earendil-works/pi-agent-core`,
+`@earendil-works/pi-tui`; `pi-coding-agent` is resolved through the
+devDependency edge and marked `dev` in the lock), plus `pi-telemetry`, the AWS
+SDK, `openai`, `@anthropic-ai/sdk` and `@google/genai`
+[VERIFIED: executed 2026-08-13, fresh clone, npm 11.13.0]. Do not repeat the
+claim that "peers are never installed by us" — it is false, and it was the
+stated reason for tolerating `"*"`.
+
+The correct reason is narrower and it is a lockfile obligation, not a
+convenience: **`package-lock.json` is the only thing pinning those `"*"` peers.**
+The lock has non-dev entries for all 101 and pins each exactly, so a clone today
+gets `0.84.1` and `typebox@1.3.7`. Regenerate the lock without re-pinning and
+the `"*"` peers resolve to whatever is latest, on a laptop holding live AWS
+credentials. That is why the committed lockfile is a BOOT-08 obligation, and why
+`tests/unit/pinning.test.ts` asserts every non-dev `@earendil-works/*` entry in
+the lock is `0.84.1`. The exact pin *also* lives in `devDependencies`, which is
+what the development machine builds against.
 
 Use unscoped `typebox`. Never `@sinclair/typebox` — that is the legacy scoped
 package; Pi aliases it too (`loader.ts:136-138`) but bundles and validates
