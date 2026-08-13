@@ -134,7 +134,30 @@ Plans:
   5. `docs/RUNBOOK.md` exists and lists every credential-dependent check with its expected output, so each verification has either passed or is visibly outstanding rather than quietly assumed.
 
 **Contains [RUNBOOK] requirements**: PROV-03, PROV-04, PROV-07, PROV-10 — the runbook (PROV-09) is the phase's own deliverable.
-**Plans**: TBD
+**Plans**: 11 plans in 4 waves
+Plans:
+**Wave 1**
+
+- [ ] 03-01-PLAN.md — Wave 0 test seams: `wrapFauxWithStatus` (faux hard-codes HTTP 200) and `withModelsConfig`, an offline `ModelRuntime` over an arbitrary `models.json`
+- [ ] 03-02-PLAN.md — `models-template.json`, `auth-template.json`, the `KYPI_DASHSCOPE_BASE_URL` seam, and the Trap T1 filename guard (PROV-01, PROV-03, PROV-04, PROV-06)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 03-03-PLAN.md — `withLoopbackCompletions`: a 127.0.0.1 capture server so Pi's real adapter can be read offline (PROV-03, PROV-10)
+- [ ] 03-04-PLAN.md — Resolved-`compat` deep equality, the `detectCompat` canary, the cross-provider `contextWindow` invariant and the `COST_UNVERIFIED` allowlist (PROV-03, PROV-06)
+- [ ] 03-05-PLAN.md — `credential.env.AWS_PROFILE` resolution in both directions, and the R1 `modelOverrides` unclamp (PROV-04, PROV-07)
+- [ ] 03-06-PLAN.md — `merge_models_json` / `merge_auth_json` in `bin/bootstrap.sh` and the install/idempotence/do-not-clobber test (PROV-01, PROV-04)
+- [ ] 03-07-PLAN.md — `!command` forbidden on both uncached surfaces, proven by subprocess count (PROV-02)
+- [ ] 03-08-PLAN.md — `.pi/extensions/providers/`: the `message_end` SSO classifier, actionable message plus `callCount === 1` (PROV-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 03-09-PLAN.md — The loopback wire proof: every `compat` claim as an assertion, and `reasoning_content` on a replayed two-turn context (PROV-03, PROV-10)
+- [ ] 03-10-PLAN.md — `callWithFallback`: DeepSeek-direct → DashScope over quota/transient/unavailable, with the fatal control (PROV-08)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 03-11-PLAN.md — `docs/RUNBOOK.md` RB-03-01..05 (all OUTSTANDING), the extended status guard, and the requirement traceability (PROV-09)
 **Research**: `--research-phase` recommended — three open empirical questions, none answerable from a desk: the R1 low-thinking-tier contract, the real DashScope `contextWindow` (393,216 corroborated by one researcher, UNVERIFIED by another), and whether strict-schema mode reduces the prose-tool-call rate.
 
 ### Phase 4: Safety & Deployment Guardrails
