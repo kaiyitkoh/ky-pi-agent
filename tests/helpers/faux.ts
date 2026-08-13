@@ -61,6 +61,16 @@
  * does carry is the whole `messages[]` array, including anything the model read
  * into context this session. That is why `SECRET_FIXTURE_TOKEN` below is a
  * *value*-shaped fixture rather than a header-name one.
+ *
+ * ---------------------------------------------------------------------------
+ * The second seam: faux cannot vary the HTTP status either
+ * ---------------------------------------------------------------------------
+ * {@link wrapFauxWithStatus} exists for PROV-08 — the DeepSeek-direct →
+ * DashScope fallback chain, whose three error classes (quota, transient,
+ * unavailable) are distinguished by HTTP status. `faux` hard-codes
+ * `onResponse({ status: 200, headers: {} })` unconditionally
+ * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510], so without a wrapper a
+ * 429/503 test is asserting against a 200 and every class collapses into one.
  */
 import type {
 	Context,
@@ -298,6 +308,81 @@ export function wrapFauxWithPayload(
 			const bag = options as unknown as AnyStreamOptions | undefined;
 			void bag?.onPayload?.(buildPayload(model, context, options), model);
 			return inner.streamSimple(model, context, options);
+		},
+	};
+}
+
+/**
+ * Wrap a faux provider so every call reports `status` instead of the 200 faux
+ * hard-codes — exactly once per call. [PROV-08]
+ *
+ * `faux` has no path to a 429 or a 503: `stream()` runs
+ * `await streamOptions?.onResponse?.({ status: 200, headers: {} }, requestModel)`
+ * unconditionally [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510, and :577 /
+ * :641 for the deferred paths]. PROV-08's error taxonomy — quota, transient,
+ * unavailable — is a claim about statuses, so without this wrapper all three
+ * classes are the same green 200 and the chain test verifies nothing.
+ *
+ * THE DECISION, STATED SO IT IS NOT RE-OPENED (RESEARCH Open Question 4).
+ * There are two ways to get a non-200 out of faux and this helper takes the
+ * second:
+ *
+ *   (a) **pre-call** `onResponse({ status, ... })` before delegating — the
+ *       shape RESEARCH sketched. It is wrong. Faux's own hard-coded 200 still
+ *       fires afterwards, so the caller is called TWICE per request and the
+ *       LAST value it sees is 200. Under Phase 2's instrument that writes two
+ *       `main.response` wire records under one correlation id, and `/budget`
+ *       then counts a row that never happened.
+ *   (b) **substitute** `onResponse` in the options bag, which is what happens
+ *       below. The wrapper hands the inner provider a shallow copy of the bag
+ *       whose `onResponse` forwards `{ status, headers: {} }` to the caller's
+ *       original. Faux's hard-coded call then invokes the substitute, so the
+ *       200 is *rewritten* rather than duplicated: exactly one invocation, and
+ *       it carries `status`.
+ *
+ * `tests/unit/helpers.test.ts` asserts the invocation count is exactly 1, which
+ * is the assertion that would go red if anyone converted this back to a
+ * pre-call. [threat T-03-01-04]
+ *
+ * The caller's bag is copied, never mutated — a wrapper that wrote `onResponse`
+ * back onto the caller's own object would leave the substitute installed after
+ * the wrapper went out of scope.
+ *
+ * Accepts either a `FauxProviderHandle` or an already-wrapped `Provider`, so
+ * the two wrappers compose:
+ *   modelRuntime.registerNativeProvider(
+ *       wrapFauxWithStatus(wrapFauxWithPayload(faux), 503));
+ * keeps `onPayload` emission intact and reports 503.
+ */
+export function wrapFauxWithStatus(faux: FauxProviderHandle | Provider, status: number): Provider {
+	const inner = "provider" in faux ? faux.provider : faux;
+
+	// The substitution is written out twice rather than factored into a helper,
+	// for the same reason the sibling above duplicates its emission: task
+	// acceptance greps this file for the substitution inside BOTH overrides, and
+	// a duplicated body is a cheaper price than an assertion that stops matching
+	// the thing it checks.
+	return {
+		...inner,
+		stream(model, context, options) {
+			const bag = options as unknown as AnyStreamOptions | undefined;
+			const original = bag?.onResponse;
+			// Substituted, NOT pre-called -- see the docstring. The incoming
+			// response is faux's hard-coded 200 and is deliberately discarded.
+			const onResponse: AnyStreamOptions["onResponse"] = (_response, responseModel) => {
+				void original?.({ status, headers: {} }, responseModel);
+			};
+			const forwarded = { ...(bag ?? {}), onResponse } as unknown as typeof options;
+			return inner.stream(model, context, forwarded);
+		},
+		streamSimple(model, context, options) {
+			const bag = options as unknown as AnyStreamOptions | undefined;
+			const original = bag?.onResponse;
+			const onResponse: AnyStreamOptions["onResponse"] = (_response, responseModel) => {
+				void original?.({ status, headers: {} }, responseModel);
+			};
+			const forwarded = { ...(bag ?? {}), onResponse } as unknown as typeof options;
+			return inner.streamSimple(model, context, forwarded);
 		},
 	};
 }
