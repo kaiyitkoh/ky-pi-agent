@@ -84,8 +84,19 @@ MISSING_REQUIRED=0
 # keys such as npm_config_//registry.npmjs.org/:_authToken, which no shell can
 # unset; those are left alone rather than risking an `unset` error under a
 # special-builtin `set -e`. They are per-registry auth, not policy keys.
+#
+# THE PREFIX MATCH IS CASE-INSENSITIVE, AND THAT IS LOAD-BEARING ON WINDOWS.
+# [VERIFIED: executed 2026-08-13, vitest 4.1.9 / node 24.16.0] a Node test
+# runner hands its children the SAME keys upper-cased - NPM_CONFIG_IGNORE_SCRIPTS
+# rather than npm_config_ignore_scripts. Windows environment names are
+# case-insensitive and npm lower-cases before reading, so the upper-case form is
+# every bit as effective; a lower-case-only strip therefore leaves the override
+# in place and the script certifies a control it never exercised. Written as
+# explicit bracket classes rather than a `I`/`/i` flag: neither is POSIX, and
+# the macOS runner is BSD sed.
 sanitise_npm_env() {
-	_keys=$(env | sed -n 's/^\(npm_config_[A-Za-z0-9_]*\)=.*/\1/p' || true)
+	_keys=$(env | sed -n \
+		's/^\([Nn][Pp][Mm]_[Cc][Oo][Nn][Ff][Ii][Gg]_[A-Za-z0-9_]*\)=.*/\1/p' || true)
 	for _k in $_keys; do
 		unset "$_k" || true
 	done
