@@ -396,9 +396,17 @@ harden_pi_npm_root() {
 		# Back up FIRST, then rebuild from the backup: every line the user put
 		# there is carried over, and only an existing (wrong) ignore-scripts
 		# setting is dropped, because a later duplicate would not reliably win.
-		# `|| true` on the grep: it exits 1 when the filtered result is empty,
-		# which is a legitimate input (a one-line `ignore-scripts=false` file),
-		# not an error, and `set -e` would otherwise abort mid-write.
+		# `|| [ "$?" -eq 1 ]` on the grep, NOT `|| true`. grep exits 1 when the
+		# filtered result is empty, which is a legitimate input (a one-line
+		# `ignore-scripts=false` file) and which `set -e` would otherwise abort
+		# on. It exits 2 on a real error - an unreadable or vanished backup, a
+		# file grep refuses to read - and `|| true` swallowed that too. The
+		# redirection TRUNCATES "$_rc_file" before grep runs, so on exit 2 the
+		# npm config was left empty and then gained only the two appended lines
+		# below. Discriminating the one legitimate code turns that into a loud
+		# failure with the 0600 backup still on disk, which is the whole reason
+		# the backup is written first. In "a || b", $? inside b is the status of
+		# a. [IN-02]
 		# THE BACKUP IS A DURABLE COPY OF A FILE THAT MAY HOLD A CREDENTIAL - the
 		# comment above says so itself (a private registry, a proxy, a
 		# //registry.internal/:_authToken). It is kept, because the rebuild below
@@ -414,7 +422,7 @@ harden_pi_npm_root() {
 		chmod 600 "$_rc_file.kypi-backup" 2>/dev/null || true
 		cat "$_rc_file" >"$_rc_file.kypi-backup"
 		grep -v '^[[:space:]]*ignore-scripts[[:space:]]*=' "$_rc_file.kypi-backup" \
-			>"$_rc_file" || true
+			>"$_rc_file" || [ "$?" -eq 1 ]
 		{
 			printf '%s\n' '# Added by ky-pi-agent bin/bootstrap.sh. See docs/RUNBOOK.md.'
 			printf '%s\n' 'ignore-scripts=true'
