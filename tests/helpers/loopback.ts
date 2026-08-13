@@ -316,6 +316,14 @@ export async function withLoopbackCompletions<T>(
 			resolveListening();
 		});
 	}).catch((error: unknown) => {
+		// TEAR DOWN BEFORE RETHROWING. This `catch` runs BEFORE the `try` below, so
+		// its `finally` never executes: without these two lines the server object
+		// and its `connection` listener survive the throw. In practice the server
+		// never bound so no port leaks, but the listener does, and there is no
+		// second chance to remove it.
+		server.removeAllListeners("connection");
+		server.close();
+
 		const detail = error instanceof Error ? error.message : String(error);
 		throw new Error(
 			[
@@ -329,6 +337,10 @@ export async function withLoopbackCompletions<T>(
 				"firewall, a container without a loopback interface, or an exhausted ephemeral",
 				"port range are the three causes seen in practice.",
 			].join("\n"),
+			// `cause`, so the underlying EACCES / EADDRINUSE code survives. Flattening
+			// the error into `detail` alone loses `error.code` and the original stack,
+			// which are the two things that say WHICH of the three causes it was.
+			{ cause: error },
 		);
 	});
 

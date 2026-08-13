@@ -66,11 +66,19 @@
  * The second seam: faux cannot vary the HTTP status either
  * ---------------------------------------------------------------------------
  * {@link wrapFauxWithStatus} exists for PROV-08 — the DeepSeek-direct →
- * DashScope fallback chain, whose three error classes (quota, transient,
- * unavailable) are distinguished by HTTP status. `faux` hard-codes
+ * DashScope fallback chain. `faux` hard-codes
  * `onResponse({ status: 200, headers: {} })` unconditionally
- * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510], so without a wrapper a
- * 429/503 test is asserting against a 200 and every class collapses into one.
+ * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510], so without a wrapper
+ * nothing downstream can ever see a 429 or a 503.
+ *
+ * CORRECTED, BECAUSE THE OBVIOUS READING IS WRONG. The three error classes are
+ * NOT distinguished by HTTP status: `classifyFailure`
+ * (`.pi/extensions/providers/fallback.ts`) reads the error TEXT and never sees
+ * a status at all. `CLASS_STATUS` in `fallback-chain.test.ts` is used solely to
+ * populate the `httpStatus` column of the turns row that case 5 asserts. This
+ * wrapper is genuinely needed — for that row — but not for classification, and
+ * a reader who comes here looking for a status→class mapping will not find one
+ * because there is not one. [IN-04]
  */
 import type {
 	Context,

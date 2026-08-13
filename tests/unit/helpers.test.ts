@@ -494,9 +494,11 @@ describe("faux helper -- wrapFauxWithStatus rewrites the status exactly once", (
 
 		expect(
 			capture.statuses[0],
-			"the recorded status must be the wrapped 503, not faux's hard-coded 200 -- PROV-08's " +
-				"three error classes ARE statuses, so a 200 here collapses quota, transient and " +
-				"unavailable into one indistinguishable case",
+			"the recorded status must be the wrapped 503, not faux's hard-coded 200. NOT because " +
+				"the three PROV-08 classes are statuses -- they are not, classifyFailure reads " +
+				"the error TEXT and never sees a status -- but because the turns row carries an " +
+				"httpStatus column, and fallback-chain case 5 asserts the status the provider " +
+				"reported. A 200 here makes that row say every failure was a success [IN-04]",
 		).toBe(503);
 	});
 

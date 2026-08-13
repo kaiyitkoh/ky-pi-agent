@@ -399,7 +399,20 @@ harden_pi_npm_root() {
 		# `|| true` on the grep: it exits 1 when the filtered result is empty,
 		# which is a legitimate input (a one-line `ignore-scripts=false` file),
 		# not an error, and `set -e` would otherwise abort mid-write.
-		cp "$_rc_file" "$_rc_file.kypi-backup"
+		# THE BACKUP IS A DURABLE COPY OF A FILE THAT MAY HOLD A CREDENTIAL - the
+		# comment above says so itself (a private registry, a proxy, a
+		# //registry.internal/:_authToken). It is kept, because the rebuild below
+		# is the only thing standing between the user and a hand-written npm
+		# config, and a failed rebuild with no copy is unrecoverable. But it is
+		# created 0600 BEFORE anything is written into it, and its existence is
+		# reported as something to delete rather than as a courtesy.
+		#
+		# Overwriting rather than rotating is deliberate: the repair branch is
+		# byte-idempotent, so a second repair only happens after the user edits the
+		# file again, and the copy worth having is the current one.
+		: >"$_rc_file.kypi-backup"
+		chmod 600 "$_rc_file.kypi-backup" 2>/dev/null || true
+		cat "$_rc_file" >"$_rc_file.kypi-backup"
 		grep -v '^[[:space:]]*ignore-scripts[[:space:]]*=' "$_rc_file.kypi-backup" \
 			>"$_rc_file" || true
 		{
@@ -407,7 +420,9 @@ harden_pi_npm_root() {
 			printf '%s\n' 'ignore-scripts=true'
 		} >>"$_rc_file"
 		printf '  updated %s (ignore-scripts line added; every other line kept)\n' "$_rc_file"
-		printf '  previous contents backed up at %s.kypi-backup\n' "$_rc_file"
+		printf '  previous contents backed up at %s.kypi-backup (mode 0600)\n' "$_rc_file"
+		printf '  DELETE THAT BACKUP once you have checked the result: an .npmrc may hold a\n'
+		printf '  registry auth token, and this copy persists until you remove it.\n'
 	fi
 
 	assert_user_scope
