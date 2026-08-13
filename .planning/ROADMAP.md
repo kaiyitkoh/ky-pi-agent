@@ -102,11 +102,11 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 02-05-PLAN.md — `wire.ts`: the three provider hooks, redaction at capture, and the on-disk redaction proof (DIAG-01, DIAG-07)
-- [ ] 02-06-PLAN.md — `turns.ts`: pure row composition with the omitted-`reasoning` rule and defensive `calculateCost` (DIAG-04)
+- [x] 02-06-PLAN.md — `turns.ts`: pure row composition with the omitted-`reasoning` rule and defensive `calculateCost` (DIAG-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 02-07-PLAN.md — `callModel()`, the source-grep chokepoint gate, and the bare-`complete()` negative control (DIAG-02, DIAG-03)
+- [x] 02-07-PLAN.md — `callModel()`, the source-grep chokepoint gate, and the bare-`complete()` negative control (DIAG-02, DIAG-03)
 - [ ] 02-08-PLAN.md — Turn-hook wiring and the end-to-end turns-log proof, including the error turn (DIAG-04)
 
 **Wave 5** *(blocked on Wave 4 completion)*

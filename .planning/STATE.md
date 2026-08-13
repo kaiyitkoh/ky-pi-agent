@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 02-04-PLAN.md — the pure prose-tool-call predicate: four gates, five positives, nine negatives, and a 1 MB bound"
-last_updated: "2026-08-13T05:13:30.737Z"
+stopped_at: Completed 02-07-PLAN.md — the callModel chokepoint, its build gate, and the bare-completion negative control
+last_updated: "2026-08-13T05:43:28.428Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 15
+  completed_plans: 17
   percent: 9
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 7 of 11
+Plan: 8 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [███████░░░] 71%
+Progress: [████████░░] 81%
 
 **Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
@@ -72,6 +72,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 02 P04 | 20m | 2 tasks | 3 files |
 | Phase 2 P5 | 40m | 3 tasks | 5 files |
 | Phase 02 P06 | 35m | 2 tasks | 3 files |
+| Phase 02 P07 | ~45m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -134,6 +135,9 @@ Recent decisions affecting current work:
 - [Phase 02]: DIAG-05 stays Pending after plan 02-04 — this plan ships the classifier only; the capped retry effect, the prose_tool_call row and the exhausted row are 02-09, and the live half is RB-02-03 (OUTSTANDING)
 - [Phase 02]: AssistantMessage is re-exported type-only from schema.ts rather than imported from pi-ai a second time — it keeps the diagnostics subsystem's single-pi-ai-import-site rule true while prose.ts stays at zero value imports, and re-declaring the shape locally would trade a compile error for a silent miss the day Pi renames a content-block type
 - [Phase 02]: a ninth negative case (unread({...})) was added to the prose table after a falsification run proved the pattern's leading word boundary was undetectable by the plan's eight — removing \b left all 21 tests green, and a guard no test can break is a guard that is not there
+- [Phase 2]: 02-07: the diagnostics correlation counter lives on globalThis — Two jiti module instances of wire.ts in one process both start at 1 and both stamp <sessionId>#1 into the same wire log, silently mis-joining nested wire records onto a different call's turns row. Observed, then falsified: six records shared one id.
+- [Phase 2]: 02-07: session_start does not fire in a headless createAgentSession — Measured with a five-event probe: nothing fires before the first prompt; then before_agent_start, turn_start, before_provider_headers, agent_end. Pi emits it from AgentSession's extension-binding step (agent-session.ts:1761), which the headless factory does not reach. Any in-session test needing ctx must prompt first.
+- [Phase 2]: 02-07: spread order, not the type system, stops a caller suppressing callModel's capture — Api is KnownApi | (string & {}), so the option-bag union always carries pi-ai's Record<string, unknown> fallback arm and accepts onPayload for a Model<Api>. Verified by compiling it. opts.api is spread first and the captures overwrite it; asserted at runtime by tests/integration/call-model.test.ts case 2c.
 
 ### Pending Todos
 
@@ -179,8 +183,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T05:13:24.975Z
-Stopped at: Completed 02-04-PLAN.md — the pure prose-tool-call predicate: four gates, five positives, nine negatives, and a 1 MB bound
+Last session: 2026-08-13T05:43:28.419Z
+Stopped at: Completed 02-07-PLAN.md — the callModel chokepoint, its build gate, and the bare-completion negative control
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

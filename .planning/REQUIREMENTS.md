@@ -29,8 +29,8 @@
 ### Diagnostics
 
 - [ ] **DIAG-01**: Every provider request and response is captured via `before_provider_request` / `after_provider_response` / `before_provider_headers`, showing the exact JSON on the wire **[FAUX]** + **[RUNBOOK]**
-- [ ] **DIAG-02**: All model invocations route through a single exported `callModel()` chokepoint — provider hooks wire only into the main agent's `streamFn`, so a direct `modelRegistry.complete()` is invisible to the inspector **[FAUX]**
-- [ ] **DIAG-03**: A lint or test fails the build if `modelRegistry.complete` is called outside `diagnostics/` **[FAUX]**
+- [x] **DIAG-02**: All model invocations route through a single exported `callModel()` chokepoint — provider hooks wire only into the main agent's `streamFn`, so a direct `modelRegistry.complete()` is invisible to the inspector **[FAUX]**
+- [x] **DIAG-03**: A lint or test fails the build if `modelRegistry.complete` is called outside `diagnostics/` **[FAUX]**
 - [ ] **DIAG-04**: Every turn appends a JSONL record — model, provider, tokens, cost, latency, cache-read ratio, outcome (no reasoning-token column for Bedrock; it reports none) **[FAUX]**
 - [ ] **DIAG-05**: A detector identifies prose tool calls — `finish_reason:"stop"` with `tool_calls:null` and a function name in `content` — logs `event: prose_tool_call`, and retries rather than treating the turn as complete **[FAUX]** + **[RUNBOOK]**
 - [ ] **DIAG-06**: `/budget` reports system-prompt tokens, tool-schema tokens, context-file tokens, skills-index tokens, and `cacheRead` vs `input` **[FAUX]**
@@ -239,8 +239,8 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | BOOT-09 | Phase 1 | Complete |
 | BOOT-10 | Phase 1 | Complete |
 | DIAG-01 | Phase 2 | Pending |
-| DIAG-02 | Phase 2 | Pending |
-| DIAG-03 | Phase 2 | Pending |
+| DIAG-02 | Phase 2 | Complete |
+| DIAG-03 | Phase 2 | Complete |
 | DIAG-04 | Phase 2 | Pending |
 | DIAG-05 | Phase 2 | Pending |
 | DIAG-06 | Phase 2 | Pending |
