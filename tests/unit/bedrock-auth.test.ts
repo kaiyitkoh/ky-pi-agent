@@ -67,9 +67,14 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+
 import { describe, expect, it } from "vitest";
 
+import { resolveProfileName } from "../../.pi/extensions/providers/index.ts";
 import {
+	AWS_PROFILE_ENV,
+	PROFILE_PLACEHOLDER,
 	PROFILE_TEMPLATE_SENTINEL,
 	TEMPLATE_SENTINEL_PREFIX,
 } from "../../.pi/extensions/providers/schema.ts";
@@ -359,5 +364,151 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 				"over the ambient variable through `??` and then resolves nothing at all. Ship a " +
 				`non-empty literal the user is meant to replace (it is ${JSON.stringify(placeholder)} today)`,
 		).toBe(true);
+	});
+
+	// -------------------------------------------------------------------------
+	// Case 6 — WR-03: the HARNESS mirrors Pi's order, asserted directly
+	// -------------------------------------------------------------------------
+	// Cases 2 and 4 prove PI's order. Nothing proved that the message PROV-05
+	// surfaces follows it, and it is the message the user acts on: a laptop with
+	// `export AWS_PROFILE=personal` and a stored Bedrock credential naming `work`
+	// has Pi dialling `work` while an inverted handler prints `aws sso login
+	// --profile personal`. The user re-authenticates the profile that did not
+	// fail, the next turn fails identically, and PROV-05 has made the failure
+	// MORE confusing than the raw SDK string. Verified: swapping the two lines of
+	// `resolveProfileName` left the whole suite at 649/649 green.
+	//
+	// WHY A STUB AND NOT THE SESSION. `tests/integration/sso-classifier.test.ts`
+	// reaches the ambient branch on every single run — `withFauxSession` aims
+	// `ModelRuntime.create` at an `auth.json` that does not exist and faux's own
+	// auth resolves empty — and since the WR-05 fix the faux provider is
+	// registered under `amazon-bedrock`, which SHADOWS Pi's real Bedrock
+	// resolver, so `getProviderAuth("amazon-bedrock")` cannot be made to answer
+	// through that seam at all. `resolveProfileName` reads nothing but
+	// `ctx.modelRegistry.getProviderAuth`, so a stub covers both branches with no
+	// session, no temp directory and no faux provider. [WR-03]
+
+	/** Every call `resolveProfileName` made, so a wrong provider id cannot hide. */
+	interface StubbedRegistry {
+		ctx: ExtensionContext;
+		asked: string[];
+	}
+
+	/**
+	 * An `ExtensionContext` that is nothing but `modelRegistry.getProviderAuth`.
+	 *
+	 * `stored === undefined` means "no credential for this provider", which is
+	 * what Pi's registry returns when `auth.json` has no entry. Any provider id
+	 * other than Bedrock's answers `undefined` too, so a handler that asked for
+	 * the wrong provider would fall through to the ambient branch and the
+	 * precedence assertion would fail rather than pass by coincidence.
+	 */
+	function stubCtx(stored: string | undefined): StubbedRegistry {
+		const asked: string[] = [];
+		const ctx = {
+			modelRegistry: {
+				getProviderAuth: (provider: string): Promise<unknown> => {
+					asked.push(provider);
+					if (provider !== BEDROCK || stored === undefined) {
+						return Promise.resolve(undefined);
+					}
+					return Promise.resolve({ source: "stored credential", env: { AWS_PROFILE: stored } });
+				},
+			},
+		} as unknown as ExtensionContext;
+		return { ctx, asked };
+	}
+
+	/**
+	 * Scope the ambient `AWS_PROFILE` around one call, then put it back.
+	 *
+	 * A key that did not exist beforehand is DELETED, never set to `""`: Pi's
+	 * auth context reads an empty value as absent, and so does
+	 * `usableProfileName`, so `""` and "unset" would be indistinguishable here
+	 * while meaning different things one layer down (Trap T8, and the same
+	 * reasoning as `scopedAwsEnv` above).
+	 */
+	async function withAmbientProfile<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
+		const had = Object.hasOwn(process.env, AWS_PROFILE_ENV);
+		const previous = process.env[AWS_PROFILE_ENV];
+		if (value === undefined) {
+			delete process.env[AWS_PROFILE_ENV];
+		} else {
+			process.env[AWS_PROFILE_ENV] = value;
+		}
+		try {
+			return await fn();
+		} finally {
+			if (had) {
+				process.env[AWS_PROFILE_ENV] = previous as string;
+			} else {
+				delete process.env[AWS_PROFILE_ENV];
+			}
+		}
+	}
+
+	const STORED_PROFILE = "kypi-fixture-stored-profile";
+	const AMBIENT_PROFILE = "kypi-fixture-ambient-profile";
+
+	it("case 6 — WR-03: the surfaced profile is the STORED one when both are present", async () => {
+		const { ctx, asked } = stubCtx(STORED_PROFILE);
+
+		const resolved = await withAmbientProfile(AMBIENT_PROFILE, async () =>
+			resolveProfileName(ctx),
+		);
+
+		expect(
+			asked,
+			`resolveProfileName did not ask the registry for ${BEDROCK}. If it asked for nothing ` +
+				"the stored branch is unreachable and the assertion below passes only because the " +
+				"ambient value happens to be second; if it asked for a different provider it is " +
+				"reading somebody else's credential [WR-03]",
+		).toContain(BEDROCK);
+
+		expect(
+			resolved,
+			`the stored credential names ${STORED_PROFILE} and the environment names ` +
+				`${AMBIENT_PROFILE}; the stored one must win, because that is the one Pi itself ` +
+				"would have dialled (pi-ai amazon-bedrock.ts:65, proven by cases 2 and 4 above). " +
+				"Surfacing the ambient name sends the user to re-authenticate the profile that did " +
+				"NOT fail: the next turn fails identically, and the message has made the failure " +
+				"more confusing than the raw SDK string it replaced [WR-03, PROV-05]",
+		).toBe(STORED_PROFILE);
+	});
+
+	it("case 6b — the paired positive: with no stored credential the AMBIENT one is surfaced", async () => {
+		// WITHOUT THIS, CASE 6 IS SATISFIED BY A FUNCTION THAT NEVER READS THE
+		// ENVIRONMENT AT ALL. The ambient branch is the one that fires on the
+		// target machine today — nothing writes a Bedrock entry, because
+		// bin/bootstrap.sh deliberately withholds the placeholder one — so a
+		// regression here is the common case, not the corner.
+		const { ctx } = stubCtx(undefined);
+
+		const resolved = await withAmbientProfile(AMBIENT_PROFILE, async () =>
+			resolveProfileName(ctx),
+		);
+
+		expect(
+			resolved,
+			"with no stored Bedrock credential the exported AWS_PROFILE must be surfaced. If this " +
+				"is the placeholder instead, the ambient branch is dead and case 6's precedence " +
+				"result is a function that only ever reads one source [WR-03]",
+		).toBe(AMBIENT_PROFILE);
+	});
+
+	it("case 6c — with neither source the placeholder is surfaced, not an empty command", async () => {
+		// The floor. `aws sso login --profile ` with nothing after it is a command
+		// the user can paste and cannot use, and it is what a chain that returned
+		// `undefined ?? ""` would produce.
+		const { ctx } = stubCtx(undefined);
+
+		const resolved = await withAmbientProfile(undefined, async () => resolveProfileName(ctx));
+
+		expect(
+			resolved,
+			"with no stored credential and no ambient AWS_PROFILE the placeholder must be " +
+				"returned, so PROFILE_PLACEHOLDER_HINT fires and the message points at RB-03-03 " +
+				"instead of trailing off after `--profile `",
+		).toBe(PROFILE_PLACEHOLDER);
 	});
 });

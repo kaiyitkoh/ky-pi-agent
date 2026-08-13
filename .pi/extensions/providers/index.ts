@@ -195,8 +195,25 @@ async function storedProfileName(ctx: ExtensionContext): Promise<string | undefi
  * `tests/unit/bedrock-auth.test.ts`], so the name in the message is the name Pi
  * would actually have used. Naming a different profile than the one that failed
  * would be worse than naming none.
+ *
+ * EXPORTED SO THE ORDER CAN BE ASSERTED, because through the session it cannot
+ * be. Every run in `tests/integration/sso-classifier.test.ts` reaches the
+ * AMBIENT branch and only the ambient branch: `withFauxSession` builds its own
+ * agent directory and aims the runtime it constructs at an `auth.json` that does
+ * not exist, and the faux provider's own auth resolves empty — so
+ * {@link storedProfileName} returns `undefined` on every one of them. Since the
+ * WR-05 fix the faux provider is registered under `amazon-bedrock` itself, which
+ * SHADOWS Pi's real Bedrock resolver, so `getProviderAuth(BEDROCK_PROVIDER_ID)`
+ * cannot be made to answer through that seam at all. Verified: swapping the two
+ * lines below left 649/649 green. This function takes nothing but
+ * `ctx.modelRegistry.getProviderAuth`, so a stub covers both branches without a
+ * session — see `tests/unit/bedrock-auth.test.ts` case 6. [WR-03]
+ *
+ * A named export here does not make this file anything other than an extension
+ * entry point: `tests/unit/extension-layout.test.ts` classifies on the DEFAULT
+ * export, which is still below.
  */
-async function resolveProfileName(ctx: ExtensionContext): Promise<string> {
+export async function resolveProfileName(ctx: ExtensionContext): Promise<string> {
 	return (
 		usableProfileName(await storedProfileName(ctx)) ??
 		usableProfileName(process.env[AWS_PROFILE_ENV]) ??
