@@ -176,6 +176,49 @@ describe("DIAG-04 — the `reasoning` key is absent, not zero, when the provider
 		expect(row.reasoning, "the field is copied verbatim, never derived").toBe(812);
 	});
 
+	it("omits `cacheWrite1h` on a provider that reports no retention split", () => {
+		expect(
+			Object.keys(makeRow()),
+			"only Anthropic reports the split [VERIFIED: pi-ai 0.84.1 dist/types.d.ts:258-259], so a " +
+				"zero here would claim every DeepSeek row had no 1h writes when the provider said " +
+				"nothing about them at all",
+		).not.toContain("cacheWrite1h");
+	});
+
+	it("records `cacheWrite1h`, and its 2x-input price is then derivable from the row", () => {
+		// `calculateCost` prices the 1h portion at 2x the INPUT rate, not at the
+		// cacheWrite rate [VERIFIED: pi-ai 0.84.1 dist/models.js:538-543]:
+		//   longWrite  = cacheWrite1h                       = 50
+		//   shortWrite = cacheWrite - cacheWrite1h    = 200 - 50 = 150
+		//   cost       = (1.5 * 150 + 1 * 2 * 50) / 1e6 = (225 + 100) / 1e6
+		const cacheWrite1h = 50;
+		const shortWrite = TOKENS.cacheWrite - cacheWrite1h;
+		const expected = (RATES.cacheWrite * shortWrite + RATES.input * 2 * cacheWrite1h) / 1_000_000;
+
+		const row = makeRow({ message: makeMessage({ usage: makeUsage({ cacheWrite1h }) }) });
+
+		expect(
+			row.cacheWrite1h,
+			"the column has to be ON the row. WITHOUT IT `cost.cacheWrite` is not reproducible from " +
+				"any column: a reader multiplying `cacheWrite` by `rates.cacheWrite` gets a different " +
+				"number and nothing on the row explains the gap — which is precisely the fabricated " +
+				"measurement the omitted-key rule exists to prevent, in the column Phase 8 reconciles " +
+				"spend against",
+		).toBe(cacheWrite1h);
+
+		expect(
+			row.cost.cacheWrite,
+			"and the price must really be the 2x-input arithmetic, not `rates.cacheWrite * 200`. If " +
+				"this passes for both formulas the fixture's rates are no longer distinguishable",
+		).toBeCloseTo(expected, 12);
+
+		expect(
+			expected,
+			"the paired guard: the two formulas must give DIFFERENT answers, or the assertion above " +
+				"is satisfied by either and proves nothing about the split",
+		).not.toBeCloseTo((RATES.cacheWrite * TOKENS.cacheWrite) / 1_000_000, 12);
+	});
+
 	it("still lacks the key after a JSON round trip, so the on-disk row matches the in-memory one", () => {
 		const row = makeRow({ message: makeMessage({ usage: makeUsage({ reasoning: undefined }) }) });
 		const roundTripped = JSON.parse(JSON.stringify(row)) as Record<string, unknown>;

@@ -220,6 +220,28 @@ export interface TurnRow {
 	output: number;
 	cacheRead: number;
 	cacheWrite: number;
+	/**
+	 * Subset of `cacheWrite` written with 1h retention.
+	 *
+	 * OPTIONAL UNDER THE OMITTED-KEY RULE, and recorded because without it
+	 * `cost.cacheWrite` CANNOT BE REPRODUCED FROM THE ROW. `calculateCost` prices
+	 * the 1h portion at 2x the INPUT rate, not the cacheWrite rate:
+	 *
+	 *     const longWrite = usage.cacheWrite1h ?? 0;
+	 *     const shortWrite = usage.cacheWrite - longWrite;
+	 *     usage.cost.cacheWrite =
+	 *       (rates.cacheWrite * shortWrite + rates.input * 2 * longWrite) / 1000000;
+	 *     [VERIFIED: pi-ai 0.84.1 dist/models.js:538-543]
+	 *
+	 * Only Anthropic reports the split [VERIFIED: pi-ai 0.84.1
+	 * dist/types.d.ts:258-259], so on every other provider the key is genuinely
+	 * absent. Without this column a Bedrock Claude row with 1h retention has a
+	 * `cost.cacheWrite` that does not equal `cacheWrite x rates.cacheWrite` and
+	 * nothing on the row explaining the gap — which is the fabricated-measurement
+	 * class the `reasoning` rule above exists to prevent, arriving through the
+	 * column Phase 8 reconciles spend against.
+	 */
+	cacheWrite1h?: number;
 	totalTokens: number;
 	/**
 	 * Reasoning tokens, a subset of `output`.

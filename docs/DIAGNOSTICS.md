@@ -91,9 +91,10 @@ came from. Provenance is 02-RESEARCH.md §5.5; the type is
 | `output` | | completion tokens, **including** reasoning tokens | `message_end` |
 | `cacheRead` | | tokens served from the prefix cache | `message_end` |
 | `cacheWrite` | | tokens written to the prefix cache | `message_end` |
+| `cacheWrite1h` | yes | the subset of `cacheWrite` written with **1h retention**. **Key omitted unless the provider reports the split** — only Anthropic does [VERIFIED: pi-ai 0.84.1 `dist/types.d.ts:258-259`]. Recorded because `calculateCost` prices this portion at **2x the `input` rate**, not the `cacheWrite` rate [VERIFIED: pi-ai `dist/models.js:538-543`], so without this column `cost.cacheWrite` cannot be reproduced from the row | `message_end` |
 | `totalTokens` | | provider-reported total | `message_end` |
 | `reasoning` | yes | reasoning tokens, a subset of `output`. **Key omitted when the provider reports no breakdown** — see the closed door below | `message_end` |
-| `cacheReadRatio` | yes | `cacheRead / (input + cacheRead)`; **omitted when the denominator is 0**, because a ratio of nothing is not zero | derived |
+| `cacheReadRatio` | yes | `cacheRead / (input + cacheRead)`; **omitted unless the denominator is strictly positive**, because a ratio of nothing is not zero — and a non-finite denominator is not a measurement either, so it is omitted rather than serialised as `null` | derived |
 | `cost` | | `{input, output, cacheRead, cacheWrite, total}` in dollars | derived via `calculateCost` |
 | `latencyMs` | | `turn_end` wall clock minus `turn_start.timestamp` | `turn_start` + `turn_end` |
 | `stopReason` | | the provider's own word, one of the seven members of Pi's union | `message_end` |
@@ -102,7 +103,7 @@ came from. Provenance is 02-RESEARCH.md §5.5; the type is
 | `errorMessage` | yes | `message.errorMessage`, passed through the redactor; absent when there was none | `message_end` |
 | `toolCalls` | | count of `content[].type === "toolCall"` in the assistant message | `message_end` |
 | `toolResults` | yes | `event.toolResults.length`; absent on a nested call | `turn_end` |
-| `httpStatus` | yes | `after_provider_response.status`. **Absent on any errored turn**, and absent on a nested call unless `callModel` was given an `onResponse` | `after_provider_response` |
+| `httpStatus` | yes | HTTP status as `onResponse` reported it. **Only ever present on a `kind:"nested"` row** — `turn_end` never derives one, so a main-loop turn never carries it, successful or not. On a nested call `callModel` always supplies an `onResponse`, so the field is present whenever an HTTP response was seen — **including on an errored row**, where `outcome:"error"` and `httpStatus:200` legitimately sit side by side | `callModel`'s `onResponse` |
 | `thinkingLevel` | yes | the **requested** thinking level, recorded because Bedrock makes the thinking cost undecomposable after the fact | `ctx.thinkingLevel` |
 | `event` | yes | set only on an out-of-band or marked row: `prose_tool_call`, `prose_tool_call_retry_exhausted`, `diagnostics.error`, `diagnostics.model_unavailable` | varies |
 

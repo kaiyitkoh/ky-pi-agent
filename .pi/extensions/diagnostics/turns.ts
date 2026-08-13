@@ -243,6 +243,16 @@ export function composeTurnRow(input: TurnRowInput): TurnRow {
 		row.reasoning = usage.reasoning;
 	}
 
+	// THE SAME RULE, FOR THE COLUMN THAT MAKES `cost.cacheWrite` CHECKABLE.
+	// `calculateCost` prices a 1h cache write at 2x the INPUT rate rather than at
+	// the cacheWrite rate [VERIFIED: pi-ai 0.84.1 dist/models.js:538-543], and only
+	// Anthropic reports the split [VERIFIED: pi-ai dist/types.d.ts:258-259]. Copy
+	// it or Phase 8's reconciliation finds a cost it cannot derive from any column
+	// on the row, with nothing there explaining why.
+	if (usage.cacheWrite1h !== undefined) {
+		row.cacheWrite1h = usage.cacheWrite1h;
+	}
+
 	const ratio = cacheReadRatio(usage);
 	if (ratio !== undefined) {
 		row.cacheReadRatio = ratio;
