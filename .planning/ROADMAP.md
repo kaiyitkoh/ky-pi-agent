@@ -86,9 +86,39 @@ Plans:
   4. When a model writes a tool call as prose (`finish_reason:"stop"` with `tool_calls:null`) the turn is logged as `prose_tool_call` and retried rather than treated as complete. Built and unit-verified with `fauxProvider`; **verified live on the work laptop** that the detector has actually fired on real traffic.
   5. `/budget` reports system-prompt, tool-schema, context-file and skills-index tokens plus `cacheRead` vs `input`, and logs rotate rather than growing unbounded.
 
-**Contains [RUNBOOK] requirements**: DIAG-01, DIAG-05 — the runbook entry for each is a deliverable of this phase, folded into `docs/RUNBOOK.md` in Phase 3.
-**Plans**: TBD
-**Research**: Not needed — all 33 events, return shapes and blocking semantics are enumerated and verified, and `fauxProvider` gives a complete offline test harness.
+**Contains [RUNBOOK] requirements**: DIAG-01, DIAG-05 — the runbook entry for each is a deliverable of this phase, appended to the existing `docs/RUNBOOK.md` as RB-02-01/02/03, all OUTSTANDING.
+**Plans**: 11 plans in 6 waves
+Plans:
+**Wave 1**
+
+- [ ] 02-01-PLAN.md — Wave 0 test helpers: the `onPayload`-emitting faux wrapper, the in-memory `createAgentSession` factory, and the torn-safe JSONL reader
+- [ ] 02-02-PLAN.md — Entry-point/module discriminator for the BOOT-05 layout gate, plus `redact.ts` and its both-directions test (DIAG-07)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 02-03-PLAN.md — `schema.ts`, the append-only writer with rotation and retention, the extension entry point, and the gitignored-path proof (DIAG-08, DIAG-07)
+- [ ] 02-04-PLAN.md — The pure prose-tool-call predicate and its positive/negative tables (DIAG-05)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 02-05-PLAN.md — `wire.ts`: the three provider hooks, redaction at capture, and the on-disk redaction proof (DIAG-01, DIAG-07)
+- [ ] 02-06-PLAN.md — `turns.ts`: pure row composition with the omitted-`reasoning` rule and defensive `calculateCost` (DIAG-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 02-07-PLAN.md — `callModel()`, the source-grep chokepoint gate, and the bare-`complete()` negative control (DIAG-02, DIAG-03)
+- [ ] 02-08-PLAN.md — Turn-hook wiring and the end-to-end turns-log proof, including the error turn (DIAG-04)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 02-09-PLAN.md — The prose-tool-call effect: log the event, retry once via a follow-up, never promote (DIAG-05)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 02-10-PLAN.md — `/budget`: the system-prompt decomposition, tool-schema cost, and `cacheRead` versus `input` (DIAG-06)
+- [ ] 02-11-PLAN.md — `docs/RUNBOOK.md` RB-02-01/02/03 (OUTSTANDING), the generalised status guard, and `docs/DIAGNOSTICS.md`
+
+**Research**: Complete — `02-RESEARCH.md` (HIGH confidence, verified at source and executed on this machine). One finding reshaped the phase: `fauxProvider` never calls `onPayload`, so `before_provider_request` never fires under faux and the naive `[FAUX]` test for DIAG-01/DIAG-07 would ship vacuously green — hence a mandatory Wave 0 of test helpers.
 
 ### Phase 3: Providers & Credentials
 
@@ -271,7 +301,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Bootstrap, Packaging & Supply Chain | 10/10 | Complete   | 2026-08-13 |
-| 2. Diagnostics — The Instrument | 0/TBD | Not started | - |
+| 2. Diagnostics — The Instrument | 0/11 | Planned | - |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
