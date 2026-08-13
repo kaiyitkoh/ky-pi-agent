@@ -40,7 +40,7 @@
 ### Providers & Credentials
 
 - [x] **PROV-01**: `models.json` and `auth.json` ship as structurally complete templates with zero secrets, resolved at runtime via `$ENV_VAR` and `!command`
-- [ ] **PROV-02**: `!command` interpolation appears only in `auth.json` (cached per process), never in `models.json` (re-executed on every provider request)
+- [x] **PROV-02**: `!command` interpolation appears only in `auth.json` (cached per process), never in `models.json` (re-executed on every provider request)
 - [ ] **PROV-03**: DashScope is configured as a custom provider with an **explicit** full `compat` block — Pi's `detectCompat` has no `aliyuncs.com` branch, so defaults silently disable thinking and 400 on the second turn of any tool sequence **[RUNBOOK]**
 - [ ] **PROV-04**: Bedrock authenticates via `credential.env.AWS_PROFILE` in `auth.json`, which Pi checks before process env — survives a fresh shell, contains no secret, templatable in-repo **[RUNBOOK]**
 - [ ] **PROV-05**: Expired SSO credentials produce an actionable message naming the exact `aws sso login --profile <name>` command, and are classified **non-retryable** so they don't burn wall-clock in a retry loop **[FAUX]**
@@ -247,7 +247,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | DIAG-07 | Phase 2 | Complete |
 | DIAG-08 | Phase 2 | Complete |
 | PROV-01 | Phase 3 | Complete |
-| PROV-02 | Phase 3 | Pending |
+| PROV-02 | Phase 3 | Complete |
 | PROV-03 | Phase 3 | Pending |
 | PROV-04 | Phase 3 | Pending |
 | PROV-05 | Phase 3 | Pending |
