@@ -55,8 +55,8 @@
 - [ ] **SAFE-01**: GitLab server-side protected branches and approval rules are configured and verified by attempting a push that must fail — the only control that is not theatre **[RUNBOOK]**
 - [x] **SAFE-02**: Bash commands are parsed to an AST with `unbash`, resolving wrappers (`sudo`, `env`, `sh -c`, `xargs`) so `g=push; git $g` and `bash -lc "..."` are caught **[FAUX]**
 - [x] **SAFE-03**: Anything unparseable — command substitution, backticks, heredocs, backgrounding — **fails closed** **[FAUX]**
-- [ ] **SAFE-04**: Writes are blocked when `HEAD == main`, while read-only operations against main (`fetch`, `rebase`, `diff`, `log`, `worktree add -b feat main`) remain allowed **[FAUX]**
-- [ ] **SAFE-05**: `glab mr merge` is blocked — in the user's work repo, the MR merge is the deploy trigger **[FAUX]**
+- [x] **SAFE-04**: Writes are blocked when `HEAD == main`, while read-only operations against main (`fetch`, `rebase`, `diff`, `log`, `worktree add -b feat main`) remain allowed **[FAUX]**
+- [x] **SAFE-05**: `glab mr merge` is blocked — in the user's work repo, the MR merge is the deploy trigger **[FAUX]**
 - [x] **SAFE-06**: Reads of `.env`, `~/.aws/credentials`, kubeconfig, and `*.tfstate` are blocked — tfstate holds plaintext secrets that would enter model context **[FAUX]**
 - [ ] **SAFE-07**: `terraform apply|destroy|import`, mutating `aws` CLI calls, and `kubectl delete` require explicit confirmation **[FAUX]**
 - [x] **SAFE-08**: File writes and deletes outside the project directory are blocked **[FAUX]**
@@ -259,8 +259,8 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-01 | Phase 4 | Pending |
 | SAFE-02 | Phase 4 | Complete |
 | SAFE-03 | Phase 4 | Complete |
-| SAFE-04 | Phase 4 | Pending |
-| SAFE-05 | Phase 4 | Pending |
+| SAFE-04 | Phase 4 | Complete |
+| SAFE-05 | Phase 4 | Complete |
 | SAFE-06 | Phase 4 | Complete |
 | SAFE-07 | Phase 4 | Pending |
 | SAFE-08 | Phase 4 | Complete |
