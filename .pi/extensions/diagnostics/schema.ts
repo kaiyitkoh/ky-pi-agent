@@ -16,8 +16,11 @@
  * `.pi/extensions/`, comments included.
  *
  * IMPORT CONCENTRATION. `@earendil-works/pi-ai`'s root entrypoint has an
- * announced future removal, so only this module and `call-model.ts` import from
- * it. Everything else imports the re-declared types from here.
+ * announced future removal, so only this module, `turns.ts` and `call-model.ts`
+ * import from it. Everything else imports the re-declared types from here.
+ * `turns.ts` is on that list because `calculateCost` is a VALUE and cannot come
+ * through a type-only re-export; it takes the types for that call from the same
+ * statement rather than opening a second import site.
  */
 import type { StopReason } from "@earendil-works/pi-ai";
 
