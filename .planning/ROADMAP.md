@@ -211,7 +211,7 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 04-11-PLAN.md — the 30-plus-case evasion corpus and `docs/SAFETY.md`'s published limits table
+- [x] 04-11-PLAN.md — the 30-plus-case evasion corpus and `docs/SAFETY.md`'s published limits table
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
