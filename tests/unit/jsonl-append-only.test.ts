@@ -1,19 +1,29 @@
 /**
- * DIAG-08 — the writer is open-write-close per record, and a stream is a build
- * failure.
+ * DIAG-08 / SAFE-14 — the writer is open-write-close per record, and a stream
+ * is a build failure, wherever in the tree it might be opened.
  *
  * ---------------------------------------------------------------------------
  * THE GATE `jsonl.ts` ALREADY CLAIMED TO HAVE
  * ---------------------------------------------------------------------------
- * `jsonl.ts`'s module docstring states the rule and its enforcement: the stream
- * constructor "is deliberately NOT spelled anywhere in this file ... A plain-
- * substring grep over this file for that constructor is the mechanical proof that
- * no stream is opened here."
+ * `.pi/lib/jsonl.ts`'s module docstring states the rule and its enforcement:
+ * the stream constructor "is deliberately NOT spelled anywhere in this file
+ * ... A plain-substring grep over this file for that constructor is the
+ * mechanical proof that no stream is opened here."
  *
- * That grep did not exist. `grep -rn "createWriteStream\|WriteStream" tests/ .pi/`
- * returned nothing, so the file was paying the readability cost of refusing to
- * name the constructor in exchange for a check nobody had written. This file is
- * the check.
+ * That grep did not exist when this file was first written for the
+ * diagnostics-only writer. This file is the check.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY THE SCANNED SET WIDENED PAST DIAGNOSTICS
+ * ---------------------------------------------------------------------------
+ * The writer moved to `.pi/lib/jsonl.ts` (04-02) so the safety audit log
+ * (SAFE-14) could reuse it without `safety/` importing from `diagnostics/`.
+ * That means TWO more directories can now reach `appendFileSync`-equivalent
+ * territory: `.pi/lib` itself, and `.pi/extensions/safety`, which binds to it
+ * the same way `.pi/extensions/diagnostics` does. A gate that kept scanning
+ * only the old directory would silently stop protecting the file that
+ * actually writes, and would never see a second writer introduced next to it
+ * in `safety/`.
  *
  * ---------------------------------------------------------------------------
  * WHY IT MATTERS MORE THAN A STYLE RULE
@@ -55,11 +65,15 @@ import { describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
-/** The scanned tree: the diagnostics subsystem, which owns every log write. */
-const DIAGNOSTICS_DIR = ".pi/extensions/diagnostics";
+/**
+ * The scanned tree: every directory that can reach the shared writer, or write
+ * a log directly. Diagnostics binds to it, safety binds to it, and the writer
+ * itself lives in `.pi/lib`.
+ */
+const SCANNED_DIRS = [".pi/extensions/diagnostics", ".pi/lib", ".pi/extensions/safety"] as const;
 
 /** The one file that does the writing, and the one this rule is really about. */
-const WRITER_FILE = ".pi/extensions/diagnostics/jsonl.ts";
+const WRITER_FILE = ".pi/lib/jsonl.ts";
 
 /**
  * The sanctioned call, spelled once, in the one file allowed to make it.
@@ -112,22 +126,22 @@ const OFFENDING_FIXTURE = [
 	"",
 ].join("\n");
 
-/** Tracked `.ts` sources under the diagnostics directory, from the index's view. */
-function diagnosticsSources(): { path: string; text: string }[] {
-	return trackedFiles(DIAGNOSTICS_DIR)
+/** Tracked `.ts` sources under every {@link SCANNED_DIRS} entry, from the index's view. */
+function allSources(): { path: string; text: string }[] {
+	return SCANNED_DIRS.flatMap((dir) => trackedFiles(dir))
 		.filter((p) => p.endsWith(".ts"))
 		.sort()
 		.map((path) => ({ path, text: readFileSync(join(repoRoot(), path), "utf-8") }));
 }
 
-describe("DIAG-08 — no diagnostics module opens a stream or a raw descriptor", () => {
-	const sources = diagnosticsSources();
+describe("DIAG-08 / SAFE-14 — no writer module opens a stream or a raw descriptor", () => {
+	const sources = allSources();
 
 	it("finds tracked sources to scan (guards against a vacuous pass)", () => {
 		expect(
 			sources.length,
-			`no tracked .ts under ${DIAGNOSTICS_DIR}/ — every assertion below scans this set, so an ` +
-				"empty one turns the whole gate into a pass that verified nothing. Phase 1 tripped this " +
+			`no tracked .ts under ${SCANNED_DIRS.join(", ")} — every assertion below scans this set, so ` +
+				"an empty one turns the whole gate into a pass that verified nothing. Phase 1 tripped this " +
 				"exact class twice",
 		).toBeGreaterThanOrEqual(1);
 

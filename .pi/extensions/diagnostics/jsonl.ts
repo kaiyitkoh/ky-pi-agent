@@ -1,71 +1,49 @@
 /**
- * Append-only JSONL writer with size-based rotation and dated retention.
+ * Diagnostics binding over the shared JSONL writer.
  *
  * ---------------------------------------------------------------------------
- * The rule, stated up front: `appendFileSync` only, never a buffered stream
+ * THIN BINDING, NOT A SECOND WRITER
  * ---------------------------------------------------------------------------
- * The `node:fs` stream constructor is deliberately NOT spelled anywhere in this
- * file, exactly the way `harness/index.ts:36` refuses to spell the
- * tool-registration call. A plain-substring grep over this file for that
- * constructor is the mechanical proof that no stream is opened here, and naming
- * it in a warning would turn that proof into a permanent false positive —
- * blocker B3's lesson, which this repo has already paid for twice. So: the rule
- * is written out in words, and the check stays live.
+ * Every byte of the append-only, rotating, path-confined machinery this file
+ * used to contain now lives in `.pi/lib/jsonl.ts` — moved, not copied, so the
+ * rotation-race and path-confinement hardening Phase 2 proved stays in exactly
+ * one place. Phase 4's safety audit log (SAFE-14) reuses the same writer
+ * through its own binding, `.pi/extensions/safety/audit.ts`, without either
+ * subsystem importing from the other (CONTEXT.md decision 7).
  *
- * THAT GREP IS `tests/unit/jsonl-append-only.test.ts`. It bans four routes to a
- * held or buffered descriptor — the stream factory, the stream class, the raw
- * descriptor opener, and the callback-form append whose asynchrony lets two writes
- * interleave inside one line — across every tracked source in this directory. It
- * proves each pattern against an inline offending fixture and asserts this file
- * still contains the SYNCHRONOUS append, so gutting the writer cannot turn the
- * gate green by leaving nothing to object to. None of the four is named here, for
- * the reason given above: the gate scans this file too, so the dodge and the check
- * are one mechanism. Until that file existed this paragraph described a check
- * nobody had written, which is worse than having no rule.
+ * This file's whole job is supplying the two things that are genuinely
+ * diagnostics-specific:
  *
- * Four concurrent Node processes appending ~950 B records to one shared file
- * produced 6000 of 6000 lines with zero unparseable records, and `renameSync`
- * on that file succeeded with an append handle open in this process and in a
- * child [VERIFIED: executed 2026-08-13, win32, node v24.16.0 — RESEARCH §10.3].
- * Rename-based rotation of a single shared file is therefore viable and needs
- * no lock file.
+ *   - {@link OWNED_BASES} — which dated log files this subsystem may delete.
+ *     `.pi/lib/jsonl.ts`'s `pruneLogs` takes `ownedBases` from the caller with
+ *     no default and no shared list, precisely so this binding cannot delete
+ *     the safety audit log and the safety binding cannot delete `wire-*` or
+ *     `turns-*`.
+ *   - {@link defaultRotateBytes} — the per-stream size cap map. `wire-*` and
+ *     `turns-*` have different caps (`schema.ts`); the shared writer only
+ *     knows a single neutral default.
  *
- * That result depends entirely on open-write-close per record. A held file
- * descriptor keeps writing into the file that was renamed away, so every record
- * after a rotation would land in the rotated file and be lost from the live
- * one. `appendFileSync` opens, writes and closes per call, which narrows that
- * window to a single write. **Never introduce a stream here.**
+ * EVERY NAME THIS FILE EXPORTED BEFORE THE EXTRACTION IS STILL EXPORTED, WITH
+ * AN IDENTICAL SIGNATURE: `logDir`, `logPath`, `rotate`, `appendJsonl`,
+ * `pruneLogs`, `producedPaths`, `resetProducedPaths`, `AppendOptions`,
+ * `PruneOptions`. `tests/unit/jsonl-rotation.test.ts` and
+ * `tests/integration/jsonl-concurrency.test.ts` import from this path and
+ * needed NO edits after this move — verified by running both against the
+ * binding below with no changes to either test file.
  *
- * Two caveats recorded rather than hidden: the concurrency evidence was
- * executed on Windows only — the macOS leg belongs to CI's `macos-latest` job,
- * which is itself BOOT-07 OUTSTANDING — and POSIX `O_APPEND` atomicity for very
- * large single writes is not formally guaranteed.
+ * `logDir`, `logPath`, `rotate`, `producedPaths` and `resetProducedPaths` pass
+ * straight through with no wrapping: none of them differ between bindings.
+ * `appendJsonl` and `pruneLogs` are the two that inject the diagnostics-owned
+ * values described above.
  *
  * ---------------------------------------------------------------------------
- * Why `withFileMutationQueue` is deliberately not used
+ * THE GATE THIS FILE USED TO CLAIM
  * ---------------------------------------------------------------------------
- * Pi exports it (`src/index.ts:322`), but its state is a module-level `Map`
- * inside one process (`core/tools/file-mutation-queue.ts:4`). Subagents are
- * separate `pi` child processes, so it serialises nothing across them — the
- * only case that matters here. Its real purpose is stopping our writes racing
- * the built-in `edit`/`write` tools on a path they share, and nothing else
- * touches these logs. RESEARCH §10.3 proved the shared file needs no lock.
- *
- * ---------------------------------------------------------------------------
- * Path discipline
- * ---------------------------------------------------------------------------
- * Every path is built from the caller's `cwd` plus Pi's exported
- * `CONFIG_DIR_NAME` plus `LOG_DIR_SEGMENT`, joined with `node:path.join` —
- * never a hardcoded `.pi`, never string concatenation (the Windows rule in
- * CLAUDE.md). A `base` is validated against a strict character allowlist and
- * the resolved file is asserted to sit inside `logDir(cwd)` before anything is
- * written, so no path can be steered out of the log directory by a caller —
- * and no path is ever built from model-supplied input. [threats T-02-03-01,
- * T-02-03-07]
- *
- * Rotation and prune touch existing paths, so both check `lstatSync` and skip
- * anything that is not a regular file: a symlink planted in the log directory
- * must not become a rename target or an unlink victim. [threat T-02-03-02]
+ * The synchronous-append-only rule and its enforcement now live in
+ * `.pi/lib/jsonl.ts`'s module docstring — that is where the write actually
+ * happens. `tests/unit/jsonl-append-only.test.ts` scans this directory,
+ * `.pi/lib` and `.pi/extensions/safety` together, so the gate still protects
+ * every path that can write a log, not only the one that used to.
  *
  * BOUNDARY RULE (BOOT-10). This module registers nothing. It does not name the
  * tool-registration call, in code or in prose, because
@@ -73,294 +51,59 @@
  * substring across every tracked source under `.pi/extensions/`.
  */
 import {
-	appendFileSync,
-	existsSync,
-	lstatSync,
-	mkdirSync,
-	readdirSync,
-	renameSync,
-	statSync,
-	unlinkSync,
-} from "node:fs";
-import { join, resolve, sep } from "node:path";
+	appendJsonl as libAppendJsonl,
+	logDir as libLogDir,
+	logPath as libLogPath,
+	producedPaths as libProducedPaths,
+	pruneLogs as libPruneLogs,
+	resetProducedPaths as libResetProducedPaths,
+	rotate as libRotate,
+} from "../../lib/jsonl.ts";
+import { TURNS_LOG_BASE, TURNS_ROTATE_BYTES, WIRE_LOG_BASE, WIRE_ROTATE_BYTES } from "./schema.ts";
 
-import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
-
-import {
-	LOG_DIR_SEGMENT,
-	MAX_ROTATED_FILES,
-	RETENTION_DAYS,
-	TURNS_LOG_BASE,
-	TURNS_ROTATE_BYTES,
-	WIRE_LOG_BASE,
-	WIRE_ROTATE_BYTES,
-} from "./schema.ts";
+/** Straight pass-through: identical between every binding. */
+export const logDir = libLogDir;
+/** Straight pass-through: identical between every binding. */
+export const logPath = libLogPath;
+/** Straight pass-through: identical between every binding. */
+export const rotate = libRotate;
+/** Straight pass-through: process-wide, shared across every binding on purpose. */
+export const producedPaths = libProducedPaths;
+/** Straight pass-through: process-wide, shared across every binding on purpose. */
+export const resetProducedPaths = libResetProducedPaths;
 
 /**
- * The stream base names this module is allowed to DELETE. Never widen without a
- * test.
+ * The stream base names this binding is allowed to DELETE. Never widen without
+ * a test.
  *
- * `LOG_DIR_SEGMENT` is `"logs"` — the most obvious name any extension would pick
- * under Pi's config dir — and this project composes roughly eleven third-party
- * extensions, several of which keep durable state (`pi-background-tasks`,
- * `@juicesharp/rpiv-todo`). {@link pruneLogs} runs on every `session_start` and
- * unlinks with failures swallowed, so a retention rule scoped by SHAPE rather
- * than by OWNERSHIP would silently and irreversibly delete another component's
- * dated JSONL after fourteen days, on startup, with nothing reported anywhere.
- *
- * Diagnostics has no claim on that directory. It deletes what it wrote.
+ * Diagnostics has no claim on anything outside these two names — in
+ * particular, not `safety/schema.ts`'s `AUDIT_LOG_BASE`.
  * `tests/unit/jsonl-rotation.test.ts` plants a foreign name beside a doomed
  * owned one and asserts the foreign file survives — the paired negative that
  * makes this a control rather than a comment.
  */
 const OWNED_BASES: readonly string[] = [WIRE_LOG_BASE, TURNS_LOG_BASE];
 
-/** File extension of every log this module writes. */
-const EXT = ".jsonl";
-
-/**
- * How stale a cached file size may be before it is re-`stat`ed.
- *
- * A `stat` per append is free at DeepSeek turn rates; caching keeps it free at
- * subagent fan-out (RESEARCH §10.5). The cached value is kept exact by adding
- * each write's byte count to it, so the re-`stat` only corrects for writes made
- * by another process.
- */
-const SIZE_RECHECK_MS = 1000;
-
-/**
- * A `base` may only be these characters.
- *
- * The point is not cosmetic. This is what makes `..`, `/`, `\`, a drive letter
- * and an absolute path impossible before `join` ever sees the value. The
- * confinement assertion in {@link assertInsideLogDir} is the second line of the
- * same defence, kept because one check that is easy to weaken is not a control.
- */
-const BASE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
-
-/** Cached live-file sizes, keyed by absolute path. */
-const sizeCache = new Map<string, { size: number; checkedAt: number }>();
-
-/** Every absolute path this process wrote or created. See {@link producedPaths}. */
-const produced = new Set<string>();
-
-/**
- * Absolute path of the directory holding every diagnostic log for `cwd`.
- *
- * `CONFIG_DIR_NAME` is Pi's own exported constant rather than a literal `.pi`
- * [CITED: pi 0.84.1 src/index.ts:7], so a rebranded distribution keeps working
- * and the logs stay next to the rest of the project's runtime state — which
- * `.gitignore:79` already covers.
- */
-export function logDir(cwd: string): string {
-	return join(cwd, CONFIG_DIR_NAME, LOG_DIR_SEGMENT);
-}
-
-/** Zero-padded local `YYYY-MM-DD`. Local, not UTC: a log is read by a human in their day. */
-function dateStamp(now: Date): string {
-	const y = String(now.getFullYear()).padStart(4, "0");
-	const m = String(now.getMonth() + 1).padStart(2, "0");
-	const d = String(now.getDate()).padStart(2, "0");
-	return `${y}-${m}-${d}`;
-}
-
-/** Throw unless `file` resolves inside `logDir(cwd)`. */
-function assertInsideLogDir(cwd: string, file: string): string {
-	const dir = resolve(logDir(cwd));
-	const full = resolve(file);
-	if (full !== dir && !full.startsWith(dir + sep)) {
-		throw new Error(
-			`refusing to write ${full}: it resolves outside the log directory ${dir}. ` +
-				"Diagnostic paths are built from cwd + CONFIG_DIR_NAME + LOG_DIR_SEGMENT only.",
-		);
-	}
-	return full;
-}
-
-/**
- * Absolute path of the live log file for `base` on `now`'s date.
- *
- * Throws on a `base` that is not a bare name — a separator, a `..`, or anything
- * outside {@link BASE_RE}. Callers pass a constant from `schema.ts`; a caller
- * that passes anything else is the bug this refusal exists to surface.
- *
- * {@link rotate} applies the same {@link assertInsideLogDir} check, so BOTH
- * exported writers are confined rather than only the one that builds its own path.
- */
-export function logPath(cwd: string, base: string, now: Date = new Date()): string {
-	if (!BASE_RE.test(base)) {
-		throw new Error(
-			`invalid log base ${JSON.stringify(base)}: expected a bare name matching ${String(BASE_RE)}. ` +
-				"A base carrying a path separator or `..` would place the file outside the log directory.",
-		);
-	}
-	return assertInsideLogDir(cwd, join(logDir(cwd), `${base}-${dateStamp(now)}${EXT}`));
-}
-
-/** `<stem>.jsonl` → `<stem>.<n>.jsonl`. */
-function rotatedPath(file: string, n: number): string {
-	return `${file.slice(0, -EXT.length)}.${n}${EXT}`;
-}
-
-/** True when `path` exists and is a regular file — not a directory, not a symlink. */
-function isRegularFile(path: string): boolean {
-	try {
-		return lstatSync(path).isFile();
-	} catch {
-		return false;
-	}
-}
-
-/** Size of `path`, or 0 when it is absent or not a regular file. */
-function regularFileSize(path: string): number {
-	if (!isRegularFile(path)) {
-		return 0;
-	}
-	try {
-		return statSync(path).size;
-	} catch {
-		return 0;
-	}
-}
-
-/** Unlink, swallowing failure. A file another process has open is noise, not an error. */
-function unlinkQuietly(path: string): boolean {
-	try {
-		unlinkSync(path);
-		return true;
-	} catch {
-		return false;
-	}
-}
-
-/**
- * Shift `<stem>.<n>.jsonl` upward and rename the live file to `<stem>.1.jsonl`.
- *
- * Highest index first, so no rename ever overwrites a file that has not been
- * moved yet. Indices at or beyond `maxRotated` are unlinked — including any
- * stragglers left by a previously larger cap — so the on-disk count is bounded
- * by the current setting rather than by whatever it used to be. [threat
- * T-02-03-03]
- *
- * Nothing here follows a symlink: every candidate is checked with `lstatSync`
- * and skipped unless it is a regular file. [threat T-02-03-02]
- *
- * TAKES `cwd` SO IT CAN BE CONFINED LIKE ITS SIBLINGS. This is a public export
- * that performs `readdirSync`, `renameSync` and `unlinkSync` relative to whatever
- * directory it derives from `file`. `logPath` validates its `base` against
- * `BASE_RE` and runs {@link assertInsideLogDir}, and `appendJsonl` goes through
- * `logPath` — so without this the module docstring's second control ("the resolved
- * file is asserted to sit inside `logDir(cwd)` before anything is written") was
- * simply untrue for one of the two exported writers. Today's only caller is
- * internal, which is why nothing was broken; a defence-in-depth claim that holds
- * for one entry point and not the other is not defence in depth.
- * [threat T-02-03-07]
- */
-export function rotate(cwd: string, file: string, maxRotated: number = MAX_ROTATED_FILES): void {
-	// The same second line of defence `logPath` applies, for the entry point a
-	// caller can reach with a path it built itself.
-	assertInsideLogDir(cwd, file);
-	const stem = file.slice(0, -EXT.length);
-	const dir = stem.slice(0, stem.lastIndexOf(sep) + 1);
-	const prefix = stem.slice(stem.lastIndexOf(sep) + 1);
-
-	// Stragglers above the current cap, e.g. after maxRotated was reduced.
-	const stale = new RegExp(`^${escapeForRegExp(prefix)}\\.(\\d+)\\${EXT}$`);
-	if (existsSync(dir === "" ? "." : dir)) {
-		for (const name of readdirSync(dir === "" ? "." : dir)) {
-			const m = stale.exec(name);
-			if (m === null) {
-				continue;
-			}
-			const n = Number(m[1]);
-			if (n >= maxRotated && isRegularFile(join(dir, name))) {
-				unlinkQuietly(join(dir, name));
-			}
-		}
-	}
-
-	for (let n = maxRotated - 1; n >= 1; n--) {
-		const src = rotatedPath(file, n);
-		if (!isRegularFile(src)) {
-			continue;
-		}
-		const dst = rotatedPath(file, n + 1);
-		try {
-			renameSync(src, dst);
-			produced.add(dst);
-		} catch {
-			// A rotated file another process holds open stays where it is. The
-			// live file still rotates below, so the cap still holds.
-		}
-	}
-
-	if (maxRotated >= 1 && isRegularFile(file)) {
-		const dst = rotatedPath(file, 1);
-		try {
-			renameSync(file, dst);
-			produced.add(dst);
-		} catch {
-			// Rotation failed; the next append will simply keep growing the live
-			// file rather than losing the record. Never throw from here.
-			return;
-		}
-		sizeCache.set(file, { size: 0, checkedAt: Date.now() });
-	}
-}
-
-/** Escape a literal for embedding in a `RegExp`. */
-function escapeForRegExp(literal: string): string {
-	return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
 /** Default size cap for a stream, by base name. */
 function defaultRotateBytes(base: string): number {
 	return base === WIRE_LOG_BASE ? WIRE_ROTATE_BYTES : TURNS_ROTATE_BYTES;
 }
 
-/** Live size of `file`, re-`stat`ed at most once per {@link SIZE_RECHECK_MS}. */
-function cachedSize(file: string, nowMs: number): number {
-	const entry = sizeCache.get(file);
-	if (entry !== undefined && nowMs - entry.checkedAt < SIZE_RECHECK_MS) {
-		return entry.size;
-	}
-	const size = regularFileSize(file);
-	sizeCache.set(file, { size, checkedAt: nowMs });
-	return size;
-}
-
-/** Options accepted by {@link appendJsonl}. */
+/** Options accepted by {@link appendJsonl}. Identical shape to the shared writer's. */
 export interface AppendOptions {
 	/** Size cap in bytes. Defaults to the stream's constant in `schema.ts`. */
 	rotateBytes?: number;
-	/** Rotated files kept. Defaults to {@link MAX_ROTATED_FILES}. */
+	/** Rotated files kept. Defaults to the shared writer's own default. */
 	maxRotated?: number;
 	/** Injected clock, for deterministic tests. */
 	now?: Date;
 }
 
 /**
- * Append one JSON record as a line, rotating first when it would cross the cap.
+ * Append one JSON record to a diagnostics stream.
  *
- * Returns the absolute path written, which is also recorded in
- * {@link producedPaths} so DIAG-07's gitignore test can check the paths the
- * writer actually produced rather than a hand-written list.
- *
- * THE CAP, STATED HONESTLY. It is checked against `size + thisRecord`, so the
- * live file never crosses the cap on account of records that FIT — that is the
- * difference from a writer which rotates only once it is already over, and it is
- * what `jsonl-rotation.test.ts`'s per-append size assertion pins.
- *
- * A SINGLE RECORD LARGER THAN THE CAP IS WRITTEN WHOLE REGARDLESS. Two branches
- * write unconditionally: an empty or absent file (`size === 0`, so the guard
- * cannot fire) and the post-rotation path (`size` is reset to `0`). The
- * consequence is real and accepted — the live file sits above the cap and rotates
- * on the very next append, producing a run of one-record rotated files — because
- * the alternative is dropping the record, and dropping a record loses the turn it
- * describes, which is the one thing this writer may never do. Reachable whenever a
- * caller passes a small cap (`logs-gitignored.test.ts:94` uses 400) or a wire
- * payload exceeds `WIRE_ROTATE_BYTES`, e.g. a large file read into `messages[]`.
- * Pinned by `jsonl-rotation.test.ts`'s oversized-record case.
+ * Injects {@link defaultRotateBytes} when the caller omits `rotateBytes`;
+ * every other option passes straight through to the shared writer.
  */
 export function appendJsonl(
 	cwd: string,
@@ -368,155 +111,29 @@ export function appendJsonl(
 	record: unknown,
 	opts: AppendOptions = {},
 ): string {
-	const now = opts.now ?? new Date();
-	const file = logPath(cwd, base, now);
-	const cap = opts.rotateBytes ?? defaultRotateBytes(base);
-	const maxRotated = opts.maxRotated ?? MAX_ROTATED_FILES;
-
-	mkdirSync(logDir(cwd), { recursive: true });
-
-	const text = `${JSON.stringify(record)}\n`;
-	const bytes = Buffer.byteLength(text, "utf8");
-
-	const nowMs = now.getTime();
-	let size = cachedSize(file, nowMs);
-	if (size > 0 && size + bytes > cap) {
-		rotate(cwd, file, maxRotated);
-		size = 0;
-	}
-
-	appendFileSync(file, text, "utf8");
-	sizeCache.set(file, { size: size + bytes, checkedAt: sizeCache.get(file)?.checkedAt ?? nowMs });
-	produced.add(file);
-	return file;
+	return libAppendJsonl(cwd, base, record, {
+		...opts,
+		rotateBytes: opts.rotateBytes ?? defaultRotateBytes(base),
+	});
 }
 
-/** Options accepted by {@link pruneLogs}. */
+/** Options accepted by {@link pruneLogs}. Identical shape to the shared writer's, minus `ownedBases`. */
 export interface PruneOptions {
-	/** Rotated files kept per dated stream. Defaults to {@link MAX_ROTATED_FILES}. */
+	/** Rotated files kept per dated stream. Defaults to the shared writer's own default. */
 	maxRotated?: number;
-	/** Days of history kept. Defaults to {@link RETENTION_DAYS}. */
+	/** Days of history kept. Defaults to the shared writer's own default. */
 	retentionDays?: number;
 	/** Injected clock, for deterministic tests. */
 	now?: Date;
 }
 
-/** `<base>-YYYY-MM-DD.jsonl` or `<base>-YYYY-MM-DD.<n>.jsonl`. */
-const LOG_NAME_RE = /^([A-Za-z0-9][A-Za-z0-9_-]*)-(\d{4})-(\d{2})-(\d{2})(?:\.(\d+))?\.jsonl$/;
-
-/** Whole days between two dates, counted from local midnight to local midnight. */
-function ageInDays(stamp: { y: number; m: number; d: number }, now: Date): number {
-	const then = Date.UTC(stamp.y, stamp.m - 1, stamp.d);
-	const today = Date.UTC(now.getFullYear(), now.getMonth(), now.getDate());
-	return Math.round((today - then) / 86_400_000);
-}
-
 /**
- * Delete logs past the retention window and rotated files past the cap.
+ * Delete aged diagnostics logs, scoped to {@link OWNED_BASES} only.
  *
- * Returns the absolute paths deleted, sorted. Called from `session_start`:
- * cheap, deterministic, and off the hot path (RESEARCH §10.5).
- *
- * Age is computed from the file's DATE STAMP against an injectable `now`, never
- * from an mtime. A stamp is what the name promises, it survives a copy between
- * machines, and it makes the retention test deterministic on both platforms.
- *
- * Every unlink failure is swallowed: a log another process holds open is noise,
- * and a session that cannot start because a prune failed would be a diagnostics
- * subsystem taking the harness down with it.
- *
- * SCOPE. Only files whose base name is in {@link OWNED_BASES} are considered at
- * all. `.pi/logs/` is a directory this module shares with whatever else picks the
- * same obvious name, and a retention rule that deleted by NAME SHAPE would quietly
- * destroy another extension's state. [threat T-02-03-02, and the ownership half]
+ * The safety audit log and anything else under `.pi/logs/` is untouched no
+ * matter what this call is given, because `ownedBases` is injected here rather
+ * than accepted from the caller.
  */
 export function pruneLogs(cwd: string, opts: PruneOptions = {}): string[] {
-	const dir = logDir(cwd);
-	if (!existsSync(dir)) {
-		return [];
-	}
-
-	const now = opts.now ?? new Date();
-	const retentionDays = opts.retentionDays ?? RETENTION_DAYS;
-	const maxRotated = opts.maxRotated ?? MAX_ROTATED_FILES;
-
-	const deleted: string[] = [];
-	/** Surviving rotated files, grouped by dated stem, so the cap applies per stream. */
-	const rotatedByStem = new Map<string, { n: number; path: string }[]>();
-
-	let names: string[];
-	try {
-		names = readdirSync(dir);
-	} catch {
-		return [];
-	}
-
-	for (const name of names) {
-		const match = LOG_NAME_RE.exec(name);
-		if (match === null) {
-			continue;
-		}
-		// OWNERSHIP BEFORE SHAPE. `LOG_NAME_RE`'s first group is `[A-Za-z0-9][...]*`,
-		// i.e. ANY base name, because the same expression also parses the rotation
-		// bucket stem below. Matching the shape says this looks like a dated JSONL
-		// log; it does not say this module wrote it. See {@link OWNED_BASES}.
-		if (!OWNED_BASES.includes(match[1] as string)) {
-			continue;
-		}
-		const path = join(dir, name);
-		// Not a regular file: a symlink or directory shaped like a log name is
-		// never followed and never unlinked. [threat T-02-03-02]
-		if (!isRegularFile(path)) {
-			continue;
-		}
-
-		const stamp = { y: Number(match[2]), m: Number(match[3]), d: Number(match[4]) };
-		if (ageInDays(stamp, now) > retentionDays) {
-			if (unlinkQuietly(path)) {
-				sizeCache.delete(path);
-				deleted.push(path);
-			}
-			continue;
-		}
-
-		if (match[5] !== undefined) {
-			const stem = `${match[1]}-${match[2]}-${match[3]}-${match[4]}`;
-			const bucket = rotatedByStem.get(stem) ?? [];
-			bucket.push({ n: Number(match[5]), path });
-			rotatedByStem.set(stem, bucket);
-		}
-	}
-
-	for (const bucket of rotatedByStem.values()) {
-		for (const entry of bucket) {
-			if (entry.n > maxRotated && unlinkQuietly(entry.path)) {
-				sizeCache.delete(entry.path);
-				deleted.push(entry.path);
-			}
-		}
-	}
-
-	return deleted.sort();
-}
-
-/**
- * Every absolute path this process wrote or renamed into existence.
- *
- * DIAG-07's gitignore test reads this instead of a hand-written list: a table
- * of literals proves the rules classify the names someone remembered to type,
- * while this proves them against what the writer actually produced.
- */
-export function producedPaths(): readonly string[] {
-	return [...produced].sort();
-}
-
-/**
- * Forget every recorded path.
- *
- * Exported for the DIAG-07 test, which must start from an empty set — otherwise
- * paths produced by an earlier test in the same worker would make its
- * "non-empty" guard pass without this run having written anything.
- */
-export function resetProducedPaths(): void {
-	produced.clear();
+	return libPruneLogs(cwd, { ...opts, ownedBases: OWNED_BASES });
 }
