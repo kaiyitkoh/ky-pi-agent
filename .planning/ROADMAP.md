@@ -111,7 +111,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 02-09-PLAN.md — The prose-tool-call effect: log the event, retry once via a follow-up, never promote (DIAG-05)
+- [x] 02-09-PLAN.md — The prose-tool-call effect: log the event, retry once via a follow-up, never promote (DIAG-05)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 

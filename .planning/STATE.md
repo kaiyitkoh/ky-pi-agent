@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-08-PLAN.md — the per-turn JSONL row wired into the main agent loop
-last_updated: "2026-08-13T06:02:32.706Z"
+stopped_at: Completed 02-09-PLAN.md — the prose-tool-call retry, capped at one, inside a single agent run
+last_updated: "2026-08-13T06:22:13.948Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 18
+  completed_plans: 19
   percent: 9
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 9 of 11
+Plan: 10 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 90%
 
 **Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
@@ -74,6 +74,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 02 P06 | 35m | 2 tasks | 3 files |
 | Phase 02 P07 | ~45m | 3 tasks | 4 files |
 | Phase 02 P08 | 40m | 2 tasks | 5 files |
+| Phase 02 P09 | ~40m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -142,6 +143,10 @@ Recent decisions affecting current work:
 - [Phase 2]: 02-08: DIAG-04 complete — the turn row spine is turn_start + message_end + turn_end, never after_provider_response — that hook never fires on a provider error
 - [Phase 2]: 02-08: the correlation id is captured at message_end, not turn_end: a nested callModel during tool execution issues its own id and would otherwise be stamped onto the turn row
 - [Phase 2]: 02-08: a degraded computation is MARKED (event: diagnostics.model_unavailable), so a zero cost is never indistinguishable from a computed one
+- [Phase 2]: 02-09: prose retry is follow-up injection, not tool-call promotion — promotion executes a tool with regex-scraped arguments before Phase 4's guard exists
+- [Phase 2]: 02-09: DIAG-05 stays Pending — the [FAUX] half is complete end to end, RB-02-03 (live DeepSeek prose rate) is OUTSTANDING
+- [Phase 2]: 02-09: PROSE_RETRY_FORCES_TOOL_CHOICE is false and registers NO handler — the tool_choice lever's effect is UNVERIFIED and belongs to Phase 10
+- [Phase 2]: 02-09: two negative controls can cover for each other — one live fixture per detector gate, each individually falsified
 
 ### Pending Todos
 
@@ -187,8 +192,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T06:02:23.753Z
-Stopped at: Completed 02-08-PLAN.md — the per-turn JSONL row wired into the main agent loop
+Last session: 2026-08-13T06:22:06.675Z
+Stopped at: Completed 02-09-PLAN.md — the prose-tool-call retry, capped at one, inside a single agent run
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
