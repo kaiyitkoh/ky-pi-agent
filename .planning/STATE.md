@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-02-PLAN.md — BOOT-05 layout gate discriminates entry points from modules; the redactor lands, proven both directions and bounded
-last_updated: "2026-08-13T04:13:16.163Z"
-last_activity: 2026-08-13 -- Phase 02 Plan 02 complete (layout-gate discriminator + redactor)
+stopped_at: "Completed 02-03-PLAN.md — the log substrate: rotation, retention, cross-process append integrity, and a diagnostics entry point that cannot die quietly"
+last_updated: "2026-08-13T04:31:50.820Z"
+last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 12
-  percent: 57
+  completed_plans: 13
+  percent: 9
 ---
 
 # Project State
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 3 of 11
-Status: Executing Phase 02
-Last activity: 2026-08-13 -- Phase 02 Plan 02 complete (layout-gate discriminator + redactor)
+Plan: 4 of 11
+Status: Ready to execute
+Last activity: 2026-08-13
 
-Progress: [██████░░░░] 57% (12 of 21 plans complete)
+Progress: [██████░░░░] 62%
 
 **Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
@@ -68,6 +68,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 01 P10 | 25m | 3 tasks | 3 files |
 | Phase 02 P01 | 20m | 3 tasks | 4 files |
 | Phase 02 P02 | 12m | 3 tasks | 3 files |
+| Phase 02 P03 | 35m | 3 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -123,6 +124,10 @@ Recent decisions affecting current work:
 - [Phase 02]: the wire payload never carries the API key (RESEARCH §1.3, 12 verified onPayload call sites) — so the redactor matches secret-SHAPED values as well as credential-named header keys; the real hazard is a .env or *.tfstate the model read into messages[]
 - [Phase 02]: a word boundary is added to the sk- and pt- patterns only, against RESEARCH's literal list — risk-assessment-documents is sk- plus 24 token characters, and a redactor that mangles ordinary paths fails DIAG-07's negative control as surely as one that leaks
 - [Phase 02]: DIAG-07 stays Pending after plan 02-02 — the requirement names redaction at capture AND gitignored paths, and this plan ships only the redactor; nothing calls it until wire.ts (02-05)
+- [Phase 02]: createWriteStream is deliberately not spelled in jsonl.ts — the plan's own acceptance grep and its docstring instruction were mutually exclusive, and blocker B3's lesson (a substring gate matches prose) says keep the gate live and state the rule in words
+- [Phase 02]: the four concurrency children are spawned asynchronously with a wall-clock barrier, never spawnSync — spawnSync blocks, so four calls in a loop are strictly serial and still produce 1600 clean lines while proving nothing; the latest-start-precedes-earliest-finish assertion is what makes a serialised run fail
+- [Phase 02]: path confinement in jsonl.ts is two layers (a character allowlist on base, plus a resolved-path containment assertion) and the falsification run proved each catches inputs the other does not — '..' slips past containment, 'wire/../../evil' slips past a loosened allowlist
+- [Phase 02]: DIAG-08 is complete and DIAG-07 stays Pending — DIAG-07 names redaction AT CAPTURE as well as gitignored paths, and nothing calls the redactor on a payload until wire.ts (02-05)
 
 ### Pending Todos
 
@@ -168,8 +173,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T04:13:16.154Z
-Stopped at: Completed 02-02-PLAN.md — BOOT-05 layout gate discriminates entry points from modules; the redactor lands, proven both directions and bounded
+Last session: 2026-08-13T04:31:50.810Z
+Stopped at: Completed 02-03-PLAN.md — the log substrate: rotation, retention, cross-process append integrity, and a diagnostics entry point that cannot die quietly
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

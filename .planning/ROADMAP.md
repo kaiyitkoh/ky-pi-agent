@@ -96,7 +96,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 02-03-PLAN.md — `schema.ts`, the append-only writer with rotation and retention, the extension entry point, and the gitignored-path proof (DIAG-08, DIAG-07)
+- [x] 02-03-PLAN.md — `schema.ts`, the append-only writer with rotation and retention, the extension entry point, and the gitignored-path proof (DIAG-08, DIAG-07)
 - [ ] 02-04-PLAN.md — The pure prose-tool-call predicate and its positive/negative tables (DIAG-05)
 
 **Wave 3** *(blocked on Wave 2 completion)*
