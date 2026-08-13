@@ -76,8 +76,8 @@ plausible location does not cover the paths that matter.
 **Not covered:**
 
 - **Third-party *git* packages.** Their clone directory is created fresh by
-  `git clone`, so there is no file we can pre-place inside it. This is **not
-  covered** by anything in this repo and cannot be.
+  `git clone`, so there is no file we can pre-place inside it. Third-party git
+  packages are **not covered** by anything in this repo, and cannot be.
 - **Any `pi install` on a machine where bootstrap has never been run.** The
   user-scope control is machine state, not repo state.
 
