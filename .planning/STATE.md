@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 01-09-PLAN.md — BOOT-10 boundary rule written with verified citations and gated by test
-last_updated: "2026-08-13T01:21:01.382Z"
+status: verifying
+stopped_at: Completed 01-10-PLAN.md — README residual gap stated, docs/RUNBOOK.md seeded with three OUTSTANDING Phase 1 checks, status guard enforced
+last_updated: "2026-08-13T01:30:43.781Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 10
-  completed_plans: 9
-  percent: 0
+  completed_plans: 10
+  percent: 9
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
 Plan: 10 of 10
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-13
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100%
 
 ## Performance Metrics
 
@@ -61,6 +61,7 @@ Progress: [█████████░] 90%
 | Phase 01 P06 | 30m | 2 tasks | 4 files |
 | Phase 01 P08 | 22m | 2 tasks | 3 files |
 | Phase 01 P09 | 20m | 2 tasks | 2 files |
+| Phase 01 P10 | 25m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -104,6 +105,10 @@ Recent decisions affecting current work:
 - [Phase 01]: the registerTool scan is a plain substring per 01-VALIDATION's BOOT-10 wording — it survives bracket access and aliasing, at the cost that extensions may not name the call even in a comment
 - [Phase 01]: TOOL_REGISTRATION_ALLOWLIST is empty and named so a later phase extends it with an (a)/(b)/(c) justification instead of deleting the test
 - [Phase 01]: the npm_config_ignore_scripts persistence hazard cites bash.ts:105 + shell.ts:122-134 (the bash tool spreads process.env) — package-manager's getEnv() is private and covers only Pi's own npm spawns
+- [Phase 01]: a runbook status is parsed from BOTH the summary table and the detail subsection and the two must agree — a half-flip returns INCONSISTENT, because updating the skim-able table and forgetting the subsection is the likeliest real failure and would otherwise leave two contradictory answers with no signal
+- [Phase 01]: the outstanding-status parser is asserted against a PASSED fixture as well as an OUTSTANDING one — without the PASSED case, asserting OUTSTANDING on the real file is a tautology that passes whatever the file says
+- [Phase 01]: docs/RUNBOOK.md is created in Phase 1 though PROV-09 (Phase 3) owns it — the ownership is stated inline so Phase 3 appends rather than rewrites, and the three Phase 1 checks are not lost in between
+- [Phase 01]: the README's 'not covered' clause is asserted case-sensitively — Task 1's own case-insensitive regex passed against the capitalised heading while the prose instance was split across a line break, i.e. present in spirit and absent as a string
 
 ### Pending Todos
 
@@ -115,9 +120,10 @@ None yet.
 
 - **UNRESOLVED (R1)**: Whether DeepSeek-direct accepts `reasoning_effort: "low"`. Settled by one request in Phase 3 (PROV-07), gated behind Phase 2. Until then `/cheap` must not be defined in terms of a cheap thinking tier.
 - **Root cause still open**: prose tool calls vs context pollution vs provider misconfiguration. Phase 2 measures, Phase 10 discriminates. Do not commit to a fix for an unmeasured cause.
-- **No credentials on the dev machine**: 8 of 107 requirements are [RUNBOOK] and need the work laptop. `docs/RUNBOOK.md` (PROV-09, Phase 3) is the deliverable that carries them.
-- **SAFE-16 is half-shipped, deliberately**: the classifier (`scripts/check-gh-unauthenticated.sh`) is proven in both directions, but the live control — `gh auth logout` on the work laptop — is **OUTSTANDING** and must never be reported as passed. `gh` stays authenticated on this dev box; it is how the repo is pushed over HTTPS. Runbook entry lands in Plan 10.
-- **BOOT-07's live CI run is OUTSTANDING**: `.github/workflows/ci.yml` exists, is valid YAML, and is statically proven (both action SHAs resolved against the GitHub API, matrix `[windows-latest, macos-latest]`, `fail-fast: false`, every execution step asserted by `tests/unit/ci-pinning.test.ts`). It has **never run** — GitHub Actions cannot be triggered from this machine. macOS behaviour, ShellCheck's verdict on the two tracked scripts, and whether the pinned global Pi install satisfies the load-path tests on a runner are all unverified until the first push. Do not report a green tick that does not exist.
+- **No credentials on the dev machine**: 8 of 107 requirements are [RUNBOOK] and need the work laptop. `docs/RUNBOOK.md` (PROV-09, Phase 3) is the deliverable that carries them. **The file now exists** — Phase 1 created it in Plan 10 with its own section; Phase 3 appends rather than rewrites.
+- **Three Phase 1 checks are OUTSTANDING and machine-enforced as such**: `RB-01-01` (SAFE-16, `gh auth logout` on the work laptop), `RB-01-02` (BOOT-02, `pi install` against the real URL on a clean profile), `RB-01-03` (BOOT-05, `/reload` in a TTY). Each is recorded in `docs/RUNBOOK.md` with its exact command, expected output and offline proxy. `tests/unit/docs-policy.test.ts` parses both the summary table and the detail subsection and fails if either is flipped to passed, or if the two disagree. Flipping one requires a human to have executed it and must be a deliberate edit in the same commit as the test change.
+- **SAFE-16 is half-shipped, deliberately**: the classifier (`scripts/check-gh-unauthenticated.sh`) is proven in both directions, but the live control — `gh auth logout` on the work laptop — is **OUTSTANDING** and must never be reported as passed. `gh` stays authenticated on this dev box; it is how the repo is pushed over HTTPS. Runbook entry is `RB-01-01`.
+- **BOOT-07's live CI run is OUTSTANDING**: `.github/workflows/ci.yml` exists, is valid YAML, and is statically proven (both action SHAs resolved against the GitHub API, matrix `[windows-latest, macos-latest]`, `fail-fast: false`, every execution step asserted by `tests/unit/ci-pinning.test.ts`). It has **never run** — GitHub Actions cannot be triggered from this machine. macOS behaviour, ShellCheck's verdict on the two tracked scripts, and whether the pinned global Pi install satisfies the load-path tests on a runner are all unverified until the first push. Do not report a green tick that does not exist. **It has no `docs/RUNBOOK.md` entry yet** — Plan 10 seeded only the three checks its plan named. A later phase should add it alongside `RB-01-01..03`.
 - **`shellcheck` is not installed on this machine**: `--shell=sh` conformance of `bin/bootstrap.sh` and `scripts/check-gh-unauthenticated.sh` is UNVERIFIED locally. `tests/unit/lf-and-shell.test.ts` asserts only the four constructs that break on macOS bash 3.2 (`[[`, `sort -V`, `declare -A`, `${v^^}`); it is a companion to the Ubuntu `posix-lint` job, not a substitute for it.
 - **Moving platform**: Pi ships every 2–3 days; the composed extension ecosystem ships 13–16 releases/month. Every pin must be re-verified at Phase 7 planning time, not inherited from research.
 
@@ -148,8 +154,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T01:21:01.371Z
-Stopped at: Completed 01-09-PLAN.md — BOOT-10 boundary rule written with verified citations and gated by test
+Last session: 2026-08-13T01:30:16.946Z
+Stopped at: Completed 01-10-PLAN.md — README residual gap stated, docs/RUNBOOK.md seeded with three OUTSTANDING Phase 1 checks, status guard enforced
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

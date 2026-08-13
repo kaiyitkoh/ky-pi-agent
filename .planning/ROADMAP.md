@@ -17,7 +17,7 @@ Two things about this roadmap are unusual and deliberate. First, **eight of 107 
 
 Decimal phases appear between their surrounding integers in numeric order.
 
-- [ ] **Phase 1: Bootstrap, Packaging & Supply Chain** - Harden the machine and establish the repo shape before the first `pi install` executes third-party code
+- [x] **Phase 1: Bootstrap, Packaging & Supply Chain** - Harden the machine and establish the repo shape before the first `pi install` executes third-party code (completed 2026-08-13)
 - [ ] **Phase 2: Diagnostics — The Instrument** - Wire inspector, the `callModel()` chokepoint, per-turn JSONL, and the prose-tool-call detector
 - [ ] **Phase 3: Providers & Credentials** - Structurally complete providers with zero secrets, verified by Phase 2's instrument and a first-run runbook
 - [ ] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents
@@ -69,7 +69,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 01-10-PLAN.md — README residual-gap statement, `docs/RUNBOOK.md` with three OUTSTANDING entries, and the outstanding-status guard
+- [x] 01-10-PLAN.md — README residual-gap statement, `docs/RUNBOOK.md` with three OUTSTANDING entries, and the outstanding-status guard
 
 **Research**: Complete — `01-RESEARCH.md` (HIGH confidence, executed at source). Three findings reshaped the phase: `.gitignore:56` made BOOT-01 a no-op; a repo-root `.npmrc` does not cover Pi's npm install path (`--prefix` wins over cwd, attack executed); Pi installs itself with `--ignore-scripts` but never its extensions.
 
@@ -270,7 +270,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Bootstrap, Packaging & Supply Chain | 9/10 | In Progress|  |
+| 1. Bootstrap, Packaging & Supply Chain | 10/10 | Complete   | 2026-08-13 |
 | 2. Diagnostics — The Instrument | 0/TBD | Not started | - |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |

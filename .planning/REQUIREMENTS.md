@@ -226,13 +226,13 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
-| BOOT-01 | Phase 1 | Complete |
-| BOOT-02 | Phase 1 | Complete |
+| BOOT-01 | Phase 1 | Complete — control shipped and live-verified at all three npm scopes; the residual gap (third-party git packages, and any machine bootstrap has not run on) is stated as **not covered** in `README.md` per the requirement's own wording |
+| BOOT-02 | Phase 1 | Complete offline — proven by `tests/integration/load-paths.test.ts` case 2 (local clone + `npm install --omit=dev`). The real-URL install on a clean profile is `RB-01-02`, **OUTSTANDING** |
 | BOOT-03 | Phase 1 | Complete |
 | BOOT-04 | Phase 1 | Complete |
-| BOOT-05 | Phase 1 | Complete |
+| BOOT-05 | Phase 1 | Complete offline — `.pi/` dogfood load proven by `tests/integration/load-paths.test.ts`; the structural hot-reload precondition by `tests/unit/extension-layout.test.ts`. Live `/reload` in a TTY is `RB-01-03`, **OUTSTANDING** |
 | BOOT-06 | Phase 1 | Complete |
-| BOOT-07 | Phase 1 | Complete |
+| BOOT-07 | Phase 1 | Complete statically — `ci.yml` fully asserted by `tests/unit/ci-pinning.test.ts`; the workflow has **never actually run**, and cannot be triggered from this machine |
 | BOOT-08 | Phase 1 | Complete |
 | BOOT-09 | Phase 1 | Complete |
 | BOOT-10 | Phase 1 | Complete |
@@ -269,7 +269,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-13 | Phase 4 | Pending |
 | SAFE-14 | Phase 4 | Pending |
 | SAFE-15 | Phase 4 | Pending |
-| SAFE-16 | Phase 1 | Pending — classifier shipped in 01-07; live `gh auth logout` on the work laptop is OUTSTANDING (runbook, Plan 10) |
+| SAFE-16 | Phase 1 | Pending — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING — `gh auth logout` has not been run on the work laptop. Not completable from this machine |
 | SAFE-17 | Phase 4 | Pending |
 | ROUTE-01 | Phase 5 | Pending |
 | ROUTE-02 | Phase 5 | Pending |
