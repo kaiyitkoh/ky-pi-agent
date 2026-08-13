@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-02-PLAN.md
-last_updated: "2026-08-13T20:00:20.523Z"
+stopped_at: Completed 04-03-PLAN.md
+last_updated: "2026-08-13T20:18:10.017Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 44
-  completed_plans: 34
+  completed_plans: 35
   percent: 27
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 04 (safety-deployment-guardrails) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [████████░░] 77%
+Progress: [████████░░] 80%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -96,6 +96,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 3 P11 | 55m | 3 tasks | 4 files |
 | Phase 04 P01 | 15min | 3 tasks | 5 files |
 | Phase 04 P02 | 13min | 2 tasks | 7 files |
+| Phase 04 P03 | 20min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -215,6 +216,8 @@ Recent decisions affecting current work:
 - [Phase 04-02]: safety/audit.ts does not import diagnostics/index.ts's safeHandler -- CONTEXT.md decision 7's isolation reading wins over the providers/index.ts precedent
 - [Phase 04-02]: writeAuditRow never throws -- catches and returns undefined on failure so an audit write failure cannot turn a BLOCK into an unhandled exception
 - [Phase 04-02]: shared JSONL writer moved to .pi/lib/jsonl.ts (outside .pi/extensions/, never auto-discovered) so diagnostics and safety can both bind to the hardened Phase 2 writer without importing each other
+- [Phase 04]: unresolved-expansion-in-command-position checks Command.name always AND a guarded verb's suffix[] args, not argv[0] alone -- the plan's g=push; git $g example places the expansion in the subcommand position
+- [Phase 04]: shell-runner + guarded-verb combos (sh -c "git push") are denied outright, never routed to approval, per SAFE-03's fail-closed contract
 
 ### Pending Todos
 
@@ -262,8 +265,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T20:00:20.513Z
-Stopped at: Completed 04-02-PLAN.md
+Last session: 2026-08-13T20:18:10.008Z
+Stopped at: Completed 04-03-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

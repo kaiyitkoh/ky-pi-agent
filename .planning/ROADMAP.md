@@ -185,7 +185,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 04-03-PLAN.md — `shell.ts`: the node-type fail-closed deny predicate and wrapper resolution
+- [x] 04-03-PLAN.md — `shell.ts`: the node-type fail-closed deny predicate and wrapper resolution
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
