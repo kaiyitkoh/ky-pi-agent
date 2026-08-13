@@ -52,7 +52,7 @@
 
 ### Safety
 
-- [ ] **SAFE-01**: GitLab server-side protected branches and approval rules are configured and verified by attempting a push that must fail — the only control that is not theatre **[RUNBOOK]**
+- [~] **SAFE-01**: GitLab server-side protected branches and approval rules are configured and verified by attempting a push that must fail — the only control that is not theatre **[RUNBOOK]** — *the offline proxy is shipped and green (`tests/integration/gitlab-push-protection.test.ts`: a real push to a real local bare repo with a rejecting `pre-receive` hook is refused, a paired non-protected push succeeds, and the harness's own `classifyPushFailure()` classifies a protected rejection and an ordinary non-fast-forward rejection differently). Whether GitLab is actually configured on the work laptop is `RB-04-01`, **OUTSTANDING***
 - [x] **SAFE-02**: Bash commands are parsed to an AST with `unbash`, resolving wrappers (`sudo`, `env`, `sh -c`, `xargs`) so `g=push; git $g` and `bash -lc "..."` are caught **[FAUX]**
 - [x] **SAFE-03**: Anything unparseable — command substitution, backticks, heredocs, backgrounding — **fails closed** **[FAUX]**
 - [x] **SAFE-04**: Writes are blocked when `HEAD == main`, while read-only operations against main (`fetch`, `rebase`, `diff`, `log`, `worktree add -b feat main`) remain allowed **[FAUX]**
@@ -256,23 +256,23 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | PROV-08 | Phase 3 | Complete |
 | PROV-09 | Phase 3 | Complete — `docs/RUNBOOK.md` carries eleven entries across Phases 1–3, all `OUTSTANDING` and machine-enforced as such by `tests/unit/docs-policy.test.ts` in both the summary table and the detail subsection |
 | PROV-10 | Phase 3 | Partial — `reasoning_content` on the replayed assistant message is proven on real bytes with a paired negative; the second turn's 200 is `RB-03-02`, **OUTSTANDING**. Not complete |
-| SAFE-01 | Phase 4 | Pending |
-| SAFE-02 | Phase 4 | Complete |
-| SAFE-03 | Phase 4 | Complete |
-| SAFE-04 | Phase 4 | Complete |
-| SAFE-05 | Phase 4 | Complete |
-| SAFE-06 | Phase 4 | Complete |
-| SAFE-07 | Phase 4 | Complete |
-| SAFE-08 | Phase 4 | Complete |
-| SAFE-09 | Phase 4 | Complete |
-| SAFE-10 | Phase 4 | Complete |
-| SAFE-11 | Phase 4 | Complete |
-| SAFE-12 | Phase 4 | Complete |
-| SAFE-13 | Phase 4 | Complete |
-| SAFE-14 | Phase 4 | Complete |
-| SAFE-15 | Phase 4 | Complete |
+| SAFE-01 | Phase 4 | Partial — the offline proxy (`tests/integration/gitlab-push-protection.test.ts`, plan 04-12) is shipped and green: a real push to a real local bare repo with a rejecting `pre-receive` hook is refused, the paired non-protected push succeeds, and `classifyPushFailure()` classifies a protected rejection and an ordinary non-fast-forward rejection differently. Whether GitLab is actually configured on the work laptop is `RB-04-01`, **OUTSTANDING**. Not complete |
+| SAFE-02 | Phase 4 | Complete — plans 04-01, 04-03 |
+| SAFE-03 | Phase 4 | Complete — plans 04-03, 04-07 |
+| SAFE-04 | Phase 4 | Complete — plan 04-05 |
+| SAFE-05 | Phase 4 | Complete — plan 04-05 |
+| SAFE-06 | Phase 4 | Complete — plan 04-04 |
+| SAFE-07 | Phase 4 | Complete — plan 04-06 |
+| SAFE-08 | Phase 4 | Complete — plan 04-04 |
+| SAFE-09 | Phase 4 | Complete — plan 04-08 |
+| SAFE-10 | Phase 4 | Complete — plans 04-07, 04-08, 04-09 |
+| SAFE-11 | Phase 4 | Complete — plans 04-01, 04-09 |
+| SAFE-12 | Phase 4 | Complete — plan 04-10 |
+| SAFE-13 | Phase 4 | Complete — plan 04-04 |
+| SAFE-14 | Phase 4 | Complete — plans 04-02, 04-08, 04-10 |
+| SAFE-15 | Phase 4 | Complete — plan 04-11 |
 | SAFE-16 | Phase 1 | Pending — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING — `gh auth logout` has not been run on the work laptop. Not completable from this machine |
-| SAFE-17 | Phase 4 | Complete |
+| SAFE-17 | Phase 4 | Complete — plan 04-11 |
 | ROUTE-01 | Phase 5 | Pending |
 | ROUTE-02 | Phase 5 | Pending |
 | ROUTE-03 | Phase 5 | Pending |
