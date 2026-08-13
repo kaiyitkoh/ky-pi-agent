@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-04-PLAN.md — BOOT-01 effectiveness + BOOT-08 pinning gates
-last_updated: "2026-08-13T00:37:11.921Z"
-last_activity: 2026-08-13 -- completed 01-05 (cold-machine bootstrap + BOOT-04 gate)
+stopped_at: Completed 01-07-PLAN.md — SAFE-16 /share control classifier
+last_updated: "2026-08-13T00:46:11.855Z"
+last_activity: 2026-08-13 -- completed 01-07 (SAFE-16 /share control classifier)
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 5
+  completed_plans: 6
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 6 of 10
-Status: Executing Phase 01
-Last activity: 2026-08-13 -- completed 01-05 (cold-machine bootstrap + BOOT-04 gate)
+Plan: 7 of 10
+Status: Ready to execute
+Last activity: 2026-08-13 -- completed 01-07 (SAFE-16 /share control classifier)
 
-Progress: [█████░░░░░] 50%
+Progress: [██████░░░░] 60%
 
 ## Performance Metrics
 
@@ -57,6 +57,7 @@ Progress: [█████░░░░░] 50%
 | Phase 01 P03 | 18m | 3 tasks | 3 files |
 | Phase 01 P04 | 18m | 2 tasks | 2 files |
 | Phase 01 P05 | 35m | 2 tasks | 3 files |
+| Phase 01 P07 | 18m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -85,6 +86,10 @@ Recent decisions affecting current work:
 - [Phase 01]: bootstrap strips npm_config_* before every npm query — run under npm/npx it would otherwise certify a control it never exercised, the same trap Plan 04 hit
 - [Phase 01]: E404-token discrimination replaces RESEARCH's leading-quote-zero heuristic, which would misclassify any 1.x pin as unpublished
 - [Phase 01]: the full bootstrap was run for real on this machine — ~/.pi/agent/npm/.npmrc now exists, so BOOT-01 user-scope is live-verified, not just mechanism-verified
+- [Phase 01]: /share cannot be blocked by any extension — it is a literal-string match in the interactive submit handler (interactive-mode.ts:2902), dispatched before extension commands and before the input event; gh auth status exiting non-zero is the entire control
+- [Phase 01]: dropping only the gist scope is a closed door — repo, read:org and gist are gh's documented non-removable minimum set, so gh auth logout is the only remedy
+- [Phase 01]: SAFE-16's script ships --warn-only because gh is legitimately authenticated on the dev machine for git-over-HTTPS; CI and the dev box use it, the work-laptop runbook runs the script bare
+- [Phase 01]: every stubbed-binary test case asserts the stub's own call log — without it a PATH-ordering mistake silently turns the suite into an assertion about the developer's real keyring
 
 ### Pending Todos
 
@@ -97,6 +102,7 @@ None yet.
 - **UNRESOLVED (R1)**: Whether DeepSeek-direct accepts `reasoning_effort: "low"`. Settled by one request in Phase 3 (PROV-07), gated behind Phase 2. Until then `/cheap` must not be defined in terms of a cheap thinking tier.
 - **Root cause still open**: prose tool calls vs context pollution vs provider misconfiguration. Phase 2 measures, Phase 10 discriminates. Do not commit to a fix for an unmeasured cause.
 - **No credentials on the dev machine**: 8 of 107 requirements are [RUNBOOK] and need the work laptop. `docs/RUNBOOK.md` (PROV-09, Phase 3) is the deliverable that carries them.
+- **SAFE-16 is half-shipped, deliberately**: the classifier (`scripts/check-gh-unauthenticated.sh`) is proven in both directions, but the live control — `gh auth logout` on the work laptop — is **OUTSTANDING** and must never be reported as passed. `gh` stays authenticated on this dev box; it is how the repo is pushed over HTTPS. Runbook entry lands in Plan 10.
 - **Moving platform**: Pi ships every 2–3 days; the composed extension ecosystem ships 13–16 releases/month. Every pin must be re-verified at Phase 7 planning time, not inherited from research.
 
 ## Deferred Items
@@ -126,8 +132,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T00:35:04.547Z
-Stopped at: Completed 01-04-PLAN.md — BOOT-01 effectiveness + BOOT-08 pinning gates
+Last session: 2026-08-13T00:45:43.840Z
+Stopped at: Completed 01-07-PLAN.md — SAFE-16 /share control classifier
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

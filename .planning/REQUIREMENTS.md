@@ -269,7 +269,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-13 | Phase 4 | Pending |
 | SAFE-14 | Phase 4 | Pending |
 | SAFE-15 | Phase 4 | Pending |
-| SAFE-16 | Phase 1 | Pending |
+| SAFE-16 | Phase 1 | Pending — classifier shipped in 01-07; live `gh auth logout` on the work laptop is OUTSTANDING (runbook, Plan 10) |
 | SAFE-17 | Phase 4 | Pending |
 | ROUTE-01 | Phase 5 | Pending |
 | ROUTE-02 | Phase 5 | Pending |
