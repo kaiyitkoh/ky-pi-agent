@@ -164,6 +164,30 @@ export const SKILLS_MARKER_MISSING_WARNING =
 	"prompt -- either Pi changed its prompt format, or the read tool is inactive and Pi " +
 	"omitted the block (skills.ts:155 gates it on `hasRead`)";
 
+/**
+ * Warning text when `base + contextFiles + skills` does not equal the total.
+ *
+ * `sliceSystemPrompt` computes `base` by physically REMOVING the located regions
+ * rather than by subtraction, precisely so this sum is a real invariant and not
+ * an identity. The loop that removes them skips a region overlapping a previous
+ * one, deliberately leaving the sum broken — "the loud failure we want". Nothing
+ * at runtime was loud: `computeBudget` never evaluated the invariant, so a
+ * mis-attributed table printed with an empty `warnings` array and the assertion
+ * lived only in tests, against prompts the tests control.
+ *
+ * THE REACHABLE TRIGGER IS CONTENT, NOT A PI RELEASE. `findRegion` uses
+ * `prompt.indexOf(open)` — first occurrence ANYWHERE — and context-file content
+ * is interpolated verbatim into the prompt. So an `AGENTS.md` or `CLAUDE.md` that
+ * merely QUOTES `<project_context>`, `</project_context>`, or the skills index's
+ * opening sentence relocates or truncates a region, and a skills marker quoted
+ * inside the context block yields two overlapping regions. This repository's own
+ * planning documents quote those markers, so it is not hypothetical here.
+ */
+export const DECOMPOSITION_DOES_NOT_SUM_WARNING =
+	"base + contextFiles + skills does not equal the system-prompt length -- the located regions " +
+	"overlap or were located twice (a context file whose CONTENT quotes one of Pi's own prompt " +
+	"delimiters does exactly this), so every proportion in this table is mis-attributed";
+
 /** Warning text when the recomputed skills block and the sliced region differ in size. */
 export const SKILLS_DIVERGENCE_WARNING =
 	"the skills block recomputed with formatSkillsForPrompt does not match the region sliced " +
@@ -417,6 +441,21 @@ export function computeBudget(input: BudgetInput): BudgetReport {
 	const skillsBlockMatchesSlice = recomputedSkills.length === slices.skills;
 
 	const warnings: string[] = [];
+
+	// THE INVARIANT, EVALUATED AT RUNTIME AND NOT ONLY IN A TEST. This is the one
+	// check that can tell the reader the table in front of them is wrong: `base` is
+	// the remainder after physically removing the located regions, so a sum that
+	// misses `total` means the regions overlapped or were located twice. The
+	// reachable cause is a context FILE whose content quotes one of Pi's delimiters
+	// — see {@link DECOMPOSITION_DOES_NOT_SUM_WARNING}. It is checked first because
+	// when it fires every other number below it is unreliable.
+	const accounted = slices.base + slices.contextFiles + slices.skills;
+	if (accounted !== slices.total) {
+		warnings.push(
+			`${DECOMPOSITION_DOES_NOT_SUM_WARNING} (accounted ${accounted}, total ${slices.total})`,
+		);
+	}
+
 	// Only a marker that was EXPECTED and is missing is a warning. A session with
 	// no context files and no skills legitimately has neither block, and warning
 	// about that would make the warnings array noise that nobody reads.

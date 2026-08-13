@@ -41,6 +41,7 @@ import {
 	BUDGET_COMMAND_NAME,
 	CONTEXT_FILES_CLOSE_MARKER,
 	CONTEXT_FILES_OPEN_MARKER,
+	DECOMPOSITION_DOES_NOT_SUM_WARNING,
 	PROJECT_INSTRUCTIONS_WRAPPER_CHARS,
 	PROVIDER_REPORTED_LABEL,
 	ROWS_WRITTEN_LABEL,
@@ -249,6 +250,85 @@ describe("sliceSystemPrompt — every character is accounted for", () => {
 				"A warnings array that cries on every healthy session is a warnings array nobody " +
 				"reads on the one session that mattered",
 		).toEqual([]);
+	});
+});
+
+describe("computeBudget — the decomposition invariant is checked at RUNTIME, not only here", () => {
+	/**
+	 * A context file whose CONTENT quotes Pi's skills markers.
+	 *
+	 * THE OFFENDING FIXTURE, in the same style as `chokepoint-lint.test.ts:212-233`.
+	 * `findRegion` uses `prompt.indexOf(open)` — first occurrence ANYWHERE — and
+	 * context-file content is interpolated verbatim into the prompt, so a file that
+	 * merely documents Pi's prompt format produces a skills region nested inside
+	 * the context region. `sliceSystemPrompt`'s removal loop then skips the
+	 * overlapping region on purpose and the pieces stop adding up.
+	 *
+	 * This is not hypothetical for this project: this repository's own planning
+	 * documents quote those markers, and `.planning/` sits above the working tree
+	 * Pi walks up from.
+	 */
+	const QUOTING_BODY =
+		"Notes on Pi's prompt format, for a future reader:\n" +
+		`${SKILLS_OPEN_MARKER} for specific tasks.\n<available_skills>\n${SKILLS_CLOSE_MARKER}\n` +
+		"...which is what the skills index looks like.";
+
+	const QUOTING_PROMPT = PREAMBLE + contextBlock(CONTEXT_PATH, QUOTING_BODY) + TRAILER;
+
+	it("case 3b: an overlapping region breaks the sum, and the report SAYS SO", () => {
+		const slices = sliceSystemPrompt(QUOTING_PROMPT);
+
+		// The precondition, asserted rather than assumed: if the fixture stopped
+		// producing an overlap the warning assertion below would be vacuous.
+		expect(
+			slices.base + slices.contextFiles + slices.skills,
+			"the fixture must actually break the invariant. Both markers have to be located and the " +
+				"skills one has to sit INSIDE the context block; if this equals `total` the fixture no " +
+				"longer overlaps and the guard below is being asserted against a healthy prompt",
+		).not.toBe(slices.total);
+
+		expect(
+			[slices.contextFilesFound, slices.skillsFound],
+			"both regions must have been located — that is what makes them overlap. A false here " +
+				"means the fixture is exercising a MISSING marker, which is cases 2 and 3, not this one",
+		).toEqual([true, true]);
+
+		const report = computeBudget(
+			input({ systemPrompt: QUOTING_PROMPT, contextFiles: [{ path: CONTEXT_PATH, content: QUOTING_BODY }] }),
+		);
+
+		expect(
+			report.warnings.join("\n"),
+			"THIS IS THE WHOLE POINT. `sliceSystemPrompt` computes `base` by physically removing the " +
+				"located regions so the sum is a real invariant, and its own comment calls a broken sum " +
+				"`the loud failure we want` — but nothing at runtime evaluated it, so `/budget` printed " +
+				"a mis-attributed table with an EMPTY warnings array and the invariant lived only in " +
+				"this file, against prompts this file wrote. A report that cannot tell the reader it is " +
+				"wrong is worse than no report",
+		).toContain(DECOMPOSITION_DOES_NOT_SUM_WARNING);
+
+		expect(
+			report.warnings.join("\n"),
+			"the warning must carry both numbers, so a reader can see HOW far off the attribution is " +
+				"rather than only that it is",
+		).toContain(`accounted ${slices.base + slices.contextFiles + slices.skills}, total ${slices.total}`);
+
+		expect(
+			formatBudgetReport(report),
+			"and it must reach the rendered output. A warning nobody prints is a boolean nobody sees",
+		).toContain(DECOMPOSITION_DOES_NOT_SUM_WARNING);
+	});
+
+	it("case 3c: the paired positive — a healthy prompt raises no sum warning", () => {
+		// Without this half, a check that pushed the warning unconditionally would
+		// satisfy every assertion above while making the warnings array noise nobody
+		// reads on the session that mattered.
+		expect(
+			computeBudget(input()).warnings.join("\n"),
+			"the ordinary fixture's regions do not overlap and its sum holds exactly (case 1), so " +
+				"this warning must be absent. A warnings array that fires on every healthy session is " +
+				"one nobody reads on the one session that mattered",
+		).not.toContain(DECOMPOSITION_DOES_NOT_SUM_WARNING);
 	});
 });
 
