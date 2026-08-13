@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: "Completed 02-03-PLAN.md — the log substrate: rotation, retention, cross-process append integrity, and a diagnostics entry point that cannot die quietly"
-last_updated: "2026-08-13T04:31:50.820Z"
+stopped_at: "Completed 02-04-PLAN.md — the pure prose-tool-call predicate: four gates, five positives, nine negatives, and a 1 MB bound"
+last_updated: "2026-08-13T04:46:55.062Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 13
+  completed_plans: 14
   percent: 9
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [██████░░░░] 62%
+Progress: [███████░░░] 67%
 
 **Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
@@ -69,6 +69,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 02 P01 | 20m | 3 tasks | 4 files |
 | Phase 02 P02 | 12m | 3 tasks | 3 files |
 | Phase 02 P03 | 35m | 3 tasks | 7 files |
+| Phase 02 P04 | 20m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -128,6 +129,9 @@ Recent decisions affecting current work:
 - [Phase 02]: the four concurrency children are spawned asynchronously with a wall-clock barrier, never spawnSync — spawnSync blocks, so four calls in a loop are strictly serial and still produce 1600 clean lines while proving nothing; the latest-start-precedes-earliest-finish assertion is what makes a serialised run fail
 - [Phase 02]: path confinement in jsonl.ts is two layers (a character allowlist on base, plus a resolved-path containment assertion) and the falsification run proved each catches inputs the other does not — '..' slips past containment, 'wire/../../evil' slips past a loosened allowlist
 - [Phase 02]: DIAG-08 is complete and DIAG-07 stays Pending — DIAG-07 names redaction AT CAPTURE as well as gitignored paths, and nothing calls the redactor on a payload until wire.ts (02-05)
+- [Phase 02]: DIAG-05 stays Pending after plan 02-04 — this plan ships the classifier only; the capped retry effect, the prose_tool_call row and the exhausted row are 02-09, and the live half is RB-02-03 (OUTSTANDING)
+- [Phase 02]: AssistantMessage is re-exported type-only from schema.ts rather than imported from pi-ai a second time — it keeps the diagnostics subsystem's single-pi-ai-import-site rule true while prose.ts stays at zero value imports, and re-declaring the shape locally would trade a compile error for a silent miss the day Pi renames a content-block type
+- [Phase 02]: a ninth negative case (unread({...})) was added to the prose table after a falsification run proved the pattern's leading word boundary was undetectable by the plan's eight — removing \b left all 21 tests green, and a guard no test can break is a guard that is not there
 
 ### Pending Todos
 
@@ -173,8 +177,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T04:31:50.810Z
-Stopped at: Completed 02-03-PLAN.md — the log substrate: rotation, retention, cross-process append integrity, and a diagnostics entry point that cannot die quietly
+Last session: 2026-08-13T04:46:55.052Z
+Stopped at: Completed 02-04-PLAN.md — the pure prose-tool-call predicate: four gates, five positives, nine negatives, and a 1 MB bound
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
