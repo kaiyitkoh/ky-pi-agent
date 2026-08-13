@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
-last_updated: "2026-08-13T15:03:18.392Z"
+last_updated: "2026-08-13T15:24:57.256Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 32
-  completed_plans: 28
+  completed_plans: 29
   percent: 18
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 03 (providers-credentials) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 91%
 
 **Read that 72% carefully.** The denominator is *plans written so far* — Phase 1's
 10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
@@ -86,6 +86,7 @@ phases complete**.
 | Phase 03 P05 | ~20m | 2 tasks | 2 files |
 | Phase 03 P06 | ~30m | 2 tasks | 2 files |
 | Phase 03 P07 | ~35m | 2 tasks | 1 files |
+| Phase 03 P08 | ~50m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -182,6 +183,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-07: PROV-02 is a CALL-SITE rule, not a filename rule -- proven by subprocess count: the same !command logs ONE invocation for two resolutions from auth.json (auth-storage.ts:442-448 -> the memoised resolver) and TWO from models.json apiKey (resolveConfigValueOrThrow -> the uncached one). Falsified by moving the credential between the two files and watching 2 become 1.
 - [Phase 03]: 03-07: the PROV-02 counter is a generated counter.mjs, not a stub-bin PATH stub -- withStubBin is synchronous by contract and deletes its directory the moment the callback returns (stub-bin.ts:205-211), and every resolution here is awaited. Pi runs the command through Git Bash -c, so the .cmd-launcher Windows caveat never arises and neither direction needed narrowing.
 - [Phase 03]: 03-07: the inline-fixture guard scans for a distinctive MARKER string, not for registerProvider( -- harness/index.ts:79 legitimately registers a provider, and the first draft failed on correct code
+- [Phase 03]: the SSO classifier is a message_end handler that REPLACES the finalized message — after_provider_response never fires on a provider error (Trap T2), and message_end runs before the retry gate reads the mutated object
+- [Phase 03]: the original SDK text is carried on the message's diagnostics[] and kept OUT of errorMessage — isRetryableAssistantError reads errorMessage and nothing else, so an `(original: ...)` suffix silently restores 3 retries at 2s/4s/8s against a dead credential (Trap T4)
+- [Phase 03]: a callCount === 1 assertion is only a measurement when paired with a retryable control in the SAME harness — all six SSO strings are ALREADY non-retryable under Pi 0.84.1, so the 1 would hold with the extension uninstalled
 
 ### Pending Todos
 
@@ -227,7 +231,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T15:03:10.525Z
+Last session: 2026-08-13T15:24:38.721Z
 Stopped at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
 Resume file: None
 

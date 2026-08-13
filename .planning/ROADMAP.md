@@ -148,7 +148,7 @@ Plans:
 - [x] 03-05-PLAN.md — `credential.env.AWS_PROFILE` resolution in both directions, and the R1 `modelOverrides` unclamp (PROV-04, PROV-07)
 - [x] 03-06-PLAN.md — `merge_models_json` / `merge_auth_json` in `bin/bootstrap.sh` and the install/idempotence/do-not-clobber test (PROV-01, PROV-04)
 - [x] 03-07-PLAN.md — `!command` forbidden on both uncached surfaces, proven by subprocess count (PROV-02)
-- [ ] 03-08-PLAN.md — `.pi/extensions/providers/`: the `message_end` SSO classifier, actionable message plus `callCount === 1` (PROV-05)
+- [x] 03-08-PLAN.md — `.pi/extensions/providers/`: the `message_end` SSO classifier, actionable message plus `callCount === 1` (PROV-05)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
