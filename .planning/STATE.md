@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-10-PLAN.md — README residual gap stated, docs/RUNBOOK.md seeded with three OUTSTANDING Phase 1 checks, status guard enforced
-last_updated: "2026-08-13T03:42:43.242Z"
-last_activity: 2026-08-13 -- Phase 2 planning complete
+stopped_at: Completed 02-01-PLAN.md — three Wave 0 test helpers, Pitfall-1 guard proven live by falsification
+last_updated: "2026-08-13T03:57:24.428Z"
+last_activity: 2026-08-13 -- Phase 02 Plan 01 complete (Wave 0 test helpers)
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 10
-  percent: 9
+  completed_plans: 11
+  percent: 52
 ---
 
 # Project State
@@ -21,16 +21,20 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 2 — diagnostics — the instrument
+**Current focus:** Phase 02 — diagnostics-the-instrument
 
 ## Current Position
 
-Phase: 2
-Plan: Not started
-Status: Ready to execute
-Last activity: 2026-08-13 -- Phase 2 planning complete
+Phase: 02 (diagnostics-the-instrument) — EXECUTING
+Plan: 2 of 11
+Status: Executing Phase 02
+Last activity: 2026-08-13 -- Phase 02 Plan 01 complete (Wave 0 test helpers)
 
-Progress: [█░░░░░░░░░] 9% (1 of 11 phases complete)
+Progress: [█████░░░░░] 52% (11 of 21 plans complete)
+
+**Read that 52% carefully.** The denominator is *plans written so far* — Phase 1's
+10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
+percentage will fall. The honest phase-level figure is **1 of 11 phases complete**.
 
 ## Performance Metrics
 
@@ -62,6 +66,7 @@ Progress: [█░░░░░░░░░] 9% (1 of 11 phases complete)
 | Phase 01 P08 | 22m | 2 tasks | 3 files |
 | Phase 01 P09 | 20m | 2 tasks | 2 files |
 | Phase 01 P10 | 25m | 3 tasks | 3 files |
+| Phase 02 P01 | 20m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -109,6 +114,10 @@ Recent decisions affecting current work:
 - [Phase 01]: the outstanding-status parser is asserted against a PASSED fixture as well as an OUTSTANDING one — without the PASSED case, asserting OUTSTANDING on the real file is a tautology that passes whatever the file says
 - [Phase 01]: docs/RUNBOOK.md is created in Phase 1 though PROV-09 (Phase 3) owns it — the ownership is stated inline so Phase 3 appends rather than rewrites, and the three Phase 1 checks are not lost in between
 - [Phase 01]: the README's 'not covered' clause is asserted case-sensitively — Task 1's own case-insensitive regex passed against the capitalised heading while the prose instance was split across a line break, i.e. present in spirit and absent as a string
+- [Phase 02]: fauxProvider never calls onPayload (pi-ai faux.ts:510) so before_provider_request never fires under a plain faux session — tests/helpers/faux.ts wraps the provider to emit it at the adapter position, and every capture test must assert captured.length > 0 before asserting content
+- [Phase 02]: the extension under test loads at USER scope (<agentDir>/extensions/<name>/index.ts) — project-scoped .pi/extensions is gated behind project trust, which resolves false headless with no UI to answer it
+- [Phase 02]: the faux session cwd is always a temp dir outside this repo — from inside it Pi walks up and loads the 49 KB CLAUDE.md into every faux request (12,725 input tokens for a one-word prompt), so any token measurement would be measuring the harness
+- [Phase 02]: two JSONL readers, not one — readTornSafe reports a torn line as data because DIAG-08 is a measurement, and readJsonl throws so a writer bug in a test-authored file stays loud; the difference is asserted on the same fixture
 
 ### Pending Todos
 
@@ -154,8 +163,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T01:30:16.946Z
-Stopped at: Completed 01-10-PLAN.md — README residual gap stated, docs/RUNBOOK.md seeded with three OUTSTANDING Phase 1 checks, status guard enforced
+Last session: 2026-08-13T03:57:24.418Z
+Stopped at: Completed 02-01-PLAN.md — three Wave 0 test helpers, Pitfall-1 guard proven live by falsification
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
