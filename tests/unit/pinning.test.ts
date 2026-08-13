@@ -102,6 +102,30 @@ const REQUIRED_DEV_PINS: Record<string, string> = {
 };
 
 /**
+ * `dependencies` (runtime, installed by `npm install --omit=dev`) mirrors
+ * `REQUIRED_DEV_PINS`' shape for exactly one package, `unbash@4.0.10`.
+ *
+ * Why this cannot live in `devDependencies`: Pi installs a consumer's clone
+ * with `npm install --omit=dev` (CLAUDE.md, "Runtime deps must be in
+ * `dependencies`"; `docs/packages.md`), so anything in `devDependencies`
+ * simply never reaches a machine that installs this repo as a Pi package.
+ * `unbash` is the AST parser Phase 4's safety guard runs on every `bash`
+ * tool call -- it sits in the tool-execution path, not the dev toolchain.
+ *
+ * Why this is governed at all: `unbash` is the one package audited in
+ * `.planning/phases/04-safety-deployment-guardrails/04-RESEARCH.md`
+ * ("Package Legitimacy Audit" -- Approved, slopcheck `[OK]`). An ungoverned
+ * `dependencies` block is exactly where the next, unaudited package would
+ * land silently -- the same reasoning `REQUIRED_DEV_PINS` above already
+ * states for the six toolchain pins. `EXACT_FIELDS` (`:84`) already forbids
+ * a range operator on `dependencies`; this constant additionally pins WHICH
+ * keys are allowed to be there, and at what version.
+ */
+const REQUIRED_RUNTIME_PINS: Record<string, string> = {
+	unbash: "4.0.10",
+};
+
+/**
  * True when a Pi package source cannot silently move under you.
  *
  * `pi update --extensions` reconciles an existing install to the configured
@@ -253,6 +277,31 @@ describe("BOOT-08.3 -- the toolchain matches Pi core 0.84.1, not the registry", 
 	it("declares no dev dependency beyond the six audited pins", () => {
 		// Anything extra has not been through the Package Legitimacy Audit.
 		expect(Object.keys(dev).sort()).toEqual(Object.keys(REQUIRED_DEV_PINS).sort());
+	});
+});
+
+describe("BOOT-08.5 -- the runtime dependencies block is governed exactly like devDependencies", () => {
+	const runtime = depMap("dependencies");
+
+	for (const [name, version] of Object.entries(REQUIRED_RUNTIME_PINS)) {
+		it(`pins ${name} at ${version}`, () => {
+			expect(runtime[name]).toBe(version);
+		});
+	}
+
+	it("declares no runtime dependency beyond the audited pin", () => {
+		// Same reasoning as BOOT-08.3's dev-pin equivalent: anything extra has not
+		// been through the Package Legitimacy Audit, and `dependencies` is what a
+		// consumer's `npm install --omit=dev` actually installs.
+		expect(Object.keys(runtime).sort()).toEqual(Object.keys(REQUIRED_RUNTIME_PINS).sort());
+	});
+
+	it("carries no range operator on the runtime pin (belt-and-suspenders with BOOT-08.1)", () => {
+		for (const [name, version] of Object.entries(runtime)) {
+			expect(RANGE_OPERATOR.test(version), `dependencies["${name}"] = "${version}" is a RANGE, not a pin`).toBe(
+				false,
+			);
+		}
 	});
 });
 
