@@ -195,7 +195,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 04-07-PLAN.md — `policy.ts` deny-by-default composer and `approvals.ts` one-shot grants
+- [x] 04-07-PLAN.md — `policy.ts` deny-by-default composer and `approvals.ts` one-shot grants
 
 **Wave 5** *(blocked on Wave 4 completion)*
 

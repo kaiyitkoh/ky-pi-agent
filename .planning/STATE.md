@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-08-13T21:02:17.505Z"
+last_updated: "2026-08-13T21:21:12.770Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 44
-  completed_plans: 38
+  completed_plans: 39
   percent: 27
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 04 (safety-deployment-guardrails) — EXECUTING
-Plan: 7 of 12
+Plan: 8 of 12
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 89%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -100,6 +100,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 04 P04 | 25min | 2 tasks | 2 files |
 | Phase 04 P05 | 25min | 2 tasks | 3 files |
 | Phase 04 P06 | 25min | 2 tasks | 2 files |
+| Phase 04 P07 | 45min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -228,6 +229,8 @@ Recent decisions affecting current work:
 - [Phase 04]: currentBranch returns the distinct DETACHED_HEAD sentinel on any non-zero git symbolic-ref exit, never undefined -- a caller's === comparison against a protected-branch name would otherwise silently fail open on a detached checkout
 - [Phase 04-06]: SAFE-07: AWS sensitive-read checked before safe-operation, falsified by reversing the checks and watching tests go red before restoring
 - [Phase 04-06]: SAFE-07: unknown terraform subcommands and unknown kubectl verbs default to confirm, not allow or a hard block -- distinct from git.ts's protected-HEAD posture
+- [Phase 04]: policy.ts's bash argument scan applies classifyPathRead only (never classifyPathWrite) to avoid blocking ordinary absolute-path arguments — classifyPathWrite's project-root containment would false-positive on most bash args outside the repo; SAFE-13 detonation targets are exercised directly via the write/edit tool surface instead
+- [Phase 04]: approvals.ts grants are keyed on requestKey (a content fingerprint), never on the caller-chosen request id — the id identifies one approval conversation; only a fingerprint of the actual command/tool/cwd is safe to trust as the thing being authorised, preventing a laundered-command approval (T-04-09)
 
 ### Pending Todos
 
@@ -275,8 +278,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T21:02:17.496Z
+Last session: 2026-08-13T21:21:12.760Z
 Stopped at: Completed 04-06-PLAN.md
-Resume file: None
+Resume file: Completed 04-07-PLAN.md
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
