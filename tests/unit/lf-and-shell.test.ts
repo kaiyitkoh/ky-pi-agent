@@ -95,8 +95,21 @@ export function hasCarriageReturn(bytes: Buffer): boolean {
  *   `[[`        bash/ksh keyword; `sh` has only `[`.
  *   `sort -V`   GNU version sort; absent on BSD sort.
  *   `declare`   bash builtin; `sh` has none. `-A` additionally needs bash 4.
+ *   `typeset`   ksh/bash builtin; dash has none.
+ *   `local`     not in POSIX (shellcheck SC3043); dash accepts it, other `sh`
+ *               implementations do not, and the header of `bin/bootstrap.sh`
+ *               forbids it outright.
  *   `${v^^}`    bash-4 case modification; a syntax error on bash 3.2.
  *   `${v,,}`    same.
+ *
+ * `declare`, `typeset` and `local` are invisible to `dash -n` below: a parse
+ * does not resolve builtins, so `dash -n` exits 0 on all three while
+ * `sh bin/bootstrap.sh` would die with `declare: not found` on the ubuntu CI
+ * leg, where /bin/sh IS dash. This table is therefore the only offline gate
+ * that sees them, and the reason they are listed here rather than left to
+ * shellcheck (ubuntu-only in CI, and not installed on the Windows dev box).
+ * They are anchored to statement position so prose in a comment or the word
+ * "local" inside a string cannot trip them.
  *
  * The `[[` pattern excludes a following `:`, because `[[:space:]]`, `[[:alpha:]]`
  * and friends are POSIX bracket-expression character classes -- fully portable,
@@ -113,6 +126,11 @@ const BASHISMS: ReadonlyArray<{ readonly label: string; readonly pattern: RegExp
 	{ label: "[[ ... ]] double-bracket test", pattern: /\[\[(?!:)/ },
 	{ label: "sort -V (GNU version sort, absent on BSD)", pattern: /\bsort\s+-V\b/ },
 	{ label: "declare -A (bash 4 associative array)", pattern: /\bdeclare\s+-A\b/ },
+	{
+		label: "declare / typeset (bash builtin; dash has neither)",
+		pattern: /^[ \t]*(declare|typeset)[ \t]+/m,
+	},
+	{ label: "local (not POSIX; shellcheck SC3043)", pattern: /^[ \t]*local[ \t]+/m },
 	{ label: "${v^^} / ${v,,} bash 4 case modification", pattern: /\$\{[A-Za-z_][A-Za-z0-9_]*(\^\^|,,)/ },
 ];
 
@@ -185,6 +203,15 @@ describe("BOOT-06 -- every shipped script is POSIX sh, not bash", () => {
 			"sort -V (GNU version sort, absent on BSD)",
 		);
 		expect(findBashisms("declare -A map")).toContain("declare -A (bash 4 associative array)");
+		expect(findBashisms("declare x=1\n")).toContain(
+			"declare / typeset (bash builtin; dash has neither)",
+		);
+		expect(findBashisms("typeset -A m\n")).toContain(
+			"declare / typeset (bash builtin; dash has neither)",
+		);
+		expect(findBashisms("f() {\n\tlocal x=1\n}\n")).toContain(
+			"local (not POSIX; shellcheck SC3043)",
+		);
 		expect(findBashisms('echo "${name^^}"')).toContain(
 			"${v^^} / ${v,,} bash 4 case modification",
 		);
@@ -199,6 +226,11 @@ describe("BOOT-06 -- every shipped script is POSIX sh, not bash", () => {
 		expect(findBashisms('echo "${out#*error}"')).toEqual([]);
 		expect(findBashisms("grep -v '^[[:space:]]*ignore-scripts[[:space:]]*='")).toEqual([]);
 		expect(findBashisms("sed 's/[[:alpha:]][[:digit:]]//'")).toEqual([]);
+		// `local` / `declare` are anchored to statement position, so prose and
+		// string contents must not trip them -- the same disable-the-lint risk.
+		expect(findBashisms("# no local variables here\n")).toEqual([]);
+		expect(findBashisms('  echo "a local copy"\n')).toEqual([]);
+		expect(findBashisms("# we declare nothing\n")).toEqual([]);
 		// …but the class exclusion must not blind it to the real keyword.
 		expect(findBashisms('if [[ "$a" == "$b" ]]; then :; fi')).toContain(
 			"[[ ... ]] double-bracket test",

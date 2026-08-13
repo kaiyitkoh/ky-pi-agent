@@ -191,6 +191,28 @@ that `tests/unit/lf-and-shell.test.ts:101-107` documents and excludes with
 `/\[\[(?!:)/`. Nothing in this plan added a bashism: the real gates —
 `findBashisms` and `dash -n bin/bootstrap.sh` — are both green.
 
+**RESOLVED 2026-08-14 (phase-close sweep).** The paragraph above understated the
+problem, and the understatement is the interesting part. The criterion was false
+in *both* directions. Red-on-clean is only the visible half: because that grep
+was the sole place `local` and `declare` were checked anywhere in the repo, and
+it could only ever be waived, nothing gated them. `findBashisms` had no `local`
+pattern at all and matched only `declare -A` (uppercase `-A`); `dash -n` parses
+`local`, `declare` and `typeset` without complaint because a parse does not
+resolve builtins. Executed: replacing `_label=$1` at `bin/bootstrap.sh:295` with
+`local _label=$1` left the ENTIRE local suite green, while on the ubuntu CI leg
+(`/bin/sh` is dash) `declare` would abort the script at runtime with
+`declare: not found`. The claim that "the real gates are both green" was true
+only because those gates were not looking.
+
+Fix: `tests/unit/lf-and-shell.test.ts` `BASHISMS` gains two statement-anchored
+entries — `declare`/`typeset` and `local` — plus live positive controls and
+three prose/string near-miss controls. Falsified against all three mutations
+(`local`, `declare`, `typeset` at `bin/bootstrap.sh:295`); each turns
+`bin/bootstrap.sh uses no bash-4 or GNU-only construct` red with a named label,
+and `dash -n` exits 0 on all three. The plan-level criteria at
+`03-06-PLAN.md:125` and `01-05-PLAN.md:121,189` were rewritten to point at the
+live test instead of restating the broken grep.
+
 No Rule 4 (architectural) decisions arose. No packages were installed; the test
 stubs `npm` in every run.
 
