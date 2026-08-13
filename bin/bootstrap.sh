@@ -303,10 +303,20 @@ assert_user_scope() {
 # at user scope. Pi creates this directory itself (ensureNpmProject,
 # package-manager.ts:1975-1986) and only ever creates files that are absent, so
 # a .npmrc placed here survives.
+#
+# NEVER A WHOLE-FILE REWRITE, for the same reason merge_settings is careful
+# below: this is a normal npm project config for the user-scope prefix, and a
+# private registry, a proxy or a //registry.internal/:_authToken are all
+# legitimate contents. Truncating it is credential destruction, not hardening.
+# Only the `ignore-scripts` line is ours; everything else is the user's.
+#
+# Byte-idempotent: the repair branch leaves `ignore-scripts=true` in the file,
+# so every later run takes the "already hardened" branch and writes nothing.
 harden_pi_npm_root() {
 	mkdir -p "$PI_NPM_ROOT"
 	_rc_file="$PI_NPM_ROOT/.npmrc"
-	if [ ! -f "$_rc_file" ] || ! grep -q '^ignore-scripts=true' "$_rc_file"; then
+
+	if [ ! -f "$_rc_file" ]; then
 		{
 			printf '%s\n' '# Written by ky-pi-agent bin/bootstrap.sh. See docs/RUNBOOK.md.'
 			printf '%s\n' '#'
@@ -320,9 +330,26 @@ harden_pi_npm_root() {
 			printf '%s\n' 'ignore-scripts=true'
 		} >"$_rc_file"
 		printf '  wrote %s\n' "$_rc_file"
-	else
+	elif grep -q '^ignore-scripts=true' "$_rc_file"; then
 		printf '  %s already hardened\n' "$_rc_file"
+	else
+		# Back up FIRST, then rebuild from the backup: every line the user put
+		# there is carried over, and only an existing (wrong) ignore-scripts
+		# setting is dropped, because a later duplicate would not reliably win.
+		# `|| true` on the grep: it exits 1 when the filtered result is empty,
+		# which is a legitimate input (a one-line `ignore-scripts=false` file),
+		# not an error, and `set -e` would otherwise abort mid-write.
+		cp "$_rc_file" "$_rc_file.kypi-backup"
+		grep -v '^[[:space:]]*ignore-scripts[[:space:]]*=' "$_rc_file.kypi-backup" \
+			>"$_rc_file" || true
+		{
+			printf '%s\n' '# Added by ky-pi-agent bin/bootstrap.sh. See docs/RUNBOOK.md.'
+			printf '%s\n' 'ignore-scripts=true'
+		} >>"$_rc_file"
+		printf '  updated %s (ignore-scripts line added; every other line kept)\n' "$_rc_file"
+		printf '  previous contents backed up at %s.kypi-backup\n' "$_rc_file"
 	fi
+
 	assert_user_scope
 }
 
