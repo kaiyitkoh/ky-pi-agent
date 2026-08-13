@@ -1,5 +1,5 @@
 /**
- * PROV-03 — the DashScope compat block, asserted on the WIRE.
+ * PROV-03 / PROV-10 — the DashScope compat block, asserted on the WIRE.
  *
  * ---------------------------------------------------------------------------
  * WHAT THIS FILE IS, AND WHAT IT IS NOT
@@ -33,8 +33,19 @@
  * ordinary DashScope turn returns 200 and the wire dump shows this same field
  * set) and `RB-03-02` (the SECOND turn of a tool-calling sequence returns 200
  * rather than the `reasoning_content` 400) in `docs/RUNBOOK.md`. Both are
- * **OUTSTANDING**, and nothing green here may be read as discharging either of
- * them (Trap T12).
+ * **OUTSTANDING**, this file is the offline proxy `RB-03-02` names, and nothing
+ * green here may be read as discharging either of them (Trap T12).
+ *
+ * ---------------------------------------------------------------------------
+ * THE PROV-10 MECHANISM, STATED ONCE
+ * ---------------------------------------------------------------------------
+ * `convertMessages` inserts `reasoning_content: ""` on a replayed assistant
+ * message when `compat.requiresReasoningContentOnAssistantMessages && model.reasoning`
+ * and the key is not already set [pi-ai `openai-completions.ts:1223-1229`]. The
+ * value `""` is correct and expected — Pi is the thing that puts it there. Its
+ * ABSENCE is what returns HTTP 400 on the second turn of a tool sequence while
+ * the first turn succeeds, which is why the failure reads as intermittent rather
+ * than as a misconfiguration. Two controls below prove the assertion can fail.
  *
  * ---------------------------------------------------------------------------
  * NO REQUEST IN THIS FILE LEAVES 127.0.0.1
@@ -53,7 +64,7 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Context, Message, Tool } from "@earendil-works/pi-ai";
+import type { AssistantMessage, Context, Message, Tool } from "@earendil-works/pi-ai";
 import { Type } from "typebox";
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -115,6 +126,54 @@ const REQUEST_OPTIONS = {
 /** One user message. The ordinary-turn shape `RB-03-01` describes. */
 const ONE_TURN: Message[] = [{ role: "user", content: "hello", timestamp: 1 }];
 
+const TOOL_CALL_ID = "call_kypi_fixture_1";
+
+/**
+ * A replayed two-turn tool sequence, built by hand.
+ *
+ * The assistant entry carries a tool call and NOTHING resembling reasoning
+ * content — pi-ai's `AssistantMessage` has no `reasoning_content` field at all
+ * [pi-ai 0.84.1 `dist/types.d.ts:295-310`], so the fixture is structurally
+ * incapable of supplying the key the PROV-10 case asserts. Whatever appears on
+ * the wire was put there by the adapter. The two controls prove that claim
+ * rather than resting on it. [threat T-03-09-05]
+ */
+const TWO_TURN: Message[] = [
+	{ role: "user", content: "read package.json", timestamp: 1 },
+	{
+		role: "assistant",
+		content: [
+			{
+				type: "toolCall",
+				id: TOOL_CALL_ID,
+				name: FIXTURE_TOOL.name,
+				arguments: { path: "package.json" },
+			},
+		],
+		api: "openai-completions",
+		provider: PROVIDER_ID,
+		model: MODEL_ID,
+		usage: {
+			input: 0,
+			output: 0,
+			cacheRead: 0,
+			cacheWrite: 0,
+			totalTokens: 0,
+			cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 },
+		},
+		stopReason: "toolUse",
+		timestamp: 2,
+	} satisfies AssistantMessage,
+	{
+		role: "toolResult",
+		toolCallId: TOOL_CALL_ID,
+		toolName: FIXTURE_TOOL.name,
+		content: [{ type: "text", text: '{"name":"fixture"}' }],
+		isError: false,
+		timestamp: 3,
+	},
+];
+
 /**
  * Parse the models template the way `bin/bootstrap.sh` does: WHOLE-LINE `//`
  * only, which is what the template's own header promises. A naive strip of every
@@ -152,6 +211,8 @@ function templateProvider(): Record<string, unknown> {
 /** Loosely-typed views of the emitted body. Nothing here is retyped from Pi. */
 interface WireMessage {
 	role?: unknown;
+	tool_calls?: unknown;
+	reasoning_content?: unknown;
 }
 interface WireTool {
 	function?: Record<string, unknown>;
@@ -237,7 +298,8 @@ async function captureOne(
  * THE VACUITY GUARD, and it is the most important function in this file.
  *
  * Every absence assertion below — no `store`, no `developer` role, no `strict`,
- * no `prompt_cache_*` — is satisfied PERFECTLY by an empty or missing body. So no case may touch a body it has not first proved
+ * no `prompt_cache_*`, no `reasoning_content` — is satisfied PERFECTLY by an
+ * empty or missing body. So no case may touch a body it has not first proved
  * exists, and each case calls this as its first statement.
  * [threat T-03-09-04]
  */
@@ -282,6 +344,9 @@ function wireTools(body: Record<string, unknown>): WireTool[] {
 
 let shipped: Capture;
 let detectionDefaults: Capture;
+let replay: Capture;
+let replayWithoutCompatField: Capture;
+let replayWithoutReasoning: Capture;
 
 beforeAll(async () => {
 	// One capture per fixture, taken once. Each is a full server + registry +
@@ -302,8 +367,39 @@ beforeAll(async () => {
 		delete compat.supportsStrictMode;
 		delete compat.supportsLongCacheRetention;
 	});
-});
 
+	replay = await captureOne("shipped template, replayed two-turn", TWO_TURN);
+
+	// CONTROL 1 — without the compat field the key must vanish. Without this, an
+	// assertion that read the wrong object, or a fixture that somehow carried the
+	// key itself, would pass while proving nothing. [threat T-03-09-05]
+	replayWithoutCompatField = await captureOne(
+		"two-turn, requiresReasoningContentOnAssistantMessages removed",
+		TWO_TURN,
+		(provider) => {
+			for (const model of provider.models as Record<string, unknown>[]) {
+				delete (model.compat as Record<string, unknown>)
+					.requiresReasoningContentOnAssistantMessages;
+			}
+		},
+	);
+
+	// CONTROL 2 — TRAP T5. The emission is `compat.requires… && model.reasoning`
+	// [`:1223-1229`], and `modelFromJson` defaults `reasoning` to FALSE when the
+	// key is omitted [pi `provider-composer.ts:156`]. So a template that forgets
+	// `reasoning: true` re-opens the 400 with a perfectly correct compat block
+	// sitting next to it doing nothing. Without this control, a reader could
+	// believe the compat field alone is sufficient. [threat T-03-09-05]
+	replayWithoutReasoning = await captureOne(
+		"two-turn, reasoning:false on the model entry",
+		TWO_TURN,
+		(provider) => {
+			for (const model of provider.models as Record<string, unknown>[]) {
+				model.reasoning = false;
+			}
+		},
+	);
+});
 
 describe("PROV-03 — the shipped compat block, on the wire", () => {
 	it("case 0 — one request was captured, and it went to 127.0.0.1", () => {
@@ -353,7 +449,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 				(model as Record<string, unknown>).compat,
 			),
 			"the per-model compat blocks in the fixture are not the template's. The PROV-10 " +
-				"half of this file reads exactly this field.",
+				"cases below read exactly this field.",
 		).toEqual((template.models as unknown[]).map((model) => (model as Record<string, unknown>).compat));
 
 		const changed = Object.keys(template)
@@ -594,5 +690,123 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 					"stale: re-read `convertTools` before editing this case.",
 			).toBe(false);
 		}
+	});
+});
+
+describe("PROV-10 — reasoning_content on a replayed two-turn context", () => {
+	it("case 5 — the replayed assistant message with tool_calls carries reasoning_content", () => {
+		const body = wireBody(replay);
+		const messages = wireMessages(body);
+
+		expect(
+			messages.length,
+			"the two-turn body carries no messages, so the search below iterates nothing",
+		).toBeGreaterThan(0);
+
+		const assistant = messages.find((message) => message.role === "assistant");
+		expect(
+			assistant,
+			"no assistant message survived conversion. `convertMessages` drops an assistant " +
+				"entry with neither content nor tool_calls, so this fixture's tool call must be " +
+				"reaching the wire for the assertion below to mean anything.",
+		).toBeDefined();
+
+		// The paired positive: the message this case is about really is the one
+		// carrying the tool call. An assistant message with `reasoning_content` and
+		// no `tool_calls` would be a different (and harmless) thing entirely.
+		expect(
+			Array.isArray(assistant?.tool_calls) && (assistant?.tool_calls as unknown[]).length,
+			"the replayed assistant message reached the wire WITHOUT its tool_calls, so this " +
+				"is not the second-turn shape PROV-10 is about",
+		).toBe(1);
+
+		// THE ASSERTION THIS HALF OF THE FILE EXISTS FOR. The KEY'S PRESENCE is the
+		// claim; the value `""` is correct and expected, because Pi is what inserts
+		// it [`:1223-1229`]. Its absence is the HTTP 400 on the second turn of every
+		// tool sequence, while the first turn succeeds.
+		expect(
+			Object.hasOwn(assistant ?? {}, "reasoning_content"),
+			"the replayed assistant message carrying tool_calls has NO `reasoning_content` " +
+				"key. That is exactly the second-turn 400: the first turn of a tool sequence " +
+				"succeeds and the second is rejected, which is why the failure reads as " +
+				"intermittent rather than as a misconfiguration. Check " +
+				"`requiresReasoningContentOnAssistantMessages` on the model entry AND " +
+				"`reasoning: true` beside it — the emission is gated on both.",
+		).toBe(true);
+		expect(
+			assistant?.reasoning_content,
+			'Pi inserts the empty string. A non-empty value would mean something other than ' +
+				"the adapter put this key here, which is what the two controls below rule out.",
+		).toBe("");
+	});
+
+	it("case 6 — control: without the compat field, the key is gone", () => {
+		// WHAT WOULD SILENTLY PASS WITHOUT THIS. A case 5 that read the wrong
+		// object, matched on a key some other layer adds, or asserted against a
+		// fixture that carried the key itself would be green forever. This is the
+		// same body, same context, same adapter, with exactly one compat key
+		// removed. [threat T-03-09-05]
+		const body = wireBody(replayWithoutCompatField);
+		const assistant = wireMessages(body).find((message) => message.role === "assistant");
+
+		expect(
+			assistant,
+			"the control emitted no assistant message, so its absence assertion would pass " +
+				"over nothing — the control would be the vacuous one",
+		).toBeDefined();
+		expect(
+			Array.isArray(assistant?.tool_calls) && (assistant?.tool_calls as unknown[]).length,
+			"the control's assistant message lost its tool_calls, so it is not the same shape " +
+				"case 5 asserts on and the comparison is not like-for-like",
+		).toBe(1);
+
+		expect(
+			Object.hasOwn(assistant ?? {}, "reasoning_content"),
+			"`reasoning_content` is present even with " +
+				"`requiresReasoningContentOnAssistantMessages` REMOVED. Something other than " +
+				"that compat field is putting the key on the wire, so case 5 is not evidence " +
+				"about the template's compat block at all.",
+		).toBe(false);
+	});
+
+	it("case 7 — control (Trap T5): with reasoning:false the key is gone even with the compat field set", () => {
+		// WHAT WOULD SILENTLY PASS WITHOUT THIS. A reader could conclude that
+		// `requiresReasoningContentOnAssistantMessages` alone is sufficient. It is
+		// not: the emission is `compat.requires… && model.reasoning` [`:1223-1229`],
+		// and `modelFromJson` defaults `reasoning` to FALSE when the key is omitted
+		// [pi `provider-composer.ts:156`]. So a template that drops `reasoning: true`
+		// disables thinking AND re-opens the 400, together, with a perfectly correct
+		// compat block sitting beside it doing nothing.
+		const body = wireBody(replayWithoutReasoning);
+		const assistant = wireMessages(body).find((message) => message.role === "assistant");
+
+		expect(assistant, "the control emitted no assistant message").toBeDefined();
+		expect(
+			Array.isArray(assistant?.tool_calls) && (assistant?.tool_calls as unknown[]).length,
+			"the control's assistant message lost its tool_calls, so the comparison with case " +
+				"5 is not like-for-like",
+		).toBe(1);
+
+		expect(
+			Object.hasOwn(assistant ?? {}, "reasoning_content"),
+			"`reasoning_content` survived `reasoning: false`, which contradicts the " +
+				"`&& model.reasoning` gate at `:1225`. Either pi-ai changed or this control is " +
+				"not driving the model it thinks it is.",
+		).toBe(false);
+
+		// The second half of Trap T5, on the same body: forgetting `reasoning` does
+		// not only re-open the 400, it silently disables thinking. Both failures
+		// arrive together and neither is visible from the UI.
+		expect(
+			Object.hasOwn(body, "enable_thinking"),
+			"`enable_thinking` survived `reasoning: false`. Every thinkingFormat branch is " +
+				"`compat.thinkingFormat === X && model.reasoning` [`:748`, `:761`], so this " +
+				"should have vanished with the reasoning flag.",
+		).toBe(false);
+		expect(
+			Object.hasOwn(body, "reasoning_effort"),
+			"`reasoning_effort` survived `reasoning: false`, which is the other half of the " +
+				"same gate",
+		).toBe(false);
 	});
 });
