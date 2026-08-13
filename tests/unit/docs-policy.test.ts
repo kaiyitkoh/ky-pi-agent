@@ -24,15 +24,18 @@
  * a regex that matches nothing would otherwise pass while proving nothing —
  * the failure shape this phase has already tripped over more than once.
  *
- * THE GUARD SPANS BOTH PHASES. It was written in Phase 1 against a literal
+ * THE GUARD SPANS THREE PHASES. It was written in Phase 1 against a literal
  * `RB-01-\d{2}`, which meant appending Phase 2's entries would have left three
  * new statuses completely unguarded — the one outcome the policy above exists
  * to prevent, arriving quietly through a file that was never touched. The id
  * pattern is now `RB-<phase>-<n>` and {@link ALL_IDS} drives Group B and
  * Group C, so a future phase adds its ids to one array and inherits the whole
- * guard. Group C carries a synthetic `RB-02-01` fixture as well as the Phase 1
- * ones, because a generalisation that only the real file exercises is a
- * generalisation nobody has tested.
+ * guard. Phase 3 is the first phase to collect on that promise: extending
+ * {@link ALL_IDS} and adding five {@link ENTRY_COMMANDS} rows was the entire
+ * change, and `ID_RE`, {@link runbookEntryStatuses} and both loops below were
+ * left alone. Group C carries a synthetic `RB-02-01` fixture and a synthetic
+ * `RB-03-01` fixture as well as the Phase 1 ones, because a generalisation
+ * that only the real file exercises is a generalisation nobody has tested.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -61,8 +64,22 @@ const PHASE_ONE_IDS = ["RB-01-01", "RB-01-02", "RB-01-03"] as const;
  */
 const PHASE_TWO_IDS = ["RB-02-01", "RB-02-02", "RB-02-03"] as const;
 
+/**
+ * The Phase 3 entries this file governs.
+ *
+ * All five need the work laptop and a credential this machine does not hold: a
+ * live DashScope key for the wire-level compat check (RB-03-01) and the
+ * two-turn tool-calling check (RB-03-02), an IAM Identity Center session for
+ * Bedrock (RB-03-03), a live DeepSeek-direct key for the R1 token counts
+ * (RB-03-04), and a Model Studio console login for the real cap and price
+ * (RB-03-05). Every one of them has a green offline proxy in this repository,
+ * and not one of those proxies is the check — which is the entire reason this
+ * array exists rather than a `[x]` in a requirements file.
+ */
+const PHASE_THREE_IDS = ["RB-03-01", "RB-03-02", "RB-03-03", "RB-03-04", "RB-03-05"] as const;
+
 /** Every governed entry, in phase order. A later phase appends its array here. */
-const ALL_IDS = [...PHASE_ONE_IDS, ...PHASE_TWO_IDS] as const;
+const ALL_IDS = [...PHASE_ONE_IDS, ...PHASE_TWO_IDS, ...PHASE_THREE_IDS] as const;
 
 /**
  * Matches any runbook entry id, of any phase.
@@ -266,6 +283,68 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		`cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":' | wc -l`,
 		`cat .pi/logs/turns-*.jsonl | grep -cF '"event":"prose_tool_call_retry_exhausted"'`,
 	],
+	// PHASE 3 PINS WHOLE ONE-LINE COMMANDS, following RB-02-03's lesson above
+	// rather than RB-02-01/02's fragments. Every command below sits inside
+	// backticks on a single line of a numbered list, so it is not subject to
+	// reflow, and each is distinct from every other command in the file --
+	// verified once by counting occurrences in the runbook, because a pin that
+	// also matches a neighbouring entry's command stays green when the entry that
+	// owns it drops it, which is the same blindness the fragment pins had.
+	//
+	// Each of these five entries needs a credential this machine does not hold,
+	// so the commands are the only thing about them that CAN be checked here.
+	// Pinning them is what stops a documentation tidy-up leaving an operator to
+	// reconstruct the step -- and a step that gets reconstructed gets done
+	// differently every time, in a runbook whose whole value is that two runs are
+	// comparable.
+
+	// The request record carries the compat block on the wire; the response
+	// record is the 200 that says DashScope accepted it. Both are needed: a 200
+	// with no `enable_thinking` is a finding, not a pass. The base-URL export is
+	// pinned whole because the remedy is worthless in halves -- exporting the
+	// variable without re-running bootstrap changes nothing on disk.
+	"RB-03-01": [
+		`cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 1`,
+		`grep -F '"kind":"main.response"' .pi/logs/wire-$(date +%F).jsonl | tail -n 1`,
+		`export KYPI_DASHSCOPE_BASE_URL="https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" && sh bin/bootstrap.sh`,
+	],
+
+	// `tail -n 2`, not `-n 1`: the FIRST turn of a tool sequence always works, so
+	// a procedure that reads one record reads the turn that cannot fail. The
+	// turns command is what surfaces the provider's message when the second
+	// request 4xx'd and therefore left no response record at all.
+	"RB-03-02": [
+		`cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 2`,
+		`cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"kind":"turn"' | tail -n 2`,
+	],
+
+	// The `&& echo` half is not decoration and must not be dropped: `aws sso
+	// login` sets no environment variable, so a successful login with an empty
+	// `AWS_PROFILE` is precisely the state in which Bedrock does not work and
+	// everything looks configured. The turns-row command is provider-filtered so
+	// it cannot be satisfied by some other provider's row.
+	"RB-03-03": [
+		`aws sso login --profile X && echo $AWS_PROFILE`,
+		`cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"provider":"amazon-bedrock"' | tail -n 1`,
+	],
+
+	// Step 1 is the stop condition for the whole experiment -- a malformed
+	// `modelOverrides` edit invalidates every measurement below it -- and steps 4
+	// and 5 are the two records the four recorded fragments come from.
+	"RB-03-04": [
+		"pi --list-models | grep deepseek-v4-flash",
+		`tail -n 5 .pi/logs/wire-$(date +%F).jsonl`,
+		`cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"kind":"turn"' | tail -n 1`,
+	],
+
+	// The vitest run is the step that makes the console reading land in the
+	// repository rather than in a note: the allowlist is asserted in both
+	// directions, so a price written into the template without the matching
+	// allowlist removal fails there and nowhere else.
+	"RB-03-05": [
+		"npx vitest run tests/unit/model-metadata.test.ts",
+		`pi --list-models | grep -F 'deepseek-v4-pro'`,
+	],
 };
 
 /** Matches a repo-relative test path mentioned anywhere in the runbook prose. */
@@ -321,6 +400,37 @@ describe("Group B — the runbook is structurally complete", () => {
 			"the runbook points at offline-proxy tests that do not exist. A runbook citing a proxy that " +
 				"was never written is worse than no runbook: it converts an open question into a false " +
 				"claim of partial coverage",
+		).toEqual([]);
+	});
+
+	it("governs every entry the runbook declares — an id outside ALL_IDS is an unguarded status", () => {
+		// [Rule 2 — missing critical functionality, added by plan 03-11] Everything
+		// else in this file asserts that the ids in ALL_IDS are OUTSTANDING. Nothing
+		// asserted the converse: that ALL_IDS covers the file. Both loops iterate
+		// ALL_IDS, so DELETING `...PHASE_THREE_IDS` from it leaves five live checks
+		// with no assertion at all and the suite GREENER than before -- the same
+		// silent shape as Phase 1's literal `RB-01-\d{2}`, arriving through a
+		// one-token edit instead of through a new phase. A guard that can be
+		// disarmed by removing something is not a guard.
+		//
+		// This reads the ids OUT OF THE FILE, so a sixth Phase 3 entry appended
+		// without extending PHASE_THREE_IDS also fails here rather than landing
+		// unguarded.
+		const declared = Object.keys(runbookEntryStatuses(runbook));
+
+		expect(
+			declared.length,
+			"no RB-<phase>-<n> id parsed out of docs/RUNBOOK.md at all, so the comparison below has " +
+				"nothing on one side of it and cannot fail",
+		).toBeGreaterThanOrEqual(ALL_IDS.length);
+
+		const ungoverned = declared.filter((id) => !(ALL_IDS as readonly string[]).includes(id));
+		expect(
+			ungoverned,
+			"docs/RUNBOOK.md declares these ids and no phase array in this file lists them, so their " +
+				"statuses are parsed and then asserted by nothing. Add them to the phase array for " +
+				"their phase -- that is the entire cost of inheriting this guard, and it is why the " +
+				"id pattern was generalised in the first place.",
 		).toEqual([]);
 	});
 
@@ -407,6 +517,39 @@ const FIXTURE_PHASE_TWO_HALF_FLIPPED = [
 ].join("\n");
 
 /**
+ * The same two-source shape carrying a PHASE 3 id.
+ *
+ * Written for the reason {@link FIXTURE_PHASE_TWO} states and which has not
+ * expired: the generalised parser is proven off the real runbook only, and the
+ * real runbook is the file this guard exists to police. A phase array can be
+ * extended while the parser silently fails to see the new shape, and that
+ * failure is not a red suite — it is `statuses[id] === undefined`, which the
+ * loop below would report as "RB-03-01 is recorded as undefined". These two
+ * fixtures are what make that impossible.
+ */
+const FIXTURE_PHASE_THREE = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-03-01 | example phase 3 check | OUTSTANDING |",
+	"",
+	"### RB-03-01 — example phase 3 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+const FIXTURE_PHASE_THREE_HALF_FLIPPED = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-03-01 | example phase 3 check | PASSED — 2026-08-14 |",
+	"",
+	"### RB-03-01 — example phase 3 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+/**
  * A malformed id in the same two-source shape.
  *
  * Widening the pattern is one edit away from widening it too far — `RB-[\d-]+`
@@ -462,6 +605,21 @@ describe("Group C — the parser catches a status flip", () => {
 		});
 	});
 
+	it("reads a Phase 3 id, so the third phase's statuses are parsed rather than assumed", () => {
+		expect(
+			runbookEntryStatuses(FIXTURE_PHASE_THREE),
+			"PHASE_THREE_IDS was added to ALL_IDS on the promise that the parser already generalises. " +
+				"If it does not, the loop below asserts OUTSTANDING against undefined for five entries " +
+				"that need a live credential — the exact silent gap this file exists to prevent",
+		).toEqual({ "RB-03-01": "OUTSTANDING" });
+	});
+
+	it("reports a Phase 3 half-flip as INCONSISTENT", () => {
+		expect(runbookEntryStatuses(FIXTURE_PHASE_THREE_HALF_FLIPPED)).toEqual({
+			"RB-03-01": "INCONSISTENT",
+		});
+	});
+
 	it("does not recognise a malformed id, so the widened pattern stays a shape and not a wildcard", () => {
 		expect(
 			runbookEntryStatuses(FIXTURE_MALFORMED_ID),
@@ -486,7 +644,13 @@ describe("Group C — every live check is still OUTSTANDING", () => {
 					"in the same commit, so the claim is reviewable. Never flip it to make a build green. " +
 					"The Phase 2 three need the work laptop and live provider credentials specifically: " +
 					"one real turn per provider (RB-02-01), a real credential passing through the capture " +
-					"path (RB-02-02), and a working day of real DeepSeek V4 Flash traffic (RB-02-03).",
+					"path (RB-02-02), and a working day of real DeepSeek V4 Flash traffic (RB-02-03). " +
+					"The Phase 3 five need the work laptop, a live DashScope key and an IAM Identity " +
+					"Center session: what DashScope accepts on the wire (RB-03-01), its 200 on the second " +
+					"turn of a tool sequence (RB-03-02), Bedrock authenticating from a fresh shell " +
+					"(RB-03-03), the R1 reasoning-token counts (RB-03-04), and the real cap and price " +
+					"from the Model Studio console (RB-03-05). Each has a green offline proxy in this " +
+					"repository, and not one of those proxies is the check.",
 			).toBe("OUTSTANDING");
 		});
 	}

@@ -28,12 +28,15 @@
  * new placeholder cannot ship silently and an entry that quietly gained a real
  * price stops being listed as having none. [threat T-03-04-03]
  *
- * FORWARD REFERENCE, DELIBERATELY NOT AN ASSERTION. The other half of that
- * coupling — every id on the list is also named in `docs/RUNBOOK.md` under
- * `RB-03-05` — belongs here but cannot be written here: `RB-03-05` does not
- * exist until plan 03-11, so the case would be knowingly red across two waves of
- * an unattended run. Plan 03-11 adds it to this file in the same commit that
- * creates the entry, which is the first moment it can be green.
+ * DISCHARGED, AND NOW AN ASSERTION. The other half of that coupling — every id
+ * on the list is also named in `docs/RUNBOOK.md` under `RB-03-05` — could not be
+ * written when this file was created, because `RB-03-05` did not exist until
+ * plan 03-11 and a knowingly-red case spanning two waves of an unattended run is
+ * worse than a late one. Plan 03-11 created the entry and added the case in the
+ * same commit; it is the third describe block below. A placeholder price can
+ * therefore no longer ship without a named live check that will replace it: the
+ * allowlist is asserted against the composed registry in both directions AND
+ * against the runbook.
  *
  * ---------------------------------------------------------------------------
  * WHAT THIS FILE DOES NOT PROVE — the live half is RB-03-05
@@ -343,6 +346,50 @@ describe("PROV-06 — the COST_UNVERIFIED allowlist", () => {
 				"a number a human will eventually believe. Add each to COST_UNVERIFIED with " +
 				"its reason, and name it in RB-03-05 so the gap gets measured rather than " +
 				"inherited.",
+		).toEqual([]);
+	});
+});
+
+describe("PROV-06 — every placeholder price names the live check that will replace it", () => {
+	// Read once, as text. This block is about `docs/RUNBOOK.md` as a DOCUMENT --
+	// whether the gap has a named owner -- and not about anything Pi composes.
+	const RUNBOOK = readFileSync(join(repoRoot(), "docs", "RUNBOOK.md"), "utf-8");
+
+	it("names RB-03-05 in docs/RUNBOOK.md", () => {
+		// POSITIVE CONTROL for the case below, and it is not ceremonial. That case
+		// passes vacuously if the allowlist is ever emptied, and it passes against
+		// any file that happens to contain two model ids --
+		// `.pi/templates/models-template.json` contains both, for instance.
+		// Asserting that the file also carries the entry id is what pins the
+		// assertion to the runbook rather than to any file with the right words in
+		// it.
+		expect(
+			RUNBOOK,
+			"docs/RUNBOOK.md does not mention RB-03-05, the entry that measures the real DashScope " +
+				"cap and price. Either the entry was removed -- in which case the placeholders below " +
+				"have no owner and must not ship -- or this test is reading the wrong file, in which " +
+				"case the case below proves nothing about the runbook.",
+		).toContain("RB-03-05");
+	});
+
+	it("names every COST_UNVERIFIED model in docs/RUNBOOK.md", () => {
+		// Non-empty BEFORE the filter. An emptied allowlist would otherwise satisfy
+		// this case by having nothing to look for, which is exactly the state in
+		// which an unpriced model is most likely to be shipping unnoticed.
+		expect(
+			COST_UNVERIFIED.length,
+			"COST_UNVERIFIED is empty, so the filter below iterates nothing and this case cannot fail",
+		).toBeGreaterThan(0);
+
+		const unnamed = COST_UNVERIFIED.filter((key) => !RUNBOOK.includes(key));
+
+		expect(
+			unnamed,
+			"these models ship an all-zero cost that renders as 'free' in a cost report, and no entry " +
+				"in docs/RUNBOOK.md names them -- so nothing on the work laptop will ever be asked to " +
+				"measure the real price. A placeholder with no named live check is not a declared gap, " +
+				"it is a number a human will eventually believe. Name each one in RB-03-05, or take it " +
+				"off COST_UNVERIFIED in the same change that sources its price.",
 		).toEqual([]);
 	});
 });
