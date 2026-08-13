@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 03-10-PLAN.md — the DeepSeek-direct -> DashScope fallback chain (callWithFallback + the four-class taxonomy), falsified twelve ways
-last_updated: "2026-08-14T00:20:00.000Z"
-last_activity: 2026-08-14 -- 03-10 complete (the fallback chain)
+status: verifying
+stopped_at: Completed 03-11-PLAN.md — docs/RUNBOOK.md RB-03-01..05 (all OUTSTANDING), the three-phase status guard falsified nine ways, and the PROV traceability (five complete, five partial)
+last_updated: "2026-08-13T16:37:17.424Z"
+last_activity: 2026-08-14 -- 03-11 complete (the Phase 3 runbook, all five checks OUTSTANDING)
 progress:
   total_phases: 11
-  completed_phases: 2
+  completed_phases: 3
   total_plans: 32
-  completed_plans: 31
-  percent: 18
+  completed_plans: 32
+  percent: 27
 ---
 
 # Project State
@@ -25,17 +25,20 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 ## Current Position
 
-Phase: 03 (providers-credentials) — EXECUTING
+Phase: 03 (providers-credentials) — ALL 11 PLANS EXECUTED
 Plan: 11 of 11
-Status: Ready to execute
-Last activity: 2026-08-14 -- 03-10 complete (the fallback chain)
+Status: Phase complete — ready for verification (code review not yet run)
+Last activity: 2026-08-14 -- 03-11 complete (the runbook + the three-phase status guard)
 
-Progress: [██████████] 97%
+Progress: [██████████] 100%
 
-**Read that 72% carefully.** The denominator is *plans written so far* — Phase 1's
-10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
-grow and the percentage will fall. The honest phase-level figure is **2 of 11
-phases complete**.
+**Read that 100% carefully — it is the most misleading number in this file.**
+The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
+Phase 3's 11. Phases 4-11 are not yet planned, so it will grow and the
+percentage will fall. The honest phase-level figure is **3 of 11 phases with
+their plans executed**, and Phase 3 additionally carries **five OUTSTANDING
+live checks** (`RB-03-01..05`) and **five partial requirements**, so "complete"
+means "everything a machine without credentials can do has been done".
 
 ## Performance Metrics
 
@@ -89,6 +92,7 @@ phases complete**.
 | Phase 03 P08 | ~50m | 3 tasks | 4 files |
 | Phase 03 P09 | ~40m | 2 tasks | 1 files |
 | Phase 03 P10 | ~45m | 3 tasks | 4 files |
+| Phase 3 P11 | 55m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -197,6 +201,11 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-10: every hop asserts the resolved model carries THIS run's faux api id -- F11 (registration omitted) resolved Pi's REAL built-in deepseek entry instead ("expected openai-completions to be faux:..."), so without the identity guard a failed registration silently measures the wrong provider
 - [Phase 03]: 03-10: a rejection and a returned failure are classified by ONE rule over the provider-controlled TEXT -- a message-shaped signature would need a second rule for facade rejections, which is how the same outage advances down one path and stops down the other; Pi's predicate is fed a two-field probe because stopReason and errorMessage are exactly what it reads (pi-ai dist/utils/retry.js:165-172)
 - [Phase 03]: 03-10: a mutation that fails to COMPILE proves nothing and looks identical to one that passed -- Git Bash rewrote a leading-slash regex argument into C:/Program Files/Git/... and two falsification runs reported "no tests" rather than a failure; both were re-run with the slash removed
+- [Phase 03]: 03-11: the runbook status guard could be DISARMED, not only forgotten -- both loops iterate ALL_IDS, so deleting ...PHASE_THREE_IDS left five live checks unasserted and dropped the suite from 78 to 63 tests with NOTHING red. A Rule 2 case now reads the declared ids OUT OF docs/RUNBOOK.md and asserts every one is governed (falsification F7)
+- [Phase 03]: 03-11: all five RB-03 statuses are OUTSTANDING and machine-enforced in BOTH the summary table and the Status line -- a half-flip reports INCONSISTENT (F1), a full flip reports PASSED (F2), and both fail the suite. Nine falsifications; every one turned a green suite red with a targeted message
+- [Phase 03]: 03-11: Phase 3 pins WHOLE one-line commands in ENTRY_COMMANDS and each pin was verified to occur EXACTLY ONCE in the runbook -- RB-02-03's fragment lesson plus its converse, since a pin that also matches a neighbouring entry's command stays green when the entry that owns it drops it
+- [Phase 03]: 03-11: five PROV requirements complete (01, 02, 05, 08, 09) and five PARTIAL with their RB-03 id named inline (03/RB-03-01, 04/RB-03-03, 06/RB-03-05, 07/RB-03-04, 10/RB-03-02) -- the status table says 'Partial ... Not complete' rather than Phase 1's 'Complete offline', because the file's own legend defines [~] as partial and it is the only shape a skimmer cannot misread as done
+- [Phase 03]: 03-11: a falsification restore via git checkout -- silently DELETED uncommitted Task 2 edits, and two mutations then reported a green 58-test run against the pre-edit file. Commit the change before falsifying it; a mutation run against an unmutated original is indistinguishable from a passing one
 
 ### Pending Todos
 
@@ -208,7 +217,9 @@ None yet.
 
 - **UNRESOLVED (R1)**: Whether DeepSeek-direct accepts `reasoning_effort: "low"`. Settled by one request in Phase 3 (PROV-07), gated behind Phase 2. Until then `/cheap` must not be defined in terms of a cheap thinking tier.
 - **Root cause still open**: prose tool calls vs context pollution vs provider misconfiguration. Phase 2 measures, Phase 10 discriminates. Do not commit to a fix for an unmeasured cause.
-- **No credentials on the dev machine**: 8 of 107 requirements are [RUNBOOK] and need the work laptop. `docs/RUNBOOK.md` (PROV-09, Phase 3) is the deliverable that carries them. **The file now exists** — Phase 1 created it in Plan 10 with its own section; Phase 3 appends rather than rewrites.
+- **No credentials on the dev machine**: 8 of 107 requirements are [RUNBOOK] and need the work laptop. `docs/RUNBOOK.md` (PROV-09, Phase 3) is the deliverable that carries them. **The file now exists and PROV-09 is discharged** — Phase 1 created it in Plan 10, Phase 2 and Phase 3 appended, and it now carries eleven entries. Phases 4, 5, 8 and 10 append their own sections and each must add its ids to one array in `tests/unit/docs-policy.test.ts`; since 03-11 a test fails if they do not.
+- **Five Phase 3 checks are OUTSTANDING and machine-enforced as such**: `RB-03-01` (PROV-03, does DashScope accept the compat block on the wire), `RB-03-02` (PROV-10, the 200 on the **second** turn of a tool sequence), `RB-03-03` (PROV-04, Bedrock from a fresh shell — plus the one live check of the SSO classifier, whose six strings are all fixtures this repo wrote), `RB-03-04` (PROV-07, the R1 experiment, threshold pre-committed at `low.reasoning <= 0.6 * high.reasoning`), `RB-03-05` (PROV-06, the real DashScope cap and per-token price). Each has a green offline proxy and **not one of those proxies is the check**. PROV-03, PROV-04, PROV-06, PROV-07 and PROV-10 are `[~]` partial in REQUIREMENTS.md with their id named inline.
+- **R1 is still open after Phase 3.** Two sub-findings are settled — the API documents `low`, and Pi 0.84.1 with the built-in catalogue clamps it to `high` so it can never be sent without a `modelOverrides` unclamp — and neither is the answer. The token count is `RB-03-04`. **`/cheap` must not be defined in terms of a cheap thinking tier** (Phase 5).
 - **Three Phase 1 checks are OUTSTANDING and machine-enforced as such**: `RB-01-01` (SAFE-16, `gh auth logout` on the work laptop), `RB-01-02` (BOOT-02, `pi install` against the real URL on a clean profile), `RB-01-03` (BOOT-05, `/reload` in a TTY). Each is recorded in `docs/RUNBOOK.md` with its exact command, expected output and offline proxy. `tests/unit/docs-policy.test.ts` parses both the summary table and the detail subsection and fails if either is flipped to passed, or if the two disagree. Flipping one requires a human to have executed it and must be a deliberate edit in the same commit as the test change.
 - **SAFE-16 is half-shipped, deliberately**: the classifier (`scripts/check-gh-unauthenticated.sh`) is proven in both directions, but the live control — `gh auth logout` on the work laptop — is **OUTSTANDING** and must never be reported as passed. `gh` stays authenticated on this dev box; it is how the repo is pushed over HTTPS. Runbook entry is `RB-01-01`.
 - **BOOT-07's live CI run is OUTSTANDING**: `.github/workflows/ci.yml` exists, is valid YAML, and is statically proven (both action SHAs resolved against the GitHub API, matrix `[windows-latest, macos-latest]`, `fail-fast: false`, every execution step asserted by `tests/unit/ci-pinning.test.ts`). It has **never run** — GitHub Actions cannot be triggered from this machine. macOS behaviour, ShellCheck's verdict on the two tracked scripts, and whether the pinned global Pi install satisfies the load-path tests on a runner are all unverified until the first push. Do not report a green tick that does not exist. **It has no `docs/RUNBOOK.md` entry yet** — Plan 10 seeded only the three checks its plan named. A later phase should add it alongside `RB-01-01..03`.
@@ -242,8 +253,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T00:20:00.000Z
-Stopped at: Completed 03-10-PLAN.md — the DeepSeek-direct -> DashScope fallback chain (callWithFallback + the four-class taxonomy), falsified twelve ways
+Last session: 2026-08-13T16:36:49.322Z
+Stopped at: Completed 03-11-PLAN.md — docs/RUNBOOK.md RB-03-01..05 (all OUTSTANDING), the three-phase status guard falsified nine ways, and the PROV traceability (five complete, five partial)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
