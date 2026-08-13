@@ -128,8 +128,14 @@ export type SafeHandlerFactory = <E, R = undefined>(
  * first on every request (RESEARCH §2.3) and issues one. Seeing it in a file
  * means the header hook did not run, which is a finding rather than a detail —
  * so it is recorded as a distinct value instead of being silently omitted.
+ *
+ * EXPORTED as of plan 02-08, because the turns row needs the same sentinel: a
+ * `turn_end` that finds no correlation id must write the identical value a wire
+ * record would, or a reader greps for one string and misses half the evidence.
+ * Two spellings of one sentinel is how an assertion silently stops matching the
+ * thing it checks (`harness/index.ts:50-56`).
  */
-const UNCORRELATED = "uncorrelated";
+export const UNCORRELATED = "uncorrelated";
 
 /**
  * Where the request counter lives, so it is PER PROCESS and not per module

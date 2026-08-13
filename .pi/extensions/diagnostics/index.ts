@@ -8,9 +8,19 @@
  * them are registered.
  *
  * LIFETIME. Permanent. It grows across this phase: plan 02-05 added the wire
- * capture, 02-06 adds the turn rows, 02-09 the prose-tool-call retry and 02-08
- * the `/budget` command. Today it registers `session_start` plus the three
- * main-loop provider hooks.
+ * capture, 02-08 the per-turn rows, 02-09 the prose-tool-call retry and 02-10
+ * the `/budget` command. Today it registers `session_start`, the three
+ * main-loop provider hooks, and the three turn hooks.
+ *
+ * THE TURN ROW IS BUILT FROM THE HOOKS THAT ALWAYS FIRE. `turn_start` supplies
+ * the clock, `message_end` the finalized assistant message, `turn_end` the turn
+ * index and tool-result count. `after_provider_response` contributes NOTHING to
+ * a turns row and must not: it sits after the retry wrapper
+ * [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:239] so a 4xx/5xx
+ * throws into the catch at `:590` and the hook never fires at all. A row derived
+ * from it would be missing exactly the turns most worth having, and the warning
+ * sign is a day with errors visible on screen and zero rows carrying
+ * `outcome: "error"` (RESEARCH §3.2, Pitfall 3).
  *
  * BOUNDARY RULE (BOOT-10). This subsystem registers **commands and event hooks
  * only**. It must never register a tool. A tool's name, description and
@@ -27,14 +37,20 @@
  *
  * LAYOUT. Sibling modules, and the requirement each serves:
  *
- *   schema.ts   — row types and every literal a test asserts on. DIAG-04/08.
- *   jsonl.ts    — the append-only writer, rotation and retention.   DIAG-08.
- *   redact.ts   — credential redaction at capture time.             DIAG-07.
- *   wire.ts     — the three main-loop provider hooks: capture,
- *                 redact, append. Redaction happens INSIDE the hook,
- *                 which is what makes DIAG-07's "at capture time"
- *                 true rather than aspirational.               DIAG-01/07.
- *   prose.ts    — the prose-tool-call predicate (effect is 02-09). DIAG-05.
+ *   schema.ts     — row types and every literal a test asserts on. DIAG-04/08.
+ *   jsonl.ts      — the append-only writer, rotation and retention. DIAG-08.
+ *   redact.ts     — credential redaction at capture time.           DIAG-07.
+ *   wire.ts       — the three main-loop provider hooks: capture,
+ *                   redact, append. Redaction happens INSIDE the hook,
+ *                   which is what makes DIAG-07's "at capture time"
+ *                   true rather than aspirational.             DIAG-01/07.
+ *   turns.ts      — the pure per-turn row composer. This file supplies it
+ *                   the message, the clock and the model; it supplies the
+ *                   tokens, the cost and the outcome.               DIAG-04.
+ *   call-model.ts — THE chokepoint for nested model calls. It writes its
+ *                   own `kind:"nested"` rows and counts them through
+ *                   {@link noteRowWritten}.                      DIAG-02/03.
+ *   prose.ts      — the prose-tool-call predicate (effect is 02-09). DIAG-05.
  *
  * Only this file is an entry point: `.pi/extensions/<dir>/index.ts` is one of
  * the four auto-discovered shapes [CITED: pi 0.84.1 docs/extensions.md:115-120]
@@ -54,13 +70,26 @@
 import type {
 	ExtensionAPI,
 	ExtensionContext,
+	MessageEndEvent,
 	SessionStartEvent,
+	TurnEndEvent,
+	TurnStartEvent,
 } from "@earendil-works/pi-coding-agent";
 
 import { appendJsonl, pruneLogs } from "./jsonl.ts";
 import { redactString } from "./redact.ts";
-import { DIAGNOSTICS_ERROR_EVENT, TURNS_LOG_BASE } from "./schema.ts";
-import { registerWireHooks } from "./wire.ts";
+import {
+	DIAGNOSTICS_ERROR_EVENT,
+	MAX_ROTATED_FILES,
+	TURNS_LOG_BASE,
+	TURNS_ROTATE_BYTES,
+	type Api,
+	type AssistantMessage,
+	type Model,
+	type TurnRow,
+} from "./schema.ts";
+import { composeTurnRow } from "./turns.ts";
+import { currentCorrelationId, registerWireHooks, UNCORRELATED } from "./wire.ts";
 
 /**
  * `event` value on the row written once per session start.
@@ -69,6 +98,39 @@ import { registerWireHooks } from "./wire.ts";
  * rule from `harness/index.ts:50-56`.
  */
 export const SESSION_START_EVENT = "diagnostics.session_start";
+
+/**
+ * `role` carried by every main-loop turn row.
+ *
+ * The main loop has no `opts.role` to pass — that field belongs to
+ * `callModel`, where a nested call names the executor it ran as. A constant
+ * here keeps the column present and joinable on every row rather than optional
+ * on some, so Phase 8's per-role cost query does not need a special case for
+ * "the rows with no role".
+ */
+export const SESSION_TURN_ROLE = "session";
+
+/**
+ * `where` on the error row a turn that produced no assistant message leaves.
+ *
+ * A turn MUST leave a row. Skipping the append when the accumulator is empty
+ * would make a broken instrument indistinguishable from a quiet session, which
+ * is the single failure class this phase exists to eliminate.
+ * [threat T-02-08-02]
+ */
+export const TURN_NO_MESSAGE_WHERE = "turn_end.no_message";
+
+/**
+ * `event` on a row whose cost was computed from a DEGRADED model shape.
+ *
+ * `ctx.model` is `Model<any> | undefined` [VERIFIED: pi 0.84.1
+ * dist/core/extensions/types.d.ts:223]. When it is undefined there are no cost
+ * rates to compute with, so the row's `cost` is all zeros — and a zero cost that
+ * looks exactly like a computed one is a fabricated measurement. This marker is
+ * what lets Phase 8 exclude the row from a spend total instead of quietly
+ * under-counting it. [threat T-02-08-05]
+ */
+export const MODEL_UNAVAILABLE_EVENT = "diagnostics.model_unavailable";
 
 /** Rows this process has written. Read through {@link rowsWrittenThisSession}. */
 let rowsWritten = 0;
@@ -97,10 +159,85 @@ export function noteRowWritten(): void {
 	rowsWritten += 1;
 }
 
-/** Append one row to the turns stream and count it. */
-function writeTurnsRow(cwd: string, record: Record<string, unknown>): void {
-	appendJsonl(cwd, TURNS_LOG_BASE, record);
+/**
+ * Append one row to the turns stream and count it.
+ *
+ * The rotation cap is passed explicitly even though `appendJsonl` resolves the
+ * same numbers from the base name: `call-model.ts` spells them out at its own
+ * append, and a reader comparing the two append sites should not have to know
+ * that one of them relies on a default to reach the same value.
+ */
+function writeTurnsRow(cwd: string, record: TurnRow | Record<string, unknown>): void {
+	appendJsonl(cwd, TURNS_LOG_BASE, record, {
+		rotateBytes: TURNS_ROTATE_BYTES,
+		maxRotated: MAX_ROTATED_FILES,
+	});
 	noteRowWritten();
+}
+
+/**
+ * What the three turn hooks accumulate between `turn_start` and `turn_end`.
+ *
+ * ONE MUTABLE RECORD, NOT A MAP. The agent loop is serial: `turn_start` →
+ * (provider request) → `message_end` → tool execution → `turn_end`, then the
+ * next turn. Keying by `turnIndex` would suggest an interleaving that does not
+ * happen and would leak an entry for every turn that never ended.
+ */
+interface TurnAccumulator {
+	/** `turn_start.timestamp`, which is `Date.now()` [VERIFIED: pi 0.84.1 dist/core/agent-session.js:448-453]. */
+	startedAt: number;
+	/** The correlation id live at `message_end`. See {@link captureCorrelationId}. */
+	corr?: string;
+	/** The finalized assistant message, or `undefined` if none was seen. */
+	message?: AssistantMessage;
+	/** `ctx.thinkingLevel` as REQUESTED at turn start. */
+	thinkingLevel?: string;
+}
+
+/** The turn currently in flight, or `undefined` between turns. */
+let inFlight: TurnAccumulator | undefined;
+
+/**
+ * Why the correlation id is captured at `message_end` and not at `turn_end`.
+ *
+ * `currentCorrelationId()` returns the LAST id this module instance issued.
+ * Between the assistant message and the end of the turn, tool execution runs —
+ * and a tool (or a Phase 5 router, or a Phase 8 gate) may make a nested
+ * `callModel` invocation, which issues its own id. Reading the id at `turn_end`
+ * would therefore stamp the turn row with the nested call's correlation and
+ * join the turn to bytes it never sent. Reading it at `message_end`, which
+ * fires immediately after the provider response, captures the id of the request
+ * that produced this very message.
+ */
+function captureCorrelationId(): string {
+	return currentCorrelationId() ?? UNCORRELATED;
+}
+
+/**
+ * A `Model<Api>` standing in for an absent `ctx.model`, with ZERO cost rates.
+ *
+ * The rates are zero because there are none to read, not because the turn was
+ * free — which is precisely why every row composed against this shape also
+ * carries {@link MODEL_UNAVAILABLE_EVENT}. The identifying strings come from the
+ * message itself, so the row still says which provider and model ran even when
+ * the catalogue entry is gone.
+ *
+ * `contextWindow` and `maxTokens` are zero and unused: `calculateCost` reads
+ * only `model.cost` [VERIFIED: pi-ai 0.84.1 src/models.ts:878-898].
+ */
+function degradedModel(message: AssistantMessage): Model<Api> {
+	return {
+		id: message.model,
+		name: message.model,
+		api: message.api,
+		provider: message.provider,
+		baseUrl: "",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 0,
+		maxTokens: 0,
+	};
 }
 
 /**
@@ -173,4 +310,119 @@ export default function (pi: ExtensionAPI): void {
 	// append path — a counter only some paths increment reports a number that
 	// looks like a measurement and is not.
 	registerWireHooks(pi, safeHandler, noteRowWritten);
+
+	// DIAG-04 — the three turn hooks. See the module docstring for why the row
+	// is built from these and never from `after_provider_response`.
+
+	pi.on(
+		"turn_start",
+		safeHandler<TurnStartEvent>("turn_start", (event, ctx) => {
+			// A FRESH record, which is also how a stale message from a turn that
+			// somehow never ended is cleared: carrying one forward would attribute
+			// the previous turn's tokens and cost to this one.
+			inFlight = {
+				// `timestamp` is `Date.now()` at emit
+				// [VERIFIED: pi 0.84.1 dist/core/agent-session.js:448-453], so the
+				// subtraction at `turn_end` is a real wall-clock latency. The
+				// fallback exists for a synthetic event in a unit harness, not for
+				// production.
+				startedAt: typeof event.timestamp === "number" ? event.timestamp : Date.now(),
+				// The REQUESTED level, recorded here rather than at `turn_end`
+				// because that is when it was requested — and because Bedrock never
+				// reports a reasoning-token breakdown, so the request is the only
+				// thing about thinking a Bedrock row can honestly carry
+				// (RESEARCH §5.4, §5.5).
+				thinkingLevel: ctx.thinkingLevel,
+			};
+		}),
+	);
+
+	pi.on(
+		"message_end",
+		safeHandler<MessageEndEvent>("message_end", (event, ctx) => {
+			// `message_end` fires for user and toolResult messages too
+			// [pi 0.84.1 dist/core/extensions/types.d.ts:573], so the role check is
+			// what keeps a tool result from overwriting the turn's real message.
+			if (event.message.role === "assistant") {
+				const turn = inFlight ?? { startedAt: Date.now(), thinkingLevel: ctx.thinkingLevel };
+				turn.message = event.message;
+				turn.corr = captureCorrelationId();
+				inFlight = turn;
+			}
+			// THIS HANDLER RETURNS NOTHING, AND THAT IS A CONTRACT, NOT A STYLE.
+			// A returned `{ message }` REPLACES the finalized message, and the
+			// replacement must keep the original role
+			// [VERIFIED: pi 0.84.1 src/core/extensions/types.ts:1097-1100]; the
+			// runner applies it by deleting every key on the live object and
+			// `Object.assign`-ing the replacement onto it
+			// (`agent-session.ts:710-724`), which the agent loop then reads back
+			// immediately (`pi-agent-core agent-loop.ts:350-352`). Diagnostics never
+			// replaces a message. The only thing in this subsystem that interacts
+			// with this hook's semantics is the prose retry (plan 02-09), and it
+			// does so by sending a follow-up user message, not by rewriting this
+			// one. [threat T-02-08-04]
+		}),
+	);
+
+	pi.on(
+		"turn_end",
+		safeHandler<TurnEndEvent>("turn_end", (event, ctx) => {
+			// Taken and cleared FIRST, so an exception below cannot leave a
+			// half-consumed accumulator to contaminate the next turn.
+			const turn = inFlight;
+			inFlight = undefined;
+
+			const sessionId = ctx.sessionManager.getSessionId();
+			const message = turn?.message;
+
+			if (message === undefined) {
+				// A VISIBLE HOLE, not a skipped append. Zero rows on a turn that
+				// really happened is the same picture as a dead instrument, and
+				// `rowsWrittenThisSession()` would still count this one — so
+				// `/budget` reports a number that matches the file.
+				// [threat T-02-08-02]
+				writeTurnsRow(ctx.cwd, {
+					ts: Date.now(),
+					event: DIAGNOSTICS_ERROR_EVENT,
+					where: TURN_NO_MESSAGE_WHERE,
+					sessionId,
+					corr: turn?.corr ?? captureCorrelationId(),
+					turnIndex: event.turnIndex,
+					toolResults: event.toolResults.length,
+				});
+			} else {
+				// `ctx.model` is `Model<any> | undefined`. When it is missing the row
+				// is still written — with zero rates and a marker saying so — because
+				// a missing row is worse than an honestly-degraded one.
+				const model = ctx.model as Model<Api> | undefined;
+
+				writeTurnsRow(
+					ctx.cwd,
+					composeTurnRow({
+						kind: "turn",
+						role: SESSION_TURN_ROLE,
+						sessionId,
+						corr: turn?.corr ?? captureCorrelationId(),
+						message,
+						model: model ?? degradedModel(message),
+						// `startedAt` falls back to now only when `turn_start` never
+						// ran, which yields 0 rather than a fabricated duration.
+						latencyMs: Date.now() - (turn?.startedAt ?? Date.now()),
+						turnIndex: event.turnIndex,
+						toolResults: event.toolResults.length,
+						thinkingLevel: turn?.thinkingLevel,
+						// `composeTurnRow` omits the key when this is undefined, so a
+						// healthy row carries no `event` at all.
+						event: model === undefined ? MODEL_UNAVAILABLE_EVENT : undefined,
+					}),
+				);
+			}
+			// No `return` anywhere in this handler, and none in the two above it.
+			// Pi ignores what `turn_start` and `turn_end` return, but the shape is
+			// kept identical to `message_end` — where a return value is a
+			// REPLACEMENT — so a reader never has to remember which is which.
+			// `tests/unit/wire-nonmutating.test.ts` asserts the value, rather than
+			// trusting this comment.
+		}),
+	);
 }

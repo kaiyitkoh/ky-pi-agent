@@ -33,8 +33,18 @@ import type { StopReason } from "@earendil-works/pi-ai";
  * compile error for a silent miss the day Pi renames a block type, and
  * importing pi-ai directly from a second module would break the concentration
  * rule stated above. So it comes through here, type-only and fully erased.
+ *
+ * `Api` and `Model` are on the list because `index.ts` must construct a
+ * DEGRADED model shape when `ctx.model` is undefined at `turn_end` — a row whose
+ * cost was computed from zero rates rather than a real catalogue entry. Without
+ * the annotation the literal's `input: ["text"]` infers `string[]` and is not
+ * assignable to `("text" | "image")[]`, so the fallback would need a cast; with
+ * it, a future field added to pi-ai's `Model` is a compile error at the fallback
+ * rather than a silently under-populated object. They are re-exported here, not
+ * imported there, because `index.ts` is NOT one of the three sanctioned pi-ai
+ * import sites.
  */
-export type { AssistantMessage, StopReason } from "@earendil-works/pi-ai";
+export type { Api, AssistantMessage, Model, StopReason } from "@earendil-works/pi-ai";
 
 // ---------------------------------------------------------------------------
 // Log file naming
