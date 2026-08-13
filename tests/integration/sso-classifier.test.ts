@@ -84,6 +84,7 @@ import {
 	PROFILE_PLACEHOLDER,
 	PROFILE_TEMPLATE_SENTINEL,
 	RETRYABLE_CONTROL_FIXTURE,
+	SAFE_PROFILE_NAME,
 	SSO_DIAGNOSTIC_ORIGINAL_KEY,
 	SSO_DIAGNOSTIC_TYPE,
 	SSO_FIXTURES,
@@ -521,13 +522,59 @@ describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 		// THE FLOOR THAT MAKES THIS A TABLE RATHER THAN A LOOP OVER ITSELF. An
 		// emptied NOT_A_PROFILE would iterate nothing and report green, which is
 		// the same disarm-by-deletion the guard in 03-11 was written to close.
+		//
+		// BOTH FLOORS ARE LITERALS, AND THAT IS THE WHOLE CORRECTION. The first
+		// draft of this case read `toBeGreaterThanOrEqual(NOT_A_PROFILE.length)`,
+		// which is the WR-04 shape reintroduced in the very case written to close
+		// CR-01: `notAProfileRuns` is built by iterating `NOT_A_PROFILE`, so that
+		// comparison is two views of one loop and can only differ if `beforeAll`
+		// threw. The only real floor was the paired `>= 1`, and one row is exactly
+		// enough to let the table be halved to the metacharacter row — which
+		// `SAFE_PROFILE_NAME` already rejects — leaving the CR-01 equality check in
+		// `usableProfileName` free to delete with nothing red. Verified: deleting
+		// the sentinel row AND the sentinel check gave 649/649 green. [WR-01]
+		//
+		// The literal is 2 because the table covers TWO MECHANISMS, and the number
+		// of mechanisms is the thing a deletion moves.
+		expect(
+			NOT_A_PROFILE.length,
+			"two rows, rejected by two DIFFERENT mechanisms: the auth-template sentinel by the " +
+				"equality check in `usableProfileName` (no shape bound can ever reject it — it is " +
+				"29 characters drawn entirely from the AWS profile charset), and the metacharacter " +
+				"name by SAFE_PROFILE_NAME. Dropping either row makes its guard deletable with " +
+				"nothing red, and for the sentinel that is CR-01 restored: a hand-copied template " +
+				"entry surfaces `aws sso login --profile REPLACE_WITH_AWS_PROFILE_NAME` with the " +
+				"RB-03-03 pointer suppressed [CR-01, WR-01]",
+		).toBeGreaterThanOrEqual(2);
+
 		expect(
 			notAProfileRuns.length,
 			"no not-a-profile value was driven, so every assertion below iterates nothing. " +
-				"The table is the whole case; a truncated one removes coverage without turning " +
-				"anything red",
-		).toBeGreaterThanOrEqual(NOT_A_PROFILE.length);
-		expect(NOT_A_PROFILE.length).toBeGreaterThanOrEqual(1);
+				"Comparing against NOT_A_PROFILE.length would compare the loop with itself and is " +
+				"satisfied by an empty table — the WR-04 shape, in the case written to close " +
+				"CR-01 [WR-01]",
+		).toBeGreaterThanOrEqual(2);
+
+		// AND THE MECHANISMS ARE REALLY DISTINCT, NOT JUST CLAIMED TO BE. A floor
+		// of 2 over a table holding two metacharacter names would be satisfied
+		// while the sentinel row was gone. `SAFE_PROFILE_NAME` must ACCEPT the
+		// sentinel — that is precisely why the equality check exists and why no
+		// tightening of the shape bound can stand in for it.
+		expect(
+			SAFE_PROFILE_NAME.test(PROFILE_TEMPLATE_SENTINEL),
+			"SAFE_PROFILE_NAME now rejects the auth-template sentinel, so the two rows above are " +
+				"no longer covering two mechanisms and the floor of 2 could be met by two " +
+				"shape-rejected values. If the shape bound genuinely subsumes the sentinel, say so " +
+				"deliberately and re-derive whether the equality check in `usableProfileName` is " +
+				"still load-bearing — do not leave this assertion inverted [CR-01, WR-01]",
+		).toBe(true);
+		expect(
+			NOT_A_PROFILE.some(([, value]) => value === PROFILE_TEMPLATE_SENTINEL),
+			"the auth-template sentinel row is gone from NOT_A_PROFILE. It is the ONLY row that " +
+				"exercises the equality check in `usableProfileName`, and that check is the only " +
+				"thing that can ever reject the string bin/bootstrap.sh withholds and a hand-copy " +
+				"installs [CR-01, WR-01]",
+		).toBe(true);
 
 		for (const { label, value, capture } of notAProfileRuns) {
 			const message = firstError(capture.settled);
