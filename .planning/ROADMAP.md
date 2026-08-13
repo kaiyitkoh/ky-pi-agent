@@ -19,7 +19,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Bootstrap, Packaging & Supply Chain** - Harden the machine and establish the repo shape before the first `pi install` executes third-party code (completed 2026-08-13)
 - [x] **Phase 2: Diagnostics — The Instrument** - Wire inspector, the `callModel()` chokepoint, per-turn JSONL, and the prose-tool-call detector (completed 2026-08-13)
-- [ ] **Phase 3: Providers & Credentials** - Structurally complete providers with zero secrets, verified by Phase 2's instrument and a first-run runbook
+- [x] **Phase 3: Providers & Credentials** - Structurally complete providers with zero secrets, verified by Phase 2's instrument and a first-run runbook (all 11 plans executed 2026-08-14; **five live checks `RB-03-01..05` are OUTSTANDING** and five of its ten requirements are partial until they run — see `docs/RUNBOOK.md`)
 - [ ] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents
 - [ ] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes
 - [ ] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size
@@ -157,7 +157,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 03-11-PLAN.md — `docs/RUNBOOK.md` RB-03-01..05 (all OUTSTANDING), the extended status guard, and the requirement traceability (PROV-09)
+- [x] 03-11-PLAN.md — `docs/RUNBOOK.md` RB-03-01..05 (all OUTSTANDING), the extended status guard, and the requirement traceability (PROV-09)
 **Research**: `--research-phase` recommended — three open empirical questions, none answerable from a desk: the R1 low-thinking-tier contract, the real DashScope `contextWindow` (393,216 corroborated by one researcher, UNVERIFIED by another), and whether strict-schema mode reduces the prose-tool-call rate.
 
 ### Phase 4: Safety & Deployment Guardrails
@@ -294,7 +294,7 @@ These are open at roadmap time and must not be planned as settled.
 
 | # | Unknown | Where it is settled | Constraint until then |
 |---|---------|---------------------|-----------------------|
-| R1 | Whether DeepSeek-direct accepts `reasoning_effort: "low"` — two researchers reached opposite conclusions, neither issued a request | Phase 3 (PROV-07), gated behind Phase 2 | `/cheap` must **not** be defined in terms of a cheap thinking tier. Impact is bounded: on the DashScope path `low` → `high` server-side regardless, so this only ever affects DeepSeek-direct. |
+| R1 | **STILL OPEN after Phase 3.** Whether DeepSeek-direct accepts `reasoning_effort: "low"` — and, the question that actually matters, whether it yields materially fewer reasoning tokens. Two sub-findings are now settled and neither answers it: the API *documents* `low` (with `medium`/`xhigh` mapping to `high`/`max`), and **Pi 0.84.1 with the built-in catalogue can never send it** — `thinkingLevelMap.low` is `null`, so `clampThinkingLevel` walks `low` forward to `high`, and only a `modelOverrides` unclamp makes the experiment runnable at all. The token count is a fact about a live provider and remains unmeasured. | Phase 3 wrote the experiment; **`RB-03-04` in `docs/RUNBOOK.md` settles it and its status is OUTSTANDING**. The threshold is pre-committed as `low.reasoning <= 0.6 * high.reasoning`, and the status flips only with both `main.request` payloads and both turns rows pasted in verbatim. | `/cheap` must **not** be defined in terms of a cheap thinking tier. Impact is bounded: on the DashScope path `low` → `high` server-side regardless, so this only ever affects DeepSeek-direct. Graduating the unclamp into the shipped template is a follow-up gated on the result, not part of Phase 3. |
 | — | Which of three candidates is the actual root cause of "DeepSeek misses bugs Sonnet would catch": prose tool calls (~11%, open upstream issue), context pollution (mechanism verified, degradation evidence medium), or provider misconfiguration (verified for Bedrock non-Claude and DashScope) | Phase 2 (measurement) + Phase 10 (controlled experiment) | Do not commit to a fix for a cause that has not been measured. |
 | — | Whether DeepSeek V4 Flash honours `reasoning_effort` at all through Pi's `openai-completions` adapter | Phase 2 — this is what the instrument exists to answer | Main-loop thinking budgets stay gated (GATE-10). |
 | — | Runtime behaviour of every third-party extension — nothing was executed during research | Phase 7 | Re-verify every pin at planning time; treat checkpointing and provider fallback as unsettled categories. |
@@ -325,7 +325,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 |-------|----------------|--------|-----------|
 | 1. Bootstrap, Packaging & Supply Chain | 10/10 | Complete   | 2026-08-13 |
 | 2. Diagnostics — The Instrument | 11/11 | Complete   | 2026-08-13 |
-| 3. Providers & Credentials | 0/TBD | Not started | - |
+| 3. Providers & Credentials | 11/11 | Plans complete — 5 live checks OUTSTANDING | 2026-08-14 |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 0/TBD | Not started | - |

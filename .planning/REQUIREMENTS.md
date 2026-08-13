@@ -41,14 +41,14 @@
 
 - [x] **PROV-01**: `models.json` and `auth.json` ship as structurally complete templates with zero secrets, resolved at runtime via `$ENV_VAR` and `!command`
 - [x] **PROV-02**: `!command` interpolation appears only in `auth.json` (cached per process), never in `models.json` (re-executed on every provider request)
-- [ ] **PROV-03**: DashScope is configured as a custom provider with an **explicit** full `compat` block — Pi's `detectCompat` has no `aliyuncs.com` branch, so defaults silently disable thinking and 400 on the second turn of any tool sequence **[RUNBOOK]**
-- [ ] **PROV-04**: Bedrock authenticates via `credential.env.AWS_PROFILE` in `auth.json`, which Pi checks before process env — survives a fresh shell, contains no secret, templatable in-repo **[RUNBOOK]**
+- [~] **PROV-03**: DashScope is configured as a custom provider with an **explicit** full `compat` block — Pi's `detectCompat` has no `aliyuncs.com` branch, so defaults silently disable thinking and 400 on the second turn of any tool sequence **[RUNBOOK]** — *the block is shipped and proven twice offline: deep-equal against the composed `compat` (`tests/unit/dashscope-compat.test.ts`) and on real emitted bytes through Pi's own adapter (`tests/integration/dashscope-payload.test.ts`). Both prove what Pi **emits**; whether DashScope **accepts** it is `RB-03-01`, **OUTSTANDING***
+- [~] **PROV-04**: Bedrock authenticates via `credential.env.AWS_PROFILE` in `auth.json`, which Pi checks before process env — survives a fresh shell, contains no secret, templatable in-repo **[RUNBOOK]** — *the template, the merge-if-absent installer and the resolution order are proven offline with every variable in Pi's chain blanked (`tests/unit/bedrock-auth.test.ts`); authenticating from a fresh shell against a real IAM Identity Center session is `RB-03-03`, **OUTSTANDING***
 - [x] **PROV-05**: Expired SSO credentials produce an actionable message naming the exact `aws sso login --profile <name>` command, and are classified **non-retryable** so they don't burn wall-clock in a retry loop **[FAUX]**
-- [ ] **PROV-06**: Every model carries accurate capability metadata — `input[]`, per-provider true `contextWindow`, `cost` — and never inherits a context window from a different provider's entry for the same model
-- [ ] **PROV-07**: The R1 experiment is run and recorded: does `api.deepseek.com` accept `reasoning_effort: "low"`, and does it produce materially fewer reasoning tokens than `"high"` **[RUNBOOK]**
+- [~] **PROV-06**: Every model carries accurate capability metadata — `input[]`, per-provider true `contextWindow`, `cost` — and never inherits a context window from a different provider's entry for the same model — *the invariant is complete and enforced (no templated model inherits the identically-named DeepSeek-direct context window or cost table), and every all-zero placeholder price is on the `COST_UNVERIFIED` allowlist and named in the runbook. The real output cap and the real per-token price are `RB-03-05`, **OUTSTANDING***
+- [~] **PROV-07**: The R1 experiment is run and recorded: does `api.deepseek.com` accept `reasoning_effort: "low"`, and does it produce materially fewer reasoning tokens than `"high"` **[RUNBOOK]** — *the experiment is written, executable and unit-proven (`tests/unit/r1-unclamp.test.ts`: Pi 0.84.1 clamps `low` to `high`, the `modelOverrides` unclamp removes the clamp), with a pre-committed threshold. It has **not been run** — that is `RB-03-04`, **OUTSTANDING**, and until it has a result `/cheap` is not defined in terms of a cheap thinking tier*
 - [x] **PROV-08**: A DeepSeek-direct → DashScope fallback chain handles quota, transient, and unavailable errors **[FAUX]**
-- [ ] **PROV-09**: A first-run runbook documents every credential-dependent verification the user performs on the work laptop, with expected output for each
-- [ ] **PROV-10**: A two-turn tool-calling sequence against DashScope returns 200 — the first turn always works, so the second is the test **[RUNBOOK]**
+- [x] **PROV-09**: A first-run runbook documents every credential-dependent verification the user performs on the work laptop, with expected output for each — *`docs/RUNBOOK.md` carries eleven entries across Phases 1–3, each with an exact command, precise expected output, a named offline proxy that exists on disk, and a status; `tests/unit/docs-policy.test.ts` parses both the summary table and the `**Status:**` line and reports a disagreement as `INCONSISTENT`. Phases 4, 5, 8 and 10 append their own sections*
+- [~] **PROV-10**: A two-turn tool-calling sequence against DashScope returns 200 — the first turn always works, so the second is the test **[RUNBOOK]** — *the mechanism is proven on real bytes with a paired negative control: Pi inserts `reasoning_content` on the replayed assistant message, and deleting the compat key removes it (`tests/integration/dashscope-payload.test.ts`). The provider's 200 on the **second** turn is `RB-03-02`, **OUTSTANDING**, and cannot be substituted*
 
 ### Safety
 
@@ -248,14 +248,14 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | DIAG-08 | Phase 2 | Complete |
 | PROV-01 | Phase 3 | Complete |
 | PROV-02 | Phase 3 | Complete |
-| PROV-03 | Phase 3 | Pending |
-| PROV-04 | Phase 3 | Pending |
+| PROV-03 | Phase 3 | Partial — the explicit `compat` block is shipped and proven both as composed and as emitted bytes; provider acceptance is `RB-03-01`, **OUTSTANDING**. Not complete |
+| PROV-04 | Phase 3 | Partial — `credential.env.AWS_PROFILE` resolution, the template and the merge-if-absent installer are proven offline; a fresh shell against a real SSO session is `RB-03-03`, **OUTSTANDING**. Not complete |
 | PROV-05 | Phase 3 | Complete |
-| PROV-06 | Phase 3 | Pending |
-| PROV-07 | Phase 3 | Pending |
+| PROV-06 | Phase 3 | Partial — the cross-provider invariant and the `COST_UNVERIFIED` allowlist are complete and enforced in both directions; the real cap and per-token price are `RB-03-05`, **OUTSTANDING**. Not complete |
+| PROV-07 | Phase 3 | Partial — the experiment is written, executable and unit-proven with a pre-committed threshold; it has never been run, which is `RB-03-04`, **OUTSTANDING**. Not complete |
 | PROV-08 | Phase 3 | Complete |
-| PROV-09 | Phase 3 | Pending |
-| PROV-10 | Phase 3 | Pending |
+| PROV-09 | Phase 3 | Complete — `docs/RUNBOOK.md` carries eleven entries across Phases 1–3, all `OUTSTANDING` and machine-enforced as such by `tests/unit/docs-policy.test.ts` in both the summary table and the detail subsection |
+| PROV-10 | Phase 3 | Partial — `reasoning_content` on the replayed assistant message is proven on real bytes with a paired negative; the second turn's 200 is `RB-03-02`, **OUTSTANDING**. Not complete |
 | SAFE-01 | Phase 4 | Pending |
 | SAFE-02 | Phase 4 | Pending |
 | SAFE-03 | Phase 4 | Pending |
