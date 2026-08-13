@@ -107,6 +107,25 @@ const TOOL = "read";
 const NOTE = "note.txt";
 
 /**
+ * Where the probe writes the active-tool list Pi actually reported.
+ *
+ * WHY THIS FILE EXISTS. `Capture.activeTools` used to be the literal `[TOOL]`,
+ * hardcoded by `drive()` — so the final `it` in this file was
+ * `[TOOL].toContain(TOOL)` and could not fail even if `tools: [TOOL]` were dropped
+ * from `withFauxSession`, which is precisely the condition it claims to guard.
+ * Gate 3 refuses an empty active-tool list by design, so that removal would turn
+ * every count in this file into a trivial zero while the guard stayed green — the
+ * vacuous-pass shape this whole phase exists to eliminate, wearing the costume of
+ * a precondition check.
+ *
+ * The value is now READ OUT OF THE LIVE SESSION, through the same
+ * `pi.getActiveTools()` the detector itself calls. It goes through a file because
+ * jiti gives the loaded extension its own module registry, so an in-process
+ * variable this file could read would never move (02-05's finding).
+ */
+const ACTIVE_TOOLS_DUMP = "active-tools.json";
+
+/**
  * A message that DESCRIBES a `read` call instead of emitting one.
  *
  * The name, an immediately-following `(` and a `{` — the whole of gate 4. It is
@@ -202,7 +221,11 @@ async function drive(options: {
 	const outgoing = options.outgoing ?? [];
 	return await withFauxSession(
 		{
-			extensionPath: EXTENSION_ENTRY,
+			// `extensionSource` rather than `extensionPath`: the probe IS the real
+			// diagnostics extension plus the observers this file needs, and one of them
+			// is what makes the active-tool precondition a measurement instead of a
+			// literal. See {@link ACTIVE_TOOLS_DUMP}.
+			extensionSource: probeSource(),
 			responses: options.responses,
 			tools: [TOOL],
 			cwdFiles: { [NOTE]: "hi\n" },
@@ -221,7 +244,8 @@ async function drive(options: {
 				unparseable: turns.unparseable,
 				callCount: faux.state.callCount,
 				pending: faux.getPendingResponseCount(),
-				activeTools: [TOOL],
+				// OBSERVED, not asserted. See {@link ACTIVE_TOOLS_DUMP}.
+				activeTools: readActiveTools(cwd),
 				outgoing,
 			};
 		},
@@ -239,7 +263,7 @@ async function drive(options: {
  */
 function probeSource(): string {
 	return [
-		'import { appendFileSync } from "node:fs";',
+		'import { appendFileSync, writeFileSync } from "node:fs";',
 		'import { join } from "node:path";',
 		`import diagnostics from ${JSON.stringify(EXTENSION_ENTRY.replace(/\\/g, "/"))};`,
 		"export default function (pi) {",
@@ -250,9 +274,32 @@ function probeSource(): string {
 		'\tpi.on("agent_start", (_event, ctx) => {',
 		'\t\tappendFileSync(join(ctx.cwd, "agent-start.count"), "x\\n");',
 		"\t});",
+		// THE ACTIVE-TOOL LIST AS PI REALLY REPORTS IT, read through the same
+		// `pi.getActiveTools()` the detector's gate 3 reads. See
+		// {@link ACTIVE_TOOLS_DUMP} for why this is observed rather than asserted
+		// against a literal.
+		'\tpi.on("turn_start", (_event, ctx) => {',
+		`\t\twriteFileSync(join(ctx.cwd, ${JSON.stringify(ACTIVE_TOOLS_DUMP)}), JSON.stringify(pi.getActiveTools()), "utf-8");`,
+		"\t});",
 		"}",
 		"",
 	].join("\n");
+}
+
+/**
+ * The active-tool list the live session reported, or `[]` when the probe never ran.
+ *
+ * `[]` on absence is deliberate and is the honest answer: an absent dump means no
+ * `turn_start` fired, which means the extension did not load, which means the
+ * detector was never active. Returning `[TOOL]` as a fallback would put the
+ * tautology straight back.
+ */
+function readActiveTools(cwd: string): string[] {
+	const file = join(cwd, ACTIVE_TOOLS_DUMP);
+	if (!existsSync(file)) {
+		return [];
+	}
+	return JSON.parse(readFileSync(file, "utf-8")) as string[];
 }
 
 /** How many lines the named probe counter file holds. Absent counts as zero. */
@@ -780,12 +827,24 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 		).toBe(4);
 	});
 
-	it("every session had the tool active, so no case was vacuous", () => {
+	it("every session really had the tool active, as Pi itself reported it", () => {
+		// THIS USED TO BE A TAUTOLOGY. `Capture.activeTools` was the literal `[TOOL]`,
+		// written by `drive()` — so the assertion was `[TOOL].toContain(TOOL)` and
+		// could not fail even if `tools: [TOOL]` were dropped from `withFauxSession`,
+		// which is exactly the condition it claims to guard. Gate 3 refuses an empty
+		// active-tool list, so that removal would make every count in this file a
+		// trivial zero with this "precondition check" still green.
+		//
+		// The value now comes from `pi.getActiveTools()` inside the live session, read
+		// back off disk because jiti gives the extension its own module registry.
 		for (const capture of [retried, capped, control, stopWithCall, truncated, twoRuns]) {
 			expect(
 				capture.activeTools,
-				`each session must enable \`${TOOL}\`. The detector's gate 3 returns false on an empty ` +
-					"active-tool list, so a session without tools is a detector that cannot fire",
+				`each session must enable \`${TOOL}\`, and this reads what Pi REPORTED rather than what ` +
+					"this file passed in. The detector's gate 3 returns false on an empty active-tool " +
+					"list, so a session without tools is a detector that cannot fire and every " +
+					"zero-or-one count above is trivially satisfied. An empty array here also means the " +
+					"probe never saw a `turn_start`, i.e. the extension did not load at all",
 			).toContain(TOOL);
 		}
 	});
