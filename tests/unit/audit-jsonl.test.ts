@@ -104,7 +104,7 @@ describe("SAFE-14 — writeAuditRow records both verdicts in one dated file", ()
 			expect(
 				Object.keys(row).sort(),
 				"the row must carry exactly the audited field list — nothing more, nothing less",
-			).toEqual(["command", "cwd", "event", "pid", "reason", "ts", "verdict"].sort());
+			).toEqual(["command", "cwd", "event", "pid", "reason", "tool", "ts", "verdict"].sort());
 
 			expect(typeof row.ts).toBe("number");
 			expect(typeof row.pid).toBe("number");
