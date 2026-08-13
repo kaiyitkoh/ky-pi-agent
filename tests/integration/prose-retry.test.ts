@@ -165,6 +165,16 @@ interface Capture {
 	activeTools: string[];
 	/** Every outgoing context a capturing response step recorded. */
 	outgoing: Context[];
+	/**
+	 * The turns log EXACTLY as it reached disk.
+	 *
+	 * The parsed `rows` are what most cases assert on, but `RB-02-03` is a
+	 * procedure the operator runs with `grep` over these bytes, so the case that
+	 * checks the runbook's arithmetic has to see the bytes and not a reconstruction
+	 * of them. A serialised-back-from-`rows` fixture would silently agree with any
+	 * key order the runbook's fixed-string patterns depend on.
+	 */
+	logText: string;
 }
 
 /**
@@ -194,6 +204,81 @@ function standalone(capture: Capture, event: string): Row[] {
 /** Composed per-turn rows. These always carry `kind: "turn"`. */
 function turnRows(capture: Capture): Row[] {
 	return capture.rows.filter((row) => row.kind === "turn");
+}
+
+/**
+ * The `cat .pi/logs/turns-*.jsonl | ...` one-liners `RB-02-03` tells the operator
+ * to run, in the order the runbook numbers them.
+ *
+ * Read out of `docs/RUNBOOK.md` rather than retyped. The point of
+ * {@link runbookPipeline} is to compute the operator's number from the runbook's
+ * own text over a real log, so a retyped copy would only prove this file agrees
+ * with itself.
+ */
+function runbookCountingCommands(): string[] {
+	const runbook = readFileSync(join(repoRoot(), "docs", "RUNBOOK.md"), "utf-8");
+	const section = runbook.slice(runbook.indexOf("### RB-02-03"));
+	const nextHeading = section.indexOf("\n### ");
+	const body = nextHeading === -1 ? section : section.slice(0, nextHeading);
+	return Array.from(body.matchAll(/`(cat \.pi\/logs\/turns-[^`]+)`/g)).map(
+		(match) => match[1] as string,
+	);
+}
+
+/**
+ * Run one of those one-liners against real log bytes and return its number.
+ *
+ * A faithful interpreter for exactly the four stage forms `RB-02-03` uses, and it
+ * THROWS on anything else. That is deliberate: a rewrite of the runbook into a
+ * shape this cannot read must fail loudly here, because the alternative is a
+ * pipeline that silently computes nothing and a green test over it.
+ *
+ * `grep -F` semantics are plain substring matching on a whole line, which is
+ * exactly what makes the trailing `"` in `'"event":"prose_tool_call"'` keep
+ * `prose_tool_call_retry_exhausted` out of the count.
+ */
+function runbookPipeline(command: string, logText: string): number {
+	const stages = command.split("|").map((stage) => stage.trim());
+	let lines = logText.split("\n").filter((line) => line !== "");
+	let count: number | undefined;
+
+	for (const stage of stages) {
+		if (count !== undefined) {
+			throw new Error(`stage ${JSON.stringify(stage)} follows a stage that already produced a count`);
+		}
+		if (/^cat \.pi\/logs\/turns-[^\s]+$/.test(stage)) {
+			continue;
+		}
+		const counting = /^grep -cF '(.+)'$/.exec(stage);
+		if (counting) {
+			count = lines.filter((line) => line.includes(counting[1] as string)).length;
+			continue;
+		}
+		const keep = /^grep -F '(.+)'$/.exec(stage);
+		if (keep) {
+			lines = lines.filter((line) => line.includes(keep[1] as string));
+			continue;
+		}
+		const drop = /^grep -v '(.+)'$/.exec(stage);
+		if (drop) {
+			lines = lines.filter((line) => !line.includes(drop[1] as string));
+			continue;
+		}
+		if (stage === "wc -l") {
+			count = lines.length;
+			continue;
+		}
+		throw new Error(
+			`RB-02-03 stage ${JSON.stringify(stage)} is not a shape this interpreter understands, so ` +
+				"the runbook's arithmetic is no longer being checked against a real log. Teach the " +
+				"interpreter the new stage rather than deleting the case.",
+		);
+	}
+
+	if (count === undefined) {
+		throw new Error(`RB-02-03 command ${JSON.stringify(command)} produced no number at all`);
+	}
+	return count;
 }
 
 /**
@@ -247,6 +332,7 @@ async function drive(options: {
 				// OBSERVED, not asserted. See {@link ACTIVE_TOOLS_DUMP}.
 				activeTools: readActiveTools(cwd),
 				outgoing,
+				logText: readFileSync(logPath(cwd, TURNS_LOG_BASE), "utf-8"),
 			};
 		},
 	);
@@ -623,6 +709,67 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 				"of which one the harness could still afford to answer. Marking only the retried one " +
 				"would under-report the prose rate by exactly the turns where the problem is worst",
 		).toBe(2);
+	});
+
+	it("case 3b — RB-02-03's own commands, run over the capped session's real log", () => {
+		// [WR-01R] THE RUNBOOK'S ARITHMETIC, MEASURED. Case 3 proves the log holds
+		// two verdict rows and one retry action. This case proves the commands
+		// `docs/RUNBOOK.md` hands the operator turn those bytes into the right
+		// numbers, because the whole value of RB-02-03 is the ratio it produces and
+		// an off-by-a-factor numerator read against a published ~11% baseline is
+		// worse than no measurement: it looks like evidence.
+		//
+		// The `capped` session is the only fixture that can catch this. It is one
+		// agent run with TWO prose turns and a cap of one, which is exactly the
+		// shape where the verdict count and the action count diverge.
+		const commands = runbookCountingCommands();
+		expect(
+			commands.length,
+			"RB-02-03 must carry four `cat .pi/logs/turns-*.jsonl` one-liners: numerator, denominator, " +
+				"retries issued, retries refused. Fewer means a step was dropped and this case is " +
+				"silently checking a shorter procedure than the operator will run",
+		).toBe(4);
+
+		const [numerator, denominator, issued, refused] = commands as [string, string, string, string];
+
+		expect(
+			runbookPipeline(numerator, capped.logText),
+			`step 1 (${numerator}) must count BOTH prose turns. This is the defect WR-01R names: the ` +
+				"kind-less action record is written only when a retry was actually issued, and the cap " +
+				"is one per agent run, so counting those records reports 1 where the truth is 2 — a " +
+				"halved rate, which against a published ~11% baseline reads as refutation of the " +
+				"leading root-cause hypothesis",
+		).toBe(2);
+
+		expect(
+			runbookPipeline(denominator, capped.logText),
+			`step 2 (${denominator}) is the denominator and must count the turns, not the records`,
+		).toBe(2);
+
+		const issuedCount = runbookPipeline(issued, capped.logText);
+		const refusedCount = runbookPipeline(refused, capped.logText);
+
+		expect(
+			issuedCount,
+			`step 3 (${issued}) is the retries ISSUED. One retry was affordable, so exactly one`,
+		).toBe(1);
+		expect(
+			refusedCount,
+			`step 4 (${refused}) is the retries REFUSED. The second prose turn hit the cap`,
+		).toBe(1);
+
+		expect(
+			issuedCount + refusedCount,
+			"the reconciliation identity RB-02-03 states — retries issued + retries refused = prose " +
+				"turn rows — must hold on a real log. It is the only thing that makes a turn whose " +
+				"`event` slot was taken by the degraded-cost marker visible instead of silent",
+		).toBe(runbookPipeline(numerator, capped.logText));
+
+		expect(
+			issuedCount,
+			"and the two numbers must genuinely DISAGREE on this fixture, or this case would pass " +
+				"just as happily with the old, halved numerator pinned in the runbook",
+		).not.toBe(runbookPipeline(numerator, capped.logText));
 	});
 
 	it("case 4 — a genuine tool call, narrated as well, does not fire the detector", () => {

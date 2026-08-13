@@ -407,17 +407,31 @@ grep '"kind":"turn"' .pi/logs/turns-$(date +%F).jsonl \
 ```
 
 **Find every turn where the detector fired.** Note the two meanings: the turn row
-carries the verdict, the kind-less record carries the action, and both use the
-same `event` value. Count the actions, not both:
+carries the VERDICT, the kind-less record carries the ACTION, and both use the
+same `event` value. For the prose *rate* you want the verdicts, one per detected
+turn:
 
 ```sh
-cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":'
+cat .pi/logs/turns-*.jsonl | grep -F '"kind":"turn"' | grep -cF '"event":"prose_tool_call"'
 ```
 
-Pipe that through `wc -l` for the numerator of the prose rate. `cat` first: `grep -c`
-over a glob prints `file:count` per file rather than one total, so with any
-rotation the un-piped counting form yields no single number. `RB-02-03` in
-`docs/RUNBOOK.md` carries the same three commands as a procedure.
+Do **not** count the kind-less records for the rate. The verdict is stamped on the
+turn accumulator before the retry budget is consulted, so every detected prose
+turn has a turn row; the kind-less record is written only when a retry was
+actually issued, and `MAX_PROSE_RETRIES` is `1` per agent run, so every prose turn
+after the first in a run is missing from it. The actions are still worth counting
+— as a reconciliation, where *retries issued + retries refused* must equal the
+numerator above:
+
+```sh
+cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":' | wc -l
+cat .pi/logs/turns-*.jsonl | grep -cF '"event":"prose_tool_call_retry_exhausted"'
+```
+
+`cat` first in every one of them: `grep -c` over a glob prints `file:count` per
+file rather than one total, so with any rotation the un-piped counting form yields
+no single number. `RB-02-03` in `docs/RUNBOOK.md` carries these commands as a
+procedure, with the denominator and the reconciliation identity.
 
 **Join a turns row to its wire records.** Take the row's `corr` and grep the
 other stream for it; you should get a headers/request/response triple, or a pair

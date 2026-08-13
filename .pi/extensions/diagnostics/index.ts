@@ -638,10 +638,16 @@ export default function (pi: ExtensionAPI): void {
 						// verdict `message_end` stamped on the accumulator. The marker
 						// wins, because losing it means a fabricated zero cost enters a
 						// Phase 8 spend total with nothing anywhere saying so
-						// [threat T-02-08-05]. Losing the prose verdict here costs
-						// nothing equivalent: `message_end` already appended a standalone
-						// record carrying it, which is exactly the case that record
-						// exists for.
+						// [threat T-02-08-05]. Losing the prose verdict here costs less:
+						// `message_end` left a standalone record for this turn either
+						// way — carrying PROSE_EVENT if a retry was issued, or
+						// PROSE_EXHAUSTED_EVENT if the budget was already spent — so the
+						// turn is still visible, just not in the rate's numerator.
+						// [WR-01R] That is a real hole in the numerator and it is why
+						// RB-02-03 carries the reconciliation identity "retries issued +
+						// retries refused = prose turn rows": this is the one case where
+						// the two sides disagree, and the runbook says so rather than
+						// leaving the operator to discover it.
 						event: model === undefined ? MODEL_UNAVAILABLE_EVENT : turn?.event,
 					}),
 				);

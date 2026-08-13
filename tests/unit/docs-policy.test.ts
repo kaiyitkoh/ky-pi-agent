@@ -228,25 +228,36 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	// dropping the command fails here.
 	"RB-02-01": ["tail -n 1 .pi/logs/wire-"],
 	"RB-02-02": ["grep -rIEn", ".pi/logs/"],
-	// RB-02-03 pins the THREE COUNTING COMMANDS IN FULL, not fragments of them.
+	// RB-02-03 pins the FOUR COUNTING COMMANDS IN FULL, not fragments of them.
 	//
 	// Fragments were not enough here. Each of these commands carries a fix for a
-	// specific defect -- `grep -v '"kind":'` stops the numerator double-counting the
-	// turn row beside the standalone record (every detected prose turn leaves both),
-	// and the `cat ... |` prefix makes `grep -c` over a rotated glob yield one total
-	// instead of `file:count` per file -- and the runbook DESCRIBES those same
-	// fragments in the prose underneath the steps. A fragment pin therefore stayed
-	// green when the fragment was deleted from the command and left in the
-	// explanation, which is the whole failure this pin exists to catch. Pinning the
-	// complete line is safe because each command sits inside backticks on one line
-	// of a numbered list and is not subject to reflow.
+	// specific defect -- the `grep -F '"kind":"turn"'` prefilter stops the numerator
+	// double-counting the standalone record beside the turn row (a detected prose turn
+	// can leave both, and they share the same `event` value), and the `cat ... |`
+	// prefix makes `grep -c` over a rotated glob yield one total instead of
+	// `file:count` per file -- and the runbook DESCRIBES those same fragments in the
+	// prose underneath the steps. A fragment pin therefore stayed green when the
+	// fragment was deleted from the command and left in the explanation, which is the
+	// whole failure this pin exists to catch. Pinning the complete line is safe
+	// because each command sits inside backticks on one line of a numbered list and is
+	// not subject to reflow.
 	//
-	// A 2-3x inflated prose rate read against a published ~11% baseline would look
-	// like loud confirmation of the leading root-cause hypothesis, which is why the
-	// numerator command is pinned rather than trusted.
+	// [WR-01R] The NUMERATOR counts TURN ROWS, not the kind-less action records. The
+	// verdict is stamped on the turn accumulator before the retry budget is consulted
+	// (`index.ts`), so every detected prose turn leaves a turn row; the kind-less
+	// record is written only when a retry was actually issued, and `MAX_PROSE_RETRIES`
+	// is 1 per agent run, so every prose turn after the first in a run is invisible to
+	// it. Measured on a fixture holding both shapes: the action count reports 1/3 where
+	// the turn-row count reports the true 2/3.
+	//
+	// Read against a published ~11% baseline, an inflated rate looks like loud
+	// confirmation of the leading root-cause hypothesis and a deflated one looks like
+	// refutation. Both directions are pinned rather than trusted, which is why the
+	// action commands are also here: steps 3 and 4 must sum to step 1.
 	"RB-02-03": [
-		`cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":' | wc -l`,
+		`cat .pi/logs/turns-*.jsonl | grep -F '"kind":"turn"' | grep -cF '"event":"prose_tool_call"'`,
 		`cat .pi/logs/turns-*.jsonl | grep -cF '"kind":"turn"'`,
+		`cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":' | wc -l`,
 		`cat .pi/logs/turns-*.jsonl | grep -cF '"event":"prose_tool_call_retry_exhausted"'`,
 	],
 };
