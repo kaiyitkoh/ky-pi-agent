@@ -1051,12 +1051,26 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 
 		// Everything tracked except the two env templates, which are where the
 		// names are DECLARED rather than consumed.
+		//
+		// AND EXCEPT `tests/`. A test that names a variable is DOCUMENTING A
+		// CHECK, not consuming a credential, so counting it as a consumer lets a
+		// variable certify itself: re-adding an out-of-scope vendor's
+		// personal-access-token line to the template AND naming that string
+		// anywhere under tests/ — a fixture, a table like AWS_CHAIN_VARIABLES, a
+		// comment — makes this case green again, and the operator is back to being
+		// asked to mint a credential for a vendor 03-CONTEXT decision 8 rules out.
+		// Tightening costs nothing today: all four managed names have non-test
+		// consumers (DASHSCOPE_API_KEY and DEEPSEEK_API_KEY in
+		// .pi/templates/auth-template.json, AWS_PROFILE in
+		// .pi/extensions/providers/schema.ts, KYPI_DASHSCOPE_BASE_URL in
+		// bin/bootstrap.sh and docs/RUNBOOK.md). [IN-04]
 		const consumers = trackedFiles()
 			.filter(
 				(path) =>
 					path !== ".env.example" &&
 					path !== ".pi/templates/env.example" &&
 					!path.startsWith(".planning/") &&
+					!path.startsWith("tests/") &&
 					path !== "CLAUDE.md",
 			)
 			.map((path) => {
