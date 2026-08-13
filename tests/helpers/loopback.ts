@@ -93,6 +93,7 @@
  * package may ever be added here. [threat T-03-03-SC]
  */
 import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http";
+import type { Socket } from "node:net";
 
 /** One request the server received, recorded before any response is written. */
 export interface LoopbackRequest {
@@ -300,12 +301,20 @@ export async function withLoopbackCompletions<T>(
 		});
 	});
 
-	server.on("connection", (socket) => {
+	// NAMED AND HOISTED so the bind-failure path below can remove exactly this
+	// listener. `createServer()` installs http's OWN `connectionListener` on the
+	// same event, and a blanket `removeAllListeners("connection")` takes that with
+	// it — leaving an object that still accepts sockets and no longer parses a
+	// request. Harmless where it was used (the server never bound and is closed
+	// immediately) but only by accident: any future edit that retried the bind
+	// after that catch would get a silently non-HTTP server. [IN-03]
+	const trackSocket = (socket: Socket): void => {
 		sockets.add(socket);
 		socket.on("close", () => {
 			sockets.delete(socket);
 		});
-	});
+	};
+	server.on("connection", trackSocket);
 
 	await new Promise<void>((resolveListening, rejectListening) => {
 		server.once("error", rejectListening);
@@ -321,7 +330,11 @@ export async function withLoopbackCompletions<T>(
 		// and its `connection` listener survive the throw. In practice the server
 		// never bound so no port leaks, but the listener does, and there is no
 		// second chance to remove it.
-		server.removeAllListeners("connection");
+		//
+		// ONLY WHAT THIS HELPER ADDED. `removeAllListeners("connection")` would
+		// also strip http's own `connectionListener`, which `createServer()`
+		// registered on this very event. [IN-03]
+		server.removeListener("connection", trackSocket);
 		server.close();
 
 		const detail = error instanceof Error ? error.message : String(error);
