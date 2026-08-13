@@ -185,15 +185,15 @@ Compounding this: DeepSeek cache reads are ~50× cheaper than fresh input, so a 
 | Qoder via official PAT + Agent SDK | Bypass proxies breach Qoder ToS and risk irreversible account termination; the official API gives the same capacity | — Pending |
 | Compose subagents, never fork | ~15 upstream releases/month makes a fork permanent unpaid maintenance | — Pending |
 | Progressive disclosure as an architectural principle | Resolves "don't overcomplicate" without cutting features; directly targets a plausible cause of the cheap-model symptom | — Pending |
-| Repo *and* Pi package, not either/or | A `package.json` costs one file, a bootstrap script one more; choosing means being worse at one for no saving | — Pending |
+| Repo *and* Pi package, not either/or | A `package.json` costs one file, a bootstrap script one more; choosing means being worse at one for no saving | Validated in Phase 1 — both load paths execute off one set of files (`tests/integration/load-paths.test.ts`, 4/4 against the real `pi@0.84.1`); the real-URL install is `RB-01-02`, outstanding |
 | UI layer sequenced last | Genuinely wanted and motivating, but must not block a working daily driver; also gated by cache economics — volatile system-prompt tokens cost 50× on the whole prefix | — Pending |
 | Route via `ctx.modelRegistry.complete()`, `setModel` at idle, and subagents — not a virtual provider | Verified at source as the mechanism Pi's own `summarize.ts`/`handoff.ts` use; avoids losing the `/model` picker and cost accounting | — Pending |
 | Test with `fauxProvider()` rather than live credentials | Makes the credential-dependent surface testable on a machine with no API keys | — Pending |
 | Prefer Pi's own bundled examples over third-party extensions where they cover the need | Zero supply-chain risk, guaranteed current against an API that ships every 2–3 days | — Pending |
-| Project-scoped `.npmrc` with `ignore-scripts=true`, not global | `pi install` runs npm lifecycle scripts; arbitrary code executes before the trust prompt. Scoped because global `ignore-scripts` breaks legitimate native builds machine-wide. Residual gap — a `pi install` from another directory is unprotected — is documented rather than hidden | — Pending |
-| Autonomous runs build and mark live checks outstanding | The 8 [RUNBOOK] requirements need credentials the dev machine lacks; blocking on them would stall progress, while silently passing them would repeat the project's original failure of building on unverified assumptions | — Pending |
+| Project-scoped `.npmrc` with `ignore-scripts=true`, not global | `pi install` runs npm lifecycle scripts; arbitrary code executes before the trust prompt. Scoped because global `ignore-scripts` breaks legitimate native builds machine-wide. Residual gap — a `pi install` from another directory is unprotected — is documented rather than hidden | Validated in Phase 1 — `.npmrc` + `.pi/npm/.npmrc` committed, `bin/bootstrap.sh` asserts the control at three npm scopes before its single install call, and the residual gap is stated in `README.md`. Two bypasses of the assertion itself (env-var casing, hyphenated `npm_config_*` keys) were found and closed during the phase |
+| Autonomous runs build and mark live checks outstanding | The 8 [RUNBOOK] requirements need credentials the dev machine lacks; blocking on them would stall progress, while silently passing them would repeat the project's original failure of building on unverified assumptions | Held in Phase 1 — verification returned `human_needed`, 4 live checks recorded outstanding in `01-HUMAN-UAT.md` and `docs/RUNBOOK.md`, none marked passed. `tests/unit/docs-policy.test.ts` now enforces this mechanically rather than by discipline |
 | Qoder demoted from routable model to delegate tool | No inference endpoint exists — verified at `docs.qoder.com/llms.txt` | — Pending |
-| GitHub Actions matrix for macOS verification | macOS cannot be tested locally; free on public repos; the alternative is shipping unverified | — Pending |
+| GitHub Actions matrix for macOS verification | macOS cannot be tested locally; free on public repos; the alternative is shipping unverified | Built in Phase 1, unproven — `.github/workflows/ci.yml` is written and SHA-pinned, but it has never run. Until the first push, macOS remains exactly as unverified as it was |
 
 ## Evolution
 
@@ -213,4 +213,4 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-13 after domain research — corrected assumptions on DeepSeek wire format, Qoder capability, and context budget*
+*Last updated: 2026-08-13 after Phase 1 (Bootstrap, Packaging & Supply Chain) — 10/10 plans, verification `human_needed` with 4 live checks outstanding, none marked passed*
