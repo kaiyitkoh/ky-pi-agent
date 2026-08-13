@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md — the two Wave-0 provider test seams (wrapFauxWithStatus, withModelsConfig), both falsified
-last_updated: "2026-08-13T13:54:34.631Z"
+stopped_at: Completed 03-02-PLAN.md — the models.json / auth.json templates and the Trap T1 filename guard, falsified twice
+last_updated: "2026-08-13T14:03:37.940Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 32
-  completed_plans: 22
+  completed_plans: 23
   percent: 18
 ---
 
@@ -26,13 +26,13 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 03 (providers-credentials) — EXECUTING
-Plan: 2 of 11
+Plan: 3 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [███████░░░] 69%
+Progress: [███████░░░] 72%
 
-**Read that 69% carefully.** The denominator is *plans written so far* — Phase 1's
+**Read that 72% carefully.** The denominator is *plans written so far* — Phase 1's
 10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
 grow and the percentage will fall. The honest phase-level figure is **2 of 11
 phases complete**.
@@ -80,6 +80,7 @@ phases complete**.
 | Phase 02 P10 | 55m | 3 tasks | 6 files |
 | Phase 02 P11 | 25m | 3 tasks | 3 files |
 | Phase 03 P01 | 35m | 3 tasks | 3 files |
+| Phase 03 P02 | 25m | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -165,6 +166,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-01: withModelsConfig COPIES the models config into its own temp agent dir even when handed a template path -- Pi defaults the models store to dirname(modelsPath)/models-store.json, so a modelsPath aimed at .pi/templates/ would aim a writer at this repository
 - [Phase 03]: 03-01: $ENV_VAR config values resolve LAZILY at getProviderAuth() time, not at composition time -- falsified by moving applyEnv below ModelRuntime.create and watching the test stay green; the assertion message was rewritten to claim only what it proves
 - [Phase 03]: 03-01: Pi's process-lifetime !command cache cannot be cleared from a test -- clearApiKeyCache is re-exported from core/model-registry.ts but not from the package root, so PROV-02's cached-vs-uncached proof must do both resolutions inside ONE withModelsConfig callback
+- [Phase 03]: 03-02: trackedFiles() membership, not isIgnored(), is the load-bearing half of the Trap T1 guard -- git mv FORCES an ignored path into the index, so renaming auth-template.json to auth.example.json left the ignore half green and only the tracked-name case turned red
+- [Phase 03]: 03-02: both config templates are validated by RUNNING Pi's own loaders (stripJsonComments+JSON.parse; ReadOnlyAuthStorage.load/read) over the real files, never by a local regex strip or by reading the validator -- the auth run also proved the DASHSCOPE_API_KEY env reference interpolates and env.AWS_PROFILE survives raw
+- [Phase 03]: 03-02: where the plan's task prose conflicted with its own acceptance greps (a baseUrl comment naming the workspace-dedicated host, a header naming the out-of-scope vendor), the greps won and the prose was rephrased -- a comment is text like any other and a gate that greps to zero means zero
 
 ### Pending Todos
 
@@ -210,8 +214,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T13:54:34.623Z
-Stopped at: Completed 03-01-PLAN.md — the two Wave-0 provider test seams (wrapFauxWithStatus, withModelsConfig), both falsified
+Last session: 2026-08-13T14:03:56.081Z
+Stopped at: Completed 03-02-PLAN.md — the models.json / auth.json templates and the Trap T1 filename guard, falsified twice
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
