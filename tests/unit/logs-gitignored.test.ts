@@ -34,6 +34,7 @@ import {
 	resetProducedPaths,
 } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { TURNS_LOG_BASE, WIRE_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
+import { writeAuditRow } from "../../.pi/extensions/safety/audit.ts";
 import { isIgnored } from "../helpers/git.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
 
@@ -52,6 +53,11 @@ const MUST_BE_IGNORED = [
 	".pi/logs/turns-2026-08-13.10.jsonl",
 	".pi/logs/",
 	".pi/logs/sub/whatever.jsonl",
+	// SAFE-14 — the audit stream shares the same directory and the same
+	// blanket `*.jsonl` rule, but it is a new stream added in Phase 4 and the
+	// declared-rules table does not notice a stream nobody typed in.
+	".pi/logs/audit-2026-08-14.jsonl",
+	".pi/logs/audit-2026-08-14.1.jsonl",
 ] as const;
 
 describe("DIAG-07 — the declared log paths are not committable", () => {
@@ -83,7 +89,7 @@ describe("DIAG-07 — the declared log paths are not committable", () => {
 	});
 });
 
-describe("DIAG-07 — the paths the writer ACTUALLY produced are ignored", () => {
+describe("DIAG-07 / SAFE-14 — the paths the writer ACTUALLY produced are ignored", () => {
 	it("checks git against a real run rather than a remembered list", async () => {
 		resetProducedPaths();
 
@@ -97,6 +103,17 @@ describe("DIAG-07 — the paths the writer ACTUALLY produced are ignored", () =>
 			for (let i = 0; i < 6; i++) {
 				appendJsonl(cwd, WIRE_LOG_BASE, { i, filler }, opts);
 				appendJsonl(cwd, TURNS_LOG_BASE, { i, filler }, opts);
+				// The audit stream shares `producedPaths()` -- it is the same
+				// globalThis-keyed set every binding over `.pi/lib/jsonl.ts` writes
+				// into -- so a real audit row belongs in the same reality check.
+				writeAuditRow(cwd, {
+					event: "bash_call",
+					tool: "bash",
+					command: `echo ${String(i)}`,
+					cwd,
+					verdict: i % 2 === 0 ? "allow" : "block",
+					reason: filler,
+				});
 			}
 
 			// Repo-relative, forward-slash: the temp cwd is not the repo, but the
