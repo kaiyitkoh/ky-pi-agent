@@ -1,5 +1,5 @@
 {
-  "model_profile": "quality",
+  "model_profile": "balanced",
   "commit_docs": true,
   "parallelization": false,
   "search_gitignored": false,
@@ -66,5 +66,8 @@
   "agent_skills": {},
   "features": {},
   "mode": "yolo",
-  "granularity": "fine"
+  "granularity": "fine",
+  "model_overrides": {
+    "gsd-code-reviewer": "opus"
+  }
 }
