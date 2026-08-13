@@ -58,7 +58,7 @@
 - [x] **SAFE-04**: Writes are blocked when `HEAD == main`, while read-only operations against main (`fetch`, `rebase`, `diff`, `log`, `worktree add -b feat main`) remain allowed **[FAUX]**
 - [x] **SAFE-05**: `glab mr merge` is blocked — in the user's work repo, the MR merge is the deploy trigger **[FAUX]**
 - [x] **SAFE-06**: Reads of `.env`, `~/.aws/credentials`, kubeconfig, and `*.tfstate` are blocked — tfstate holds plaintext secrets that would enter model context **[FAUX]**
-- [ ] **SAFE-07**: `terraform apply|destroy|import`, mutating `aws` CLI calls, and `kubectl delete` require explicit confirmation **[FAUX]**
+- [x] **SAFE-07**: `terraform apply|destroy|import`, mutating `aws` CLI calls, and `kubectl delete` require explicit confirmation **[FAUX]**
 - [x] **SAFE-08**: File writes and deletes outside the project directory are blocked **[FAUX]**
 - [ ] **SAFE-09**: Enforcement happens **twice** — at the `tool_call` hook and inside a wrapped `bash` tool — because later hooks can mutate `event.input` after approval and Pi performs no re-validation **[FAUX]**
 - [ ] **SAFE-10**: Confirmation uses block → approval-tool → re-issue, not an inline `confirm()`, and is **deny-by-default**; a CI test asserts the deny under `--mode json` where `noOpUIContext.confirm` returns `false` **[FAUX]**
@@ -262,7 +262,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-04 | Phase 4 | Complete |
 | SAFE-05 | Phase 4 | Complete |
 | SAFE-06 | Phase 4 | Complete |
-| SAFE-07 | Phase 4 | Pending |
+| SAFE-07 | Phase 4 | Complete |
 | SAFE-08 | Phase 4 | Complete |
 | SAFE-09 | Phase 4 | Pending |
 | SAFE-10 | Phase 4 | Pending |
