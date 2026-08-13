@@ -23,6 +23,16 @@
  * and asserts each one exists on disk. That scan is asserted non-empty first:
  * a regex that matches nothing would otherwise pass while proving nothing —
  * the failure shape this phase has already tripped over more than once.
+ *
+ * THE GUARD SPANS BOTH PHASES. It was written in Phase 1 against a literal
+ * `RB-01-\d{2}`, which meant appending Phase 2's entries would have left three
+ * new statuses completely unguarded — the one outcome the policy above exists
+ * to prevent, arriving quietly through a file that was never touched. The id
+ * pattern is now `RB-<phase>-<n>` and {@link ALL_IDS} drives Group B and
+ * Group C, so a future phase adds its ids to one array and inherits the whole
+ * guard. Group C carries a synthetic `RB-02-01` fixture as well as the Phase 1
+ * ones, because a generalisation that only the real file exercises is a
+ * generalisation nobody has tested.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -36,11 +46,29 @@ const RUNBOOK_PATH = join(ROOT, "docs", "RUNBOOK.md");
 /** The Phase 1 entries this file governs. */
 const PHASE_ONE_IDS = ["RB-01-01", "RB-01-02", "RB-01-03"] as const;
 
-/** Matches any Phase 1 runbook entry id. */
-const ID_RE = /RB-01-\d{2}/g;
+/**
+ * The Phase 2 entries this file governs.
+ *
+ * All three need the work laptop and live provider credentials: a real turn per
+ * provider (RB-02-01), a real credential passing through the capture path
+ * (RB-02-02), and a working day of real DeepSeek V4 Flash traffic (RB-02-03).
+ */
+const PHASE_TWO_IDS = ["RB-02-01", "RB-02-02", "RB-02-03"] as const;
+
+/** Every governed entry, in phase order. A later phase appends its array here. */
+const ALL_IDS = [...PHASE_ONE_IDS, ...PHASE_TWO_IDS] as const;
 
 /**
- * Extracts the recorded status token for every `RB-01-*` id in a runbook.
+ * Matches any runbook entry id, of any phase.
+ *
+ * Deliberately `RB-<2 digits>-<2 digits>` rather than a literal phase number:
+ * the Phase 1 version was `RB-01-\d{2}`, so Phase 2's entries would have been
+ * invisible to the parser and their statuses unguarded.
+ */
+const ID_RE = /RB-\d{2}-\d{2}/g;
+
+/**
+ * Extracts the recorded status token for every `RB-<phase>-<n>` id in a runbook.
  *
  * Two independent sources are read and required to agree:
  *
@@ -57,7 +85,7 @@ const ID_RE = /RB-01-\d{2}/g;
  * Returns `MISSING` for an id that appears with no status at all: per the
  * runbook's own contract, an entry without a status line is a bug in the file.
  */
-export function phaseOneEntryStatuses(markdown: string): Record<string, string> {
+export function runbookEntryStatuses(markdown: string): Record<string, string> {
 	const ids = Array.from(new Set(markdown.match(ID_RE) ?? []));
 	const out: Record<string, string> = {};
 
@@ -195,12 +223,18 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-01-01": ["sh scripts/check-gh-unauthenticated.sh", "gh auth logout"],
 	"RB-01-02": ["pi install https://github.com/kaiyitkoh/ky-pi-agent", "pi --list-models"],
 	"RB-01-03": ["/reload"],
+	// Fragments, not whole command lines: each is short enough to survive a
+	// reflow of the surrounding markdown and specific enough that a rewrite
+	// dropping the command fails here.
+	"RB-02-01": ["tail -n 1 .pi/logs/wire-"],
+	"RB-02-02": ["grep -rIEn", ".pi/logs/"],
+	"RB-02-03": [`grep -c '"event":"prose_tool_call"'`, `grep -c '"kind":"turn"'`],
 };
 
 /** Matches a repo-relative test path mentioned anywhere in the runbook prose. */
 const PROXY_PATH_RE = /tests\/[A-Za-z0-9._\-/]+\.test\.ts/g;
 
-describe("Group B — the Phase 1 runbook is structurally complete", () => {
+describe("Group B — the runbook is structurally complete", () => {
 	it("exists", () => {
 		expect(
 			existsSync(RUNBOOK_PATH),
@@ -211,7 +245,7 @@ describe("Group B — the Phase 1 runbook is structurally complete", () => {
 
 	const runbook = readFileSync(RUNBOOK_PATH, "utf-8");
 
-	for (const id of PHASE_ONE_IDS) {
+	for (const id of ALL_IDS) {
 		it(`declares ${id} in a summary-table row marked OUTSTANDING`, () => {
 			const row = runbook
 				.split("\n")
@@ -242,7 +276,7 @@ describe("Group B — the Phase 1 runbook is structurally complete", () => {
 			referenced.length,
 			"no test paths referenced in docs/RUNBOOK.md — this assertion scans that set, so an empty one " +
 				"would pass while verifying nothing",
-		).toBeGreaterThanOrEqual(PHASE_ONE_IDS.length);
+		).toBeGreaterThanOrEqual(ALL_IDS.length);
 
 		const missing = referenced.filter((rel) => !existsSync(join(ROOT, rel)));
 		expect(
@@ -305,32 +339,106 @@ const FIXTURE_HALF_FLIPPED = [
 
 const FIXTURE_NO_STATUS = ["### RB-01-01 — example check", "", "Some prose and no status line.", ""].join("\n");
 
+/**
+ * The same two-source shape carrying a PHASE 2 id.
+ *
+ * The Phase 1 fixtures above cannot tell a generalised `RB-\d{2}-\d{2}` apart
+ * from the literal `RB-01-\d{2}` it replaced — both match `RB-01-01`. Without a
+ * fixture whose id starts `RB-02`, the generalisation would be proven only by
+ * the real runbook, i.e. by the very file the guard is supposed to police.
+ */
+const FIXTURE_PHASE_TWO = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-02-01 | example phase 2 check | OUTSTANDING |",
+	"",
+	"### RB-02-01 — example phase 2 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+const FIXTURE_PHASE_TWO_HALF_FLIPPED = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-02-01 | example phase 2 check | PASSED — 2026-08-13 |",
+	"",
+	"### RB-02-01 — example phase 2 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+/**
+ * A malformed id in the same two-source shape.
+ *
+ * Widening the pattern is one edit away from widening it too far — `RB-[\d-]+`
+ * would match this, and then an id that corresponds to no entry in
+ * {@link ALL_IDS} would be parsed, statused and silently ignored by both
+ * loops. `RB-<2 digits>-<2 digits>` is the shape the file actually uses, and
+ * this fixture is what holds the pattern to it.
+ */
+const FIXTURE_MALFORMED_ID = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-2-1 | single-digit phase and index | OUTSTANDING |",
+	"",
+	"### RB-2-1 — single-digit phase and index",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
 describe("Group C — the parser catches a status flip", () => {
 	it("reads OUTSTANDING", () => {
-		expect(phaseOneEntryStatuses(FIXTURE_OUTSTANDING)).toEqual({ "RB-01-01": "OUTSTANDING" });
+		expect(runbookEntryStatuses(FIXTURE_OUTSTANDING)).toEqual({ "RB-01-01": "OUTSTANDING" });
 	});
 
 	it("reads PASSED, so the guard below is proven live rather than assumed", () => {
 		expect(
-			phaseOneEntryStatuses(FIXTURE_PASSED),
+			runbookEntryStatuses(FIXTURE_PASSED),
 			"if the parser could not see PASSED, asserting OUTSTANDING against the real file would be a " +
 				"tautology — it would pass no matter what the file said",
 		).toEqual({ "RB-01-01": "PASSED" });
 	});
 
 	it("reports a half-flip as INCONSISTENT", () => {
-		expect(phaseOneEntryStatuses(FIXTURE_HALF_FLIPPED)).toEqual({ "RB-01-01": "INCONSISTENT" });
+		expect(runbookEntryStatuses(FIXTURE_HALF_FLIPPED)).toEqual({ "RB-01-01": "INCONSISTENT" });
 	});
 
 	it("reports an entry with no status line as MISSING", () => {
-		expect(phaseOneEntryStatuses(FIXTURE_NO_STATUS)).toEqual({ "RB-01-01": "MISSING" });
+		expect(runbookEntryStatuses(FIXTURE_NO_STATUS)).toEqual({ "RB-01-01": "MISSING" });
+	});
+
+	it("reads a Phase 2 id, so the generalised pattern is exercised off the real file", () => {
+		expect(
+			runbookEntryStatuses(FIXTURE_PHASE_TWO),
+			"the id pattern was widened from RB-01-\\d{2} to RB-\\d{2}-\\d{2}; if that widening had not " +
+				"landed, this fixture would parse to {} and the Phase 2 half of the guard below would " +
+				"assert OUTSTANDING against undefined",
+		).toEqual({ "RB-02-01": "OUTSTANDING" });
+	});
+
+	it("reports a Phase 2 half-flip as INCONSISTENT", () => {
+		expect(runbookEntryStatuses(FIXTURE_PHASE_TWO_HALF_FLIPPED)).toEqual({
+			"RB-02-01": "INCONSISTENT",
+		});
+	});
+
+	it("does not recognise a malformed id, so the widened pattern stays a shape and not a wildcard", () => {
+		expect(
+			runbookEntryStatuses(FIXTURE_MALFORMED_ID),
+			"RB-2-1 is not the id shape docs/RUNBOOK.md uses. A pattern loose enough to match it would " +
+				"also parse ids that appear in no phase array, which the two loops below would then " +
+				"silently skip — a status that is read and never asserted is not guarded",
+		).toEqual({});
 	});
 });
 
-describe("Group C — every Phase 1 live check is still OUTSTANDING", () => {
-	const statuses = phaseOneEntryStatuses(readFileSync(RUNBOOK_PATH, "utf-8"));
+describe("Group C — every live check is still OUTSTANDING", () => {
+	const statuses = runbookEntryStatuses(readFileSync(RUNBOOK_PATH, "utf-8"));
 
-	for (const id of PHASE_ONE_IDS) {
+	for (const id of ALL_IDS) {
 		it(`${id} is OUTSTANDING`, () => {
 			expect(
 				statuses[id],
@@ -338,7 +446,10 @@ describe("Group C — every Phase 1 live check is still OUTSTANDING", () => {
 					"development machine — they need the work laptop, a clean profile, or a TTY. Marking " +
 					"one passed is a claim that a human ran the command and read the output. If that " +
 					"genuinely happened, date-stamp the status in docs/RUNBOOK.md and update this test " +
-					"in the same commit, so the claim is reviewable. Never flip it to make a build green.",
+					"in the same commit, so the claim is reviewable. Never flip it to make a build green. " +
+					"The Phase 2 three need the work laptop and live provider credentials specifically: " +
+					"one real turn per provider (RB-02-01), a real credential passing through the capture " +
+					"path (RB-02-02), and a working day of real DeepSeek V4 Flash traffic (RB-02-03).",
 			).toBe("OUTSTANDING");
 		});
 	}
