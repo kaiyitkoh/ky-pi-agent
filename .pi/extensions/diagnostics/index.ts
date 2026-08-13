@@ -368,8 +368,9 @@ function degradedModel(message: AssistantMessage): Model<Api> {
  * exists to escape, and several Pi hooks treat any non-`undefined` return as a
  * REPLACEMENT for the thing being hooked (`runner.ts:1031-1033`), so a wrapper
  * that invented a return value on failure could silently rewrite every provider
- * request. The success path's return value is passed through untouched, which
- * is what lets a hook with a real return contract be wrapped too.
+ * request. The success path's return value is passed through untouched with one
+ * deliberate exception — `null` is coerced to `undefined`, see below — which is
+ * what lets a hook with a real return contract be wrapped too.
  *
  * The write itself is inside a second `try`. If the log cannot be written there
  * is nothing further this code can do, and throwing from the error path would
@@ -382,14 +383,35 @@ export function safeHandler<E, R = undefined>(
 	return async (event: E, ctx: ExtensionContext): Promise<R | undefined> => {
 		try {
 			const result = await fn(event, ctx);
-			// [IN-04's sibling, IN-07] PASSED THROUGH, not `?? undefined`. The `??`
-			// converted a deliberate `null` return into `undefined`, which contradicts
-			// the docstring above: some Pi hooks distinguish the two, and a wrapper
-			// that silently rewrote one to the other could not honestly be described as
-			// safe for "a hook with a real return contract". Harmless for the eight
-			// handlers registered today — none returns a value — which is exactly why
-			// it had to be fixed before one does.
-			return result as R | undefined;
+			// [WR-03R, reverting IN-07] `null` is NOT passed through. IN-07 removed this
+			// `??` on the stated grounds that "some Pi hooks distinguish null from
+			// undefined". That justification is FALSE, and I checked rather than reasoned:
+			// no event-result type in Pi declares `null` as meaningful, and the only
+			// documented `null` semantics in the whole extension API is a HEADER MAP VALUE
+			// meaning "delete this header"
+			// [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:511], which is not a
+			// return value at all.
+			//
+			// What removing it did cost is exact. `BeforeProviderRequestEventResult` is
+			// `unknown` [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:777], so
+			// `null` is a well-typed return from that hook, and the runner replaces on
+			// anything that is not `undefined`:
+			//
+			//     const handlerResult = await handler(event, ctx);
+			//     if (handlerResult !== undefined) { currentPayload = handlerResult; }
+			//     [VERIFIED: pi 0.84.1 dist/core/extensions/runner.js:789-792,
+			//      = src/core/extensions/runner.ts:1030-1033 via dist sourcesContent]
+			//
+			// and `currentPayload` is what is handed back to the adapter
+			// (`runner.js:806`). So a wrapped handler that returned `null` — `return match
+			// ?? null`, a mapped lookup that misses — would set the real outgoing request
+			// BODY to `null`. That is the single catastrophe `wire.ts:26-40` is organised
+			// around. The coercion costs nothing real and is the only thing standing
+			// between a `?? null` typo and every request in the harness being destroyed.
+			// `tests/unit/diagnostics-entry.test.ts` proves both halves: the coercion
+			// happens, and the coerced value does not reach `currentPayload` under the
+			// runner's own replacement rule. [threat T-02-05-03]
+			return (result ?? undefined) as R | undefined;
 		} catch (err) {
 			try {
 				writeTurnsRow(ctx.cwd, {

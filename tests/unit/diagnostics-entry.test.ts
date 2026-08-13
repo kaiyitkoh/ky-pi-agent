@@ -136,22 +136,47 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 		});
 	});
 
-	it("passes a deliberate null through instead of coercing it to undefined", async () => {
+	it("coerces a handler's null return to undefined so it cannot replace a provider payload", async () => {
 		await withTempLogCwd(async (cwd) => {
-			// [IN-07] `result ?? undefined` turned a deliberate `null` into `undefined`.
-			// Harmless for the eight handlers registered today — none returns a value —
-			// but the docstring advertises the wrapper as safe for "a hook with a real
-			// return contract", and some Pi hooks distinguish null from undefined. A
-			// wrapper that rewrites one to the other cannot honestly claim to pass the
-			// success value through untouched.
+			// [WR-03R] IN-07 removed the `?? undefined` on the grounds that "some Pi
+			// hooks distinguish null from undefined". No Pi event-result type declares
+			// `null` as meaningful — the only documented `null` in the extension API is
+			// a header-map value meaning "delete this header"
+			// [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:511] — while
+			// `BeforeProviderRequestEventResult` is `unknown`
+			// [VERIFIED: types.d.ts:777], so `null` IS a well-typed return there, and
+			// the runner replaces the outgoing payload on anything that is not
+			// `undefined` [VERIFIED: dist/core/extensions/runner.js:789-792]. The
+			// coercion is therefore load-bearing, not cosmetic. [threat T-02-05-03]
 			const wrapped = safeHandler<undefined, null>("null_probe", () => null);
 
+			const returned = await wrapped(undefined, fakeCtx(cwd));
+
 			expect(
-				await wrapped(undefined, fakeCtx(cwd)),
-				"the success path must return exactly what the handler returned. `undefined` here means " +
-					"the wrapper is still coercing, and the first hook whose contract distinguishes the " +
-					"two would break in a way no error anywhere would report",
-			).toBeNull();
+				returned,
+				"the wrapper must coerce `null` to `undefined`. `null` here means a `return match ?? null` " +
+					"anywhere inside a wrapped `before_provider_request` handler sets the real outgoing " +
+					"request body to `null`, and nothing anywhere would report it",
+			).toBeUndefined();
+
+			// Pi's own replacement rule, transcribed from
+			// dist/core/extensions/runner.js:789-792, applied to what the wrapper
+			// actually returned. Asserting `toBeUndefined()` alone would pass if the
+			// coercion moved somewhere that did not protect this specific path; this
+			// asserts the CONSEQUENCE the coercion exists to prevent.
+			const realPayload = { model: "deepseek-chat", messages: [{ role: "user" }] };
+			let currentPayload: unknown = realPayload;
+			if (returned !== undefined) {
+				currentPayload = returned;
+			}
+
+			expect(
+				currentPayload,
+				"under the runner's own `if (handlerResult !== undefined) currentPayload = handlerResult` " +
+					"(pi 0.84.1 dist/core/extensions/runner.js:789-792), a `null` escaping the wrapper " +
+					"REPLACES the outgoing provider request body. This is the one catastrophe wire.ts:26-40 " +
+					"is built around",
+			).toBe(realPayload);
 
 			expect(
 				logFilesIn(logDir(cwd)),
