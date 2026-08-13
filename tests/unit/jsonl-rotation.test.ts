@@ -237,6 +237,49 @@ describe("DIAG-08 — retention deletes by date stamp against an injected clock"
 		});
 	});
 
+	it("never deletes a dated .jsonl this module did not write", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const dir = logDir(cwd);
+			mkdirSync(dir, { recursive: true });
+
+			/** `<base>-<now minus days>.jsonl`, created empty-but-valid. */
+			function plant(base: string, days: number): string {
+				const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+				const stamp = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(
+					d.getDate(),
+				).padStart(2, "0")}`;
+				const path = join(dir, `${base}-${stamp}.jsonl`);
+				writeFileSync(path, `${JSON.stringify({ base, ageDays: days })}\n`, "utf-8");
+				return path;
+			}
+
+			// Both are 40 days old, so AGE cannot be what distinguishes them. The only
+			// difference is who wrote them.
+			const foreign = plant("foreign", 40);
+			const alsoForeign = plant("todo_state", 40);
+			const owned = plant(TURNS_LOG_BASE, 40);
+
+			const deleted = pruneLogs(cwd, { retentionDays: 14, now });
+
+			expect(
+				deleted,
+				"pruneLogs must report ONLY the file it owns. `LOG_NAME_RE`'s first capture group is any " +
+					"base name, because the same expression parses the rotation-bucket stem, so a prune " +
+					"scoped by name SHAPE deletes another extension's dated JSONL — irreversibly, on every " +
+					"session_start, with the unlink error swallowed so nothing anywhere reports it. " +
+					"`.pi/logs/` is the most obvious directory name any extension would pick under Pi's " +
+					"config dir, and this project composes roughly eleven of them",
+			).toEqual([owned]);
+
+			expect(
+				logFilesIn(dir).sort(),
+				"the foreign files must still be on disk. Asserting only the returned list would pass " +
+					"for a prune that deleted them and forgot to mention it",
+			).toEqual([basename(foreign), basename(alsoForeign)].sort());
+		});
+	});
+
 	it("returns an empty list when there is no log directory at all", async () => {
 		await withTempLogCwd(async (cwd) => {
 			expect(

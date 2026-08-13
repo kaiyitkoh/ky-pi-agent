@@ -79,10 +79,30 @@ import {
 	LOG_DIR_SEGMENT,
 	MAX_ROTATED_FILES,
 	RETENTION_DAYS,
+	TURNS_LOG_BASE,
 	TURNS_ROTATE_BYTES,
 	WIRE_LOG_BASE,
 	WIRE_ROTATE_BYTES,
 } from "./schema.ts";
+
+/**
+ * The stream base names this module is allowed to DELETE. Never widen without a
+ * test.
+ *
+ * `LOG_DIR_SEGMENT` is `"logs"` — the most obvious name any extension would pick
+ * under Pi's config dir — and this project composes roughly eleven third-party
+ * extensions, several of which keep durable state (`pi-background-tasks`,
+ * `@juicesharp/rpiv-todo`). {@link pruneLogs} runs on every `session_start` and
+ * unlinks with failures swallowed, so a retention rule scoped by SHAPE rather
+ * than by OWNERSHIP would silently and irreversibly delete another component's
+ * dated JSONL after fourteen days, on startup, with nothing reported anywhere.
+ *
+ * Diagnostics has no claim on that directory. It deletes what it wrote.
+ * `tests/unit/jsonl-rotation.test.ts` plants a foreign name beside a doomed
+ * owned one and asserts the foreign file survives — the paired negative that
+ * makes this a control rather than a comment.
+ */
+const OWNED_BASES: readonly string[] = [WIRE_LOG_BASE, TURNS_LOG_BASE];
 
 /** File extension of every log this module writes. */
 const EXT = ".jsonl";
@@ -363,6 +383,11 @@ function ageInDays(stamp: { y: number; m: number; d: number }, now: Date): numbe
  * Every unlink failure is swallowed: a log another process holds open is noise,
  * and a session that cannot start because a prune failed would be a diagnostics
  * subsystem taking the harness down with it.
+ *
+ * SCOPE. Only files whose base name is in {@link OWNED_BASES} are considered at
+ * all. `.pi/logs/` is a directory this module shares with whatever else picks the
+ * same obvious name, and a retention rule that deleted by NAME SHAPE would quietly
+ * destroy another extension's state. [threat T-02-03-02, and the ownership half]
  */
 export function pruneLogs(cwd: string, opts: PruneOptions = {}): string[] {
 	const dir = logDir(cwd);
@@ -388,6 +413,13 @@ export function pruneLogs(cwd: string, opts: PruneOptions = {}): string[] {
 	for (const name of names) {
 		const match = LOG_NAME_RE.exec(name);
 		if (match === null) {
+			continue;
+		}
+		// OWNERSHIP BEFORE SHAPE. `LOG_NAME_RE`'s first group is `[A-Za-z0-9][...]*`,
+		// i.e. ANY base name, because the same expression also parses the rotation
+		// bucket stem below. Matching the shape says this looks like a dated JSONL
+		// log; it does not say this module wrote it. See {@link OWNED_BASES}.
+		if (!OWNED_BASES.includes(match[1] as string)) {
 			continue;
 		}
 		const path = join(dir, name);
