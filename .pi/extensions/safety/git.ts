@@ -356,3 +356,49 @@ export function classifyGlabInvocation(invocation: GitInvocation): GitVerdict {
 		reason: `"${display}" is an unclassified glab form -- defaults to block (fail closed, same posture as git)`,
 	};
 }
+
+// ---------------------------------------------------------------------------
+// SAFE-01's classifier half -- reads a push failure, never causes one
+// ---------------------------------------------------------------------------
+
+/**
+ * What kind of failure a `git push` produced, read off its stderr text.
+ *
+ * `"protected-branch-rejection"` means the SERVER rejected the push because the
+ * target ref is protected -- the only control in this phase enforced where the
+ * harness has no code execution at all (CONTEXT.md decision 1). `"other"` is
+ * every other push failure -- non-fast-forward, network, auth, anything -- and
+ * exists so this classifier can be driven in BOTH directions: a classifier that
+ * answers `"protected-branch-rejection"` for everything would pass a
+ * one-directional test just as well as a correct one.
+ */
+export type PushFailureClassification = "protected-branch-rejection" | "other";
+
+/**
+ * GitLab's own wording for a protected-branch push rejection.
+ *
+ * `tests/integration/gitlab-push-protection.test.ts`'s fixture hook writes this
+ * exact sentence to stderr, and its own comment says so: it is a REPRODUCTION
+ * of GitLab's real message, not a captured one, because this machine has no
+ * GitLab access. `RB-04-01` (`docs/RUNBOOK.md`) is what confirms the real
+ * wording on the work laptop -- this pattern is deliberately loose (a
+ * case-insensitive substring test) so a live message that differs from the
+ * fixture only in capitalisation or surrounding text still classifies
+ * correctly, while the phrase itself is specific enough not to match an
+ * ordinary git failure by accident.
+ */
+const PROTECTED_BRANCH_REJECTION_RE = /not allowed to push code to protected branches/i;
+
+/**
+ * Classifies one `git push` failure's stderr text.
+ *
+ * Pure, and deliberately reads text rather than an exit code: `git push`'s
+ * process exit code is non-zero for every rejection reason (protected branch,
+ * non-fast-forward, network failure, auth failure, ...), so the exit code alone
+ * cannot distinguish this phase's one server-side control from any other
+ * failure. This is a proxy-side READER, never a caller of `git push` itself --
+ * it takes text the caller already captured.
+ */
+export function classifyPushFailure(stderr: string): PushFailureClassification {
+	return PROTECTED_BRANCH_REJECTION_RE.test(stderr) ? "protected-branch-rejection" : "other";
+}
