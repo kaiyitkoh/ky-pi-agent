@@ -519,6 +519,180 @@ console.log("  .env.example written from .pi/templates/env.example");
 }
 
 # ---------------------------------------------------------------------------
+# Install the two config templates into the directory Pi actually reads
+# ---------------------------------------------------------------------------
+# Pi resolves models.json and auth.json from the AGENT DIRECTORY only -
+# join(getAgentDir(), "models.json") [pi 0.84.1 dist/config.js:423-425], and
+# ~/.pi/agent/auth.json [docs/providers.md:111]. There is no project-scope form
+# of either, so the two files committed under .pi/templates/ are read by nothing
+# until these two functions put them somewhere Pi looks.
+#
+# Both follow merge_settings above: read, parse with node, REFUSE to touch a
+# target that is not valid JSON, replace only the key that is ours, and report
+# "already current - unchanged" on a no-op so a second run is byte-identical.
+#
+# The two files get DIFFERENT merge semantics, on purpose:
+#
+#   models.json  key-namespaced REPLACE of providers.dashscope. That key is the
+#                harness's own definition, exactly as settings.json's kyPiAgent
+#                key is, and it must be updatable: the documented remedy when
+#                RB-03-01 cannot resolve the shared host is "set
+#                KYPI_DASHSCOPE_BASE_URL and re-run bootstrap", which a
+#                write-only-when-absent rule would silently ignore. Every other
+#                provider, model override and user edit in the file survives.
+#
+#   auth.json    per-key merge-if-ABSENT. This file may hold the user's live
+#                credentials for every provider they have ever configured, and
+#                clobbering it is the worst outcome in this phase. An existing
+#                key is never modified, never merged into, never reordered.
+#
+# Neither belongs in --check-only (which mutates nothing) or in
+# --assert-hardening (the ordering proof, which must need no network and no
+# templates). Both run in run_full after install_pi: they configure Pi, they do
+# not gate the BOOT-01 hardening ordering.
+#
+# NOTHING HERE WRITES A SECRET. Both templates carry $ENV_VAR references only,
+# which is why the file mode is not this script's business - and why the
+# "auth.json mode 0600 is a no-op on Windows" note in docs/RUNBOOK.md (Phase 1
+# machine-state notes) is referenced here rather than restated.
+merge_models_json() {
+	_src="$REPO_ROOT/.pi/templates/models-template.json"
+	if [ ! -f "$_src" ]; then
+		printf 'FATAL: missing template %s\n' "$_src" >&2
+		exit 1
+	fi
+	mkdir -p "$PI_AGENT_DIR"
+	# Every value crosses into node through a KYPI_* variable, never through
+	# shell interpolation into the JS source: a base URL is caller-supplied text
+	# and would otherwise be a code-injection seam in this script.
+	KYPI_MODELS_SRC="$_src" \
+		KYPI_MODELS_DST="$PI_AGENT_DIR/models.json" \
+		KYPI_DASHSCOPE_BASE_URL="${KYPI_DASHSCOPE_BASE_URL:-}" \
+		node -e '
+const fs = require("node:fs");
+const src = process.env.KYPI_MODELS_SRC;
+const dst = process.env.KYPI_MODELS_DST;
+
+// The template carries whole-line // comments deliberately - models.json is
+// comment-stripped by Pi (src/core/model-config.ts:261) and every number in it
+// has to carry its source. JSON.parse does not accept them. The strip is
+// WHOLE-LINE ONLY, which is what the template promises in its own header: a
+// naive strip of every // would eat the https:// inside baseUrl.
+let parsed;
+try {
+  parsed = JSON.parse(
+    fs.readFileSync(src, "utf8")
+      .split("\n")
+      .filter((line) => !/^\s*\/\//.test(line))
+      .join("\n"),
+  );
+} catch (e) {
+  console.error("FATAL: " + src + " is not valid JSON once whole-line // comments are removed (" + e.message + ").");
+  process.exit(1);
+}
+const next = parsed && parsed.providers ? parsed.providers.dashscope : undefined;
+if (next === null || typeof next !== "object" || Array.isArray(next)) {
+  console.error("FATAL: " + src + " defines no providers.dashscope object. Refusing to guess what to install.");
+  process.exit(1);
+}
+// The only value this installer transforms. The committed template carries the
+// shared international host; the workspace-dedicated form names a workspace id,
+// which must never enter a public repository, so it arrives here instead.
+const override = process.env.KYPI_DASHSCOPE_BASE_URL;
+if (override) { next.baseUrl = override; }
+
+let raw = "{}";
+if (fs.existsSync(dst)) { raw = fs.readFileSync(dst, "utf8").trim() || "{}"; }
+let obj;
+try { obj = JSON.parse(raw); } catch (e) {
+  console.error("FATAL: " + dst + " is not valid JSON (" + e.message + "). Refusing to touch it.");
+  console.error("       Note Pi strips // comments from models.json and JSON.parse does not, so a");
+  console.error("       commented file lands here too. Merge providers.dashscope by hand rather");
+  console.error("       than letting this script rewrite the file without your comments.");
+  process.exit(1);
+}
+if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+  console.error("FATAL: " + dst + " is not a JSON object. Refusing to touch it.");
+  process.exit(1);
+}
+const providers = obj.providers;
+if (providers !== undefined && (providers === null || typeof providers !== "object" || Array.isArray(providers))) {
+  console.error("FATAL: " + dst + " has a providers key that is not a JSON object. Refusing to touch it.");
+  process.exit(1);
+}
+if (providers !== undefined && JSON.stringify(providers.dashscope) === JSON.stringify(next)) {
+  console.log("  models.json providers.dashscope already current - unchanged");
+  process.exit(0);
+}
+obj.providers = providers === undefined ? {} : providers;
+obj.providers.dashscope = next;
+fs.writeFileSync(dst, JSON.stringify(obj, null, 2) + "\n", "utf8");
+console.log("  models.json providers.dashscope key merged");
+'
+}
+
+merge_auth_json() {
+	_src="$REPO_ROOT/.pi/templates/auth-template.json"
+	if [ ! -f "$_src" ]; then
+		printf 'FATAL: missing template %s\n' "$_src" >&2
+		exit 1
+	fi
+	mkdir -p "$PI_AGENT_DIR"
+	KYPI_AUTH_SRC="$_src" \
+		KYPI_AUTH_DST="$PI_AGENT_DIR/auth.json" \
+		node -e '
+const fs = require("node:fs");
+const src = process.env.KYPI_AUTH_SRC;
+const dst = process.env.KYPI_AUTH_DST;
+
+// No comment stripping here, in either direction: auth.json is read as strict
+// JSON by Pi, so a template carrying a comment would already be broken and a
+// destination carrying one is not a file this script may silently rewrite.
+let tpl;
+try { tpl = JSON.parse(fs.readFileSync(src, "utf8")); } catch (e) {
+  console.error("FATAL: " + src + " is not valid JSON (" + e.message + ").");
+  process.exit(1);
+}
+if (tpl === null || typeof tpl !== "object" || Array.isArray(tpl)) {
+  console.error("FATAL: " + src + " is not a JSON object. Refusing to guess what to install.");
+  process.exit(1);
+}
+
+let raw = "{}";
+if (fs.existsSync(dst)) { raw = fs.readFileSync(dst, "utf8").trim() || "{}"; }
+let obj;
+try { obj = JSON.parse(raw); } catch (e) {
+  console.error("FATAL: " + dst + " is not valid JSON (" + e.message + "). Refusing to touch it.");
+  console.error("       This file holds credentials. A refusal is always better than a rewrite:");
+  console.error("       fix the JSON by hand and re-run, or move it aside if it is disposable.");
+  process.exit(1);
+}
+if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+  console.error("FATAL: " + dst + " is not a JSON object. Refusing to touch it.");
+  process.exit(1);
+}
+
+// MERGE-IF-ABSENT, per provider key. An existing entry is left exactly as it
+// was - not merged into, not normalised, not reordered. "Absent" means absent,
+// never "absent or different": a dashscope entry holding the real key must
+// survive a re-run untouched, and so must a provider this template never heard
+// of. [threat T-03-06-01]
+const added = [];
+for (const key of Object.keys(tpl)) {
+  if (Object.prototype.hasOwnProperty.call(obj, key)) { continue; }
+  obj[key] = tpl[key];
+  added.push(key);
+}
+if (added.length === 0) {
+  console.log("  auth.json already current - unchanged");
+  process.exit(0);
+}
+fs.writeFileSync(dst, JSON.stringify(obj, null, 2) + "\n", "utf8");
+console.log("  auth.json provider entries added: " + added.join(", "));
+'
+}
+
+# ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
 
@@ -531,8 +705,9 @@ Usage: sh bin/bootstrap.sh [MODE]
 Modes:
   (no arguments)      Full run. Probes tools, verifies the pinned Pi version is
                       still published, hardens and VERIFIES every npm scope,
-                      then installs Pi, merges settings and writes .env.example.
-                      Safe to re-run: every step is idempotent.
+                      then installs Pi, merges settings, writes .env.example and
+                      installs the models.json / auth.json templates into the
+                      agent directory. Safe to re-run: every step is idempotent.
   --check-only        Every probe and every repo-side assertion; mutates
                       nothing. Exits 0 on a clean CI runner. Deterministic
                       output, so two consecutive runs are byte-identical.
@@ -551,6 +726,14 @@ Environment:
                        user-scope path at a temp directory.
   KYPI_PI_PINNED       Override the pinned Pi version (default ${PI_PINNED}).
   KYPI_SKIP_INSTALL    Set to 1 to skip the global npm install step.
+  KYPI_DASHSCOPE_BASE_URL
+                       DashScope endpoint written into the installed models.json.
+                       Set it to the workspace-dedicated regional form - a host
+                       whose first label is your own workspace id - so that id
+                       lives only in ~/.pi/agent/models.json and never in this
+                       public repo. Unset uses the shared international host the
+                       template carries. RB-03-01 in docs/RUNBOOK.md is the entry
+                       that tells you when to set it.
 EOF
 }
 
@@ -603,6 +786,8 @@ run_full() {
 	printf 'Configuration:\n'
 	merge_settings
 	write_env_template
+	merge_models_json
+	merge_auth_json
 
 	printf 'Summary:\n'
 	printf '  repo root          %s\n' "$REPO_ROOT"
