@@ -8,13 +8,6 @@
  * the allow-list right is therefore not a nicety layered on top of the
  * confirm-list; it is the requirement's whole point.
  *
- * THIS FILE, TASK 1 OF 2. Only the `aws` half is implemented here; `terraform`
- * and `kubectl` land in Task 2 (`04-06-PLAN.md`), which extends
- * `classifyInfraInvocation` to dispatch to them. Until then, any non-`aws`
- * executable — including `terraform`/`kubectl` themselves — reports
- * `not-applicable`, matching how a not-yet-taught verb should behave rather
- * than silently allowing it.
- *
  * ---------------------------------------------------------------------------
  * REIMPLEMENTED, NOT IMPORTED
  * ---------------------------------------------------------------------------
@@ -67,6 +60,31 @@
  * conservative default that can only ever consume too little (leaving a
  * flag's value to be mis-read as a positional, which is a fail-toward-confirm
  * outcome for an unclassified command, never a fail-toward-allow one).
+ *
+ * ---------------------------------------------------------------------------
+ * WHY UNKNOWN TERRAFORM SUBCOMMANDS AND UNKNOWN KUBECTL VERBS DEFAULT TO
+ * `confirm`, NOT `allow` OR A HARD BLOCK
+ * ---------------------------------------------------------------------------
+ * Unlike `git.ts`, where an unknown subcommand under a protected `HEAD` is a
+ * hard block (there is no legitimate reason to approve an unrecognised git
+ * write to `main`), an unknown infra verb has a legitimate human-in-the-loop
+ * path: the operator may genuinely want to run it. Routing it to the
+ * approval protocol is both fail-safe (nothing executes without a human
+ * decision) and usable (it does not permanently wall off a verb this module
+ * simply has not been taught). Under `--mode json` that `confirm` is a
+ * terminal block anyway, because `noOpUIContext.select` returns `undefined`
+ * — the deny-by-default property Plan 07 and Plan 09 build on and prove.
+ *
+ * ---------------------------------------------------------------------------
+ * WHY `terraform state` / `terraform workspace` CLASSIFY ON THE PAIR
+ * ---------------------------------------------------------------------------
+ * `terraform state list` (read) and `terraform state rm` (mutates state,
+ * silently orphaning real resources) share a first word. Classifying on
+ * `args[0]` alone would give both the SAME verdict — whichever one the table
+ * happened to name would swallow the other. `terraformSubcommandKey` below
+ * joins `state`/`workspace` with their second word before any table lookup,
+ * so `"state rm"` and `"state list"` are distinct keys. Same shape as `aws`'s
+ * service+operation pair.
  *
  * ---------------------------------------------------------------------------
  * WHY EVERY `confirm` VERDICT CARRIES A `reason`
@@ -255,7 +273,129 @@ function classifyAwsInvocation(args: readonly string[]): InfraVerdict {
 }
 
 // ---------------------------------------------------------------------------
-// The public entry point (aws only for now -- Task 2 adds terraform/kubectl)
+// terraform classification (SAFE-07)
+// ---------------------------------------------------------------------------
+
+/**
+ * terraform subcommands (or `<parent> <child>` pairs for `state`/`workspace`)
+ * that require confirmation. Every entry here is either irreversible
+ * (`apply`, `destroy`, `import`) or mutates state without touching real
+ * infrastructure in a way that is easy to undo (`state rm`/`mv`, `taint`,
+ * `untaint`, `force-unlock`, `workspace delete`).
+ */
+export const TERRAFORM_CONFIRM_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"apply",
+	"destroy",
+	"import",
+	"state rm",
+	"state mv",
+	"taint",
+	"untaint",
+	"force-unlock",
+	"workspace delete",
+]);
+
+/**
+ * terraform subcommands that run without a prompt -- the calls a session uses
+ * to orient itself or preview a change, never one that mutates state or a
+ * live resource.
+ */
+export const TERRAFORM_ALLOW_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"plan",
+	"fmt",
+	"validate",
+	"show",
+	"output",
+	"version",
+	"providers",
+	"state list",
+	"state show",
+	"workspace select",
+	"workspace list",
+]);
+
+/** terraform subcommand parents whose SECOND word forms the classification key -- see module docstring. */
+const TERRAFORM_TWO_WORD_PARENTS = new Set(["state", "workspace"]);
+
+function terraformSubcommandKey(args: readonly string[]): string | undefined {
+	const first = args[0];
+	if (first === undefined) {
+		return undefined;
+	}
+	if (TERRAFORM_TWO_WORD_PARENTS.has(first) && args[1] !== undefined) {
+		return `${first} ${args[1]}`;
+	}
+	return first;
+}
+
+function classifyTerraformInvocation(args: readonly string[]): InfraVerdict {
+	const key = terraformSubcommandKey(args);
+	if (key === undefined) {
+		return {
+			kind: "confirm",
+			reason: "\"terraform\" with no subcommand -- fail closed to confirmation",
+		};
+	}
+	if (TERRAFORM_CONFIRM_SUBCOMMANDS.has(key)) {
+		return {
+			kind: "confirm",
+			reason: `"terraform ${key}" mutates state or a live resource and cannot be trivially undone`,
+		};
+	}
+	if (TERRAFORM_ALLOW_SUBCOMMANDS.has(key)) {
+		return { kind: "allow" };
+	}
+	// Unknown terraform subcommand: fail closed toward the prompt, not toward
+	// execution -- see module docstring's "WHY UNKNOWN ... DEFAULT TO confirm" section.
+	return {
+		kind: "confirm",
+		reason: `"terraform ${key}" is an unclassified subcommand -- defaults to confirm (fail-safe, not a hard block: add a table row rather than widening a default)`,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// kubectl classification (SAFE-07)
+// ---------------------------------------------------------------------------
+
+/** kubectl verbs that require confirmation -- mutate a live cluster or run code inside a live workload. */
+export const KUBECTL_CONFIRM_VERBS: ReadonlySet<string> = new Set([
+	"delete",
+	"apply",
+	"replace",
+	"patch",
+	"scale",
+	"drain",
+	"cordon",
+	"exec",
+]);
+
+/** kubectl verbs that run without a prompt -- read-only inspection of the cluster. */
+export const KUBECTL_ALLOW_VERBS: ReadonlySet<string> = new Set(["get", "describe", "logs", "config"]);
+
+function classifyKubectlInvocation(args: readonly string[]): InfraVerdict {
+	const verb = args[0];
+	if (verb === undefined) {
+		return { kind: "confirm", reason: "\"kubectl\" with no verb -- fail closed to confirmation" };
+	}
+	if (KUBECTL_CONFIRM_VERBS.has(verb)) {
+		const reason =
+			verb === "exec"
+				? `"kubectl exec" runs arbitrary commands inside a live workload -- the bash guard cannot see into a remote shell`
+				: `"kubectl ${verb}" mutates a live cluster resource`;
+		return { kind: "confirm", reason };
+	}
+	if (KUBECTL_ALLOW_VERBS.has(verb)) {
+		return { kind: "allow" };
+	}
+	// Unknown kubectl verb: fail closed toward the prompt, same posture as terraform above.
+	return {
+		kind: "confirm",
+		reason: `"kubectl ${verb}" is an unclassified verb -- defaults to confirm (fail-safe, not a hard block)`,
+	};
+}
+
+// ---------------------------------------------------------------------------
+// The public entry point
 // ---------------------------------------------------------------------------
 
 /** Discriminated verdict shape, mirroring `shell.ts`'s `ShellVerdict` and `git.ts`'s `GitVerdict`. */
@@ -266,16 +406,21 @@ export type InfraVerdict =
 	| { readonly kind: "sensitive-read"; readonly reason: string };
 
 /**
- * The SAFE-07 decision for `aws` invocations. `{ kind: "not-applicable" }`
- * for any other executable — Task 2 extends this to dispatch `terraform` and
- * `kubectl` invocations too, so a later composer (Plan 07) can chain this
- * classifier with `git.ts`'s and `paths.ts`'s without special-casing "this
- * classifier had nothing to say about this command."
+ * The whole SAFE-07 decision. `{ kind: "not-applicable" }` for any executable
+ * that is not `aws`/`terraform`/`kubectl`, so a later composer (Plan 07) can
+ * chain this classifier with `git.ts`'s and `paths.ts`'s without
+ * special-casing "this classifier had nothing to say about this command."
  */
 export function classifyInfraInvocation(invocation: CanonicalInvocation): InfraVerdict {
 	const executable = invocation.executable.toLowerCase();
 	if (executable === "aws") {
 		return classifyAwsInvocation(invocation.args);
+	}
+	if (executable === "terraform") {
+		return classifyTerraformInvocation(invocation.args);
+	}
+	if (executable === "kubectl") {
+		return classifyKubectlInvocation(invocation.args);
 	}
 	return { kind: "not-applicable" };
 }
