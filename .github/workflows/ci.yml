@@ -57,8 +57,13 @@
 
 name: ci
 
+# A bare `push:` plus `pull_request:` fires BOTH events for a PR from a branch
+# in this repo, doubling every run. Harmless, but this project's stated
+# constraint is zero spend and macOS minutes bill at 10x. Restricting push to
+# main keeps the post-merge signal while letting the PR event own branch runs.
 on:
   push:
+    branches: [main]
   pull_request:
 
 permissions:

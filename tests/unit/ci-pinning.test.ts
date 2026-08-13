@@ -62,6 +62,23 @@ function isCommentLine(line: string): boolean {
 	return line.trim().startsWith("#");
 }
 
+/**
+ * The workflow with wholly-commented lines removed.
+ *
+ * Every assertion about what the workflow DOES must run over this rather than
+ * the raw text. `actionReferences`, `declaredShells` and `runStepCount` already
+ * filtered comments; the `--ignore-scripts` lint did not, so any future
+ * explanatory comment mentioning `npm install` without the flag on the same
+ * line would have turned that gate red for a non-defect. A lint that fires on
+ * prose is a lint someone deletes.
+ */
+export function withoutCommentLines(text: string): string {
+	return text
+		.split("\n")
+		.filter((line) => !isCommentLine(line))
+		.join("\n");
+}
+
 /** Every `uses:` value in the workflow, with the trailing comment kept. */
 export function actionReferences(text: string): Array<{ ref: string; comment: string }> {
 	const out: Array<{ ref: string; comment: string }> = [];
@@ -133,6 +150,8 @@ describe("ci.yml exists", () => {
 });
 
 const workflow = readFileSync(WORKFLOW_PATH, "utf-8");
+/** What the workflow DOES, with the prose about what it does removed. */
+const executable = withoutCommentLines(workflow);
 const references = actionReferences(workflow);
 
 describe("the SHA predicate itself is proven, independently of ci.yml", () => {
@@ -390,7 +409,26 @@ describe("T-01-25 / T-01-28 -- the legs execute rather than merely build", () =>
 		// BOOT-01 applies on a runner too: this workflow checks out and installs
 		// a dependency tree before anything reviews it.
 		expect(workflow).toContain("npm ci --ignore-scripts");
-		expect(workflow).not.toMatch(/npm (ci|install)(?![^\n]*--ignore-scripts)/);
+		// Over the comment-stripped text (IN-04): the raw file discusses
+		// `npm install` in prose, and a lint that reads prose as policy is one
+		// that goes red for a non-defect and gets disabled.
+		expect(executable).not.toMatch(/npm (ci|install)(?![^\n]*--ignore-scripts)/);
+	});
+
+	it("would still catch an unflagged install (the comment strip did not blind it)", () => {
+		// Removing comments makes the assertion weaker by construction, so prove
+		// it can still fail on the thing it exists for, and that it now tolerates
+		// the prose that used to break it.
+		expect(withoutCommentLines("      - run: npm ci\n")).toMatch(
+			/npm (ci|install)(?![^\n]*--ignore-scripts)/,
+		);
+		expect(withoutCommentLines("      # note: npm install would run scripts\n")).not.toMatch(
+			/npm (ci|install)(?![^\n]*--ignore-scripts)/,
+		);
+		// An inline trailing comment is NOT a comment line, so it is still policy.
+		expect(withoutCommentLines("      - run: npm ci # oops\n")).toMatch(
+			/npm (ci|install)(?![^\n]*--ignore-scripts)/,
+		);
 	});
 
 	it("reports the /share exposure without failing the build", () => {

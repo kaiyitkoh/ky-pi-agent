@@ -10,8 +10,19 @@
  *    during the factory are queued and flushed once the runner binds its
  *    context, which is what makes them visible to --list-models.]
  *
- * LIFETIME. Remove or gate this once Phase 3 lands real providers, or the
- * dead-endpoint model will clutter the `/model` picker for no benefit.
+ * LIFETIME. Remove this once Phase 3 lands real providers. Until then the
+ * dead-endpoint model does appear in anyone's `/model` picker, and selecting it
+ * fails with a connection error.
+ *
+ * NOT gated behind an env seam, deliberately (code review IN-05). Registration
+ * IS the observation: `pi --list-models` on an untouched checkout is the whole
+ * BOOT-02/BOOT-05 proof, and it is also the sentinel a human looks for when
+ * running the `/reload` check in docs/RUNBOOK.md (RB-01-03). Gating it would
+ * mean the default run no longer demonstrates the load path, which trades a
+ * cosmetic problem for a verification one. What IS fixed is the picker text:
+ * the display name now says what the entry is and that it cannot be routed to,
+ * so a reader who meets it in the picker is not left guessing. The `id` stays
+ * `ky-harness-selftest` because every load-path assertion greps for it.
  *
  * BOUNDARY RULE (BOOT-10), dogfooded on the first commit of real code. This
  * file registers a COMMAND and a PROVIDER. It must NEVER register a tool. A
@@ -72,7 +83,10 @@ export default function (pi: ExtensionAPI): void {
 		models: [
 			{
 				id: SELFTEST_MODEL_ID,
-				name: SELFTEST_MODEL_ID,
+				// The picker's secondary detail text. Says what this is and that
+				// choosing it will fail, because it otherwise reads as a real
+				// model pointing at a host that refuses every connection.
+				name: "ky-pi-agent load-path sentinel (diagnostic only, not routable)",
 				reasoning: false,
 				input: ["text"],
 				cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },

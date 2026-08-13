@@ -28,7 +28,12 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 *.jsonl
-!.gitkeep
+# `!.gitkeep` used to sit here and did nothing: no rule above matches `.gitkeep`
+# (`logs/` and `*.log` do not), and git cannot re-include a file inside an
+# excluded directory anyway, so it could not have rescued `logs/.gitkeep` even
+# if one existed. The live example of that rule is the `.pi/npm/*` +
+# `!/.pi/npm/.npmrc` pair further down, which works only because the directory
+# is excluded by CONTENTS rather than by name.
 
 # ---------------------------------------------------------------------------
 # Secrets, credentials, local overrides
