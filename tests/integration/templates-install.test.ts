@@ -52,7 +52,7 @@ import {
 	BEDROCK_PROVIDER_ID,
 	TEMPLATE_SENTINEL_PREFIX,
 } from "../../.pi/extensions/providers/schema.ts";
-import { repoRoot } from "../helpers/git.ts";
+import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
@@ -1020,6 +1020,60 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 			narrow.filter((value) => /\bsk-/.test(value) || value.startsWith("!")),
 			"the OLD one-key walk finds the planted values too, so this case does not " +
 				"demonstrate a difference and proves nothing about the change",
+		).toEqual([]);
+	});
+
+	it("case 7c -- IN-01: every variable in the env template is one this harness reads", () => {
+		// A NAME IN .env.example IS AN INVITATION TO MINT A CREDENTIAL. The
+		// template used to advertise a personal-access-token variable for a vendor
+		// 03-CONTEXT decision 8 rules out of v1 entirely -- it publishes no
+		// inference endpoint at all, only agent orchestration -- so nothing in this
+		// harness could ever call it and docs/RUNBOOK.md never mentions it. Asking
+		// an operator to create a secret for no reason is the whole of the harm.
+		//
+		// A MECHANISM, NOT AN ALLOWLIST. An allowlist of approved names is a second
+		// copy of the template that drifts from it. The rule is instead: every name
+		// in the managed block must be READ by something tracked outside the two
+		// env templates themselves. A variable nothing consumes has no business
+		// asking for a value. [IN-01]
+		const template = readFileSync(join(repoRoot(), ".pi", "templates", "env.example"), "utf-8");
+		const managed = template.slice(
+			template.indexOf("# ky-pi-agent managed:start"),
+			template.indexOf("# ky-pi-agent managed:end"),
+		);
+		const names = [...managed.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((match) => match[1] ?? "");
+
+		expect(
+			names.length,
+			"the managed block declares no variables, so the loop below iterates nothing and " +
+				"this case would pass over a template that had been emptied [IN-01]",
+		).toBeGreaterThanOrEqual(4);
+
+		// Everything tracked except the two env templates, which are where the
+		// names are DECLARED rather than consumed.
+		const consumers = trackedFiles()
+			.filter(
+				(path) =>
+					path !== ".env.example" &&
+					path !== ".pi/templates/env.example" &&
+					!path.startsWith(".planning/") &&
+					path !== "CLAUDE.md",
+			)
+			.map((path) => {
+				try {
+					return readFileSync(join(repoRoot(), path), "utf-8");
+				} catch {
+					return "";
+				}
+			});
+
+		const unread = names.filter((name) => !consumers.some((text) => text.includes(name)));
+		expect(
+			unread,
+			`these variables are advertised in .pi/templates/env.example and read by nothing ` +
+				"tracked in this repository. Each one asks the operator to mint and store a " +
+				"credential for something the harness cannot use. Either delete the line, or add " +
+				"it in the same commit as the code that reads it [IN-01]",
 		).toEqual([]);
 	});
 
