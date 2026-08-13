@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-02-PLAN.md — the models.json / auth.json templates and the Trap T1 filename guard, falsified twice
-last_updated: "2026-08-13T14:12:37.043Z"
+stopped_at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
+last_updated: "2026-08-13T14:24:32.595Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 32
-  completed_plans: 24
+  completed_plans: 25
   percent: 18
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 03 (providers-credentials) — EXECUTING
-Plan: 4 of 11
+Plan: 5 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [████████░░] 75%
+Progress: [████████░░] 78%
 
 **Read that 72% carefully.** The denominator is *plans written so far* — Phase 1's
 10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
@@ -82,6 +82,7 @@ phases complete**.
 | Phase 03 P01 | 35m | 3 tasks | 3 files |
 | Phase 03 P02 | 25m | 3 tasks | 5 files |
 | Phase 3 P3 | 25m | 2 tasks | 2 files |
+| Phase 03 P04 | ~20m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -171,6 +172,8 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-02: both config templates are validated by RUNNING Pi's own loaders (stripJsonComments+JSON.parse; ReadOnlyAuthStorage.load/read) over the real files, never by a local regex strip or by reading the validator -- the auth run also proved the DASHSCOPE_API_KEY env reference interpolates and env.AWS_PROFILE survives raw
 - [Phase 03]: 03-02: where the plan's task prose conflicted with its own acceptance greps (a baseUrl comment naming the workspace-dedicated host, a header naming the out-of-scope vendor), the greps won and the prose was rephrased -- a comment is text like any other and a gate that greps to zero means zero
 - [Phase 3]: 03-03: the 127.0.0.1 literal is duplicated between the loopback listen call and the refusal on purpose — a shared constant lets one edit move the bind and its guard together
+- [Phase 03]: 03-04: the templated model set is a set difference against a registry composed over an empty providers object, so no literal id list can go stale
+- [Phase 03]: 03-04: PROV-06's general cross-provider loop is scoped to templated models — a blanket form is false by design in Pi's own catalogue (Bedrock and Anthropic share Claude ids at 200,000)
 
 ### Pending Todos
 
@@ -216,8 +219,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T14:12:32.966Z
-Stopped at: Completed 03-02-PLAN.md — the models.json / auth.json templates and the Trap T1 filename guard, falsified twice
+Last session: 2026-08-13T14:23:58.088Z
+Stopped at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
