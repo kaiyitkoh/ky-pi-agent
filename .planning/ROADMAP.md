@@ -18,7 +18,7 @@ Two things about this roadmap are unusual and deliberate. First, **eight of 107 
 Decimal phases appear between their surrounding integers in numeric order.
 
 - [x] **Phase 1: Bootstrap, Packaging & Supply Chain** - Harden the machine and establish the repo shape before the first `pi install` executes third-party code (completed 2026-08-13)
-- [ ] **Phase 2: Diagnostics — The Instrument** - Wire inspector, the `callModel()` chokepoint, per-turn JSONL, and the prose-tool-call detector
+- [x] **Phase 2: Diagnostics — The Instrument** - Wire inspector, the `callModel()` chokepoint, per-turn JSONL, and the prose-tool-call detector (completed 2026-08-13)
 - [ ] **Phase 3: Providers & Credentials** - Structurally complete providers with zero secrets, verified by Phase 2's instrument and a first-run runbook
 - [ ] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents
 - [ ] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes
@@ -116,7 +116,7 @@ Plans:
 **Wave 6** *(blocked on Wave 5 completion)*
 
 - [x] 02-10-PLAN.md — `/budget`: the system-prompt decomposition, tool-schema cost, and `cacheRead` versus `input` (DIAG-06)
-- [ ] 02-11-PLAN.md — `docs/RUNBOOK.md` RB-02-01/02/03 (OUTSTANDING), the generalised status guard, and `docs/DIAGNOSTICS.md`
+- [x] 02-11-PLAN.md — `docs/RUNBOOK.md` RB-02-01/02/03 (OUTSTANDING), the generalised status guard, and `docs/DIAGNOSTICS.md`
 
 **Research**: Complete — `02-RESEARCH.md` (HIGH confidence, verified at source and executed on this machine). One finding reshaped the phase: `fauxProvider` never calls `onPayload`, so `before_provider_request` never fires under faux and the naive `[FAUX]` test for DIAG-01/DIAG-07 would ship vacuously green — hence a mandatory Wave 0 of test helpers.
 

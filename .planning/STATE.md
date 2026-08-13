@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 02-10-PLAN.md — /budget, the per-turn token report; DIAG-06 complete
-last_updated: "2026-08-13T06:47:12.526Z"
+status: verifying
+stopped_at: Completed 02-11-PLAN.md — the Phase 2 runbook section, the generalised status guard and docs/DIAGNOSTICS.md; Phase 2 execution complete
+last_updated: "2026-08-13T07:03:42.811Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
-  completed_phases: 1
+  completed_phases: 2
   total_plans: 21
-  completed_plans: 20
-  percent: 9
+  completed_plans: 21
+  percent: 18
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
 Plan: 11 of 11
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-13
 
-Progress: [██████████] 95%
+Progress: [██████████] 100%
 
 **Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
@@ -76,6 +76,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 02 P08 | 40m | 2 tasks | 5 files |
 | Phase 02 P09 | ~40m | 2 tasks | 4 files |
 | Phase 02 P10 | 55m | 3 tasks | 6 files |
+| Phase 02 P11 | 25m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -152,6 +153,11 @@ Recent decisions affecting current work:
 - [Phase 2]: 02-10: base is the prompt with the located regions REMOVED, never total-minus-sections — a subtracted base makes base+ctx+skills===total an identity that holds however wrong the arithmetic is (falsification A2 passes on duplicated regions; A fails at 916 vs 714)
 - [Phase 2]: 02-10: a marker warning fires only when the section was EXPECTED — the plan's literal wording would warn on every session with no skills, contradicting its own integration case 2
 - [Phase 2]: 02-10: a negative assertion needs a marker that COULD be found — falsification I2 aliased the skills marker to 'Guidelines:', text the real prompt genuinely contains, to prove skillsFound===false reads the prompt rather than agreeing with itself
+- [Phase 2]: 02-11: the runbook status guard is generalised to RB-<phase>-<n>, not extended phase by phase — appending RB-02 entries to a guard hardcoded at /RB-01-\d{2}/g would have landed three unguarded statuses through a file nobody touched, which is the exact silent failure the policy exists to prevent
+- [Phase 2]: 02-11: the widened id pattern is held to a SHAPE by a malformed-id fixture — falsified both ways (narrowed back to RB-01 => 5 failures; widened to RB-[\d-]+ => the malformed case fails), because a pattern loose enough to parse an id in no phase array reads a status that nothing then asserts
+- [Phase 2]: 02-11: RB-02-02 targets the DeepSeek/DashScope bearer path and never Bedrock — SigV4 is applied by Smithy middleware downstream of Pi and reserved headers are silently ignored (pi-ai types.ts:148-153), so a Bedrock-aimed credential-leak check would report a clean pass while exercising nothing
+- [Phase 2]: 02-11: docs/DIAGNOSTICS.md declares the CODE authoritative and itself a bug on disagreement, and its TurnRow field list was checked against schema.ts by script with the checker falsified — a schema document nobody can verify is a second source of truth
+- [Phase 2]: 02-11: DIAG-01 and DIAG-05 stay Pending at phase end — six of eight DIAG requirements are complete, and the two [RUNBOOK] halves (RB-02-01, RB-02-03) are OUTSTANDING because this machine has no live credentials
 
 ### Pending Todos
 
@@ -197,8 +203,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T06:47:12.519Z
-Stopped at: Completed 02-10-PLAN.md — /budget, the per-turn token report; DIAG-06 complete
+Last session: 2026-08-13T07:01:53.226Z
+Stopped at: Completed 02-11-PLAN.md — the Phase 2 runbook section, the generalised status guard and docs/DIAGNOSTICS.md; Phase 2 execution complete
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
