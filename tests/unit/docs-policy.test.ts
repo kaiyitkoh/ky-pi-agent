@@ -37,11 +37,17 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+import {
+	REDACTED_HEADER_KEY_RE,
+	TRUNCATION_PLACEHOLDER,
+} from "../../.pi/extensions/diagnostics/redact.ts";
 import { repoRoot } from "../helpers/git.ts";
 
 const ROOT = repoRoot();
 const README = readFileSync(join(ROOT, "README.md"), "utf-8");
 const RUNBOOK_PATH = join(ROOT, "docs", "RUNBOOK.md");
+const DIAGNOSTICS_PATH = join(ROOT, "docs", "DIAGNOSTICS.md");
+const REDACT_SOURCE_PATH = join(ROOT, ".pi", "extensions", "diagnostics", "redact.ts");
 
 /** The Phase 1 entries this file governs. */
 const PHASE_ONE_IDS = ["RB-01-01", "RB-01-02", "RB-01-03"] as const;
@@ -484,4 +490,145 @@ describe("Group C — every live check is still OUTSTANDING", () => {
 			).toBe("OUTSTANDING");
 		});
 	}
+});
+
+// ---------------------------------------------------------------------------
+// Group D — the published redaction contract still describes the redactor
+// ---------------------------------------------------------------------------
+
+/**
+ * `docs/DIAGNOSTICS.md`'s Redaction section.
+ *
+ * WHY THIS GROUP EXISTS [WR-02R]. `docs/DIAGNOSTICS.md` is the document a reader
+ * consults to INTERPRET a dump, so a divergence here is not a stale comment — it
+ * is a wrong reading of evidence. The redactor was changed to apply the key rule
+ * inside payloads and to write `[redacted:truncated]` for two further causes, and
+ * the published contract still named one cause and called rule 1 "By header key".
+ * A reader who saw the sentinel would have concluded the payload was
+ * pathologically deep when in fact a credential-named key was present.
+ *
+ * Group B pins runbook COMMANDS. Nothing pinned the contract, which is exactly
+ * how it drifted.
+ */
+function redactionSection(): string {
+	const doc = readFileSync(DIAGNOSTICS_PATH, "utf-8");
+	const start = doc.indexOf("\n## Redaction");
+	expect(
+		start,
+		"docs/DIAGNOSTICS.md has no `## Redaction` section. Every assertion below scans that section, " +
+			"so an absent or renamed heading would make this whole group vacuous",
+	).toBeGreaterThan(-1);
+	const rest = doc.slice(start + 1);
+	const end = rest.indexOf("\n## ");
+	return end === -1 ? rest : rest.slice(0, end);
+}
+
+/**
+ * How many code paths in `redact.ts` can produce {@link TRUNCATION_PLACEHOLDER}.
+ *
+ * Counted out of the source rather than transcribed, so ADDING a fourth cause
+ * fails this file instead of only diverging from it. That is the whole point:
+ * WR-02R was a behaviour change that no test noticed.
+ */
+function truncationCauseCount(): number {
+	const source = readFileSync(REDACT_SOURCE_PATH, "utf-8");
+	return source.split(`return ${"TRUNCATION_PLACEHOLDER"};`).length - 1;
+}
+
+/** English for the counts this doc could plausibly have to state. */
+const COUNT_WORDS: Readonly<Record<number, string>> = {
+	1: "one",
+	2: "two",
+	3: "three",
+	4: "four",
+	5: "five",
+	6: "six",
+};
+
+describe("Group D — the redaction contract matches the redactor", () => {
+	const section = redactionSection();
+
+	it("is not vacuous: the section really is the redaction contract", () => {
+		expect(
+			section.length,
+			"the extracted section is too short to be the contract, so every assertion below would be " +
+				"asserting against nearly nothing",
+		).toBeGreaterThan(500);
+		expect(
+			section,
+			"the section must state the capture-time rule, which is the property DIAG-07 actually " +
+				"requires — a redactor applied at read time is not this control",
+		).toContain("at capture");
+	});
+
+	it("names the truncation sentinel verbatim, imported rather than retyped", () => {
+		expect(
+			section,
+			`the contract must spell ${TRUNCATION_PLACEHOLDER} exactly as the code writes it. A reader ` +
+				"greps a dump for the literal, so a paraphrase in the doc is a reader who cannot find it",
+		).toContain(TRUNCATION_PLACEHOLDER);
+	});
+
+	it("states as many causes for the sentinel as redact.ts actually has", () => {
+		const causes = truncationCauseCount();
+		expect(
+			causes,
+			"no `return TRUNCATION_PLACEHOLDER;` found in redact.ts at all. The count below is derived " +
+				"from that source, so a zero would make this assertion vacuous — if the sentinel is now " +
+				"produced some other way, teach this function the new shape",
+		).toBeGreaterThan(0);
+
+		const word = COUNT_WORDS[causes];
+		expect(word, `no English word wired up for ${causes} causes`).toBeDefined();
+
+		expect(
+			section,
+			`redact.ts has ${causes} code paths that write ${TRUNCATION_PLACEHOLDER}, so the contract ` +
+				`must say "exactly ${word} causes". It said "one" while the code had three, and one ` +
+				"sentinel meaning three different things is the difference between a reader concluding " +
+				"'the payload was pathologically deep' and 'a credential-named key was present'",
+		).toContain(`exactly ${word} causes`);
+	});
+
+	it("names each of the three causes, not just their number", () => {
+		// Cue phrases, one per cause, chosen to survive a reflow of the prose while
+		// being specific enough that deleting a cause fails here.
+		for (const cue of ["depth", "node", "credential-named key", "not a plain object"]) {
+			expect(
+				section,
+				`the contract must name the ${JSON.stringify(cue)} cause. A count with no causes listed ` +
+					"tells a reader the sentinel is ambiguous without telling them between what",
+			).toContain(cue);
+		}
+	});
+
+	it("no longer describes the key rule as header-only", () => {
+		expect(
+			section.includes("**By header key.**"),
+			"`walk` applies the key rule to plain-object keys INSIDE a payload, not only to header maps, " +
+				"and it replaces the whole subtree under such a key. Calling the rule 'By header key' " +
+				"understates the redactor and misleads anyone reasoning about what a clean dump proves",
+		).toBe(false);
+		expect(
+			section,
+			"the contract must say the key rule reaches inside payloads, which is the half that changed",
+		).toContain("and to object keys inside a");
+	});
+
+	it("carries the open key pattern exactly as the code compiles it", () => {
+		expect(
+			section,
+			"the open pattern is what catches a header nobody predicted, so the doc must carry the real " +
+				"one. A drifted copy invites a reader to conclude a key is covered when it is not",
+		).toContain(REDACTED_HEADER_KEY_RE.source);
+	});
+
+	it("states that null and undefined pass through, and why", () => {
+		expect(
+			section,
+			"`null` under a credential-named key means 'delete this header'. Rewriting it to a " +
+				"placeholder would misreport a deletion as a secret, and a reader who does not know " +
+				"that will read a surviving `null` as a redaction failure",
+		).toContain("delete this header");
+	});
 });

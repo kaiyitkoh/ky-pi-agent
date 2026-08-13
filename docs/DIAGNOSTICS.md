@@ -214,15 +214,26 @@ only ever written already-clean; nothing downstream is trusted to sanitise it.
 `before_provider_request` hands over the live payload and an in-place edit would
 change what the provider actually receives.
 
-Two independent rules, because the payload does not carry the API key and the
-headers do:
+Two independent rules, and the key rule is stronger than the shape rule:
 
-1. **By header key.** A closed list — `authorization`, `x-api-key`, `api-key`,
+1. **By key name**, applied to header maps *and to object keys inside a payload*.
+   A closed list — `authorization`, `x-api-key`, `api-key`,
    `cf-aig-authorization`, `x-goog-api-key`, `proxy-authorization`, `cookie`,
    `set-cookie` — plus an open pattern for any key that *names* a credential:
    `/(^|[-_])(api[-_]?key|token|secret|credential|password)([-_]|$)/i`. The list
    goes stale the first time a provider invents a header; the pattern is what
    catches `x-session-token` and `client-secret` without having predicted them.
+
+   This is **not header-only**. A captured payload can nest a header map, and
+   `{ authorization: "…" }` there is the same credential it would be in the
+   header hook. A string value under such a key becomes `[redacted:<n> chars]`;
+   **any other value becomes `[redacted:truncated]` and the whole subtree under
+   the key goes** — a key that says "credential" is better evidence than any
+   shape heuristic, so `{ authorization: { scheme: "Bearer", token: "short123" } }`
+   is not left to shape matching that would miss a short or unusual secret.
+   Over-redacting is the right way to be wrong here. `null` and `undefined` are
+   the one exception and pass through: `null` means *delete this header*, and
+   rewriting it would misreport a deletion as a secret.
 2. **By value shape**, applied to strings anywhere in a payload. Eleven patterns:
    `sk-…`, `AKIA…`, `ASIA…`, `gh[pous]_…`, `github_pat_…`, `xox[bp]-…`, `AIza…`,
    `pt-…`, a PEM private-key header, `Bearer …`, and an
@@ -231,11 +242,39 @@ headers do:
    never carries it — but a `.env` or a `*.tfstate` the model read into
    `messages[]`.
 
-The replacement is `[redacted:<n> chars]`, which preserves the length. Keeping
-the length makes *"was a credential present at all, and roughly which one?"*
-answerable from a dump without the dump containing the answer. A subtree that
-blew the depth or node budget is replaced wholesale by `[redacted:truncated]`
-rather than partially walked — a partial walk would look like data.
+**Two placeholders, and they mean different things.**
+
+`[redacted:<n> chars]` preserves the length, and is written for a **string** that
+matched either rule. Keeping the length makes *"was a credential present at all,
+and roughly which one?"* answerable from a dump without the dump containing the
+answer.
+
+`[redacted:truncated]` preserves nothing, and has **exactly three causes**, which
+a reader cannot tell apart from the dump alone:
+
+- a subtree that blew the **depth** budget (24) or the **node** budget (200,000)
+  — replaced wholesale rather than partially walked, because a partial walk would
+  look like data;
+- a **non-string, non-nullish value under a credential-named key**, per rule 1;
+- **any object that is not a plain object or an array** — a class instance, a
+  `Map`, a `Set`, a typed array. These used to be returned by reference and
+  un-walked while `JSON.stringify` still emitted their enumerable properties, so
+  a credential-shaped string inside one reached disk verbatim. `Date` is the one
+  exception and survives as its own ISO string, because an ISO timestamp matches
+  no credential shape and mangling clean data is a failure too.
+
+So a `[redacted:truncated]` in a dump does **not** by itself mean the payload was
+pathologically deep. It is equally likely that a credential-named key was present
+or that an adapter handed over a class instance.
+
+**The fidelity cost, stated.** The third cause fires at the payload **root** too.
+If an adapter ever hands `before_provider_request` something that is not a plain
+object, the whole record's `payload` becomes the bare string
+`[redacted:truncated]` and that request is lost from the dump. Nothing today is
+known to do that — but the only evidence that real payloads are plain objects is a
+hand-built fixture, and `tests/integration/wire-capture.test.ts` says of it that
+this "makes it realistic and does not make it real". A wire dump that is suddenly
+one placeholder per request is this, not a depth explosion.
 
 `tests/unit/redact.test.ts` drives the matcher in **both** directions: every
 pattern has a sample proving it fires, and clean samples prove ordinary text
