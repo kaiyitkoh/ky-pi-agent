@@ -136,6 +136,30 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 		});
 	});
 
+	it("passes a deliberate null through instead of coercing it to undefined", async () => {
+		await withTempLogCwd(async (cwd) => {
+			// [IN-07] `result ?? undefined` turned a deliberate `null` into `undefined`.
+			// Harmless for the eight handlers registered today — none returns a value —
+			// but the docstring advertises the wrapper as safe for "a hook with a real
+			// return contract", and some Pi hooks distinguish null from undefined. A
+			// wrapper that rewrites one to the other cannot honestly claim to pass the
+			// success value through untouched.
+			const wrapped = safeHandler<undefined, null>("null_probe", () => null);
+
+			expect(
+				await wrapped(undefined, fakeCtx(cwd)),
+				"the success path must return exactly what the handler returned. `undefined` here means " +
+					"the wrapper is still coercing, and the first hook whose contract distinguishes the " +
+					"two would break in a way no error anywhere would report",
+			).toBeNull();
+
+			expect(
+				logFilesIn(logDir(cwd)),
+				"and returning null is not a failure, so no error row may be written",
+			).toEqual([]);
+		});
+	});
+
 	it("passes a successful handler's return value through untouched", async () => {
 		await withTempLogCwd(async (cwd) => {
 			const wrapped = safeHandler<undefined, { messages: number }>("passthrough_probe", () => ({

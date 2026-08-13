@@ -382,7 +382,14 @@ export function safeHandler<E, R = undefined>(
 	return async (event: E, ctx: ExtensionContext): Promise<R | undefined> => {
 		try {
 			const result = await fn(event, ctx);
-			return (result ?? undefined) as R | undefined;
+			// [IN-04's sibling, IN-07] PASSED THROUGH, not `?? undefined`. The `??`
+			// converted a deliberate `null` return into `undefined`, which contradicts
+			// the docstring above: some Pi hooks distinguish the two, and a wrapper
+			// that silently rewrote one to the other could not honestly be described as
+			// safe for "a hook with a real return contract". Harmless for the eight
+			// handlers registered today — none returns a value — which is exactly why
+			// it had to be fixed before one does.
+			return result as R | undefined;
 		} catch (err) {
 			try {
 				writeTurnsRow(ctx.cwd, {
