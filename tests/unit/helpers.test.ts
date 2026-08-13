@@ -27,6 +27,7 @@ import { afterAll, describe, expect, it } from "vitest";
 import { wrapFauxWithPayload, wrapFauxWithStatus } from "../helpers/faux.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { logFilesIn, readJsonl, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
+import { assertLoopbackUrl, withLoopbackCompletions } from "../helpers/loopback.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
 import { withFauxSession } from "../helpers/session.ts";
@@ -737,6 +738,233 @@ describe("models helper -- a composed registry with no network and no credential
 			existsSync(seenAgentDir),
 			"a leaked temp agent dir per test is how a long run fills a disk -- and a leaked " +
 				"auth.json is worse than untidy",
+		).toBe(false);
+	});
+});
+
+/** Either the response a fetch produced, or the error it rejected with. */
+type FetchOutcome =
+	| { ok: true; status: number; contentType: string; text: string }
+	| { ok: false; error: Error };
+
+/**
+ * Fetch `url` and report the outcome as data.
+ *
+ * The signal bounds every call: a case here asserts a fetch FAILS, and a hung
+ * connect would otherwise stall the whole suite rather than fail it. The body
+ * is drained on the success path so the socket is not left half-read.
+ */
+async function tryFetch(url: string, init: RequestInit = {}): Promise<FetchOutcome> {
+	try {
+		const response = await fetch(url, { signal: AbortSignal.timeout(5_000), ...init });
+		const text = await response.text();
+		return {
+			ok: true,
+			status: response.status,
+			contentType: response.headers.get("content-type") ?? "",
+			text,
+		};
+	} catch (error) {
+		return { ok: false, error: error instanceof Error ? error : new Error(String(error)) };
+	}
+}
+
+/**
+ * The PROV-03 / PROV-10 seam -- a loopback server that records what Pi emitted.
+ *
+ * This is the seam that turns "the source says Pi sends `enable_thinking`" into
+ * "the wire shows Pi sent `enable_thinking`", with no credential and no egress.
+ * Four properties have to hold before any Wave 2 payload assertion built on it
+ * means anything, and each gets a case: it CAPTURES (a server that recorded
+ * nothing makes every body assertion vacuous, [threat T-03-03-05]); it RESPONDS
+ * with a stream the adapter can finish (otherwise the payload test hangs rather
+ * than fails, [threat T-03-03-04]); it REFUSES a non-loopback host before
+ * handing out a URL ([threat T-03-03-01]); and it RELEASES its port, on the
+ * clean path and on the throwing path alike ([threat T-03-03-03]).
+ *
+ * What none of this proves: that DashScope accepts anything. That is RB-03-01
+ * and RB-03-02 in docs/RUNBOOK.md, both OUTSTANDING.
+ */
+describe("loopback helper -- the wire capture that needs no credential", () => {
+	it("captures the request body, and something was actually captured", async () => {
+		const sent = { model: "kypi-fixture-flash", messages: [{ role: "user", content: "hi" }] };
+
+		await withLoopbackCompletions({}, async (handle) => {
+			const outcome = await tryFetch(`${handle.baseUrl}/chat/completions`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify(sent),
+			});
+			expect(
+				outcome.ok ? "" : outcome.error.message,
+				"the POST to the loopback server did not complete at all, so nothing below is " +
+					"about a capture -- fix the server before reading the assertions that follow",
+			).toBe("");
+
+			// Non-emptiness FIRST -- the house rule. Every assertion below indexes
+			// this array, so an empty one turns them all into a pass that verified
+			// nothing: a server that captured zero requests satisfies "the recorded
+			// body has no `store` key" perfectly. [threat T-03-03-05]
+			expect(
+				handle.requests.length,
+				"the loopback server recorded ZERO requests after one POST completed against it. " +
+					"Its request handler never ran, or it ran and never pushed. Every assertion " +
+					"below -- and every Wave 2 assertion about the body Pi emitted -- indexes this " +
+					"array, so an empty one makes all of them vacuous",
+			).toBe(1);
+
+			const first = handle.requests[0] as (typeof handle.requests)[number];
+
+			expect(
+				first.body,
+				"the recorded body must deep-equal what was sent. Anything else means the server " +
+					"is re-encoding or truncating the bytes it received, and a PROV-03 assertion " +
+					"about `enable_thinking` would then be reading this helper's mangling rather " +
+					"than Pi's emission",
+			).toEqual(sent);
+
+			expect(
+				first.headers["content-type"],
+				"the recorded headers must be the ones the caller set. PROV-10's evidence includes " +
+					"what Pi put in the headers, so headers that arrive blank make half the capture " +
+					"unusable",
+			).toBe("application/json");
+
+			expect(
+				first.method,
+				"the verb must be recorded verbatim; a blank method means req.method was never read",
+			).toBe("POST");
+
+			expect(
+				first.url,
+				"the server accepts ANY path under its base on purpose, so an adapter that posts " +
+					"somewhere unexpected shows up here as a surprising url rather than as a hang " +
+					"against a 404",
+			).toBe("/v1/chat/completions");
+		});
+	});
+
+	it("answers with a stream the adapter can actually finish", async () => {
+		await withLoopbackCompletions({}, async (handle) => {
+			const outcome = await tryFetch(`${handle.baseUrl}/chat/completions`, {
+				method: "POST",
+				headers: { "content-type": "application/json" },
+				body: JSON.stringify({ model: "kypi-fixture-flash" }),
+			});
+
+			expect(
+				outcome.ok,
+				"the default reply must be consumable. If this rejected, every Wave 2 test that " +
+					"drives Pi's real adapter at this server will hang waiting for a stream that " +
+					"never completes, and a hung test is worse than a failing one",
+			).toBe(true);
+			if (!outcome.ok) {
+				return;
+			}
+
+			expect(outcome.status, "a non-200 default reply would be read by the adapter as a " +
+				"provider error rather than as a completion").toBe(200);
+			expect(
+				outcome.contentType,
+				"the adapter selects its SSE parser from the content type; anything else and the " +
+					"body is parsed as a single JSON document and the stream never resolves",
+			).toContain("text/event-stream");
+			expect(
+				outcome.text,
+				"an SSE reply with no `data: ` line carries no chunk at all",
+			).toContain("data: ");
+			expect(
+				outcome.text.trimEnd().endsWith("data: [DONE]"),
+				`the stream must terminate with the [DONE] sentinel. Without it the adapter waits ` +
+					`for more of a stream that will never arrive. Got: ${JSON.stringify(outcome.text.slice(-40))} ` +
+					"[threat T-03-03-04]",
+			).toBe(true);
+		});
+	});
+
+	it("refuses a non-loopback host, and does NOT refuse its own baseUrl", async () => {
+		await withLoopbackCompletions({}, (handle) => {
+			let thrown: unknown;
+			try {
+				assertLoopbackUrl("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+			} catch (error) {
+				thrown = error;
+			}
+
+			expect(
+				thrown,
+				"assertLoopbackUrl returned instead of throwing for a REAL DashScope base URL. " +
+					"That is the copy-paste this guard exists to stop: pointed at a real host the " +
+					"helper stops capturing and starts issuing live provider requests from a test " +
+					"run. [threat T-03-03-01]",
+			).toBeInstanceOf(TypeError);
+
+			expect(
+				(thrown as Error).message,
+				"the refusal must name 127.0.0.1, or the reader is told what is wrong without " +
+					"being told what is right -- and the remedy is a guess",
+			).toContain("127.0.0.1");
+
+			// The paired positive. Without it a refusal that threw on EVERYTHING --
+			// including the handle's own URL -- would satisfy the assertions above
+			// while making the helper unusable.
+			expect(
+				() => {
+					assertLoopbackUrl(handle.baseUrl);
+				},
+				`assertLoopbackUrl threw for the helper's own ${handle.baseUrl}. A guard that ` +
+					"refuses everything passes the negative case above and proves nothing by it",
+			).not.toThrow();
+		});
+	});
+
+	it("releases the port when the callback returns", async () => {
+		let baseUrl = "";
+		let insideStatus = -1;
+
+		await withLoopbackCompletions({}, async (handle) => {
+			baseUrl = handle.baseUrl;
+			// The paired positive, taken BEFORE teardown: the URL must be reachable
+			// while the server is up, or "unreachable afterwards" is satisfied by a
+			// server that never listened at all.
+			const inside = await tryFetch(`${handle.baseUrl}/chat/completions`);
+			insideStatus = inside.ok ? inside.status : -1;
+		});
+
+		expect(
+			insideStatus,
+			"the loopback URL was not reachable while the callback ran, so the teardown " +
+				"assertion below would pass against a server that never bound",
+		).toBe(200);
+
+		const after = await tryFetch(`${baseUrl}/chat/completions`);
+		expect(
+			after.ok,
+			"the port is STILL accepting connections after withLoopbackCompletions resolved. A " +
+				"leaked listener holds a port and a live handle for the remainder of the run: the " +
+				"next test that binds may collide with it, and vitest may refuse to exit. " +
+				"[threat T-03-03-03]",
+		).toBe(false);
+	});
+
+	it("releases the port even when the callback throws", async () => {
+		let baseUrl = "";
+
+		await expect(
+			withLoopbackCompletions({}, (handle) => {
+				baseUrl = handle.baseUrl;
+				throw new Error("boom");
+			}),
+			"the callback's error must propagate. A helper that swallowed it would turn a failing " +
+				"payload assertion into a silent pass",
+		).rejects.toThrow("boom");
+
+		const after = await tryFetch(`${baseUrl}/chat/completions`);
+		expect(
+			after.ok,
+			"the server survived a throwing callback. Cleanup belongs in the `finally`, or the " +
+				"first failing assertion in a Wave 2 payload test leaks a listener and every " +
+				"subsequent case in the run inherits it. [threat T-03-03-03]",
 		).toBe(false);
 	});
 });
