@@ -57,6 +57,15 @@ export interface StubSpec {
 	/** Written verbatim to the stub's stdout. Default "". */
 	stdout?: string;
 	/**
+	 * Written verbatim to the stub's stderr. Default "".
+	 *
+	 * Needed because real tools split their output: `npm view <pkg>@<ver> --json`
+	 * puts its structured error on stdout and its human error on stderr
+	 * [VERIFIED: executed 2026-08-13, npm 11.13.0]. A stub that can only write
+	 * stdout cannot simulate the failure shapes that matter.
+	 */
+	stderr?: string;
+	/**
 	 * Absolute path of a file the stub appends one line to per invocation, in
 	 * the form `<name> <argv joined by spaces>`.
 	 *
@@ -95,6 +104,7 @@ function payloadSource(name: string, spec: StubSpec): string {
 		`const NAME = ${JSON.stringify(name)};`,
 		`const LOG_TO = ${JSON.stringify(spec.logTo ?? null)};`,
 		`const STDOUT = ${JSON.stringify(spec.stdout ?? "")};`,
+		`const STDERR = ${JSON.stringify(spec.stderr ?? "")};`,
 		`const EXIT_CODE = ${JSON.stringify(exitCode)};`,
 		"if (LOG_TO) {",
 		"\tconst argv = process.argv.slice(2);",
@@ -103,6 +113,7 @@ function payloadSource(name: string, spec: StubSpec): string {
 		// writeSync, not console.log + process.exit: process.exit can truncate a
 		// piped stdout mid-flush, which would make captured output flaky.
 		"if (STDOUT) writeSync(1, STDOUT);",
+		"if (STDERR) writeSync(2, STDERR);",
 		"process.exitCode = EXIT_CODE;",
 		"",
 	].join("\n");
