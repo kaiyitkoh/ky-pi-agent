@@ -7,6 +7,8 @@
 
 **Verification split.** Requirements marked **[FAUX]** are fully testable on the development machine using `fauxProvider()` from `@earendil-works/pi-ai` (scripted mock provider, no keys, no network). Requirements marked **[RUNBOOK]** require live credentials and are verified by the user on the work laptop against a documented procedure. A requirement is not Complete until its designated verification has actually run.
 
+**Checkbox legend.** `[ ]` not started · `[~]` **partial — built and verified offline, but a named live check has not run** · `[x]` complete, its designated verification has actually executed. The checkbox is what a reader skims, so it must not claim more than the Traceability row beside it. `[~]` always names the outstanding check inline; correcting a checkbox *downward* needs no ceremony, promoting one to `[x]` requires that a human executed the named check.
+
 ---
 
 ## v1 Requirements
@@ -14,12 +16,12 @@
 ### Bootstrap & Supply Chain
 
 - [x] **BOOT-01**: A **project-scoped** `.npmrc` in the repo sets `ignore-scripts=true`, asserted by the bootstrap script before its first `pi install` — `pi install` executes npm lifecycle scripts with no `--ignore-scripts` on any code path. Deliberately **not** global: `ignore-scripts` in `~/.npmrc` breaks packages with legitimate native builds machine-wide. The tradeoff is that a `pi install` run from another directory is unprotected; README and the runbook must state this, including the setup step when installing on macOS or any second machine.
-- [x] **BOOT-02**: User can install the harness on a clean machine with `pi install https://github.com/kaiyitkoh/ky-pi-agent`
+- [~] **BOOT-02**: User can install the harness on a clean machine with `pi install https://github.com/kaiyitkoh/ky-pi-agent` — *offline half complete (local clone + `npm install --omit=dev`, `tests/integration/load-paths.test.ts` case 2); the real-URL install on a clean profile is `RB-01-02`, **OUTSTANDING***
 - [x] **BOOT-03**: User can bootstrap a cold machine with `bin/bootstrap.sh` — installs Pi, verifies `bash`/`git`/`aws`/`glab`/`gh` presence, writes the env-var template, makes idempotent marked-region edits
 - [x] **BOOT-04**: Bootstrap fails loudly with an actionable message if the pinned Pi version has been unpublished from npm (versions below 0.74.0 are already gone)
-- [x] **BOOT-05**: `cd ky-pi-agent && pi` loads the harness from `.pi/` so the repo dogfoods itself, with `/reload` working
-- [x] **BOOT-06**: All shell code is POSIX `sh` and all shipped scripts check out LF on both platforms
-- [x] **BOOT-07**: CI runs the full test suite on `windows-latest` and `macos-latest`, giving real macOS verification without a Mac
+- [~] **BOOT-05**: `cd ky-pi-agent && pi` loads the harness from `.pi/` so the repo dogfoods itself, with `/reload` working — *`.pi/` dogfood load and the structural hot-reload precondition are proven offline; live `/reload` in a TTY is `RB-01-03`, **OUTSTANDING***
+- [~] **BOOT-06**: All shell code is POSIX `sh` and all shipped scripts check out LF on both platforms — *the LF half is proven on this machine and on both CI legs; the POSIX-conformance half now has a local `dash -n` parse gate, but `shellcheck --shell=sh` runs only in the `posix-lint` CI job, which has **never executed***
+- [~] **BOOT-07**: CI runs the full test suite on `windows-latest` and `macos-latest`, giving real macOS verification without a Mac — *`ci.yml` exists and is statically asserted end-to-end by `tests/unit/ci-pinning.test.ts`; the workflow has **never actually run** and cannot be triggered from this machine*
 - [x] **BOOT-08**: Every third-party dependency is pinned to an exact version, with a committed lockfile
 - [x] **BOOT-09**: No credential can be committed — `.gitignore` covers every runtime state and secret path, verified by a test
 - [x] **BOOT-10**: `CONTRIBUTING.md` states the boundary rule: a new capability defaults to command or skill; registering a tool requires justifying its per-request schema cost
@@ -231,7 +233,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | BOOT-03 | Phase 1 | Complete |
 | BOOT-04 | Phase 1 | Complete |
 | BOOT-05 | Phase 1 | Complete offline — `.pi/` dogfood load proven by `tests/integration/load-paths.test.ts`; the structural hot-reload precondition by `tests/unit/extension-layout.test.ts`. Live `/reload` in a TTY is `RB-01-03`, **OUTSTANDING** |
-| BOOT-06 | Phase 1 | Complete |
+| BOOT-06 | Phase 1 | Complete offline — LF proven by `tests/unit/lf-and-shell.test.ts` and by the CR scan on both CI legs; POSIX syntax proven locally by a `dash -n` parse of every tracked `*.sh` (dash is a genuine POSIX shell, unlike Git-Bash `sh`). `shellcheck --shell=sh --severity=style` is the full conformance gate and lives in the `posix-lint` job, which has **never actually run** |
 | BOOT-07 | Phase 1 | Complete statically — `ci.yml` fully asserted by `tests/unit/ci-pinning.test.ts`; the workflow has **never actually run**, and cannot be triggered from this machine |
 | BOOT-08 | Phase 1 | Complete |
 | BOOT-09 | Phase 1 | Complete |
