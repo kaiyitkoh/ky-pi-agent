@@ -12,6 +12,14 @@
  * blocker B3's lesson, which this repo has already paid for twice. So: the rule
  * is written out in words, and the check stays live.
  *
+ * THAT GREP IS `tests/unit/jsonl-append-only.test.ts`. It bans the stream factory,
+ * the stream class, `openSync` and the asynchronous `appendFile(` across every
+ * tracked source in this directory, proves each pattern against an inline
+ * offending fixture, and asserts this file still contains the synchronous append —
+ * so gutting the writer cannot turn the gate green by leaving nothing to object
+ * to. Until that file existed this paragraph described a check nobody had written,
+ * which is worse than no rule at all.
+ *
  * Four concurrent Node processes appending ~950 B records to one shared file
  * produced 6000 of 6000 lines with zero unparseable records, and `renameSync`
  * on that file succeeded with an append handle open in this process and in a
