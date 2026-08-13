@@ -22,7 +22,7 @@
 - [x] **BOOT-07**: CI runs the full test suite on `windows-latest` and `macos-latest`, giving real macOS verification without a Mac
 - [x] **BOOT-08**: Every third-party dependency is pinned to an exact version, with a committed lockfile
 - [x] **BOOT-09**: No credential can be committed — `.gitignore` covers every runtime state and secret path, verified by a test
-- [ ] **BOOT-10**: `CONTRIBUTING.md` states the boundary rule: a new capability defaults to command or skill; registering a tool requires justifying its per-request schema cost
+- [x] **BOOT-10**: `CONTRIBUTING.md` states the boundary rule: a new capability defaults to command or skill; registering a tool requires justifying its per-request schema cost
 
 ### Diagnostics
 
@@ -235,7 +235,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | BOOT-07 | Phase 1 | Complete |
 | BOOT-08 | Phase 1 | Complete |
 | BOOT-09 | Phase 1 | Complete |
-| BOOT-10 | Phase 1 | Pending |
+| BOOT-10 | Phase 1 | Complete |
 | DIAG-01 | Phase 2 | Pending |
 | DIAG-02 | Phase 2 | Pending |
 | DIAG-03 | Phase 2 | Pending |

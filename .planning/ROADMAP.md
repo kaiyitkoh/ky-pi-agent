@@ -65,7 +65,7 @@ Plans:
 
 - [x] 01-06-PLAN.md — Bootstrap idempotence and the recorded-argv proof that hardening precedes any install (BOOT-03, BOOT-01 ordering)
 - [x] 01-08-PLAN.md — CI workflow: SHA-pinned actions, shellcheck on Ubuntu, executing matrix on Windows + macOS, plus LF and workflow lints (BOOT-06, BOOT-07)
-- [ ] 01-09-PLAN.md — `CONTRIBUTING.md` boundary rule and the test that proves the phase does not break it (BOOT-10)
+- [x] 01-09-PLAN.md — `CONTRIBUTING.md` boundary rule and the test that proves the phase does not break it (BOOT-10)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -270,7 +270,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Bootstrap, Packaging & Supply Chain | 8/10 | In Progress|  |
+| 1. Bootstrap, Packaging & Supply Chain | 9/10 | In Progress|  |
 | 2. Diagnostics — The Instrument | 0/TBD | Not started | - |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |

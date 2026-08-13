@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-08-PLAN.md — cross-platform CI matrix, SHA-pinned actions, LF/portability gates
-last_updated: "2026-08-13T01:11:33.469Z"
-last_activity: 2026-08-13 -- completed 01-08 (cross-platform CI matrix + LF/portability gates)
+stopped_at: Completed 01-09-PLAN.md — BOOT-10 boundary rule written with verified citations and gated by test
+last_updated: "2026-08-13T01:21:01.382Z"
+last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 8
+  completed_plans: 9
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 9 of 10
+Plan: 10 of 10
 Status: Ready to execute
-Last activity: 2026-08-13 -- completed 01-08 (cross-platform CI matrix + LF/portability gates)
+Last activity: 2026-08-13
 
-Progress: [████████░░] 80%
+Progress: [█████████░] 90%
 
 ## Performance Metrics
 
@@ -60,6 +60,7 @@ Progress: [████████░░] 80%
 | Phase 01 P07 | 18m | 2 tasks | 2 files |
 | Phase 01 P06 | 30m | 2 tasks | 4 files |
 | Phase 01 P08 | 22m | 2 tasks | 3 files |
+| Phase 01 P09 | 20m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -99,6 +100,10 @@ Recent decisions affecting current work:
 - [Phase 01]: posix-lint is a separate ubuntu-latest job, not a matrix step — shellcheck is preinstalled only there, and sh execution cannot prove POSIX conformance since Git-Bash sh and macOS /bin/sh are both bash in POSIX mode
 - [Phase 01]: no line-ending fix-up step in CI — .gitattributes eol=lf is the fix and the node CR-byte scan is the proof; a git config step would mask a broken .gitattributes
 - [Phase 01]: the CI lint reads ci.yml as TEXT — yaml exists only transitively under Pi, and declaring it would break pinning.test.ts's exactly-six-devDependencies assertion
+- [Phase 01]: the three BOOT-10 source facts were re-verified in Pi 0.84.1's recovered TypeScript, not inherited — convertTools at openai-completions.ts:1337-1372 is called at :731, system-prompt.ts's only 'command' hit is preamble prose at :121, and skills.ts:350-356 emits name/description/location only
+- [Phase 01]: the registerTool scan is a plain substring per 01-VALIDATION's BOOT-10 wording — it survives bracket access and aliasing, at the cost that extensions may not name the call even in a comment
+- [Phase 01]: TOOL_REGISTRATION_ALLOWLIST is empty and named so a later phase extends it with an (a)/(b)/(c) justification instead of deleting the test
+- [Phase 01]: the npm_config_ignore_scripts persistence hazard cites bash.ts:105 + shell.ts:122-134 (the bash tool spreads process.env) — package-manager's getEnv() is private and covers only Pi's own npm spawns
 
 ### Pending Todos
 
@@ -143,8 +148,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T01:11:33.460Z
-Stopped at: Completed 01-08-PLAN.md — cross-platform CI matrix, SHA-pinned actions, LF/portability gates
+Last session: 2026-08-13T01:21:01.371Z
+Stopped at: Completed 01-09-PLAN.md — BOOT-10 boundary rule written with verified citations and gated by test
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
