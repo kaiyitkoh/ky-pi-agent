@@ -69,11 +69,23 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import {
+	PROFILE_TEMPLATE_SENTINEL,
+	TEMPLATE_SENTINEL_PREFIX,
+} from "../../.pi/extensions/providers/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 
 /** Pi's built-in provider id. Not defined by this repo's models template. */
 const BEDROCK = "amazon-bedrock";
+
+/**
+ * What a template value must look like to be recognised as an unedited one.
+ *
+ * Built from the exported prefix rather than typed out, so the pattern cannot
+ * drift from the literal `bin/bootstrap.sh` and the SSO classifier both key on.
+ */
+const SENTINEL_SHAPE = new RegExp(`^${TEMPLATE_SENTINEL_PREFIX}`);
 
 /** The artifact under test, at the filename Trap T1 forced. */
 const AUTH_TEMPLATE_PATH = join(repoRoot(), ".pi", "templates", "auth-template.json");
@@ -185,6 +197,43 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 				).toBe(templatePlaceholder());
 			},
 		);
+	});
+
+	it("case 1b -- the shipped placeholder is recognisably a placeholder", () => {
+		// WHY THE ROUND TRIP ABOVE IS NOT ENOUGH. Case 1 feeds `authTemplate()` in
+		// and asserts the result equals `templatePlaceholder()`, which re-reads the
+		// SAME file. Both sides derive from one source, so the assertion is
+		// "whatever the template says, Pi echoed it back" -- true for ANY value,
+		// including a plausible-looking profile name. It does prove one real
+		// property (Pi returns `credential.env` verbatim on that branch) so it is
+		// not vacuous, but it is not the assertion this file needs, and it is why
+		// the CR-01 hazard sat here unnoticed: case 5 asserts the placeholder is
+		// non-empty and nothing asserts anything else about it. [WR-08]
+		const placeholder = templatePlaceholder();
+
+		expect(
+			typeof placeholder,
+			"the template's env.AWS_PROFILE is not a string, so Pi would hand a non-string to " +
+				"its Bedrock resolver and the assertion below is about the wrong kind of value",
+		).toBe("string");
+
+		expect(
+			SENTINEL_SHAPE.test(placeholder as string),
+			`the shipped placeholder ${JSON.stringify(placeholder)} is not recognisably a ` +
+				"placeholder. It must be, for two independent reasons: (a) an installed copy WINS " +
+				"over the ambient AWS_PROFILE (pi-ai amazon-bedrock.js:64), so a value that merely " +
+				"looks like a profile name silently breaks Bedrock on a machine where it already " +
+				"worked; (b) bin/bootstrap.sh withholds template entries by exactly this prefix, " +
+				"and the SSO classifier rejects this exact string before interpolating it into a " +
+				"copy-pasteable command. Renaming it here without renaming it there re-opens both " +
+				"[WR-08, CR-01]",
+		).toBe(true);
+
+		expect(
+			placeholder,
+			"the placeholder must be the literal the extension checks for. Two spellings of one " +
+				"sentinel is how the classifier stops recognising the value the template ships",
+		).toBe(PROFILE_TEMPLATE_SENTINEL);
 	});
 
 	it("case 2 — the profile comes from the file, not from the environment", async () => {
