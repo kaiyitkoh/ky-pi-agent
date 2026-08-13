@@ -329,8 +329,21 @@ export interface AppendOptions {
  * {@link producedPaths} so DIAG-07's gitignore test can check the paths the
  * writer actually produced rather than a hand-written list.
  *
- * The cap is checked against `size + thisRecord`, so the live file is never
- * larger than the cap rather than merely being rotated once it already is.
+ * THE CAP, STATED HONESTLY. It is checked against `size + thisRecord`, so the
+ * live file never crosses the cap on account of records that FIT — that is the
+ * difference from a writer which rotates only once it is already over, and it is
+ * what `jsonl-rotation.test.ts`'s per-append size assertion pins.
+ *
+ * A SINGLE RECORD LARGER THAN THE CAP IS WRITTEN WHOLE REGARDLESS. Two branches
+ * write unconditionally: an empty or absent file (`size === 0`, so the guard
+ * cannot fire) and the post-rotation path (`size` is reset to `0`). The
+ * consequence is real and accepted — the live file sits above the cap and rotates
+ * on the very next append, producing a run of one-record rotated files — because
+ * the alternative is dropping the record, and dropping a record loses the turn it
+ * describes, which is the one thing this writer may never do. Reachable whenever a
+ * caller passes a small cap (`logs-gitignored.test.ts:94` uses 400) or a wire
+ * payload exceeds `WIRE_ROTATE_BYTES`, e.g. a large file read into `messages[]`.
+ * Pinned by `jsonl-rotation.test.ts`'s oversized-record case.
  */
 export function appendJsonl(
 	cwd: string,

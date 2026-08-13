@@ -147,6 +147,75 @@ describe("DIAG-08 — size-based rotation loses no record across the rename", ()
 	});
 });
 
+describe("DIAG-08 — a record larger than the cap is written whole, not dropped", () => {
+	/**
+	 * THE HONEST HALF OF THE CAP CLAIM.
+	 *
+	 * `appendJsonl`'s guard is `size > 0 && size + bytes > cap`, so two branches
+	 * write unconditionally: an empty or absent file, and the post-rotation path
+	 * where `size` was just reset to 0. The docstring used to promise "the live file
+	 * is never larger than the cap", full stop, and that is not true for a single
+	 * oversized record.
+	 *
+	 * The behaviour is the RIGHT one — dropping a record loses the turn it describes,
+	 * which is the one thing this writer may never do — so this case pins it rather
+	 * than treating it as a bug. It also pins the consequence, which is the part a
+	 * reader would otherwise be surprised by: the live file is over the cap, so the
+	 * NEXT append rotates immediately.
+	 *
+	 * Untested in both directions before this: every rotation case uses 500-byte
+	 * records against a 4000-byte cap, so the branch was never entered.
+	 */
+	it("writes it whole, then rotates on the very next append", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = logPath(cwd, TURNS_LOG_BASE);
+			// A cap far below one record, so the first append cannot possibly fit.
+			const tinyCap = 100;
+			const oversized = makeRecord(1, OLDEST_MARKER);
+
+			expect(
+				RECORD_BYTES,
+				"the fixture record must genuinely exceed the cap, or this case exercises the ordinary " +
+					"fitting path and proves nothing about the oversized branch",
+			).toBeGreaterThan(tinyCap);
+
+			appendJsonl(cwd, TURNS_LOG_BASE, oversized, { rotateBytes: tinyCap, now });
+
+			expect(
+				readIntact(live, "the live file"),
+				"THE RECORD MUST SURVIVE. Honouring a size bound by dropping a record would lose the " +
+					"turn it describes, and a turn that left no row is indistinguishable from a quiet " +
+					"session — the single failure class this phase exists to eliminate",
+			).toEqual([oversized]);
+
+			expect(
+				statSync(live).size,
+				"and it is genuinely over the cap, which is the fact the docstring now states instead " +
+					"of the absolute claim it used to make. A file at or under the cap here would mean " +
+					"the record was truncated to fit, which is the same loss wearing a different name",
+			).toBeGreaterThan(tinyCap);
+
+			// The consequence, pinned so it is documented behaviour rather than a
+			// surprise: the live file is already over the cap with `size > 0`, so the
+			// guard fires immediately.
+			const second = makeRecord(2);
+			appendJsonl(cwd, TURNS_LOG_BASE, second, { rotateBytes: tinyCap, now });
+
+			expect(
+				readIntact(rotatedPath(live, 1), "the rotated file"),
+				"the oversized record must have rotated away intact, not been overwritten",
+			).toEqual([oversized]);
+
+			expect(
+				readIntact(live, "the live file after the second append"),
+				"and the second record is alone in the new live file. Every record still exists exactly " +
+					"once across live plus rotated, which is the property DIAG-08 is actually about",
+			).toEqual([second]);
+		});
+	});
+});
+
 describe("DIAG-08 — the rotated-file cap bounds disk use, oldest first", () => {
 	it("keeps one live plus maxRotated files and drops the oldest content", async () => {
 		await withTempLogCwd(async (cwd) => {
