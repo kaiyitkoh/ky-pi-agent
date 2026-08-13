@@ -36,6 +36,8 @@
  */
 import { spawnSync } from "node:child_process";
 
+import { quoteForWindows } from "./win-quote.ts";
+
 const IS_WINDOWS = process.platform === "win32";
 
 /** Cold jiti compile on first run makes Pi's startup slow; 5s is not enough. */
@@ -55,26 +57,15 @@ export interface RunPiOptions {
 }
 
 /**
- * Wrap an argument for Windows `cmd.exe` concatenation.
- *
- * Only used on the Windows shell path. Anything that is not plainly safe gets
- * double-quoted; embedded double quotes are backslash-escaped, which is what
- * the MSVC-style parser inside the child expects.
- */
-function quoteForWindows(arg: string): string {
-	if (/^[A-Za-z0-9_.:@/\\=-]+$/.test(arg)) {
-		return arg;
-	}
-	return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
-}
-
-/**
  * Build the `(file, args)` pair for `spawnSync`.
  *
  * On POSIX this is `("pi", args)` with no shell. On Windows the shell is
  * unavoidable (see the module docstring), so everything is quoted and folded
  * into the command string and the args array is left empty -- that is the shape
  * `shell:true` is actually safe in.
+ *
+ * The quoting itself lives in `./win-quote.ts`, once. There used to be four
+ * hand-rolled copies of it across the suite and two of them were wrong.
  */
 function commandFor(args: string[]): [string, string[]] {
 	if (!IS_WINDOWS) {

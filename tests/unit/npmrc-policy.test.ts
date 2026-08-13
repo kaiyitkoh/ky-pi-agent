@@ -36,6 +36,11 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { repoRoot } from "../helpers/git.ts";
+// npm ships as `npm.cmd` on Windows and Node has refused to spawn `.cmd`
+// without a shell since CVE-2024-27980, so `shell: true` is unavoidable there
+// -- and `shell: true` alongside an args array is unescaped concatenation
+// (Node DEP0190). One shared quoter; see the file for the CRT parser rules.
+import { quoteForWindows } from "../helpers/win-quote.ts";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -66,22 +71,6 @@ afterEach(() => {
 		}
 	}
 });
-
-/**
- * Quote an argument for Windows `cmd.exe` concatenation.
- *
- * Same reasoning as tests/helpers/pi.ts: npm ships as `npm.cmd` on Windows and
- * Node has refused to spawn `.cmd` without a shell since the CVE-2024-27980
- * fix, so `shell: true` is unavoidable there -- and `shell: true` alongside an
- * args array is unescaped concatenation (Node DEP0190). Quote here, hand over a
- * single command string, pass an empty args array.
- */
-function quoteForWindows(arg: string): string {
-	if (/^[A-Za-z0-9_.:@/\\=-]+$/.test(arg)) {
-		return arg;
-	}
-	return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
-}
 
 interface NpmResult {
 	stdout: string;

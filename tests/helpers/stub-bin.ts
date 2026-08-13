@@ -51,6 +51,8 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
+import { quoteForWindows } from "./win-quote.ts";
+
 /**
  * One argv-conditional response.
  *
@@ -212,11 +214,6 @@ export function withStubBin<T>(
 	} finally {
 		rmSync(dir, { recursive: true, force: true });
 	}
-}
-
-/** Quote for cmd.exe concatenation; see the DEP0190 note in runWithStubBin. */
-function quoteForWindows(arg: string): string {
-	return /^[A-Za-z0-9_.:@/\\=-]+$/.test(arg) ? arg : `"${arg.replace(/"/g, '\\"')}"`;
 }
 
 /**

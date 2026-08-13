@@ -41,6 +41,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SELFTEST_MODEL_ID } from "../../.pi/extensions/harness/index.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
+import { commandFor } from "../helpers/win-quote.ts";
 
 const IS_WINDOWS = process.platform === "win32";
 
@@ -67,10 +68,11 @@ function run(
 	args: string[],
 	opts: { cwd?: string; timeoutMs?: number } = {},
 ): { stdout: string; stderr: string; status: number | null } {
-	const quoted = IS_WINDOWS
-		? [[cmd, ...args.map((a) => (/^[A-Za-z0-9_.:@/\\=-]+$/.test(a) ? a : `"${a}"`))].join(" "), []]
-		: [cmd, args];
-	const result = spawnSync(quoted[0] as string, quoted[1] as string[], {
+	// This used to be a bare `"${a}"` with no escaping at all -- the weakest of
+	// the four hand-rolled quoters that existed here. One shared implementation
+	// now; see tests/helpers/win-quote.ts for the CRT parser rules it obeys.
+	const [file, spawnArgs] = commandFor(cmd, args, IS_WINDOWS);
+	const result = spawnSync(file, spawnArgs, {
 		cwd: opts.cwd,
 		encoding: "utf-8",
 		shell: IS_WINDOWS,

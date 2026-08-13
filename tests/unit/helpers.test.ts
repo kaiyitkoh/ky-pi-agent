@@ -18,6 +18,7 @@ import { afterAll, describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
+import { commandFor, quoteForWindows } from "../helpers/win-quote.ts";
 import { runWithStubBin, withStubBin } from "../helpers/stub-bin.ts";
 
 const scratch = mkdtempSync(join(tmpdir(), "kypi-helpers-"));
@@ -100,5 +101,57 @@ describe("stub-bin helper", () => {
 			}),
 		).toThrow("boom");
 		expect(existsSync(stubDir)).toBe(false);
+	});
+});
+
+/**
+ * The single Windows quoter, asserted directly.
+ *
+ * There were four hand-rolled copies of this across the suite and two were
+ * wrong -- `stub-bin.ts` escaped quotes but not trailing backslashes, and
+ * `load-paths.test.ts` did no escaping at all. All four are now one function,
+ * and it is a function no test exercised, on the `shell: true` path Node's
+ * DEP0190 warns about. Inputs are test-controlled today, which is exactly why
+ * it needs asserting rather than assuming.
+ */
+describe("quoteForWindows -- one implementation of the DEP0190 hazard", () => {
+	it("leaves plain arguments alone", () => {
+		// Readability of the command string in a failure message is worth this.
+		expect(quoteForWindows("--offline")).toBe("--offline");
+		expect(quoteForWindows("C:/Users/x/pi")).toBe("C:/Users/x/pi");
+		expect(quoteForWindows("@earendil-works/pi-ai@0.84.1")).toBe("@earendil-works/pi-ai@0.84.1");
+	});
+
+	it("quotes anything holding a space or a shell metacharacter", () => {
+		expect(quoteForWindows("C:/some dir")).toBe('"C:/some dir"');
+		expect(quoteForWindows("a&b")).toBe('"a&b"');
+		expect(quoteForWindows("")).toBe('""');
+	});
+
+	it("doubles a trailing backslash run so it cannot eat the closing quote", () => {
+		// THE stub-bin.ts BUG. `"C:\some dir\"` leaves the closing quote escaped,
+		// so the argument runs on into whatever follows it on the command line.
+		expect(quoteForWindows("C:\\some dir\\")).toBe('"C:\\some dir\\\\"');
+		expect(quoteForWindows("C:\\some dir\\\\")).toBe('"C:\\some dir\\\\\\\\"');
+		// A backslash NOT before a quote or the end is literal, so it stays put.
+		expect(quoteForWindows("C:\\some dir\\file")).toBe('"C:\\some dir\\file"');
+	});
+
+	it("escapes an embedded quote and the backslash run before it", () => {
+		// CRT rule: 2n backslashes + `"` is a delimiter, 2n+1 is a literal quote.
+		expect(quoteForWindows('say "hi"')).toBe('"say \\"hi\\""');
+		expect(quoteForWindows('a\\"b')).toBe('"a\\\\\\"b"');
+	});
+
+	it("commandFor folds args into one string on Windows and keeps the array off it", () => {
+		expect(commandFor("npm", ["config", "get", "ignore-scripts"], false)).toEqual([
+			"npm",
+			["config", "get", "ignore-scripts"],
+		]);
+		// The safe `shell: true` shape: everything in the command, args empty.
+		expect(commandFor("pi", ["--offline", "-a", "C:/some dir"], true)).toEqual([
+			'pi --offline -a "C:/some dir"',
+			[],
+		]);
 	});
 });
