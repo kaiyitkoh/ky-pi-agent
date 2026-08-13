@@ -65,7 +65,7 @@
 - [x] **SAFE-11**: Safety extensions install at **user scope** — project-scoped extensions don't load in subagents, which spawn headless and therefore never grant trust **[FAUX]**
 - [ ] **SAFE-12**: The blocked-command test passes **inside a spawned subagent**, not only in the interactive session **[FAUX]**
 - [ ] **SAFE-13**: The non-bash surface is guarded — `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.gitconfig`, CI workflow files **[FAUX]**
-- [ ] **SAFE-14**: Every allow and every block is written to an audit JSONL **[FAUX]**
+- [x] **SAFE-14**: Every allow and every block is written to an audit JSONL **[FAUX]**
 - [ ] **SAFE-15**: A documented table lists known bypasses the guard does not catch — an honest limits statement, not a claim of completeness
 - [ ] **SAFE-16**: `gh` is left unauthenticated on the work laptop and this is stated in the runbook — `/share` cannot be blocked by any extension, and aborting on `gh auth status` is the only control
 - [ ] **SAFE-17**: At least 30 evasion attempts are tested, each either blocked or explicitly documented as out of scope **[FAUX]**
@@ -269,7 +269,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-11 | Phase 4 | Complete |
 | SAFE-12 | Phase 4 | Pending |
 | SAFE-13 | Phase 4 | Pending |
-| SAFE-14 | Phase 4 | Pending |
+| SAFE-14 | Phase 4 | Complete |
 | SAFE-15 | Phase 4 | Pending |
 | SAFE-16 | Phase 1 | Pending — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING — `gh auth logout` has not been run on the work laptop. Not completable from this machine |
 | SAFE-17 | Phase 4 | Pending |

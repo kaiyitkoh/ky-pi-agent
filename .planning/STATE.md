@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-01-PLAN.md
-last_updated: "2026-08-13T19:44:54.228Z"
+stopped_at: Completed 04-02-PLAN.md
+last_updated: "2026-08-13T20:00:20.523Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 44
-  completed_plans: 33
+  completed_plans: 34
   percent: 27
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 04 (safety-deployment-guardrails) — EXECUTING
-Plan: 2 of 12
+Plan: 3 of 12
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [████████░░] 75%
+Progress: [████████░░] 77%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -95,6 +95,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 03 P10 | ~45m | 3 tasks | 4 files |
 | Phase 3 P11 | 55m | 3 tasks | 4 files |
 | Phase 04 P01 | 15min | 3 tasks | 5 files |
+| Phase 04 P02 | 13min | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -211,6 +212,9 @@ Recent decisions affecting current work:
 - [Phase 04-01]: unbash Word.value/Word.parts are self-memoizing getters, not own enumerable properties -- a plain Object.keys() tree walk silently never descends into a command substitution or expansion hidden inside a Word; walkableKeys() adds them via an 'in' check
 - [Phase 04-01]: the user-scope re-export stub loads in a real spawned pi process on Windows on the first execution -- no file:// URL or directory-copy fallback needed; this is the mechanism Plan 09's bootstrap wires
 - [Phase 04-01]: ParsedScript.errors is undefined on a clean unbash parse, not [] -- every downstream policy check must read (script.errors ?? []).length
+- [Phase 04-02]: safety/audit.ts does not import diagnostics/index.ts's safeHandler -- CONTEXT.md decision 7's isolation reading wins over the providers/index.ts precedent
+- [Phase 04-02]: writeAuditRow never throws -- catches and returns undefined on failure so an audit write failure cannot turn a BLOCK into an unhandled exception
+- [Phase 04-02]: shared JSONL writer moved to .pi/lib/jsonl.ts (outside .pi/extensions/, never auto-discovered) so diagnostics and safety can both bind to the hardened Phase 2 writer without importing each other
 
 ### Pending Todos
 
@@ -258,8 +262,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T19:44:54.219Z
-Stopped at: Completed 04-01-PLAN.md
+Last session: 2026-08-13T20:00:20.513Z
+Stopped at: Completed 04-02-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
