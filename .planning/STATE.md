@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 03-02-PLAN.md — the models.json / auth.json templates and the Trap T1 filename guard, falsified twice
-last_updated: "2026-08-13T14:03:37.940Z"
+last_updated: "2026-08-13T14:12:37.043Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 32
-  completed_plans: 23
+  completed_plans: 24
   percent: 18
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 03 (providers-credentials) — EXECUTING
-Plan: 3 of 11
+Plan: 4 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [███████░░░] 72%
+Progress: [████████░░] 75%
 
 **Read that 72% carefully.** The denominator is *plans written so far* — Phase 1's
 10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
@@ -81,6 +81,7 @@ phases complete**.
 | Phase 02 P11 | 25m | 3 tasks | 3 files |
 | Phase 03 P01 | 35m | 3 tasks | 3 files |
 | Phase 03 P02 | 25m | 3 tasks | 5 files |
+| Phase 3 P3 | 25m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -169,6 +170,7 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-02: trackedFiles() membership, not isIgnored(), is the load-bearing half of the Trap T1 guard -- git mv FORCES an ignored path into the index, so renaming auth-template.json to auth.example.json left the ignore half green and only the tracked-name case turned red
 - [Phase 03]: 03-02: both config templates are validated by RUNNING Pi's own loaders (stripJsonComments+JSON.parse; ReadOnlyAuthStorage.load/read) over the real files, never by a local regex strip or by reading the validator -- the auth run also proved the DASHSCOPE_API_KEY env reference interpolates and env.AWS_PROFILE survives raw
 - [Phase 03]: 03-02: where the plan's task prose conflicted with its own acceptance greps (a baseUrl comment naming the workspace-dedicated host, a header naming the out-of-scope vendor), the greps won and the prose was rephrased -- a comment is text like any other and a gate that greps to zero means zero
+- [Phase 3]: 03-03: the 127.0.0.1 literal is duplicated between the loopback listen call and the refusal on purpose — a shared constant lets one edit move the bind and its guard together
 
 ### Pending Todos
 
@@ -214,7 +216,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T14:03:56.081Z
+Last session: 2026-08-13T14:12:32.966Z
 Stopped at: Completed 03-02-PLAN.md — the models.json / auth.json templates and the Trap T1 filename guard, falsified twice
 Resume file: None
 

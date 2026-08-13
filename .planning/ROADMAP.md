@@ -143,7 +143,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 03-03-PLAN.md — `withLoopbackCompletions`: a 127.0.0.1 capture server so Pi's real adapter can be read offline (PROV-03, PROV-10)
+- [x] 03-03-PLAN.md — `withLoopbackCompletions`: a 127.0.0.1 capture server so Pi's real adapter can be read offline (PROV-03, PROV-10)
 - [ ] 03-04-PLAN.md — Resolved-`compat` deep equality, the `detectCompat` canary, the cross-provider `contextWindow` invariant and the `COST_UNVERIFIED` allowlist (PROV-03, PROV-06)
 - [ ] 03-05-PLAN.md — `credential.env.AWS_PROFILE` resolution in both directions, and the R1 `modelOverrides` unclamp (PROV-04, PROV-07)
 - [ ] 03-06-PLAN.md — `merge_models_json` / `merge_auth_json` in `bin/bootstrap.sh` and the install/idempotence/do-not-clobber test (PROV-01, PROV-04)
