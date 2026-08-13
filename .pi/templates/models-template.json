@@ -1,0 +1,179 @@
+// ---------------------------------------------------------------------------
+// ky-pi-agent — the DashScope provider definition, as a TEMPLATE.
+//
+// WHAT THIS FILE IS. Pi resolves `models.json` from the agent directory only —
+// `join(getAgentDir(), "models.json")` [VERIFIED: pi 0.84.1 dist/config.js:423-425,
+// and again at dist/core/agent-session-services.js:59, dist/core/model-runtime.js:76].
+// There is no project-scope `models.json`, so a file committed here is read by
+// NOTHING until it is installed. `bin/bootstrap.sh` merges the object below into
+// `$PI_AGENT_DIR/models.json` under the `providers.dashscope` key ONLY, the same
+// key-namespaced way `merge_settings` owns `settings.json`'s `kyPiAgent` key —
+// every other provider, model override and user edit in that file is left alone.
+//
+// THERE IS NO SECRET HERE AND THERE NEVER WILL BE. This repository is public.
+// `apiKey` is the literal string `$DASHSCOPE_API_KEY`; Pi interpolates it from
+// the environment at resolve time [pi src/core/provider-composer.ts:325-354].
+//
+// `!command` IS FORBIDDEN ANYWHERE IN THIS FILE (PROV-02). `models.json` values
+// are resolved at request time on EVERY request with no caching, TTL, stale reuse
+// or recovery — a deliberate Pi design choice [CITED: docs/models.md:172]. A
+// `!command` here is therefore a subprocess spawn in the hot path of every turn.
+// `auth.json` is where a `!command` belongs: there it is cached for the process
+// lifetime. `.pi/templates/auth-template.json` is the file that may carry one.
+//
+// EVERY NUMBER BELOW CARRIES ITS SOURCE OR ITS `UNVERIFIED` MARK. `models.json`
+// accepts `//` comments (`stripJsonComments`, pi src/core/model-config.ts:261),
+// so there is no excuse for an unsourced figure. Comments are whole-line only.
+//
+// NO BEDROCK ENTRY, DELIBERATELY. Pi's built-in Bedrock catalogue is complete and
+// accurate; redefining a catalogued model is exactly the cross-provider drift
+// PROV-06 forbids. Bedrock is configured through `auth.json` (`env.AWS_PROFILE`)
+// and nothing else. Exactly one provider is defined here, and it is DashScope:
+// the acceptance gate for this file greps the out-of-scope vendor's name to zero,
+// so it is not spelled even in a comment.
+// ---------------------------------------------------------------------------
+{
+  "providers": {
+    "dashscope": {
+      "name": "Alibaba Model Studio (DashScope)",
+      "api": "openai-completions",
+      // BASE URL — the SHARED international host, on purpose.
+      // Alibaba recommends the workspace-dedicated regional form — a host whose
+      // first label is the caller's own workspace id — and lists this one under
+      // "Legacy domains (still functional)". It is templated anyway because
+      // `baseUrl` is NEVER interpolated — `modelFromJson` / `composeModelProvider`
+      // take it as a raw string [pi src/core/provider-composer.ts:142, :479]; only
+      // `apiKey` and `headers` pass through `resolveConfigValue*`. A dedicated URL
+      // committed here would be a hard-coded, account-identifying literal in a
+      // public repo, and wrong on every other machine. [threat T-03-02-02]
+      // The workspace-dedicated form is selected at INSTALL time:
+      // `bin/bootstrap.sh` substitutes `$KYPI_DASHSCOPE_BASE_URL` when it is set,
+      // so the workspace id lives only in `~/.pi/agent/models.json`, outside git.
+      // Setting it is the first troubleshooting step in RB-03-01.
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "$DASHSCOPE_API_KEY",
+      // COMPAT — WRITTEN OUT IN FULL, INCLUDING FIELDS THAT MATCH THE DEFAULT.
+      // `detectCompat` keys on hard-coded provider ids and base-URL substrings and
+      // has NO branch for DashScope, Model Studio, `aliyuncs.com` or Qwen
+      // [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:1442-1540; confirmed
+      // by grep against the installed dist on 2026-08-13]. Every field left to
+      // detection therefore silently takes the generic OpenAI default. Both
+      // resulting failures are invisible from the UI, which is the whole reason
+      // PROV-03 exists — so nothing below is left implicit.
+      "compat": {
+        // `store` is not in Alibaba's supported-parameter list. Note the generic
+        // default SENDS `store: false` rather than omitting it
+        // [pi-ai src/api/openai-completions.ts:711-713]; `false` here omits it.
+        "supportsStore": false,
+        // The `developer` role is unlisted by Alibaba, and the emission is gated on
+        // `model.reasoning` [:1083-1085] — i.e. it bites on exactly our models.
+        "supportsDeveloperRole": false,
+        // Needed and set explicitly so detection never gets to decide it
+        // [:754, :763, :802, :837].
+        "supportsReasoningEffort": true,
+        // Alibaba's compatibility table lists `max_tokens` and does NOT list
+        // `max_completion_tokens`, which is the generic default [:715-721].
+        "maxTokensField": "max_tokens",
+        // `strict` is unlisted; suppressing it removes one unlisted field from the
+        // PROV-10 request [:1360, :1368]. One-key reversal if Phase 10 wants it.
+        "supportsStrictMode": false,
+        // The generic default sends `prompt_cache_key` + `prompt_cache_retention:
+        // "24h"` [:699-704]. Neither is in Alibaba's list; the conservative side is
+        // the one that cannot 400.
+        "supportsLongCacheRetention": false,
+        // THE ONE FIELD MOST LIKELY TO BE WRONG IN A DRAFT, AND IT IS NOT.
+        // Pi's "qwen" branch emits top-level `enable_thinking` + `reasoning_effort`
+        // [:761-768]; the "deepseek" branch emits a nested `thinking: {type}` object
+        // [:796-805]. Alibaba's own DeepSeek-on-Model-Studio page documents
+        // `enable_thinking` and `reasoning_effort` (high|max, default high), and no
+        // `thinking` object [CITED: alibabacloud.com/help/en/model-studio/deepseek-api].
+        // Upstream issue earendil-works/pi#6998 — "DeepSeek models provided by Aliyun
+        // should use thinkingFormat=qwen" — is CLOSED in favour of "qwen".
+        // Without this key, detection returns "openai" and thinking is never enabled
+        // at all: silent, and invisible except in a wire dump.
+        // If RB-03-01's wire dump shows DashScope rejecting `enable_thinking`,
+        // flipping this to "deepseek" is a one-key change with the test already
+        // written. Do not flip it on a hunch.
+        "thinkingFormat": "qwen"
+      },
+      "models": [
+        {
+          // The id is DELIBERATELY identical to Pi's built-in DeepSeek-direct id.
+          // That collision is the point: PROV-06's cross-provider invariant test
+          // exists to catch a model inheriting the other provider's context window
+          // or cost table. Renaming it here would dodge the test, not the bug.
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash (DashScope)",
+          // MANDATORY. Every `thinkingFormat` branch is
+          // `compat.thinkingFormat === X && model.reasoning` [:748, :761, :769, :774,
+          // :796, :806, :816, :821, :830, :837], and the `reasoning_content` fix is
+          // `&& model.reasoning` too [:1225]. `modelFromJson` defaults it to FALSE
+          // when omitted [pi src/core/provider-composer.ts:156] — so forgetting it
+          // disables thinking AND re-opens the PROV-10 400, silently and together.
+          "reasoning": true,
+          // Text only. Phase 5's capability guard reads this field; an optimistic
+          // `["text","image"]` here becomes a routing bug there.
+          "input": ["text"],
+          // VERIFIED-with-URL: "393,216 in total" for deepseek-v4-flash / -pro / -us
+          // [CITED: alibabacloud.com/help/en/model-studio/deepseek-api].
+          // NEVER copy 1,000,000 across from the identically-named DeepSeek-direct
+          // entry — that is the exact PROV-06 failure. RB-03-05 measures the real cap.
+          "contextWindow": 393216,
+          // UNVERIFIED — deliberately conservative. Alibaba's public English docs
+          // give no per-model output cap for this id. Pi sends `max_tokens` only when
+          // the caller sets `options.maxTokens`, so a low value costs at most a
+          // truncation while a high one risks a 400. RB-03-05 measures the real cap.
+          "maxTokens": 65536,
+          // ALL ZEROS ARE A VISIBLE PLACEHOLDER, NOT A FABRICATION. Public English
+          // docs give no per-token price (console only), and zeros are what
+          // `modelFromJson` would default to anyway [provider-composer.ts:159].
+          // `docs/DIAGNOSTICS.md` already documents zero-cost detection, and
+          // tests/unit/model-metadata.test.ts holds a COST_UNVERIFIED allowlist that
+          // this model must be on. RB-03-05 is the entry that replaces these numbers.
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          // Mirrors Pi's own direct-DeepSeek entry. `low` is null rather than mapped
+          // to "high" on purpose: a mapping would put a selectable "low" in the UI
+          // that silently means high. `null` is honest. On the DashScope path
+          // `low`/`medium` collapse to `high` server-side regardless [CITED], which is
+          // why R1's impact is bounded to the DeepSeek-direct path.
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": "high",
+            "max": "max"
+          },
+          // THE PROV-10 FIX. Replayed assistant messages get `reasoning_content: ""`
+          // [:1223-1229, gated on `model.reasoning`]. Without it the FIRST turn of a
+          // tool sequence succeeds and the SECOND returns HTTP 400 — which is why the
+          // failure reads as intermittent rather than as a misconfiguration.
+          "compat": { "requiresReasoningContentOnAssistantMessages": true }
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek V4 Pro (DashScope)",
+          // See deepseek-v4-flash above: every field below carries the same source
+          // and the same reason. They are repeated rather than shared because
+          // `models.json` has no include mechanism.
+          "reasoning": true,
+          "input": ["text"],
+          // VERIFIED-with-URL: "393,216 in total"
+          // [CITED: alibabacloud.com/help/en/model-studio/deepseek-api].
+          "contextWindow": 393216,
+          // UNVERIFIED — deliberately conservative; RB-03-05 measures the real cap.
+          "maxTokens": 65536,
+          // Visible placeholder; RB-03-05 replaces it. See the flash entry.
+          "cost": { "input": 0, "output": 0, "cacheRead": 0, "cacheWrite": 0 },
+          "thinkingLevelMap": {
+            "minimal": null,
+            "low": null,
+            "medium": null,
+            "high": "high",
+            "max": "max"
+          },
+          "compat": { "requiresReasoningContentOnAssistantMessages": true }
+        }
+      ]
+    }
+  }
+}
