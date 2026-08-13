@@ -22,7 +22,7 @@
  * manipulation behaves differently on Windows and macOS and the requirement is
  * about the date stamp in the file name anyway.
  */
-import { mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -32,6 +32,7 @@ import {
 	logDir,
 	logPath,
 	pruneLogs,
+	rotate,
 	type AppendOptions,
 } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { TURNS_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
@@ -388,6 +389,59 @@ describe("DIAG-08 / T-02-03-07 — a base name cannot escape the log directory",
 				"the shipped base names must still work. Without this pair, a validator that rejected " +
 					"every input would pass the escape cases above while breaking the whole subsystem",
 			).toBe(true);
+		});
+	});
+
+	/**
+	 * `rotate` is the OTHER exported writer, and it takes a raw path.
+	 *
+	 * `logPath` validates its `base` and confines the result, and `appendJsonl` goes
+	 * through `logPath` — but `rotate` performs `readdirSync`, `renameSync` and
+	 * `unlinkSync` relative to whatever directory it derives from the string it is
+	 * handed. Until it took `cwd` there was no confinement on it at all, so the
+	 * module docstring's second control ("the resolved file is asserted to sit inside
+	 * `logDir(cwd)` before anything is written") was untrue for one of the two.
+	 * Today's only caller is internal, which is why nothing was broken.
+	 */
+	const ROTATE_ESCAPES = [
+		"evil.jsonl",
+		"../evil.jsonl",
+		"sub/../../evil.jsonl",
+	] as const;
+
+	it.each(ROTATE_ESCAPES)("rotate refuses the outside path %j", async (relative) => {
+		await withTempLogCwd(async (cwd) => {
+			mkdirSync(logDir(cwd), { recursive: true });
+			const outside = join(cwd, relative);
+			writeFileSync(outside, `${JSON.stringify({ notOurs: true })}\n`, "utf-8");
+
+			expect(
+				() => rotate(cwd, outside),
+				`rotate accepted ${JSON.stringify(relative)}, which resolves outside logDir(cwd). It ` +
+					"renames and unlinks, so an unconfined path here is a rename or a delete anywhere the " +
+					"process can reach [threat T-02-03-07]",
+			).toThrow();
+
+			expect(
+				existsSync(outside),
+				"the refusal must happen BEFORE anything is touched; a throw after the rename would " +
+					"leave the file moved and only look safe",
+			).toBe(true);
+		});
+	});
+
+	it("rotate still rotates a real log, so the refusal above is not refusing everything", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = appendJsonl(cwd, TURNS_LOG_BASE, makeRecord(1, OLDEST_MARKER), { now });
+
+			rotate(cwd, live);
+
+			expect(
+				readIntact(rotatedPath(live, 1), "the rotated file"),
+				"the paired positive. Without it, a confinement check that threw on every input would " +
+					"pass every escape case above while breaking rotation for the whole subsystem",
+			).toEqual([makeRecord(1, OLDEST_MARKER)]);
 		});
 	});
 });

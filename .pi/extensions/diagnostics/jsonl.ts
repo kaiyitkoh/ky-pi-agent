@@ -183,6 +183,9 @@ function assertInsideLogDir(cwd: string, file: string): string {
  * Throws on a `base` that is not a bare name — a separator, a `..`, or anything
  * outside {@link BASE_RE}. Callers pass a constant from `schema.ts`; a caller
  * that passes anything else is the bug this refusal exists to surface.
+ *
+ * {@link rotate} applies the same {@link assertInsideLogDir} check, so BOTH
+ * exported writers are confined rather than only the one that builds its own path.
  */
 export function logPath(cwd: string, base: string, now: Date = new Date()): string {
 	if (!BASE_RE.test(base)) {
@@ -241,8 +244,22 @@ function unlinkQuietly(path: string): boolean {
  *
  * Nothing here follows a symlink: every candidate is checked with `lstatSync`
  * and skipped unless it is a regular file. [threat T-02-03-02]
+ *
+ * TAKES `cwd` SO IT CAN BE CONFINED LIKE ITS SIBLINGS. This is a public export
+ * that performs `readdirSync`, `renameSync` and `unlinkSync` relative to whatever
+ * directory it derives from `file`. `logPath` validates its `base` against
+ * `BASE_RE` and runs {@link assertInsideLogDir}, and `appendJsonl` goes through
+ * `logPath` — so without this the module docstring's second control ("the resolved
+ * file is asserted to sit inside `logDir(cwd)` before anything is written") was
+ * simply untrue for one of the two exported writers. Today's only caller is
+ * internal, which is why nothing was broken; a defence-in-depth claim that holds
+ * for one entry point and not the other is not defence in depth.
+ * [threat T-02-03-07]
  */
-export function rotate(file: string, maxRotated: number = MAX_ROTATED_FILES): void {
+export function rotate(cwd: string, file: string, maxRotated: number = MAX_ROTATED_FILES): void {
+	// The same second line of defence `logPath` applies, for the entry point a
+	// caller can reach with a path it built itself.
+	assertInsideLogDir(cwd, file);
 	const stem = file.slice(0, -EXT.length);
 	const dir = stem.slice(0, stem.lastIndexOf(sep) + 1);
 	const prefix = stem.slice(stem.lastIndexOf(sep) + 1);
@@ -364,7 +381,7 @@ export function appendJsonl(
 	const nowMs = now.getTime();
 	let size = cachedSize(file, nowMs);
 	if (size > 0 && size + bytes > cap) {
-		rotate(file, maxRotated);
+		rotate(cwd, file, maxRotated);
 		size = 0;
 	}
 
