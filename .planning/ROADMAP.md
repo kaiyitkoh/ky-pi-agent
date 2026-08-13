@@ -158,6 +158,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 03-11-PLAN.md — `docs/RUNBOOK.md` RB-03-01..05 (all OUTSTANDING), the extended status guard, and the requirement traceability (PROV-09)
+
 **Research**: `--research-phase` recommended — three open empirical questions, none answerable from a desk: the R1 low-thinking-tier contract, the real DashScope `contextWindow` (393,216 corroborated by one researcher, UNVERIFIED by another), and whether strict-schema mode reduces the prose-tool-call rate.
 
 ### Phase 4: Safety & Deployment Guardrails
@@ -177,17 +178,43 @@ Plans:
 **Plans**: 12 plans across 9 waves
 
 Plans:
+**Wave 1**
+
 - [ ] 04-01-PLAN.md — pin `unbash@4.0.10` as a runtime dependency, record the AST vocabulary by execution, spike the user-scope load mechanism
 - [ ] 04-02-PLAN.md — extract the JSONL writer to `.pi/lib/`, add `safety/audit.ts` with allow-and-block rows
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 04-03-PLAN.md — `shell.ts`: the node-type fail-closed deny predicate and wrapper resolution
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 04-04-PLAN.md — `paths.ts`: Windows/Git-Bash canonicalisation, sensitive reads, out-of-project writes, detonation targets
 - [ ] 04-05-PLAN.md — `git.ts`: per-subcommand write/read table, the `HEAD == main` oracle, `glab mr merge`
 - [ ] 04-06-PLAN.md — `infra.ts`: terraform / aws / kubectl mutating-vs-read classification
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 04-07-PLAN.md — `policy.ts` deny-by-default composer and `approvals.ts` one-shot grants
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 04-08-PLAN.md — `safety/index.ts`: hook + wrapped tools + `approve_ky_command`, and the mutated-input proof
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 04-09-PLAN.md — bootstrap user-scope install and the real `pi --mode json` headless deny
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 04-10-PLAN.md — blocked command inside a spawned headless child, and four-process audit concurrency
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 04-11-PLAN.md — the 30-plus-case evasion corpus and `docs/SAFETY.md`'s published limits table
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
 - [ ] 04-12-PLAN.md — SAFE-01's offline proxy, `RB-04-01` (OUTSTANDING), and requirements traceability
 
 **Research**: DONE — `04-RESEARCH.md`. Settled by execution: `unbash` parses every Git-Bash and Windows path form cleanly in argument position, but an unquoted Windows path collapses its backslashes in `Word.value`, so path policy must normalise on `Word.text`. The larger finding is that `unbash` is a TOLERANT parser (`errors.length === 0` for command substitution, heredocs, `sh -c` and backgrounding), so SAFE-03's fail-closed mechanism is a node-type deny-list, not a parse-error check. `@ramtinj95/pi-infra-command-guard@0.9.1` was read via `npm pack` and not installed.

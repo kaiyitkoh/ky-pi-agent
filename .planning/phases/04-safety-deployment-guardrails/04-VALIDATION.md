@@ -1,8 +1,8 @@
 ---
 phase: 4
 slug: safety-deployment-guardrails
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-08-14
 ---
@@ -38,11 +38,22 @@ Additional gate, run alongside the suite: `npm run typecheck` (`tsc --noEmit`).
 
 ## Per-Task Verification Map
 
-*Populated by the planner. Every SAFE requirement must appear in at least one row, and every row must name an automated command or be listed under Manual-Only Verifications below.*
+Mapped at plan granularity. Each plan's own tasks carry the task-level `<verify><automated>` command — every task in all 12 plans has one, confirmed by `gsd-plan-checker` (Nyquist dimensions 8a-8d), with no `MISSING` references and no watch-mode flags. The per-task detail lives in the PLAN.md files rather than being duplicated here, so there is one source of truth.
 
-| Task ID | Plan | Wave | Requirement | Threat Ref | Secure Behavior | Test Type | Automated Command | File Exists | Status |
-|---------|------|------|-------------|------------|-----------------|-----------|-------------------|-------------|--------|
-| — | — | — | SAFE-02..SAFE-15, SAFE-17 | see PLAN `<threat_model>` | see PLAN | unit / session / e2e | `npm test` | ❌ W0 | ⬜ pending |
+| Plan | Wave | Requirements | Threat Ref | Secure Behavior | Test Type | Automated Command | Status |
+|------|------|--------------|------------|-----------------|-----------|-------------------|--------|
+| 04-01 | 1 | SAFE-02, SAFE-11 | `<threat_model>` in 04-01 (incl. `T-04-SC` supply chain) | `unbash@4.0.10` pinned exactly, in `dependencies`; user-scope load mechanism proven or fallback taken | unit + spike | `npm run test:unit` | ⬜ pending |
+| 04-02 | 1 | SAFE-14 | `<threat_model>` in 04-02 | Audit JSONL append-only; `safety/` reaches it without importing `diagnostics/` | unit | `npm run test:unit` | ⬜ pending |
+| 04-03 | 2 | SAFE-02, SAFE-03 | `<threat_model>` in 04-03 | Wrappers resolved; denied AST node kinds refused — **not** an `errors.length` check | unit | `npm run test:unit` | ⬜ pending |
+| 04-04 | 3 | SAFE-06, SAFE-08, SAFE-13 | `<threat_model>` in 04-04 | Path canonicalisation over `text` **and** `value`, both slash directions, `/c/`, `/cygdrive/c/`, UNC, `~`, `$HOME` | unit | `npm run test:unit` | ⬜ pending |
+| 04-05 | 3 | SAFE-04, SAFE-05 | `<threat_model>` in 04-05 | Writes blocked at `HEAD == main`; `worktree add -b feat main` / `fetch` / `rebase` / `diff` / `log origin/main` explicitly allowed; `glab mr merge` refused | unit + integration | `npm test` | ⬜ pending |
+| 04-06 | 3 | SAFE-07 | `<threat_model>` in 04-06 | `terraform apply\|destroy\|import`, mutating `aws`, `kubectl delete` confirm-gated; `aws sts get-caller-identity` / `aws s3 ls` allowed | unit | `npm run test:unit` | ⬜ pending |
+| 04-07 | 4 | SAFE-03, SAFE-10 | `<threat_model>` in 04-07 | Decision function initialises to **block** and promotes to allow; no `hasUI`-conditioned allow | unit | `npm run test:unit` | ⬜ pending |
+| 04-08 | 5 | SAFE-09, SAFE-10, SAFE-14 | `<threat_model>` in 04-08 | Enforcement at the `tool_call` hook **and** inside the wrapped tool; survives a mutated `event.input`; allow **and** block rows written | unit + integration | `npm test` | ⬜ pending |
+| 04-09 | 6 | SAFE-10, SAFE-11 | `<threat_model>` in 04-09 | Installed at user scope by bootstrap; deny proven by a real `pi --mode json` subprocess | integration / e2e | `npm test` | ⬜ pending |
+| 04-10 | 7 | SAFE-12, SAFE-14 | `<threat_model>` in 04-10 | Blocked command still blocked inside a real spawned child; allow row is the positive evidence the guard loaded; 4-process concurrent append holds | e2e | `npm test` | ⬜ pending |
+| 04-11 | 8 | SAFE-15, SAFE-17 | `<threat_model>` in 04-11 | ≥30 cases, each BLOCKED or OUT-OF-SCOPE, driven through the real `evaluate()`; published table == the OUT-OF-SCOPE rows, no extras | unit | `npm run test:unit` | ⬜ pending |
+| 04-12 | 9 | SAFE-01 | `<threat_model>` in 04-12 | `RB-04-01` appended, **OUTSTANDING** in both parsed places; offline proxy parses a real `pre-receive` rejection | unit + integration | `npm test` | ⬜ pending |
 
 *Status: ⬜ pending · ✅ green · ❌ red · ⚠️ flaky*
 
@@ -69,11 +80,12 @@ Everything else in Phase 4 is `[FAUX]` and must be planned as **passing**, not o
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags (`vitest run`, never bare `vitest`)
-- [ ] Feedback latency < 60s
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies — confirmed by `gsd-plan-checker` across all 12 plans
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references — no `<automated>MISSING</automated>` references exist
+- [x] No watch-mode flags (`vitest run`, never bare `vitest`)
+- [x] Feedback latency < 60s
+- [x] `nyquist_compliant: true` set in frontmatter
+- [ ] `wave_0_complete` — flips at execution, not at planning
 
-**Approval:** pending
+**Approval:** approved 2026-08-14 (plan-checker returned `## VERIFICATION PASSED`, 0 blockers, 0 warnings)

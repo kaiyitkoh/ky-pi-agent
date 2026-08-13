@@ -630,7 +630,9 @@ pi.registerTool({
 
 **If this table is empty:** not applicable — see rows above.
 
-## Open Questions
+## Open Questions (RESOLVED — each converted into a falsifiable plan task)
+
+> All three questions below were closed at planning time rather than left open: (1) becomes plan `04-01` Task 3, an explicitly falsifiable spike with a named fallback chain (re-export stub → `file://` URL → directory copy); (2) becomes plans `04-09` and `04-10`, which use a real spawned child process rather than waiting on Phase 7's `pi-subagents`; (3) becomes `04-05`'s explicit per-subcommand allow/deny table rather than a single boolean. No plan builds on unresolved ambiguity. The original wording is preserved below as the record of what was uncertain at research time.
 
 1. **Does the Wave-0 re-export-stub spike (A1) actually work on Windows via Git Bash's path handling?**
    - What we know: jiti loads `.ts` via ESM import with no build step; absolute POSIX-style paths (`/c/Users/...`) and Windows paths both parse cleanly in `unbash` argument position (settled this session), but that is a *bash-parsing* fact, not a *jiti-import-specifier* fact.
