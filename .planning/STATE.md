@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-07-PLAN.md — SAFE-16 /share control classifier
-last_updated: "2026-08-13T00:46:11.855Z"
-last_activity: 2026-08-13 -- completed 01-07 (SAFE-16 /share control classifier)
+stopped_at: Completed 01-06-PLAN.md — BOOT-03 idempotence and the BOOT-01 ordering proof
+last_updated: "2026-08-13T01:01:44.494Z"
+last_activity: 2026-08-13 -- completed 01-06 (BOOT-03 idempotence + BOOT-01 ordering proof)
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 6
+  completed_plans: 7
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 7 of 10
+Plan: 8 of 10
 Status: Ready to execute
-Last activity: 2026-08-13 -- completed 01-07 (SAFE-16 /share control classifier)
+Last activity: 2026-08-13 -- completed 01-06 (BOOT-03 idempotence + BOOT-01 ordering proof)
 
-Progress: [██████░░░░] 60%
+Progress: [███████░░░] 70%
 
 ## Performance Metrics
 
@@ -58,6 +58,7 @@ Progress: [██████░░░░] 60%
 | Phase 01 P04 | 18m | 2 tasks | 2 files |
 | Phase 01 P05 | 35m | 2 tasks | 3 files |
 | Phase 01 P07 | 18m | 2 tasks | 2 files |
+| Phase 01 P06 | 30m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -90,6 +91,9 @@ Recent decisions affecting current work:
 - [Phase 01]: dropping only the gist scope is a closed door — repo, read:org and gist are gh's documented non-removable minimum set, so gh auth logout is the only remedy
 - [Phase 01]: SAFE-16's script ships --warn-only because gh is legitimately authenticated on the dev machine for git-over-HTTPS; CI and the dev box use it, the work-laptop runbook runs the script bare
 - [Phase 01]: every stubbed-binary test case asserts the stub's own call log — without it a PATH-ordering mistake silently turns the suite into an assertion about the developer's real keyring
+- [Phase 01]: sanitise_npm_env must match npm_config_ case-INSENSITIVELY — a Node test runner upper-cases the keys and Windows env names are case-insensitive, so the lower-case-only strip made --assert-hardening report true for an empty directory
+- [Phase 01]: execution order is proven by a recorded argv log, never by reading the script — and every ordering comparison is preceded by non-emptiness assertions, since Math.max of an empty array is -Infinity and Math.min is Infinity
+- [Phase 01]: the stub npm answers argv-conditionally (StubSpec.match) rather than answering true to all four questions — a stub that answers true to 'npm view ... version' would let a version-gate regression pass unseen
 
 ### Pending Todos
 
@@ -132,8 +136,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T00:45:43.840Z
-Stopped at: Completed 01-07-PLAN.md — SAFE-16 /share control classifier
+Last session: 2026-08-13T01:01:37.751Z
+Stopped at: Completed 01-06-PLAN.md — BOOT-03 idempotence and the BOOT-01 ordering proof
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
