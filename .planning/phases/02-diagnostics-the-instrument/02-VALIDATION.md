@@ -1,8 +1,8 @@
 ---
 phase: 2
 slug: diagnostics-the-instrument
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-08-13
 ---
@@ -98,11 +98,13 @@ These are appended to the existing `docs/RUNBOOK.md` (which already holds RB-01-
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or Wave 0 dependencies
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references (the three test helpers above)
-- [ ] No watch-mode flags
-- [ ] Feedback latency < 90s
-- [ ] `nyquist_compliant: true` set in frontmatter
+Traced by `gsd-plan-checker` against all 11 plans (02-01 … 02-11) on 2026-08-13.
 
-**Approval:** pending
+- [x] All tasks have `<automated>` verify or Wave 0 dependencies — 100% of tasks carry an automated verify command; no `<automated>MISSING</automated>` references exist
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify — holds trivially at 100% coverage
+- [x] Wave 0 covers all MISSING references — plan `02-01` (wave 1, no dependencies) delivers the three helpers, and every downstream capture test asserts a non-empty captured set so the `onPayload` gap cannot ship vacuously green
+- [x] No watch-mode flags
+- [x] Feedback latency < 90s — one deliberate outlier: `tests/integration/jsonl-concurrency.test.ts` (plan 02-03) spawns four child processes and is budgeted to the 90s ceiling
+- [x] `nyquist_compliant: true` set in frontmatter
+
+**Approval:** approved 2026-08-13 (plan-checker verdict: VERIFICATION PASSED, zero blockers)

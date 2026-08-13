@@ -1392,23 +1392,30 @@ Everything else in this document is tagged `[VERIFIED: file:line]` from Pi 0.84.
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED — each recommendation is implemented by a named Phase 2 plan)
+
+All four were resolved at plan time; the resolution is recorded inline so a later phase does not
+re-litigate them. None blocks execution.
 
 1. **Does `tool_choice: "required"` on the retry actually reduce the prose-tool-call rate?**
+   - **RESOLVED:** plan `02-09` builds it as `PROSE_RETRY_FORCES_TOOL_CHOICE = false` — flag-guarded, default off. Phase 10 flips it once a baseline rate exists.
    - Known: the mechanism exists on both paths (§1.2, §4.2). PITFALLS Pitfall 7 note 3 marks the effect **UNVERIFIED**.
    - Unclear: whether DeepSeek honours it, and whether it trades prose for a wrong-tool call.
    - Recommendation: build the flag-guarded payload-injection handler but leave it **off**. The detector must produce a baseline rate first. This is Phase 10's experiment, not Phase 2's.
 
 2. **Does DeepSeek V4 Flash honour `reasoning_effort` through `openai-completions`?** (Carried-Forward Unknown; the reason this phase exists.)
+   - **RESOLVED (as planned, not as answered):** plan `02-11` writes RB-02-01 naming the exact JSON keys. The question itself stays open until someone runs it on the work laptop — that is what OUTSTANDING means.
    - Phase 2 does not answer it — Phase 2 builds the apparatus that answers it. RB-02-01 is that apparatus pointed at the question.
    - Recommendation: make RB-02-01's expected output name the exact JSON keys (`thinking.type`, `reasoning_effort`) so the answer is unambiguous when someone finally runs it.
 
 3. **How should nested-call `usage` fold into Pi's own `/session` totals?**
+   - **RESOLVED:** plan `02-07` has `callModel()` return the full `AssistantMessage` (carrying `usage`), so a caller *can* attach it. Attachment itself is deferred to Phase 8.
    - Known: `ToolResultEventBase.usage?: Usage` and `ToolResultEventResult.usage` exist (`types.ts:920-921, 1094`) — the documented channel for attributing nested model usage to the tool that caused it.
    - Unclear: whether `/session`'s `cost` sums tool-result usage.
    - Recommendation: have `callModel()` return the `Usage` so a caller *can* attach it, and let Phase 8 decide. Do not build the attachment in Phase 2 — there is no caller yet.
 
 4. **Is `.pi/logs/` the right home given `pi install` also clones this repo to `~/.pi/agent/git/...`?**
+   - **RESOLVED:** plan `02-03` uses `logDir() = join(ctx.cwd, CONFIG_DIR_NAME, "logs")`. A user-scope fallback stays a Phase 7 concern.
    - Known: `ctx.cwd` is the project dir, so logs follow the project. Phase 1 proved both load paths work off one tree.
    - Recommendation: `join(ctx.cwd, CONFIG_DIR_NAME, "logs")`, as ARCHITECTURE.md specifies. A user-scope fallback is a Phase 7 concern (subagents may run with a different `cwd`), and the concurrency evidence in §10.3 means a shared file is safe if they do land in the same place.
 
