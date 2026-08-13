@@ -215,8 +215,13 @@ export const PROSE_RETRY_FORCES_TOOL_CHOICE = false;
  * directly is harmless — every instance of this module reads and writes the one
  * slot — so the import is left alone rather than turned into another injected
  * parameter on an exported cross-phase signature.
+ *
+ * EXPORTED so `tests/unit/diagnostics-entry.test.ts` asserts against the real key
+ * instead of re-typing the literal — the house rule from
+ * `harness/index.ts:50-56`. A second spelling of this string is a second counter
+ * that nothing would report on.
  */
-const ROWS_WRITTEN_KEY = "__kypiDiagnosticsRowsWritten";
+export const ROWS_WRITTEN_KEY = "__kypiDiagnosticsRowsWritten";
 
 /**
  * Prose-tool-call retries spent in the CURRENT agent run. Reset on `agent_start`.

@@ -26,7 +26,9 @@ import { describe, expect, it } from "vitest";
 
 import { BUDGET_COMMAND_NAME } from "../../.pi/extensions/diagnostics/budget.ts";
 import diagnostics, {
+	ROWS_WRITTEN_KEY,
 	SESSION_START_EVENT,
+	noteRowWritten,
 	rowsWrittenThisSession,
 	safeHandler,
 } from "../../.pi/extensions/diagnostics/index.ts";
@@ -155,45 +157,67 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 });
 
 describe("the rows-written counter is per PROCESS, not per module instance", () => {
-	it("is shared by two separate instances of this module", async () => {
-		// WHY THIS IS NOT AN ACADEMIC CASE. Pi loads each extension through jiti,
-		// which keeps its own module registry, so `.pi/extensions/foo` importing
-		// `call-model.ts` and the diagnostics entry point importing `index.ts` hold
-		// two separate copies of this file in one process. That was OBSERVED during
-		// plan 02-07 — it is why `wire.ts`'s request counter lives on `globalThis`
-		// and why `turns-log.test.ts` and `prose-retry.test.ts` read bytes on disk
-		// instead of this number. With a module-level `let`, Phase 5 or Phase 8
-		// importing `call-model.ts` (its documented cross-phase contract) would
-		// increment a counter `/budget` never reads, and `/budget` would print a
-		// figure that silently excludes every nested-call row.
-		//
-		// A distinct query suffix is what makes the bundler hand back a SECOND
-		// instance of the same source, standing in for jiti's separate registry.
-		const first = (await import("../../.pi/extensions/diagnostics/index.ts")) as typeof import("../../.pi/extensions/diagnostics/index.ts");
-		const second = (await import(
-			"../../.pi/extensions/diagnostics/index.ts?second-module-instance"
-		)) as typeof import("../../.pi/extensions/diagnostics/index.ts");
+	/**
+	 * WHY THIS IS NOT AN ACADEMIC CASE. Pi loads each extension through jiti, which
+	 * keeps its own module registry, so `.pi/extensions/foo` importing
+	 * `call-model.ts` and the diagnostics entry point importing `index.ts` hold two
+	 * separate copies of that file in one process. It was OBSERVED during plan 02-07
+	 * — it is why `wire.ts`'s request counter lives on `globalThis` and why
+	 * `turns-log.test.ts:196-201` and `prose-retry.test.ts:216-219` both read bytes
+	 * on disk instead of this number.
+	 *
+	 * With a module-level `let`, Phase 5 or Phase 8 importing `call-model.ts` — its
+	 * documented cross-phase contract — would increment a counter `/budget` never
+	 * reads, and `/budget` would print a figure silently excluding every nested-call
+	 * row. That is exactly the failure `noteRowWritten`'s own docstring says the
+	 * export exists to prevent.
+	 *
+	 * A SECOND MODULE INSTANCE CANNOT BE MANUFACTURED PORTABLY, so the property is
+	 * asserted where it actually lives: the process-wide slot. Reading and writing
+	 * `globalThis[ROWS_WRITTEN_KEY]` from OUTSIDE the module is precisely what a
+	 * second instance does, and the key is imported rather than re-typed — a second
+	 * spelling of that string is a second counter nothing reports on.
+	 */
+	const scope = globalThis as Record<string, unknown>;
 
-		// THE VACUOUS-PASS GUARD. If the loader deduplicated the two specifiers there
-		// would be one instance, the assertion below would be trivially true, and the
-		// whole case would pass just as happily against a module-level `let`.
-		expect(
-			second.noteRowWritten === first.noteRowWritten,
-			"the two imports resolved to the SAME module instance, so this case cannot distinguish a " +
-				"process-wide counter from a module-level one and proves nothing. Fix the specifier " +
-				"rather than deleting the assertion",
-		).toBe(false);
-
-		const before = first.rowsWrittenThisSession();
-		second.noteRowWritten();
+	it("increments a slot on globalThis that an outside reader can see", () => {
+		const before = rowsWrittenThisSession();
+		noteRowWritten();
 
 		expect(
-			first.rowsWrittenThisSession(),
-			"a row counted by one instance must be visible to the other. `/budget` runs in Pi's " +
-				"instance and reports this number, so a counter that only some append paths reach is " +
-				"exactly the thing the export exists to prevent: a number that looks like a " +
-				"measurement and is not",
+			scope[ROWS_WRITTEN_KEY],
+			"the count must be observable from outside this module. A module-level `let` is invisible " +
+				"here, and invisible to Pi's own instance of the module the moment jiti hands a second " +
+				"copy to an importing extension",
 		).toBe(before + 1);
+
+		expect(
+			rowsWrittenThisSession(),
+			"and the reader must agree with the slot; two numbers that can disagree are worse than one",
+		).toBe(before + 1);
+	});
+
+	it("reads a count written by something that is not this module instance", () => {
+		// The other direction, which is the half that matters for `/budget`: rows
+		// appended by the copy of the module living in ANOTHER import graph must show
+		// up in the number this instance prints.
+		const planted = rowsWrittenThisSession() + 17;
+		scope[ROWS_WRITTEN_KEY] = planted;
+
+		expect(
+			rowsWrittenThisSession(),
+			"a row counted elsewhere in the process must be visible here. `/budget` runs in Pi's " +
+				"instance and reports this number, so a counter only some append paths reach reports a " +
+				"figure that looks like a measurement and is not",
+		).toBe(planted);
+
+		// And the tolerant read, so a fresh process is 0 rather than a crash.
+		delete scope[ROWS_WRITTEN_KEY];
+		expect(
+			rowsWrittenThisSession(),
+			"an unset slot must read as 0. `/budget` prints this on the first turn of every session, " +
+				"and NaN or undefined there would be a report about the instrument rather than the run",
+		).toBe(0);
 	});
 });
 
