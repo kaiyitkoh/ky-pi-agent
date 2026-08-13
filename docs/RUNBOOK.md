@@ -329,9 +329,14 @@ ratio is the measured prose rate, to be compared against the ~11% baseline
 reported in the open DeepSeek-V3 issue. Steps 3 and 4 are the two ACTIONS the
 detector took — a retry issued, and a retry refused because the per-run budget
 was already spent — and they exist to be reconciled, not folded in:
-**step 3 + step 4 must equal step 1.** If the sum is *lower*, a turn row went
-missing or lost its `event` slot (see the caveat below); if it is *higher*, an
-action was recorded for a turn whose row never reached disk. Step 4 on its own is
+**step 3 + step 4 must equal step 1.** If the sum is *higher*, an action was
+taken but the turn it belongs to is absent from step 1 — its row never reached
+disk, or it lost its `event` slot to a competing verdict (see the caveat below).
+Both directions of that loss push the sum up, not down. If the sum is *lower*, a
+turn row carries the verdict but its action record never reached disk: `index.ts`
+stamps `turn.event` *before* either `writeTurnsRow` call, so an append that
+throws is swallowed into a `diagnostics.error` row while `turn_end` still writes
+the verdict row. Step 4 on its own is
 also the count of turns where the nudge was never attempted, which is worth
 recording beside the rate. Step 5 must find at least one instance where the
 following turn contains a real tool call — that is what distinguishes "the retry
