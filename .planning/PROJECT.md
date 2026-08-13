@@ -213,4 +213,6 @@ This document evolves at phase transitions and milestone boundaries.
 4. Update Context with current state
 
 ---
-*Last updated: 2026-08-13 after Phase 1 (Bootstrap, Packaging & Supply Chain) — 10/10 plans, verification `human_needed` with 4 live checks outstanding, none marked passed*
+*Last updated: 2026-08-14 after Phase 3 (Providers & Credentials) — 11/11 plans, verification `human_needed` with 5 live checks (`RB-03-01..05`) outstanding, none marked passed. Suite 655 tests / 45 files green, `tsc --noEmit` clean. Code review ran three iterations to `clean`: 25 findings, 24 fixed, 1 accepted-and-documented.*
+
+*The footer had been stale since Phase 1 — Phase 2's transition did not update it. Noted so the drift this section exists to prevent is not itself invisible.*
