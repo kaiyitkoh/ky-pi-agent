@@ -18,8 +18,8 @@
 - [x] **BOOT-03**: User can bootstrap a cold machine with `bin/bootstrap.sh` — installs Pi, verifies `bash`/`git`/`aws`/`glab`/`gh` presence, writes the env-var template, makes idempotent marked-region edits
 - [x] **BOOT-04**: Bootstrap fails loudly with an actionable message if the pinned Pi version has been unpublished from npm (versions below 0.74.0 are already gone)
 - [x] **BOOT-05**: `cd ky-pi-agent && pi` loads the harness from `.pi/` so the repo dogfoods itself, with `/reload` working
-- [ ] **BOOT-06**: All shell code is POSIX `sh` and all shipped scripts check out LF on both platforms
-- [ ] **BOOT-07**: CI runs the full test suite on `windows-latest` and `macos-latest`, giving real macOS verification without a Mac
+- [x] **BOOT-06**: All shell code is POSIX `sh` and all shipped scripts check out LF on both platforms
+- [x] **BOOT-07**: CI runs the full test suite on `windows-latest` and `macos-latest`, giving real macOS verification without a Mac
 - [x] **BOOT-08**: Every third-party dependency is pinned to an exact version, with a committed lockfile
 - [x] **BOOT-09**: No credential can be committed — `.gitignore` covers every runtime state and secret path, verified by a test
 - [ ] **BOOT-10**: `CONTRIBUTING.md` states the boundary rule: a new capability defaults to command or skill; registering a tool requires justifying its per-request schema cost
@@ -231,8 +231,8 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | BOOT-03 | Phase 1 | Complete |
 | BOOT-04 | Phase 1 | Complete |
 | BOOT-05 | Phase 1 | Complete |
-| BOOT-06 | Phase 1 | Pending |
-| BOOT-07 | Phase 1 | Pending |
+| BOOT-06 | Phase 1 | Complete |
+| BOOT-07 | Phase 1 | Complete |
 | BOOT-08 | Phase 1 | Complete |
 | BOOT-09 | Phase 1 | Complete |
 | BOOT-10 | Phase 1 | Pending |

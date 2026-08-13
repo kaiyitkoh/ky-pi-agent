@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 01-06-PLAN.md — BOOT-03 idempotence and the BOOT-01 ordering proof
-last_updated: "2026-08-13T01:01:44.494Z"
-last_activity: 2026-08-13 -- completed 01-06 (BOOT-03 idempotence + BOOT-01 ordering proof)
+stopped_at: Completed 01-08-PLAN.md — cross-platform CI matrix, SHA-pinned actions, LF/portability gates
+last_updated: "2026-08-13T01:11:33.469Z"
+last_activity: 2026-08-13 -- completed 01-08 (cross-platform CI matrix + LF/portability gates)
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 8 of 10
+Plan: 9 of 10
 Status: Ready to execute
-Last activity: 2026-08-13 -- completed 01-06 (BOOT-03 idempotence + BOOT-01 ordering proof)
+Last activity: 2026-08-13 -- completed 01-08 (cross-platform CI matrix + LF/portability gates)
 
-Progress: [███████░░░] 70%
+Progress: [████████░░] 80%
 
 ## Performance Metrics
 
@@ -59,6 +59,7 @@ Progress: [███████░░░] 70%
 | Phase 01 P05 | 35m | 2 tasks | 3 files |
 | Phase 01 P07 | 18m | 2 tasks | 2 files |
 | Phase 01 P06 | 30m | 2 tasks | 4 files |
+| Phase 01 P08 | 22m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -94,6 +95,10 @@ Recent decisions affecting current work:
 - [Phase 01]: sanitise_npm_env must match npm_config_ case-INSENSITIVELY — a Node test runner upper-cases the keys and Windows env names are case-insensitive, so the lower-case-only strip made --assert-hardening report true for an empty directory
 - [Phase 01]: execution order is proven by a recorded argv log, never by reading the script — and every ordering comparison is preceded by non-emptiness assertions, since Math.max of an empty array is -Infinity and Math.min is Infinity
 - [Phase 01]: the stub npm answers argv-conditionally (StubSpec.match) rather than answering true to all four questions — a stub that answers true to 'npm view ... version' would let a version-gate regression pass unseen
+- [Phase 01]: CI action SHAs are resolved live with gh api repos/<o>/<r>/commits/<tag> --jq .sha, never transcribed — actions/checkout@3d3c42e (v7.0.1), actions/setup-node@8207627 (v5.0.0)
+- [Phase 01]: posix-lint is a separate ubuntu-latest job, not a matrix step — shellcheck is preinstalled only there, and sh execution cannot prove POSIX conformance since Git-Bash sh and macOS /bin/sh are both bash in POSIX mode
+- [Phase 01]: no line-ending fix-up step in CI — .gitattributes eol=lf is the fix and the node CR-byte scan is the proof; a git config step would mask a broken .gitattributes
+- [Phase 01]: the CI lint reads ci.yml as TEXT — yaml exists only transitively under Pi, and declaring it would break pinning.test.ts's exactly-six-devDependencies assertion
 
 ### Pending Todos
 
@@ -107,6 +112,8 @@ None yet.
 - **Root cause still open**: prose tool calls vs context pollution vs provider misconfiguration. Phase 2 measures, Phase 10 discriminates. Do not commit to a fix for an unmeasured cause.
 - **No credentials on the dev machine**: 8 of 107 requirements are [RUNBOOK] and need the work laptop. `docs/RUNBOOK.md` (PROV-09, Phase 3) is the deliverable that carries them.
 - **SAFE-16 is half-shipped, deliberately**: the classifier (`scripts/check-gh-unauthenticated.sh`) is proven in both directions, but the live control — `gh auth logout` on the work laptop — is **OUTSTANDING** and must never be reported as passed. `gh` stays authenticated on this dev box; it is how the repo is pushed over HTTPS. Runbook entry lands in Plan 10.
+- **BOOT-07's live CI run is OUTSTANDING**: `.github/workflows/ci.yml` exists, is valid YAML, and is statically proven (both action SHAs resolved against the GitHub API, matrix `[windows-latest, macos-latest]`, `fail-fast: false`, every execution step asserted by `tests/unit/ci-pinning.test.ts`). It has **never run** — GitHub Actions cannot be triggered from this machine. macOS behaviour, ShellCheck's verdict on the two tracked scripts, and whether the pinned global Pi install satisfies the load-path tests on a runner are all unverified until the first push. Do not report a green tick that does not exist.
+- **`shellcheck` is not installed on this machine**: `--shell=sh` conformance of `bin/bootstrap.sh` and `scripts/check-gh-unauthenticated.sh` is UNVERIFIED locally. `tests/unit/lf-and-shell.test.ts` asserts only the four constructs that break on macOS bash 3.2 (`[[`, `sort -V`, `declare -A`, `${v^^}`); it is a companion to the Ubuntu `posix-lint` job, not a substitute for it.
 - **Moving platform**: Pi ships every 2–3 days; the composed extension ecosystem ships 13–16 releases/month. Every pin must be re-verified at Phase 7 planning time, not inherited from research.
 
 ## Deferred Items
@@ -136,8 +143,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T01:01:37.751Z
-Stopped at: Completed 01-06-PLAN.md — BOOT-03 idempotence and the BOOT-01 ordering proof
+Last session: 2026-08-13T01:11:33.460Z
+Stopped at: Completed 01-08-PLAN.md — cross-platform CI matrix, SHA-pinned actions, LF/portability gates
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
