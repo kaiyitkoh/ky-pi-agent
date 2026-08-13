@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-11-PLAN.md
-last_updated: "2026-08-13T22:59:59.890Z"
+stopped_at: Completed 04-10-PLAN.md
+last_updated: "2026-08-13T23:15:00.274Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 44
-  completed_plans: 42
+  completed_plans: 43
   percent: 27
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 04 (safety-deployment-guardrails) — EXECUTING
-Plan: 11 of 12
+Plan: 12 of 12
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [██████████] 95%
+Progress: [██████████] 98%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -104,6 +104,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 04 P08 | 50min | 2 tasks | 4 files |
 | Phase 04 P09 | 44min | 2 tasks | 3 files |
 | Phase 04 P11 | 65min | 2 tasks | 5 files |
+| Phase 04 P10 | 35min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -241,6 +242,9 @@ Recent decisions affecting current work:
 - [Phase 04]: EV-08 (eval "git push") was a genuine shell.ts defect, fixed by adding "eval" to SHELL_RUNNERS with a regression row in the pre-existing shell-parse test suite — eval executes its argument as shell code in the current shell, the same hides-a-guarded-verb shape sh -c already catches; found while assigning corpus buckets by execution
 - [Phase 04]: EV-09 (variable-indirection through eval) remains a published OUT-OF-SCOPE limit even after the EV-08 fix — the guarded-verb text lives in a separate command node's assignment, never in eval's own raw segment, so no substring check can see it without resolving arbitrary shell-variable content, which 04-RESEARCH.md rules out of scope
 - [Phase 04]: docs/SAFETY.md's published limits table is derived from tests/fixtures/evasion-corpus.ts, never hand-typed, with the converse asserted so the doc cannot grow a limit the corpus does not know about — following docs-policy.test.ts's truncationCauseCount() discipline, so SAFE-17 (the corpus) and SAFE-15 (the published table) stay one artifact instead of two that drift apart
+- [Phase 04-10]: subagent-block.test.ts scripts blocked-then-benign commands into ONE spawned pi child via a two-turn faux driver, keeping the phase's most expensive test to a single process launch while proving both BLOCK and allow-as-evidence in the same run
+- [Phase 04-10]: audit-concurrency.test.ts hand-constructs AuditRow-shaped JSON in generated child scripts rather than importing the TS writer into a spawned process, mirroring jsonl-concurrency.test.ts's DIAG-08 pattern of testing the writer's documented contract against real OS concurrency
+- [Phase 04-10]: project-scoped sentinel evidence is an import-time file write, not a registered command -- proves jiti never imported the module, the strongest available proof of SAFE-11's mechanism from outside Pi's own source
 
 ### Pending Todos
 
@@ -288,8 +292,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T22:59:59.880Z
-Stopped at: Completed 04-11-PLAN.md
+Last session: 2026-08-13T23:15:00.265Z
+Stopped at: Completed 04-10-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

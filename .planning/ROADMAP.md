@@ -207,7 +207,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 04-10-PLAN.md — blocked command inside a spawned headless child, and four-process audit concurrency
+- [x] 04-10-PLAN.md — blocked command inside a spawned headless child, and four-process audit concurrency
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
