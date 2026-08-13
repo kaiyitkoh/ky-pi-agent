@@ -33,7 +33,7 @@
 - [x] **DIAG-03**: A lint or test fails the build if `modelRegistry.complete` is called outside `diagnostics/` **[FAUX]**
 - [x] **DIAG-04**: Every turn appends a JSONL record — model, provider, tokens, cost, latency, cache-read ratio, outcome (no reasoning-token column for Bedrock; it reports none) **[FAUX]**
 - [ ] **DIAG-05**: A detector identifies prose tool calls — `finish_reason:"stop"` with `tool_calls:null` and a function name in `content` — logs `event: prose_tool_call`, and retries rather than treating the turn as complete **[FAUX]** + **[RUNBOOK]**
-- [ ] **DIAG-06**: `/budget` reports system-prompt tokens, tool-schema tokens, context-file tokens, skills-index tokens, and `cacheRead` vs `input` **[FAUX]**
+- [x] **DIAG-06**: `/budget` reports system-prompt tokens, tool-schema tokens, context-file tokens, skills-index tokens, and `cacheRead` vs `input` **[FAUX]**
 - [x] **DIAG-07**: Captured payloads are redacted at capture time and written only to gitignored paths — a wire inspector is by construction a credential-logging tool feeding a public repo **[FAUX]**
 - [x] **DIAG-08**: Diagnostic logs rotate rather than growing unbounded **[FAUX]**
 
@@ -243,7 +243,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | DIAG-03 | Phase 2 | Complete |
 | DIAG-04 | Phase 2 | Complete |
 | DIAG-05 | Phase 2 | Pending |
-| DIAG-06 | Phase 2 | Pending |
+| DIAG-06 | Phase 2 | Complete |
 | DIAG-07 | Phase 2 | Complete |
 | DIAG-08 | Phase 2 | Complete |
 | PROV-01 | Phase 3 | Pending |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-09-PLAN.md — the prose-tool-call retry, capped at one, inside a single agent run
-last_updated: "2026-08-13T06:22:13.948Z"
+stopped_at: Completed 02-10-PLAN.md — /budget, the per-turn token report; DIAG-06 complete
+last_updated: "2026-08-13T06:47:12.526Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 19
+  completed_plans: 20
   percent: 9
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 10 of 11
+Plan: 11 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [█████████░] 90%
+Progress: [██████████] 95%
 
 **Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
@@ -75,6 +75,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 02 P07 | ~45m | 3 tasks | 4 files |
 | Phase 02 P08 | 40m | 2 tasks | 5 files |
 | Phase 02 P09 | ~40m | 2 tasks | 4 files |
+| Phase 02 P10 | 55m | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -147,6 +148,10 @@ Recent decisions affecting current work:
 - [Phase 2]: 02-09: DIAG-05 stays Pending — the [FAUX] half is complete end to end, RB-02-03 (live DeepSeek prose rate) is OUTSTANDING
 - [Phase 2]: 02-09: PROSE_RETRY_FORCES_TOOL_CHOICE is false and registers NO handler — the tool_choice lever's effect is UNVERIFIED and belongs to Phase 10
 - [Phase 2]: 02-09: two negative controls can cover for each other — one live fixture per detector gate, each individually falsified
+- [Phase 2]: 02-10: DIAG-06 COMPLETE — [FAUX]-only and every input is exercised offline; no runbook entry is needed, unlike DIAG-01 and DIAG-05
+- [Phase 2]: 02-10: base is the prompt with the located regions REMOVED, never total-minus-sections — a subtracted base makes base+ctx+skills===total an identity that holds however wrong the arithmetic is (falsification A2 passes on duplicated regions; A fails at 916 vs 714)
+- [Phase 2]: 02-10: a marker warning fires only when the section was EXPECTED — the plan's literal wording would warn on every session with no skills, contradicting its own integration case 2
+- [Phase 2]: 02-10: a negative assertion needs a marker that COULD be found — falsification I2 aliased the skills marker to 'Guidelines:', text the real prompt genuinely contains, to prove skillsFound===false reads the prompt rather than agreeing with itself
 
 ### Pending Todos
 
@@ -192,8 +197,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T06:22:06.675Z
-Stopped at: Completed 02-09-PLAN.md — the prose-tool-call retry, capped at one, inside a single agent run
+Last session: 2026-08-13T06:47:12.519Z
+Stopped at: Completed 02-10-PLAN.md — /budget, the per-turn token report; DIAG-06 complete
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

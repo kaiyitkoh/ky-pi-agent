@@ -115,7 +115,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 02-10-PLAN.md — `/budget`: the system-prompt decomposition, tool-schema cost, and `cacheRead` versus `input` (DIAG-06)
+- [x] 02-10-PLAN.md — `/budget`: the system-prompt decomposition, tool-schema cost, and `cacheRead` versus `input` (DIAG-06)
 - [ ] 02-11-PLAN.md — `docs/RUNBOOK.md` RB-02-01/02/03 (OUTSTANDING), the generalised status guard, and `docs/DIAGNOSTICS.md`
 
 **Research**: Complete — `02-RESEARCH.md` (HIGH confidence, verified at source and executed on this machine). One finding reshaped the phase: `fauxProvider` never calls `onPayload`, so `before_provider_request` never fires under faux and the naive `[FAUX]` test for DIAG-01/DIAG-07 would ship vacuously green — hence a mandatory Wave 0 of test helpers.
