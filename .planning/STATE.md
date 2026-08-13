@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
-last_updated: "2026-08-13T14:24:32.595Z"
+last_updated: "2026-08-13T14:35:09.882Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 32
-  completed_plans: 25
+  completed_plans: 26
   percent: 18
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 03 (providers-credentials) — EXECUTING
-Plan: 5 of 11
+Plan: 6 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [████████░░] 78%
+Progress: [████████░░] 81%
 
 **Read that 72% carefully.** The denominator is *plans written so far* — Phase 1's
 10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
@@ -83,6 +83,7 @@ phases complete**.
 | Phase 03 P02 | 25m | 3 tasks | 5 files |
 | Phase 3 P3 | 25m | 2 tasks | 2 files |
 | Phase 03 P04 | ~20m | 2 tasks | 2 files |
+| Phase 03 P05 | ~20m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -174,6 +175,8 @@ Recent decisions affecting current work:
 - [Phase 3]: 03-03: the 127.0.0.1 literal is duplicated between the loopback listen call and the refusal on purpose — a shared constant lets one edit move the bind and its guard together
 - [Phase 03]: 03-04: the templated model set is a set difference against a registry composed over an empty providers object, so no literal id list can go stale
 - [Phase 03]: 03-04: PROV-06's general cross-provider loop is scoped to templated models — a blanket form is false by design in Pi's own catalogue (Bedrock and Anthropic share Claude ids at 200,000)
+- [Phase 03]: 03-05: PROV-04 and PROV-07 stay incomplete — both carry an OUTSTANDING live half (RB-03-03 / RB-03-04) and Trap T12 forbids marking a [RUNBOOK] requirement passing on a green offline half
+- [Phase 03]: 03-05: Bedrock credential tests blank all seven variables in resolve()'s chain, not just AWS_PROFILE — Pi's auth context treats an empty value as absent, so blanking asserts machine state without reading it
 
 ### Pending Todos
 
@@ -219,7 +222,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T14:23:58.088Z
+Last session: 2026-08-13T14:34:52.329Z
 Stopped at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
 Resume file: None
 
