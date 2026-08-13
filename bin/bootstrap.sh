@@ -80,10 +80,29 @@ MISSING_REQUIRED=0
 # That is not a cosmetic false positive: it would certify a control that had
 # never been exercised. Strip them, so npm answers from files only.
 #
-# The pattern deliberately matches valid shell identifiers only. npm can export
-# keys such as npm_config_//registry.npmjs.org/:_authToken, which no shell can
-# unset; those are left alone rather than risking an `unset` error under a
-# special-builtin `set -e`. They are per-registry auth, not policy keys.
+# Stripping is only half the job. The strip pattern matches valid shell
+# identifiers only, because that is all `unset` accepts: npm also honours keys
+# no POSIX shell can remove - npm_config_ignore-scripts (a hyphen),
+# npm_config_//registry.npmjs.org/:_authToken (slashes and a colon). Under
+# `dash` a special-builtin `unset` error kills the shell outright, `|| true`
+# included [VERIFIED: executed 2026-08-13, dash rc=2], so `unset` cannot be the
+# remedy for those names.
+#
+# It is TEMPTING to dismiss them as per-registry auth rather than policy keys.
+# That is false, and it was a live false-certification: `@npmcli/config` matches
+# /^npm_config_/i and only normalises `_`->`-` for non-nerf-darted keys, so
+# `npm_config_ignore-scripts=true` arrives already in canonical form, outranks
+# every .npmrc, and made `--assert-hardening` print "All npm scopes are
+# hardened" for a directory containing no .npmrc at all
+# [VERIFIED: executed 2026-08-13, npm 11.13.0].
+#
+# So the second pass REFUSES rather than strips. Any npm_config_* surviving the
+# strip means no assertion below is about the files on disk, and a refusal is
+# strictly better than a certificate we cannot back. The refusal is deliberately
+# indiscriminate - it fires on an _authToken key too - because this script has
+# no way to tell which surviving key npm will let outrank a file, and guessing
+# is exactly the mistake that shipped. The remedy is a clean shell, which is
+# always available.
 #
 # THE PREFIX MATCH IS CASE-INSENSITIVE, AND THAT IS LOAD-BEARING ON WINDOWS.
 # [VERIFIED: executed 2026-08-13, vitest 4.1.9 / node 24.16.0] a Node test
@@ -100,6 +119,24 @@ sanitise_npm_env() {
 	for _k in $_keys; do
 		unset "$_k" || true
 	done
+
+	# Second pass: whatever is left, npm still honours and we cannot remove.
+	# The class here is [^=] - every name, not just shell-legal ones - so a
+	# hyphen, a slash or a colon is caught rather than silently skipped.
+	_stuck=$(env | sed -n \
+		's/^\([Nn][Pp][Mm]_[Cc][Oo][Nn][Ff][Ii][Gg]_[^=]*\)=.*/\1/p' || true)
+	if [ -n "$_stuck" ]; then
+		printf 'FATAL: npm configuration is being overridden by environment variables\n' >&2
+		printf '       this script cannot unset, so no assertion below would be about\n' >&2
+		printf '       the files on disk:\n' >&2
+		printf '%s\n' "$_stuck" | sed 's/^/         /' >&2
+		printf '       npm ranks environment config above every .npmrc, so certifying\n' >&2
+		printf '       ignore-scripts here would certify the launcher, not the control.\n' >&2
+		printf '       Remedy: start a clean shell (these names cannot be unset by any\n' >&2
+		printf '       POSIX shell, so `unset` and `env -u` are both unavailable) and\n' >&2
+		printf '       re-run. Do not run this script through `npm run` or `npx`.\n' >&2
+		exit 1
+	fi
 }
 
 # ---------------------------------------------------------------------------
