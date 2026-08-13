@@ -247,11 +247,27 @@ interface WireRecordBase {
 }
 
 /**
- * One row of `wire-*.jsonl`: exactly one of `payload`, `headers` or `status`.
+ * One row of `wire-*.jsonl`: a payload record, a headers record, or a response
+ * record carrying a status and — where the transport exposes them — the
+ * response headers too.
  *
  * Modelled as a union rather than three optional fields so a record carrying
- * two of them does not typecheck. Everything here has already been through
- * `redact.ts` — the writer is not the place to remember that.
+ * both a request `payload` and a response `status` does not typecheck.
+ * Everything here has already been through `redact.ts` — the writer is not the
+ * place to remember that.
+ *
+ * THE RESPONSE ARM CARRIES BOTH `status` AND `headers`, which the original
+ * three-way split forbade. `AfterProviderResponseEvent` is
+ * `{ status: number; headers: Record<string, string> }`
+ * [VERIFIED: pi 0.84.1 src/core/extensions/types.ts:691-696] — one event, two
+ * fields — and splitting it into two records would put four entries in a
+ * three-hook dump and break the `main.headers` → `main.request` →
+ * `main.response` ordering assertion. Response headers are worth keeping: rate
+ * limits, request ids and cache indicators live there. `headers` stays optional
+ * because Bedrock supplies only `x-amzn-requestid`
+ * [VERIFIED: pi-ai src/api/bedrock-converse-stream.ts:255-261] and Pi's docs
+ * warn that a provider abstracting HTTP may expose none at all
+ * [CITED: docs/extensions.md:708].
  */
 export type WireRecord =
 	| (WireRecordBase & { payload: unknown; headers?: never; status?: never })
@@ -260,4 +276,8 @@ export type WireRecord =
 			payload?: never;
 			status?: never;
 	  })
-	| (WireRecordBase & { status: number; payload?: never; headers?: never });
+	| (WireRecordBase & {
+			status: number;
+			headers?: Record<string, string | null>;
+			payload?: never;
+	  });
