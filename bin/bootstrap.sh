@@ -524,7 +524,10 @@ if (s < 0 || e < 0) {
   console.error("FATAL: template is missing its managed markers");
   process.exit(1);
 }
-const block = src.slice(s, e + END.length) + "\n";
+// No trailing newline here. It used to be appended and then stripped again at
+// the replacement site, which read as if the two paths handled trailing
+// newlines differently when they do not. The append path adds it explicitly.
+const block = src.slice(s, e + END.length);
 const dst = process.env.KYPI_ENV_DST;
 let out;
 if (!fs.existsSync(dst)) {
@@ -533,10 +536,23 @@ if (!fs.existsSync(dst)) {
   const cur = fs.readFileSync(dst, "utf8");
   const ds = cur.indexOf(START);
   const de = cur.indexOf(END);
-  if (ds >= 0 && de >= 0) {
-    out = cur.slice(0, ds) + block.replace(/\n$/, "") + cur.slice(de + END.length);
+  // ORDER, NOT MERELY PRESENCE. `ds >= 0 && de >= 0` was satisfied by a file
+  // whose END marker sits ABOVE its START marker - a plausible outcome of a
+  // manual merge or a copy-paste. The two slices then OVERLAP:
+  // cur.slice(0, ds) still contains END, and cur.slice(de + END.length) still
+  // contains START plus everything after it. The result is duplicated content
+  // and duplicated markers, and it is NOT idempotent - every later bootstrap
+  // run grows the file further. This is a tracked file in a public repo.
+  if (ds >= 0 && de > ds) {
+    out = cur.slice(0, ds) + block + cur.slice(de + END.length);
+  } else if (ds >= 0 || de >= 0) {
+    console.error("FATAL: " + dst + " has managed markers that are out of order or half present.");
+    console.error("       Rewriting it would duplicate content and duplicate the markers, and the");
+    console.error("       damage would compound on every later run. Fix the markers by hand so");
+    console.error("       start precedes end, or delete the file and re-run to regenerate it.");
+    process.exit(1);
   } else {
-    out = cur.replace(/\n*$/, "\n") + "\n" + block;
+    out = cur.replace(/\n*$/, "\n") + "\n" + block + "\n";
   }
 }
 if (fs.existsSync(dst) && fs.readFileSync(dst, "utf8") === out) {
@@ -635,8 +651,31 @@ if (next === null || typeof next !== "object" || Array.isArray(next)) {
 // The only value this installer transforms. The committed template carries the
 // shared international host; the workspace-dedicated form names a workspace id,
 // which must never enter a public repository, so it arrives here instead.
+//
+// VALIDATED, BECAUSE THE RUNBOOK TELLS OPERATORS TO TYPE IT UNDER PRESSURE.
+// RB-03-01 makes setting this the first documented remedy, with a copy-paste
+// one-liner. A value that lands as http:// - a typo, or a copied internal
+// gateway - means Pi sends the resolved $DASHSCOPE_API_KEY as a cleartext
+// Authorization: Bearer header on every request, with no signal anywhere:
+// baseUrl is never interpolated and never validated by Pi either
+// (provider-composer.ts:142). A value that is not a URL at all fails much
+// later, inside the adapter, as an opaque fetch error.
 const override = process.env.KYPI_DASHSCOPE_BASE_URL;
-if (override) { next.baseUrl = override; }
+if (override) {
+  let parsedUrl;
+  try { parsedUrl = new URL(override); } catch (e) {
+    console.error("FATAL: KYPI_DASHSCOPE_BASE_URL is not a parseable absolute URL: " + override);
+    console.error("       Expected something like https://<workspace-id>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1");
+    process.exit(1);
+  }
+  if (parsedUrl.protocol !== "https:") {
+    console.error("FATAL: KYPI_DASHSCOPE_BASE_URL must be https. Got: " + override);
+    console.error("       Pi sends the resolved $DASHSCOPE_API_KEY as a bearer token on every");
+    console.error("       request, so an http:// endpoint puts the key on the wire in cleartext.");
+    process.exit(1);
+  }
+  next.baseUrl = override;
+}
 
 let raw = "{}";
 if (fs.existsSync(dst)) { raw = fs.readFileSync(dst, "utf8").trim() || "{}"; }

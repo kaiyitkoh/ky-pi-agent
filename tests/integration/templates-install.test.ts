@@ -635,7 +635,12 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		// Loopback-shaped and obviously synthetic: a workspace-dedicated host names
 		// the caller's own workspace id, which is exactly the value that may not
 		// enter a public repository. [threat T-03-06-03]
-		const dedicated = "http://127.0.0.1:9/compatible-mode/v1";
+		//
+		// https, not http: the installer now refuses a cleartext endpoint outright,
+		// because Pi sends the resolved $DASHSCOPE_API_KEY as a bearer token on
+		// every request (WR-07). Port 9 (discard) is never connected to by this
+		// suite either way -- nothing here issues a request.
+		const dedicated = "https://127.0.0.1:9/compatible-mode/v1";
 		const templateBefore = readFileSync(MODELS_TEMPLATE);
 
 		const run = runFullBootstrap(agentDir, { KYPI_DASHSCOPE_BASE_URL: dedicated });
@@ -662,6 +667,91 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 			"the committed template must still carry the SHARED international host. If it " +
 				"carries a dedicated one, a workspace id is already in this public repository",
 		).toContain("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
+	}, TIMEOUT_MS);
+
+	it.each([
+		[
+			"http",
+			"http://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+			"must be https",
+			"an http:// endpoint puts $DASHSCOPE_API_KEY on the wire in cleartext on EVERY " +
+				"request. Pi never validates baseUrl (provider-composer.ts:142) and never " +
+				"interpolates it, so nothing else anywhere would report this",
+		],
+		[
+			"not a URL",
+			"dashscope-intl.aliyuncs.com/compatible-mode/v1",
+			"not a parseable absolute URL",
+			"a scheme-less value is not a URL. Without a parse here it lands in models.json " +
+				"and fails much later inside the adapter as an opaque fetch error, at which " +
+				"point RB-03-01's remedy looks like it did not work",
+		],
+	])(
+		"case 5b -- WR-07: KYPI_DASHSCOPE_BASE_URL that is %s is refused, and nothing is written",
+		(_label, value, expectedMessage, why) => {
+			const agentDir = tempDir("kypi-agentdir-");
+			const run = runFullBootstrap(agentDir, { KYPI_DASHSCOPE_BASE_URL: value });
+			expectReachedTheScript(run);
+
+			expect(run.status, `${why}\nstdout:\n${run.stdout}`).not.toBe(0);
+			expect(
+				run.stderr,
+				"a refusal must NAME the variable and say what is wrong with the value, because " +
+					"RB-03-01 is where the operator was told to set it",
+			).toContain("KYPI_DASHSCOPE_BASE_URL");
+			expect(run.stderr).toContain(expectedMessage);
+
+			expect(
+				existsSync(join(agentDir, "models.json")),
+				"the installer refused and wrote models.json anyway, so the bad base URL is now " +
+					"the configured endpoint and the refusal was cosmetic",
+			).toBe(false);
+		},
+		TIMEOUT_MS,
+	);
+
+	it("case 5c -- WR-06: .env.example with markers out of order is refused, not duplicated", () => {
+		// `ds >= 0 && de >= 0` tested presence and never ORDER. With END above
+		// START the two slices OVERLAP -- cur.slice(0, ds) still contains END, and
+		// cur.slice(de + END.length) still contains START and everything after it
+		// -- so the file gained duplicated content AND duplicated markers, and grew
+		// further on every later run. .env.example is tracked and this repo is
+		// public. The afterEach hook restores the file whatever happens here.
+		const START = "# ky-pi-agent managed:start";
+		const END = "# ky-pi-agent managed:end";
+		const scrambled = [
+			"# hand-edited header",
+			END,
+			"DASHSCOPE_API_KEY=",
+			START,
+			"# hand-edited footer",
+			"",
+		].join("\n");
+		writeFileSync(ENV_EXAMPLE, scrambled, "utf-8");
+
+		const agentDir = tempDir("kypi-agentdir-");
+		const run = runFullBootstrap(agentDir);
+		expectReachedTheScript(run);
+
+		expect(run.status, `stdout:\n${run.stdout}`).not.toBe(0);
+		expect(
+			run.stderr,
+			"the refusal must name the file and the reason. A bare failure sends the user " +
+				"through every file the script writes",
+		).toContain("managed markers");
+
+		const after = readFileSync(ENV_EXAMPLE, "utf-8");
+		expect(
+			after,
+			"the installer refused and rewrote the file anyway. A refusal that still writes is " +
+				"strictly worse than no refusal [WR-06]",
+		).toBe(scrambled);
+		expect(
+			after.split(START).length - 1,
+			"the START marker was duplicated, which is the overlapping-slice corruption itself: " +
+				"the file is not idempotent any more and every later run grows it [WR-06]",
+		).toBe(1);
+		expect(after.split(END).length - 1, "the END marker was duplicated [WR-06]").toBe(1);
 	}, TIMEOUT_MS);
 
 	it("case 6 -- PROV-01: the installed pair resolves $DASHSCOPE_API_KEY from the environment", async () => {
