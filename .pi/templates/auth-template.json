@@ -1,0 +1,5 @@
+{
+  "dashscope": { "type": "api_key", "key": "$DASHSCOPE_API_KEY" },
+  "deepseek": { "type": "api_key", "key": "$DEEPSEEK_API_KEY" },
+  "amazon-bedrock": { "type": "api_key", "env": { "AWS_PROFILE": "REPLACE_WITH_AWS_PROFILE_NAME" } }
+}
