@@ -239,21 +239,67 @@ export function currentCorrelationId(): string | undefined {
 }
 
 /**
- * Compose a wire record, stamping `ts` and the current `corr`.
+ * The payload fields the given {@link WireKind} is allowed to carry.
+ *
+ * WHY THIS TYPE EXISTS, WITH THE PART THAT TURNED OUT NOT TO BE BROKEN STATED
+ * PLAINLY. `schema.ts:287-288` gives the design intent: `WireRecord` is "modelled
+ * as a union rather than three optional fields so a record carrying both a request
+ * `payload` and a response `status` does not typecheck".
+ *
+ * The old signature was `fields: Partial<WireRecord>`, and its comment claimed the
+ * union "still rejects a caller that passes, say, both a `payload` and a `status`".
+ * A code review argued that claim was false, on the grounds that `Partial`
+ * distributes over the union and erases the `never` guards. **MEASURED: the claim
+ * was TRUE and the review was wrong.** `Partial<T>` is a homomorphic mapped type,
+ * so it does distribute — but it preserves the guard's TYPE while making it
+ * optional: `headers?: never` becomes `headers?: undefined`, and `undefined` is the
+ * only assignable value. A mixed bag therefore matches no arm.
+ * `wireRecord("main.request", { payload: {}, status: 200 })` did NOT compile
+ * [VERIFIED: reverted the signature and ran `tsc --noEmit`; the
+ * `@ts-expect-error` on that line stayed in use].
+ *
+ * WHAT WAS ACTUALLY WRONG is smaller and real: `Partial` made each arm's OWN field
+ * optional too, so `wireRecord("main.request", {})` compiled — a `.request` record
+ * saying a request happened and nothing about what was in it. Selecting the arm
+ * from the `kind` literal makes that field required, and moves the whole check to
+ * the CALL SITE where a human can act on it rather than to a cast two frames away.
+ * `tests/unit/wire-record-typing.test.ts` holds all four rejections with
+ * `@ts-expect-error`, so any regression fails `npm run typecheck`.
+ */
+export type WireFieldsFor<K extends WireKind> = K extends `${string}.request`
+	? { payload: unknown }
+	: K extends `${string}.headers`
+		? { headers: Record<string, string | null> }
+		: { status: number; headers?: Record<string, string | null> };
+
+/** The attribution fields any wire record may carry, whatever its kind. */
+export interface WireAttribution {
+	/** Overrides the {@link currentCorrelationId} stamp. The nested path always passes one. */
+	corr?: string;
+	sessionId?: string;
+	role?: string;
+}
+
+/**
+ * Compose a wire record, stamping `ts` and — unless overridden — the current `corr`.
  *
  * Shared with `call-model.ts` (plan 02-06) so the main-loop and nested paths
  * produce byte-compatible rows: two composers would drift the first time a
  * field is added to one of them.
  *
  * `fields` is spread last, so a caller that knows its own correlation id — the
- * nested path, where the id is issued per call rather than by a hook — can
- * override the stamp.
+ * nested path, where the id is issued per call rather than by a hook — overrides
+ * the stamp. Both main-loop hooks now pass one explicitly too; see WR-14's note in
+ * the module docstring for the single-slot limitation the fallback carries.
  */
-export function wireRecord(kind: WireKind, fields: Partial<WireRecord>): WireRecord {
-	// The cast is the price of the plan's signature. `Partial<WireRecord>`
-	// distributes over the union, so TypeScript cannot prove the spread lands in
-	// one arm; the union in `schema.ts` still rejects a caller that passes, say,
-	// both a `payload` and a `status` in `fields`.
+export function wireRecord<K extends WireKind>(
+	kind: K,
+	fields: WireFieldsFor<K> & WireAttribution,
+): WireRecord {
+	// The cast is unavoidable and now covers exactly one thing: tsc cannot prove the
+	// spread of a GENERIC lands in one member of the union. Everything else has
+	// already been checked at the call site, because `fields` is narrowed to the arm
+	// `kind` selects.
 	return {
 		ts: Date.now(),
 		corr: currentCorrelationId() ?? UNCORRELATED,

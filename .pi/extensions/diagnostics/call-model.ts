@@ -133,7 +133,7 @@ import {
 	type WireRecord,
 } from "./schema.ts";
 import { composeTurnRow } from "./turns.ts";
-import { nextCorrelationId, wireRecord } from "./wire.ts";
+import { nextCorrelationId, wireRecord, type WireFieldsFor } from "./wire.ts";
 
 /**
  * The four keys this function owns, removed from the caller's option bag —
@@ -372,8 +372,16 @@ export async function callModel<TApi extends Api>(
 	const corr = nextCorrelationId(sessionId);
 	const role = opts.role;
 
-	/** Compose and append one nested wire record under this call's own `corr`. */
-	function record(kind: WireKind, fields: Partial<WireRecord>): void {
+	/**
+	 * Compose and append one nested wire record under this call's own `corr`.
+	 *
+	 * Generic in `K` so `WireFieldsFor<K>` narrows to the arm the literal `kind`
+	 * selects — the whole point of the union in `schema.ts`. A non-generic
+	 * `Partial<WireRecord>` here would re-open the hole `wireRecord`'s signature
+	 * closes, since `Partial` distributes over the union and erases its `never`
+	 * guards.
+	 */
+	function record<K extends WireKind>(kind: K, fields: WireFieldsFor<K>): void {
 		appendWire(cwd, wireRecord(kind, { corr, sessionId, role, ...fields }));
 	}
 
