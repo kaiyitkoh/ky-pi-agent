@@ -544,8 +544,20 @@ export interface QuotaAlternativeFixture {
  * alternative that is not really there, and the pattern then reads wider than it
  * behaves — the same failure `sso.ts`'s dead-pattern check exists to deny.
  *
- * Each `text` is chosen so that exactly ONE alternative matches it, which is
- * asserted directly by `fallback-chain.test.ts` rather than promised here.
+ * Each `text` is chosen so that exactly ONE alternative matches it, and that is
+ * asserted by `fallback-chain.test.ts` case 3b AGAINST {@link QUOTA_PATTERN}
+ * ITSELF — the other alternatives are rebuilt from `QUOTA_PATTERN.source`, not
+ * from this table. The distinction is the whole of WR-02: while minimality was
+ * judged relative to this table, an alternative added to the pattern and absent
+ * from the table was excluded from its own check, and the claim in this
+ * paragraph quietly stopped being true.
+ *
+ * THIS TABLE IS HELD IN SET EQUALITY WITH THE PATTERN, so it cannot fall behind
+ * it. `fallback-chain.test.ts` case 3c splits `QUOTA_PATTERN.source` into its
+ * top-level alternatives and requires exactly this list. Adding an alternative
+ * to the pattern without adding a minimal fixture here fails there and names the
+ * unpinned token — which is what the `|exceeded` mutation, green across 649
+ * tests before WR-02, now trips. Edit the pattern and this table in one commit.
  */
 export const QUOTA_ALTERNATIVE_FIXTURES: readonly QuotaAlternativeFixture[] = [
 	{

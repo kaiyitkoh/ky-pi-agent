@@ -93,6 +93,7 @@ import {
 	DASHSCOPE_QUOTA_FIXTURES,
 	NON_QUOTA_BILLING_FIXTURES,
 	QUOTA_ALTERNATIVE_FIXTURES,
+	QUOTA_PATTERN,
 	SSO_FIXTURES,
 	type FailureClass,
 } from "../../.pi/extensions/providers/schema.ts";
@@ -104,6 +105,79 @@ import { withFauxSession } from "../helpers/session.ts";
 
 /** Where the probe parks the live `ExtensionContext`. See the header. */
 const CTX_KEY = "__kypiFallbackChainExtensionContext";
+
+/**
+ * Split a regular-expression source into its TOP-LEVEL alternatives.
+ *
+ * WHY THIS EXISTS AT ALL. `QUOTA_ALTERNATIVE_FIXTURES` is a hand-written list of
+ * alternative labels sitting BESIDE {@link QUOTA_PATTERN}, and nothing tied the
+ * two together. That closed the deletion direction — remove an alternative and
+ * its fixture stops classifying `quota` — and closed NOTHING in the addition
+ * direction, which is the direction CR-03 was about: a new alternative gets no
+ * fixture, no minimality check, and the `>= 7` floor is still satisfied by the
+ * seven that were already there. Verified: appending `|exceeded` to the pattern
+ * left 649/649 green while making
+ * `"Input length exceeded the maximum allowed for this model"` classify as
+ * `quota`, i.e. forwarding the user's whole prompt to a second vendor on a
+ * context-length error. That is CR-03 restored by seven characters. [WR-02]
+ *
+ * A CHARACTER WALK, NOT A REGEX. Splitting a regex source with a regex needs a
+ * lookahead that is correct only for the parenthesis shapes present today
+ * (`/\|(?![^(]*\))/` mis-splits the moment a second group appears, and silently
+ * — it produces alternatives, just the wrong ones). This walks the source
+ * tracking group depth, character classes and backslash escapes, so it stays
+ * correct as the pattern grows. Its own behaviour is pinned by case 3d below,
+ * because a splitter nobody checks can be "adjusted" until the equality it feeds
+ * passes.
+ */
+function topLevelAlternatives(source: string): string[] {
+	const out: string[] = [];
+	let current = "";
+	let depth = 0;
+	let inClass = false;
+
+	for (let i = 0; i < source.length; i += 1) {
+		const ch = source[i] as string;
+
+		// An escape consumes the next character whatever it is, so `\|`, `\[`,
+		// `\(` and `\)` never move the state below.
+		if (ch === "\\") {
+			current += ch + (source[i + 1] ?? "");
+			i += 1;
+			continue;
+		}
+		if (inClass) {
+			if (ch === "]") {
+				inClass = false;
+			}
+			current += ch;
+			continue;
+		}
+		if (ch === "[") {
+			inClass = true;
+			current += ch;
+			continue;
+		}
+		if (ch === "(") {
+			depth += 1;
+			current += ch;
+			continue;
+		}
+		if (ch === ")") {
+			depth -= 1;
+			current += ch;
+			continue;
+		}
+		if (ch === "|" && depth === 0) {
+			out.push(current);
+			current = "";
+			continue;
+		}
+		current += ch;
+	}
+	out.push(current);
+	return out;
+}
 
 /** Absolute path of the diagnostics extension this repository ships. */
 const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
@@ -639,23 +713,93 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 					"stops on the single failure a second provider is most certain to survive",
 			).toBe("quota");
 
-			// MINIMALITY, ASSERTED RATHER THAN PROMISED. A fixture that two
-			// alternatives match cannot kill either of them: delete one and the
-			// other keeps the row green, which is exactly the hole this case exists
-			// to close. Checked by removing THIS alternative from the pattern and
-			// requiring the fixture to stop matching.
-			const withoutThis = QUOTA_ALTERNATIVE_FIXTURES.filter(
-				(entry) => entry.alternative !== alternative,
-			)
-				.map((entry) => entry.alternative)
+			// MINIMALITY, ASSERTED AGAINST THE REAL PATTERN RATHER THAN AGAINST THE
+			// TABLE. A fixture that two alternatives match cannot kill either of
+			// them: delete one and the other keeps the row green, which is exactly
+			// the hole this case exists to close. Checked by removing THIS
+			// alternative from the pattern and requiring the fixture to stop
+			// matching.
+			//
+			// THE OTHERS COME FROM `QUOTA_PATTERN.source`, NOT FROM
+			// `QUOTA_ALTERNATIVE_FIXTURES`. Rebuilding them from the table made this
+			// verdict relative to the table — so an alternative added to the pattern
+			// and absent from the table was excluded from its own minimality check,
+			// and `schema.ts`'s claim that minimality "is asserted directly" stopped
+			// being true the moment the two diverged. Case 3c below is what keeps
+			// the two in set equality; this line is what makes the claim true. [WR-02]
+			const withoutThis = topLevelAlternatives(QUOTA_PATTERN.source)
+				.filter((entry) => entry !== alternative)
 				.join("|");
 			expect(
 				new RegExp(withoutThis, "i").test(text),
-				`the fixture for '${alternative}' is ALSO matched by another alternative, so ` +
-					"deleting this one would leave the row above green and the alternative dead. " +
-					"Pick a string whose only quota wording is this alternative",
+				`the fixture for '${alternative}' is ALSO matched by another alternative of ` +
+					"QUOTA_PATTERN, so deleting this one would leave the row above green and the " +
+					"alternative dead. Pick a string whose only quota wording is this alternative",
 			).toBe(false);
 		}
+	});
+
+	it("case 3c — WR-02: the fixture table and QUOTA_PATTERN's alternatives are the SAME set", () => {
+		// THE ADDITION DIRECTION, WHICH CASE 3b DOES NOT CLOSE. Case 3b proves
+		// every FIXTURE's alternative is live and minimal. It is silent about an
+		// alternative that has no fixture: such a token is untested in both
+		// directions — nothing kills it, and far worse, nothing shows what else it
+		// now matches. Widening QUOTA_PATTERN is not a widened "do not retry" as it
+		// is in Pi; here a match means SEND THIS USER'S PROMPT, SYSTEM PROMPT AND
+		// TOOL SCHEMAS TO A DIFFERENT VENDOR. Same token, inverted consequence —
+		// the pattern's own docstring records this and the table did not enforce it.
+		//
+		// Verified: appending `|exceeded` to QUOTA_PATTERN left 649/649 green, and
+		// with it in place `classifyFailure("Error code: 400 - ... 'Input length
+		// exceeded the maximum allowed for this model'")` returned "quota".
+		// [CR-03, WR-02, threat T-03-10-01]
+		const declared = topLevelAlternatives(QUOTA_PATTERN.source);
+
+		expect(
+			[...declared].sort(),
+			"QUOTA_PATTERN's alternatives and QUOTA_ALTERNATIVE_FIXTURES have diverged. If an " +
+				"alternative appears on the left and not on the right it was added to the pattern " +
+				"with no minimal fixture, so it is unpinned in both directions and case 3b's " +
+				"minimality verdict excludes it. If it appears on the right and not on the left it " +
+				"was removed from the pattern and its fixture is now asserting a different " +
+				"alternative's behaviour. Add or remove the fixture in the SAME commit as the " +
+				"pattern edit [CR-03, WR-02]",
+		).toEqual([...QUOTA_ALTERNATIVE_FIXTURES.map((entry) => entry.alternative)].sort());
+	});
+
+	it("case 3d — the alternation splitter case 3c depends on really splits", () => {
+		// WITHOUT THIS, CASE 3c IS ONE EDIT AWAY FROM BEING SATISFIED BY A BROKEN
+		// SPLITTER. A `topLevelAlternatives` that returned `[source]`, or `[]`, or
+		// that split inside groups, would make the equality above fail loudly today
+		// — but the obvious way to make a failing equality pass is to adjust the
+		// thing producing the left-hand side. So the splitter's contract is pinned
+		// on inputs whose answers are obvious by inspection and independent of
+		// QUOTA_PATTERN. [WR-02]
+		expect(
+			topLevelAlternatives("a|b|c"),
+			"a flat alternation must split on every bar",
+		).toEqual(["a", "b", "c"]);
+
+		expect(
+			topLevelAlternatives("a|b (?:x|y)|c"),
+			"a bar INSIDE a group is not a top-level alternative: splitting there would invent " +
+				"alternatives that do not exist and let a real one hide among them",
+		).toEqual(["a", "b (?:x|y)", "c"]);
+
+		expect(
+			topLevelAlternatives("a[|]b|c"),
+			"a bar inside a character class is a literal bar, not an alternation",
+		).toEqual(["a[|]b", "c"]);
+
+		expect(
+			topLevelAlternatives(String.raw`a\|b|c`),
+			"an ESCAPED bar is a literal bar. Treating it as a separator would silently halve " +
+				"an alternative and case 3c would then demand a fixture for each half",
+		).toEqual([String.raw`a\|b`, "c"]);
+
+		expect(topLevelAlternatives("solo"), "a pattern with no bar is one alternative").toEqual([
+			"solo",
+		]);
 	});
 
 	it("case 4 — the chain does not call ahead when the first hop answers", () => {
