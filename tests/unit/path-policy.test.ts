@@ -20,7 +20,15 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { canonicalisePathArg, type PathWordArg } from "../../.pi/extensions/safety/paths.ts";
+import {
+	canonicalisePathArg,
+	classifyPathRead,
+	classifyPathWrite,
+	DETONATION_TARGETS,
+	SENSITIVE_READ_PATTERNS,
+	type PathPolicyFacts,
+	type PathWordArg,
+} from "../../.pi/extensions/safety/paths.ts";
 
 /** One literal backslash, built without going through any string-literal escape layer. */
 const BS = String.fromCharCode(92);
@@ -175,5 +183,193 @@ describe("SAFE-08 -- canonicalisePathArg: drive-letter case is normalised WITHOU
 			"if this equalled `shouted`, canonicalisePathArg would be lower/upper-casing the whole path, " +
 				"which the plan's <behavior> explicitly forbids ('without collapsing case on the rest of the path')",
 		).not.toBe(shouted);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Task 2 — classifyPathRead / classifyPathWrite
+// ---------------------------------------------------------------------------
+
+const KUBECONFIG_ENV_CANONICAL = "C:/Users/Admin/custom/kubeconfig.yaml";
+
+const READ_FACTS: PathPolicyFacts = {
+	projectRoot: PROJECT_ROOT,
+	home: HOME,
+	kubeconfigEnv: KUBECONFIG_ENV_CANONICAL,
+};
+
+interface ReadRow {
+	readonly label: string;
+	readonly rawText: string;
+	readonly expected: "allow" | "block";
+	readonly patternId?: string;
+}
+
+const READ_TABLE: readonly ReadRow[] = [
+	{ label: ".env", rawText: ".env", expected: "block", patternId: "dotenv" },
+	{ label: ".env.local", rawText: ".env.local", expected: "block", patternId: "dotenv" },
+	{ label: ".env.production", rawText: ".env.production", expected: "block", patternId: "dotenv" },
+	{ label: "~/.aws/credentials", rawText: "~/.aws/credentials", expected: "block", patternId: "aws-credentials" },
+	{ label: "~/.aws/config", rawText: "~/.aws/config", expected: "block", patternId: "aws-credentials" },
+	{ label: "~/.kube/config", rawText: "~/.kube/config", expected: "block", patternId: "kubeconfig" },
+	{
+		label: "KUBECONFIG-named path",
+		rawText: "C:/Users/Admin/custom/kubeconfig.yaml",
+		expected: "block",
+		patternId: "kubeconfig",
+	},
+	{ label: "terraform.tfstate", rawText: "terraform.tfstate", expected: "block", patternId: "tfstate" },
+	{ label: "terraform.tfstate.backup", rawText: "terraform.tfstate.backup", expected: "block", patternId: "tfstate" },
+	// Paired negatives -- the false positives that matter (04-CONTEXT.md `<specifics>`).
+	{ label: ".env.example (deliberate carve-out)", rawText: ".env.example", expected: "allow" },
+	{ label: ".env.template (deliberate carve-out)", rawText: ".env.template", expected: "allow" },
+	{ label: "README.md", rawText: "README.md", expected: "allow" },
+	{ label: "src/config.ts", rawText: "src/config.ts", expected: "allow" },
+	{ label: "a file merely named environment.ts", rawText: "src/environment.ts", expected: "allow" },
+	{ label: 'a "config" file whose parent is not .aws or .kube', rawText: "app/config", expected: "allow" },
+];
+
+describe("SAFE-06 -- classifyPathRead table is non-empty (vacuous-pass guard)", () => {
+	it("covers at least the four BLOCK classes named in the plan's acceptance criteria plus their negatives", () => {
+		expect(READ_TABLE.length).toBeGreaterThanOrEqual(15);
+		expect(READ_TABLE.filter((r) => r.expected === "block").length).toBeGreaterThanOrEqual(9);
+		expect(READ_TABLE.filter((r) => r.expected === "allow").length).toBeGreaterThanOrEqual(6);
+	});
+});
+
+describe("SAFE-06 -- classifyPathRead", () => {
+	for (const row of READ_TABLE) {
+		it(`${row.label} -> ${row.expected}`, () => {
+			const canonical = canonicalisePathArg(arg(row.rawText), ctx());
+			const verdict = classifyPathRead(canonical, READ_FACTS);
+			expect(verdict.kind, `canonical path was "${canonical}"`).toBe(row.expected);
+		});
+	}
+});
+
+describe("SAFE-06 -- every SENSITIVE_READ_PATTERNS entry is matched by at least one fixture row (liveness)", () => {
+	it("SENSITIVE_READ_PATTERNS is non-empty, or this guard proves nothing", () => {
+		expect(SENSITIVE_READ_PATTERNS.length).toBeGreaterThan(0);
+	});
+
+	it("every exported pattern id fires against the READ_TABLE fixtures", () => {
+		const fired = new Set<string>();
+		for (const row of READ_TABLE) {
+			const canonical = canonicalisePathArg(arg(row.rawText), ctx());
+			for (const pattern of SENSITIVE_READ_PATTERNS) {
+				if (pattern.match(canonical, READ_FACTS)) {
+					fired.add(pattern.id);
+				}
+			}
+		}
+		for (const pattern of SENSITIVE_READ_PATTERNS) {
+			expect(fired.has(pattern.id), `pattern "${pattern.id}" is exported but no fixture row triggers it -- dead pattern`).toBe(
+				true,
+			);
+		}
+	});
+});
+
+interface WriteRow {
+	readonly label: string;
+	readonly rawText: string;
+	readonly expected: "allow" | "block";
+	readonly targetId?: string;
+}
+
+const WRITE_FACTS: PathPolicyFacts = { projectRoot: PROJECT_ROOT, home: HOME };
+
+const WRITE_TABLE: readonly WriteRow[] = [
+	{ label: ".git/hooks/pre-commit", rawText: ".git/hooks/pre-commit", expected: "block", targetId: "git-hooks" },
+	{ label: ".git/hooks/post-checkout (any hook name)", rawText: ".git/hooks/post-checkout", expected: "block", targetId: "git-hooks" },
+	{ label: ".git/config", rawText: ".git/config", expected: "block", targetId: "git-config" },
+	{ label: "~/.bashrc", rawText: "~/.bashrc", expected: "block", targetId: "bashrc" },
+	{ label: "~/.bash_profile", rawText: "~/.bash_profile", expected: "block", targetId: "bash-profile" },
+	{ label: "~/.profile", rawText: "~/.profile", expected: "block", targetId: "profile" },
+	{ label: "~/.gitconfig", rawText: "~/.gitconfig", expected: "block", targetId: "gitconfig" },
+	{
+		label: ".github/workflows/ci.yml",
+		rawText: ".github/workflows/ci.yml",
+		expected: "block",
+		targetId: "github-workflows",
+	},
+	{
+		label: ".github/workflows/deploy.yaml (.yaml, not only .yml)",
+		rawText: ".github/workflows/deploy.yaml",
+		expected: "block",
+		targetId: "github-workflows",
+	},
+	{ label: ".gitlab-ci.yml", rawText: ".gitlab-ci.yml", expected: "block", targetId: "gitlab-ci" },
+	{
+		label: "absolute path elsewhere on the drive",
+		rawText: "C:/Elsewhere/file.txt",
+		expected: "block",
+	},
+	{
+		label: "../outside/file.txt (traversal above the project root)",
+		rawText: "../outside/file.txt",
+		expected: "block",
+	},
+	// Paired negatives -- the false positives that matter.
+	{ label: "docs/workflows.md (contains 'workflows' but not under .github/)", rawText: "docs/workflows.md", expected: "allow" },
+	{ label: "docs/hooks/README.md (contains 'hooks' but not under .git/)", rawText: "docs/hooks/README.md", expected: "allow" },
+	{
+		label: "notes/gitconfig-backup.md (mentions gitconfig but is not ~/.gitconfig)",
+		rawText: "notes/gitconfig-backup.md",
+		expected: "allow",
+	},
+	{ label: "an ordinary write inside the project root", rawText: "src/index.ts", expected: "allow" },
+];
+
+describe("SAFE-08/SAFE-13 -- classifyPathWrite table is non-empty (vacuous-pass guard)", () => {
+	it("covers every detonation target plus containment plus their negatives", () => {
+		expect(WRITE_TABLE.length).toBeGreaterThanOrEqual(16);
+		expect(WRITE_TABLE.filter((r) => r.expected === "block").length).toBeGreaterThanOrEqual(12);
+		expect(WRITE_TABLE.filter((r) => r.expected === "allow").length).toBeGreaterThanOrEqual(4);
+	});
+});
+
+describe("SAFE-08/SAFE-13 -- classifyPathWrite", () => {
+	for (const row of WRITE_TABLE) {
+		it(`${row.label} -> ${row.expected}`, () => {
+			const canonical = canonicalisePathArg(arg(row.rawText), ctx());
+			const verdict = classifyPathWrite(canonical, WRITE_FACTS);
+			expect(verdict.kind, `canonical path was "${canonical}"`).toBe(row.expected);
+			if (row.expected === "block" && verdict.kind === "block") {
+				expect(verdict.reason.length, "every block must carry a non-empty audit-ready reason").toBeGreaterThan(0);
+			}
+		});
+	}
+
+	it("the containment block names the project root in its reason (auditable, not just a boolean)", () => {
+		const canonical = canonicalisePathArg(arg("../outside/file.txt"), ctx());
+		const verdict = classifyPathWrite(canonical, WRITE_FACTS);
+		expect(verdict.kind).toBe("block");
+		if (verdict.kind === "block") {
+			expect(verdict.reason).toContain(PROJECT_ROOT);
+		}
+	});
+});
+
+describe("SAFE-08/SAFE-13 -- every DETONATION_TARGETS entry is matched by at least one fixture row (liveness)", () => {
+	it("DETONATION_TARGETS is non-empty, or this guard proves nothing", () => {
+		expect(DETONATION_TARGETS.length).toBeGreaterThan(0);
+	});
+
+	it("every exported target id fires against the WRITE_TABLE fixtures", () => {
+		const fired = new Set<string>();
+		for (const row of WRITE_TABLE) {
+			const canonical = canonicalisePathArg(arg(row.rawText), ctx());
+			for (const target of DETONATION_TARGETS) {
+				if (target.match(canonical, WRITE_FACTS)) {
+					fired.add(target.id);
+				}
+			}
+		}
+		for (const target of DETONATION_TARGETS) {
+			expect(fired.has(target.id), `detonation target "${target.id}" is exported but no fixture row triggers it -- dead pattern`).toBe(
+				true,
+			);
+		}
 	});
 });

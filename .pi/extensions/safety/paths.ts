@@ -279,3 +279,238 @@ export function canonicalisePathArg(arg: PathWordArg, ctx: PathResolutionContext
 	const rooted = isAbsolutePath(slashNormalized) ? slashNormalized : joinWithCwd(ctx.cwd, slashNormalized);
 	return collapseSegments(rooted);
 }
+
+// ---------------------------------------------------------------------------
+// Task 2 — the three path policies
+// ---------------------------------------------------------------------------
+
+/** Discriminated verdict shape, mirroring `.pi/extensions/safety/shell.ts`'s `ShellVerdict`. */
+export type PathVerdict = { readonly kind: "allow" } | { readonly kind: "block"; readonly reason: string };
+
+/**
+ * Caller-supplied facts a policy needs and this module will never derive for
+ * itself. `projectRoot` must already be a canonical path (the output of
+ * {@link canonicalisePathArg}, or an equivalent already-normalised absolute
+ * path) — this module does not re-run the full pipeline on it, it only
+ * segment-compares. Same for `kubeconfigEnv`, when supplied.
+ */
+export interface PathPolicyFacts {
+	readonly projectRoot: string;
+	readonly home: string;
+	readonly kubeconfigEnv?: string;
+}
+
+interface PathPattern {
+	readonly id: string;
+	readonly match: (canonicalPath: string, facts: PathPolicyFacts) => boolean;
+	readonly reason: (canonicalPath: string) => string;
+}
+
+function basenameOf(canonicalPath: string): string {
+	const { parts } = rootedSegmentsOf(canonicalPath);
+	return parts.length > 0 ? parts[parts.length - 1] : "";
+}
+
+/** Case-insensitive whole-path equality once both sides are reduced to root + segments (never a raw string compare). */
+function sameCanonicalPath(a: string, b: string): boolean {
+	const left = rootedSegmentsOf(a);
+	const right = rootedSegmentsOf(b);
+	if (left.root.toLowerCase() !== right.root.toLowerCase()) {
+		return false;
+	}
+	if (left.parts.length !== right.parts.length) {
+		return false;
+	}
+	return left.parts.every((part, i) => part.toLowerCase() === right.parts[i].toLowerCase());
+}
+
+/** True when `target`'s segments start with every one of `root`'s segments, case-insensitively, under the same root. */
+function isWithinRoot(target: string, root: string): boolean {
+	const t = rootedSegmentsOf(target);
+	const r = rootedSegmentsOf(root);
+	if (t.root.toLowerCase() !== r.root.toLowerCase()) {
+		return false;
+	}
+	if (t.parts.length < r.parts.length) {
+		return false;
+	}
+	return r.parts.every((part, i) => part.toLowerCase() === t.parts[i].toLowerCase());
+}
+
+/**
+ * `.env`, `.env.local`, `.env.production` block. `.env.example` and
+ * `.env.template` are a DELIBERATE carve-out: those files exist to be read
+ * (they are the documentation for what a real `.env` needs), and blocking
+ * them makes the harness annoying in a way that trains the user to disable
+ * the guard — the exact failure mode 04-CONTEXT.md's `<specifics>` names.
+ */
+function isDotEnvFile(basename: string): boolean {
+	if (basename === ".env") {
+		return true;
+	}
+	if (!basename.startsWith(".env.")) {
+		return false;
+	}
+	const suffix = basename.slice(".env.".length).toLowerCase();
+	return suffix !== "example" && suffix !== "template";
+}
+
+function parentDirOf(canonicalPath: string): string {
+	const { parts } = rootedSegmentsOf(canonicalPath);
+	return parts.length >= 2 ? parts[parts.length - 2] : "";
+}
+
+/**
+ * SAFE-06: the four read classes that must never reach the model's context
+ * window — `.env`-family files, `~/.aws/{credentials,config}`, kubeconfig,
+ * and Terraform state. Every entry is segment-matched (see module docstring)
+ * and proven live, and proven NOT to fire on its nearest benign neighbour, in
+ * `tests/unit/path-policy.test.ts`.
+ */
+export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
+	{
+		id: "dotenv",
+		match: (path) => isDotEnvFile(basenameOf(path)),
+		reason: (path) =>
+			`"${path}" is a .env-family secrets file, not the .example/.template carve-out — its contents must never enter the model's context window`,
+	},
+	{
+		id: "aws-credentials",
+		match: (path) => {
+			const base = basenameOf(path).toLowerCase();
+			return parentDirOf(path).toLowerCase() === ".aws" && (base === "credentials" || base === "config");
+		},
+		reason: (path) => `"${path}" is an AWS credentials/config file under a ".aws" directory`,
+	},
+	{
+		id: "kubeconfig",
+		match: (path, facts) => {
+			const base = basenameOf(path).toLowerCase();
+			const isDefaultKubeconfig = parentDirOf(path).toLowerCase() === ".kube" && base === "config";
+			const isNamedKubeconfig = facts.kubeconfigEnv !== undefined && sameCanonicalPath(path, facts.kubeconfigEnv);
+			return isDefaultKubeconfig || isNamedKubeconfig;
+		},
+		reason: (path) => `"${path}" is a kubeconfig file (default "~/.kube/config" location, or the caller-supplied KUBECONFIG path)`,
+	},
+	{
+		id: "tfstate",
+		match: (path) => {
+			const base = basenameOf(path).toLowerCase();
+			return base.endsWith(".tfstate") || base.endsWith(".tfstate.backup");
+		},
+		reason: (path) => `"${path}" is Terraform state, which holds plaintext secrets in its resource attributes`,
+	},
+];
+
+function hasSegmentPair(parts: readonly string[], first: string, second: string): number {
+	for (let i = 0; i < parts.length - 1; i += 1) {
+		if (parts[i].toLowerCase() === first && parts[i + 1].toLowerCase() === second) {
+			return i;
+		}
+	}
+	return -1;
+}
+
+/**
+ * SAFE-13: writes/deletes into any of these are a deferred detonation no
+ * bash matcher ever sees — a later, entirely benign command (a git hook
+ * firing, a shell starting, a CI run) is what actually executes the payload.
+ * Applies to the `write`/`edit` tool surface as well as to bash (Plan 08
+ * wires the dual application; this module only classifies).
+ */
+export const DETONATION_TARGETS: readonly PathPattern[] = [
+	{
+		id: "git-hooks",
+		match: (path) => {
+			const { parts } = rootedSegmentsOf(path);
+			const idx = hasSegmentPair(parts, ".git", "hooks");
+			return idx !== -1 && parts.length > idx + 2;
+		},
+		reason: (path) => `"${path}" is a git hook — a later, benign git operation executes it automatically`,
+	},
+	{
+		id: "git-config",
+		match: (path) => {
+			const { parts } = rootedSegmentsOf(path);
+			const idx = hasSegmentPair(parts, ".git", "config");
+			return idx !== -1 && idx + 1 === parts.length - 1;
+		},
+		reason: (path) => `"${path}" is the repository's git config — an [alias] entry there executes on the next ordinary git command`,
+	},
+	{
+		id: "bashrc",
+		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.bashrc`),
+		reason: (path) => `"${path}" is the user's shell rc file — it executes on every new shell`,
+	},
+	{
+		id: "bash-profile",
+		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.bash_profile`),
+		reason: (path) => `"${path}" is the user's shell profile — it executes on every new login shell`,
+	},
+	{
+		id: "profile",
+		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.profile`),
+		reason: (path) => `"${path}" is the user's POSIX shell profile — it executes on every new login shell`,
+	},
+	{
+		id: "gitconfig",
+		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.gitconfig`),
+		reason: (path) => `"${path}" is the user's global git config — an [alias] entry there executes on the next ordinary git command`,
+	},
+	{
+		id: "github-workflows",
+		match: (path) => {
+			const { parts } = rootedSegmentsOf(path);
+			const idx = hasSegmentPair(parts, ".github", "workflows");
+			if (idx === -1 || idx + 2 !== parts.length - 1) {
+				return false;
+			}
+			const file = parts[parts.length - 1].toLowerCase();
+			return file.endsWith(".yml") || file.endsWith(".yaml");
+		},
+		reason: (path) => `"${path}" is a GitHub Actions workflow — it runs on the next push/PR event, on GitHub's infrastructure`,
+	},
+	{
+		id: "gitlab-ci",
+		match: (path) => basenameOf(path).toLowerCase() === ".gitlab-ci.yml",
+		reason: (path) => `"${path}" is the GitLab CI pipeline definition — it runs on the next push, and this project's "main" auto-deploys`,
+	},
+];
+
+/**
+ * SAFE-06: block the four sensitive read classes; allow everything else,
+ * including their nearest benign neighbours (`.env.example`, `README.md`,
+ * `src/config.ts`, a file merely named `environment.ts`).
+ */
+export function classifyPathRead(canonicalPath: string, facts: PathPolicyFacts): PathVerdict {
+	for (const pattern of SENSITIVE_READ_PATTERNS) {
+		if (pattern.match(canonicalPath, facts)) {
+			return { kind: "block", reason: pattern.reason(canonicalPath) };
+		}
+	}
+	return { kind: "allow" };
+}
+
+/**
+ * SAFE-13 first (detonation targets block regardless of project-root
+ * containment — a hook OUTSIDE the project is just as dangerous as one
+ * inside it), then SAFE-08 (containment). The default for anything not
+ * explicitly listed as an allowed-outside root is to BLOCK — this module
+ * defines no allowed-outside root at all; a later plan that needs one (a
+ * system temp directory, say) must add it explicitly and name it in a
+ * comment here, not default it open.
+ */
+export function classifyPathWrite(canonicalPath: string, facts: PathPolicyFacts): PathVerdict {
+	for (const target of DETONATION_TARGETS) {
+		if (target.match(canonicalPath, facts)) {
+			return { kind: "block", reason: target.reason(canonicalPath) };
+		}
+	}
+	if (!isWithinRoot(canonicalPath, facts.projectRoot)) {
+		return {
+			kind: "block",
+			reason: `"${canonicalPath}" resolves outside the project root "${facts.projectRoot}"`,
+		};
+	}
+	return { kind: "allow" };
+}
