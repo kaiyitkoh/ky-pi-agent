@@ -233,7 +233,13 @@ export interface TurnRow {
 	 * thinking as free, which is a fabricated measurement (Pitfall 4).
 	 */
 	reasoning?: number;
-	/** `cacheRead / (input + cacheRead)`; omitted when the denominator is 0. */
+	/**
+	 * `cacheRead / (input + cacheRead)`.
+	 *
+	 * Omitted unless the denominator is strictly POSITIVE — not merely non-zero.
+	 * A `NaN` or negative denominator is not a measurement, and a `NaN` assigned
+	 * here would serialise to `null`, which the omitted-key rule forbids.
+	 */
 	cacheReadRatio?: number;
 	cost: TurnCost;
 	/** `turn_end` wall clock minus `turn_start.timestamp`. */

@@ -138,10 +138,20 @@ export function outcomeFor(stopReason: StopReason): Outcome {
  * actionable measurement, and a turn that consumed no input tokens at all is
  * not a measurement of anything. Collapsing the two would make the Phase 8 cache
  * story unreadable in exactly the sessions where it matters.
+ *
+ * THE GUARD IS `> 0`, NOT `!== 0`, AND THAT IS THE WHOLE POINT OF THIS FUNCTION
+ * HAVING ONE. `Usage` types both counts as `number`, which forbids `NaN` and
+ * forbids a negative without forcing any adapter to honour either. A `!== 0`
+ * guard lets a non-finite denominator through, `NaN / NaN` is `NaN`,
+ * `NaN !== undefined` so {@link composeTurnRow} ASSIGNS it, and `JSON.stringify`
+ * writes `"cacheReadRatio":null` — which the omitted-key rule and
+ * `docs/DIAGNOSTICS.md` both promise can never appear. `budget.ts` already
+ * guards with `> 0`; the two must agree, because both files claim to print one
+ * definition of one number.
  */
 export function cacheReadRatio(usage: Usage): number | undefined {
 	const denominator = usage.input + usage.cacheRead;
-	if (denominator === 0) return undefined;
+	if (!(denominator > 0)) return undefined;
 	return usage.cacheRead / denominator;
 }
 

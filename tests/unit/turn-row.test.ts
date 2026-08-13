@@ -358,6 +358,39 @@ describe("DIAG-04 — cache-read ratio", () => {
 		expect(cacheReadRatio(makeUsage({ input: 0, cacheRead: 0 }))).toBeUndefined();
 		expect(cacheReadRatio(makeUsage({ input: 100, cacheRead: 300 }))).toBe(0.75);
 	});
+
+	it("omits the key on a non-finite denominator rather than serialising a null", () => {
+		// `Usage` types both counts as `number`, which FORBIDS NaN and forbids a
+		// negative — and forces no adapter to honour either. A `denominator !== 0`
+		// guard lets NaN through, `NaN !== undefined` so the composer assigns it, and
+		// `JSON.stringify` then writes `"cacheReadRatio":null` — which the omitted-key
+		// rule and docs/DIAGNOSTICS.md both promise can never happen.
+		for (const usage of [
+			makeUsage({ input: Number.NaN }),
+			makeUsage({ cacheRead: Number.NaN }),
+			makeUsage({ input: -100, cacheRead: 100 }),
+		]) {
+			expect(
+				cacheReadRatio(usage),
+				"a NaN or negative denominator is not a measurement of caching, so there is no ratio " +
+					"to report. `budget.ts` guards with `> 0` and both files claim to print one " +
+					"definition of one number",
+			).toBeUndefined();
+		}
+
+		const row = makeRow({ message: makeMessage({ usage: makeUsage({ input: Number.NaN }) }) });
+
+		expect(
+			Object.keys(row),
+			"the composer must leave the key OFF, not assign a NaN. Asserted on Object.keys because " +
+				"`toBeUndefined()` passes on a key present with a NaN in it once JSON has flattened it",
+		).not.toContain("cacheReadRatio");
+
+		expect(
+			JSON.stringify(row),
+			"and the bytes a later phase reads back must carry no null under this key",
+		).not.toContain('"cacheReadRatio":null');
+	});
 });
 
 // ---------------------------------------------------------------------------
