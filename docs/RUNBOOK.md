@@ -821,3 +821,92 @@ exported predicate. Whether a real DashScope arrears failure actually says
 by `tests/integration/fallback-chain.test.ts`; it is recorded here so that the
 first real failure of each kind on the work laptop is captured and compared
 rather than merely survived.
+
+---
+
+## Phase 4 — Safety & Deployment Guardrails
+
+Phase 4 built the mistake-catcher: an `unbash`-parsed AST guard over
+`bash`/`read`/`write`/`edit`, a `git`/`glab` policy that blocks writes when
+`HEAD` is protected and blocks `glab mr merge` unconditionally, sensitive-path
+reads and mutating-infra confirmation gates, enforcement duplicated at the
+`tool_call` hook and again inside each wrapped tool, a JSONL audit of every
+allow and every block, a 30-plus evasion corpus, and the published limits
+table at `docs/SAFETY.md` that names exactly what the guard does not catch.
+Sixteen of its seventeen SAFE requirements are fully verifiable on this
+machine and are complete. The one check below is the residual — and it is the
+one control in this entire stack that is not theatre.
+
+**Server-side branch protection is verified first, before any harness rule is
+trusted.** Everything `.pi/extensions/safety/` does is a mistake-catcher for
+the *confused-model* case, layered on top of GitLab's own server-side
+enforcement — never a substitute for it. GitLab protected branches are
+enforced where the model has no code execution at all, which is why they
+catch every row of `docs/SAFETY.md`'s "Known bypasses" table, including the
+classes the AST guard itself documents as out of scope (`hub push`, a direct
+GitLab REST `PUT` against the merge-requests API, `npm run deploy`, a
+`PATH`-shadowed `git` shim — none visible to a local parser, all stopped by
+GitLab refusing the push). This machine has no GitLab access, no work-laptop
+credentials, and no network egress, so the live check below is planned
+OUTSTANDING and may never be reported as passed on the strength of anything
+built in this repository. `docs/SAFETY.md` states the same thing in full, from
+the guard's side.
+
+`tests/unit/docs-policy.test.ts` guards this status exactly as it guards the
+Phase 1, 2 and 3 ones: it parses both the summary-table row and the
+`**Status:**` line of every `RB-<phase>-<n>` entry, and a disagreement between
+the two is reported as `INCONSISTENT`, which is never an acceptable status.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-04-01 | SAFE-01 — a push to a protected GitLab branch is rejected server-side | OUTSTANDING |
+
+### RB-04-01 — SAFE-01: a push to a protected GitLab branch is rejected server-side
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** This machine has no GitLab access, no
+work-laptop credentials, and no network egress to the user's work GitLab
+instance. Whether GitLab's protected-branch rule and push rules are actually
+configured on `main` is a fact about a server this machine cannot reach — no
+local test can substitute for asking GitLab directly.
+`tests/integration/gitlab-push-protection.test.ts` drives a REAL `git push`
+against a REAL local bare repository and a REAL `pre-receive` hook subprocess,
+which is as far as a proof can go without the server itself — but the server
+on the other end of that push is one this repository wrote, and it accepts or
+rejects whatever its own fixture hook says. Whether GitLab does the same is a
+fact about GitLab.
+
+**Procedure, on the work laptop.** `<work-repo>` is a local clone of the
+user's GitLab work repository. Its remote URL is deliberately not written
+here — it is company-identifying information and this file is public.
+
+1. `cd <work-repo> && git checkout main && git pull`
+2. `echo "RB-04-01 push-protection check $(date -u +%FT%TZ)" >> RB-04-01-CHECK.md && git add RB-04-01-CHECK.md && git commit -m "RB-04-01: protected-branch push check (not meant to land)"`
+3. `git push origin main`
+
+**Expected output.** Step 3 must exit non-zero with GitLab's own
+protected-branch rejection on stderr — specific enough that "it seemed fine"
+is not an acceptable result. Record the ACTUAL rejection text observed,
+verbatim, in this entry when the status flips:
+`tests/integration/gitlab-push-protection.test.ts`'s fixture hook REPRODUCES
+GitLab's wording (`You are not allowed to push code to protected branches on
+this project.`) rather than capturing it, and this run is the only
+opportunity to confirm the real text matches what the offline proxy assumed.
+
+4. `git reset --hard HEAD~1`
+
+   Step 4 discards the local check commit. It must never actually reach
+   `main`, protected or not, regardless of the outcome of step 3.
+
+**Offline proxy:** `tests/integration/gitlab-push-protection.test.ts` — drives
+a real `git push` against a real local bare repository with a `pre-receive`
+hook that reproduces GitLab's rejection wording; asserts the push is rejected
+with that text on stderr; asserts a push to a non-protected branch against the
+identical hook SUCCEEDS (the paired control that rules out "this hook rejects
+everything"); and drives the harness's own `classifyPushFailure()` classifier
+in both directions — a real protected-branch rejection and a real
+non-fast-forward rejection, produced by genuinely diverging two clones — and
+asserts they classify differently. It proves the harness reads and classifies
+a server-side rejection correctly. It proves nothing at all about whether
+GitLab is actually configured on the work laptop, which is this entry.

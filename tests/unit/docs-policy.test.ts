@@ -78,8 +78,22 @@ const PHASE_TWO_IDS = ["RB-02-01", "RB-02-02", "RB-02-03"] as const;
  */
 const PHASE_THREE_IDS = ["RB-03-01", "RB-03-02", "RB-03-03", "RB-03-04", "RB-03-05"] as const;
 
+/**
+ * The Phase 4 entry this file governs.
+ *
+ * SAFE-01 needs the work laptop specifically: this machine has no GitLab
+ * access, no work-laptop credentials, and no network egress, so whether
+ * GitLab's protected-branch rule is actually configured on `main` is a fact
+ * about a server this machine cannot reach. `tests/integration/gitlab-push-protection.test.ts`
+ * proves the harness reads and classifies a server-side rejection correctly
+ * against a real local bare repo and a real `pre-receive` hook subprocess —
+ * and that proof is not this check, which is exactly why the array exists
+ * rather than a `[x]` in a requirements file.
+ */
+const PHASE_FOUR_IDS = ["RB-04-01"] as const;
+
 /** Every governed entry, in phase order. A later phase appends its array here. */
-const ALL_IDS = [...PHASE_ONE_IDS, ...PHASE_TWO_IDS, ...PHASE_THREE_IDS] as const;
+const ALL_IDS = [...PHASE_ONE_IDS, ...PHASE_TWO_IDS, ...PHASE_THREE_IDS, ...PHASE_FOUR_IDS] as const;
 
 /**
  * Matches any runbook entry id, of any phase.
@@ -344,6 +358,16 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-03-05": [
 		"npx vitest run tests/unit/model-metadata.test.ts",
 		`pi --list-models | grep -F 'deepseek-v4-pro'`,
+	],
+
+	// PHASE 4 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phase 3. The
+	// clean-up step is pinned alongside the check itself -- a runbook step that
+	// leaves a stray commit sitting on `main` locally is a step half-written.
+	"RB-04-01": [
+		"cd <work-repo> && git checkout main && git pull",
+		`echo "RB-04-01 push-protection check $(date -u +%FT%TZ)" >> RB-04-01-CHECK.md && git add RB-04-01-CHECK.md && git commit -m "RB-04-01: protected-branch push check (not meant to land)"`,
+		"git push origin main",
+		"git reset --hard HEAD~1",
 	],
 };
 
