@@ -92,6 +92,7 @@ import {
 	CLASS_FIXTURES,
 	DASHSCOPE_QUOTA_FIXTURES,
 	NON_QUOTA_BILLING_FIXTURES,
+	QUOTA_ALTERNATIVE_FIXTURES,
 	SSO_FIXTURES,
 	type FailureClass,
 } from "../../.pi/extensions/providers/schema.ts";
@@ -600,6 +601,48 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 				"is the opposite mistake and just as costly: the chain would stop on the one " +
 				"failure a second provider is most certain to survive",
 		).toBe("quota");
+	});
+
+	it("case 3b — every QUOTA_PATTERN alternative is live, and each is the only one that matches its fixture", () => {
+		// FOUND BY FALSIFICATION, NOT BY READING. With CLASS_FIXTURES.quota as the
+		// only positive, deleting BOTH `insufficient_quota` and `exceeded your
+		// current quota` left the entire suite green: that fixture also says
+		// "billing details", so a different alternative covered for the two that had
+		// gone. An alternative no test can kill reads wider than it behaves, and
+		// this table is what kills each one individually. [CR-03]
+		expect(
+			QUOTA_ALTERNATIVE_FIXTURES.length,
+			"the per-alternative table is empty or truncated, so alternatives can be deleted " +
+				"from QUOTA_PATTERN with nothing red — which is how the pattern quietly stops " +
+				"matching the failure it was widened for",
+		).toBeGreaterThanOrEqual(7);
+
+		for (const { alternative, text } of QUOTA_ALTERNATIVE_FIXTURES) {
+			expect(
+				classifyFailure(text),
+				`the fixture written for the '${alternative}' alternative no longer classifies as ` +
+					"quota, so that alternative has been removed or narrowed. Pi calls every quota " +
+					"string non-retryable, so losing one collapses it into `fatal` and the chain " +
+					"stops on the single failure a second provider is most certain to survive",
+			).toBe("quota");
+
+			// MINIMALITY, ASSERTED RATHER THAN PROMISED. A fixture that two
+			// alternatives match cannot kill either of them: delete one and the
+			// other keeps the row green, which is exactly the hole this case exists
+			// to close. Checked by removing THIS alternative from the pattern and
+			// requiring the fixture to stop matching.
+			const withoutThis = QUOTA_ALTERNATIVE_FIXTURES.filter(
+				(entry) => entry.alternative !== alternative,
+			)
+				.map((entry) => entry.alternative)
+				.join("|");
+			expect(
+				new RegExp(withoutThis, "i").test(text),
+				`the fixture for '${alternative}' is ALSO matched by another alternative, so ` +
+					"deleting this one would leave the row above green and the alternative dead. " +
+					"Pick a string whose only quota wording is this alternative",
+			).toBe(false);
+		}
 	});
 
 	it("case 4 — the chain does not call ahead when the first hop answers", () => {

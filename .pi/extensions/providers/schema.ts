@@ -503,6 +503,65 @@ export const DASHSCOPE_QUOTA_FIXTURES: readonly ProviderErrorFixture[] = [
 	},
 ];
 
+/** One alternative of {@link QUOTA_PATTERN} and a string only it matches. */
+export interface QuotaAlternativeFixture {
+	/** The alternative, spelled as it appears in the pattern source. */
+	readonly alternative: string;
+	/**
+	 * A quota failure whose ONLY quota wording is that alternative.
+	 *
+	 * Minimality is the whole property: if any other alternative also matched,
+	 * deleting this one would leave the row green and the alternative dead.
+	 */
+	readonly text: string;
+}
+
+/**
+ * One minimal fixture per {@link QUOTA_PATTERN} alternative. [CR-03]
+ *
+ * WHY A PER-ALTERNATIVE TABLE AND NOT ONE REPRESENTATIVE. Found by
+ * falsification, not by reading: with only `CLASS_FIXTURES.quota` as the
+ * positive, deleting BOTH `insufficient_quota` and `exceeded your current quota`
+ * left the whole suite green — that fixture also says "billing details", so the
+ * `billing (?:details|quota|limit)` alternative kept it classified `quota` and
+ * covered for the two that had gone. An alternative no test can kill is an
+ * alternative that is not really there, and the pattern then reads wider than it
+ * behaves — the same failure `sso.ts`'s dead-pattern check exists to deny.
+ *
+ * Each `text` is chosen so that exactly ONE alternative matches it, which is
+ * asserted directly by `fallback-chain.test.ts` rather than promised here.
+ */
+export const QUOTA_ALTERNATIVE_FIXTURES: readonly QuotaAlternativeFixture[] = [
+	{
+		alternative: "insufficient_quota",
+		text: "Error code: 429 - {'error': {'message': 'Request rejected', 'type': 'insufficient_quota'}}",
+	},
+	{
+		alternative: "out of budget",
+		text: "Error code: 402 - {'error': {'message': 'This organisation is out of budget for the month'}}",
+	},
+	{
+		alternative: "quota exceeded",
+		text: "Error code: 429 - {'error': {'message': 'Model quota exceeded for this endpoint'}}",
+	},
+	{
+		alternative: "exceeded your current quota",
+		text: "Error code: 429 - {'error': {'message': 'You exceeded your current quota, please check your plan'}}",
+	},
+	{
+		alternative: "allocated quota",
+		text: "Allocated quota for this workspace has run out; raise the limit in the console",
+	},
+	{
+		alternative: "arrearage",
+		text: "Arrearage: access denied for this account",
+	},
+	{
+		alternative: "billing (?:details|quota|limit)",
+		text: "Error code: 429 - {'error': {'message': 'Please check your plan and billing details'}}",
+	},
+];
+
 /**
  * Failures that MENTION billing and are not quota failures. [CR-03]
  *
