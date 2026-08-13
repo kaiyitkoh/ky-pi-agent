@@ -180,7 +180,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 04-01-PLAN.md — pin `unbash@4.0.10` as a runtime dependency, record the AST vocabulary by execution, spike the user-scope load mechanism
+- [x] 04-01-PLAN.md — pin `unbash@4.0.10` as a runtime dependency, record the AST vocabulary by execution, spike the user-scope load mechanism
 - [ ] 04-02-PLAN.md — extract the JSONL writer to `.pi/lib/`, add `safety/audit.ts` with allow-and-block rows
 
 **Wave 2** *(blocked on Wave 1 completion)*

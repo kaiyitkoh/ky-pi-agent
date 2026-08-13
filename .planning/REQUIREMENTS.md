@@ -53,7 +53,7 @@
 ### Safety
 
 - [ ] **SAFE-01**: GitLab server-side protected branches and approval rules are configured and verified by attempting a push that must fail — the only control that is not theatre **[RUNBOOK]**
-- [ ] **SAFE-02**: Bash commands are parsed to an AST with `unbash`, resolving wrappers (`sudo`, `env`, `sh -c`, `xargs`) so `g=push; git $g` and `bash -lc "..."` are caught **[FAUX]**
+- [x] **SAFE-02**: Bash commands are parsed to an AST with `unbash`, resolving wrappers (`sudo`, `env`, `sh -c`, `xargs`) so `g=push; git $g` and `bash -lc "..."` are caught **[FAUX]**
 - [ ] **SAFE-03**: Anything unparseable — command substitution, backticks, heredocs, backgrounding — **fails closed** **[FAUX]**
 - [ ] **SAFE-04**: Writes are blocked when `HEAD == main`, while read-only operations against main (`fetch`, `rebase`, `diff`, `log`, `worktree add -b feat main`) remain allowed **[FAUX]**
 - [ ] **SAFE-05**: `glab mr merge` is blocked — in the user's work repo, the MR merge is the deploy trigger **[FAUX]**
@@ -62,7 +62,7 @@
 - [ ] **SAFE-08**: File writes and deletes outside the project directory are blocked **[FAUX]**
 - [ ] **SAFE-09**: Enforcement happens **twice** — at the `tool_call` hook and inside a wrapped `bash` tool — because later hooks can mutate `event.input` after approval and Pi performs no re-validation **[FAUX]**
 - [ ] **SAFE-10**: Confirmation uses block → approval-tool → re-issue, not an inline `confirm()`, and is **deny-by-default**; a CI test asserts the deny under `--mode json` where `noOpUIContext.confirm` returns `false` **[FAUX]**
-- [ ] **SAFE-11**: Safety extensions install at **user scope** — project-scoped extensions don't load in subagents, which spawn headless and therefore never grant trust **[FAUX]**
+- [x] **SAFE-11**: Safety extensions install at **user scope** — project-scoped extensions don't load in subagents, which spawn headless and therefore never grant trust **[FAUX]**
 - [ ] **SAFE-12**: The blocked-command test passes **inside a spawned subagent**, not only in the interactive session **[FAUX]**
 - [ ] **SAFE-13**: The non-bash surface is guarded — `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.gitconfig`, CI workflow files **[FAUX]**
 - [ ] **SAFE-14**: Every allow and every block is written to an audit JSONL **[FAUX]**
@@ -257,7 +257,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | PROV-09 | Phase 3 | Complete — `docs/RUNBOOK.md` carries eleven entries across Phases 1–3, all `OUTSTANDING` and machine-enforced as such by `tests/unit/docs-policy.test.ts` in both the summary table and the detail subsection |
 | PROV-10 | Phase 3 | Partial — `reasoning_content` on the replayed assistant message is proven on real bytes with a paired negative; the second turn's 200 is `RB-03-02`, **OUTSTANDING**. Not complete |
 | SAFE-01 | Phase 4 | Pending |
-| SAFE-02 | Phase 4 | Pending |
+| SAFE-02 | Phase 4 | Complete |
 | SAFE-03 | Phase 4 | Pending |
 | SAFE-04 | Phase 4 | Pending |
 | SAFE-05 | Phase 4 | Pending |
@@ -266,7 +266,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-08 | Phase 4 | Pending |
 | SAFE-09 | Phase 4 | Pending |
 | SAFE-10 | Phase 4 | Pending |
-| SAFE-11 | Phase 4 | Pending |
+| SAFE-11 | Phase 4 | Complete |
 | SAFE-12 | Phase 4 | Pending |
 | SAFE-13 | Phase 4 | Pending |
 | SAFE-14 | Phase 4 | Pending |

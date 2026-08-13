@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-11-PLAN.md — docs/RUNBOOK.md RB-03-01..05 (all OUTSTANDING), the three-phase status guard falsified nine ways, and the PROV traceability (five complete, five partial)
-last_updated: "2026-08-13T19:26:27.560Z"
-last_activity: 2026-08-13 -- Phase 04 planning complete
+stopped_at: Completed 04-01-PLAN.md
+last_updated: "2026-08-13T19:44:54.228Z"
+last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 44
-  completed_plans: 32
+  completed_plans: 33
   percent: 27
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 4 — safety & deployment guardrails
+**Current focus:** Phase 04 — safety-deployment-guardrails
 
 ## Current Position
 
-Phase: 4
-Plan: Not started
+Phase: 04 (safety-deployment-guardrails) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-08-13 -- Phase 04 planning complete
+Last activity: 2026-08-13
 
-Progress: [██████████] 100%
+Progress: [████████░░] 75%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -94,6 +94,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 03 P09 | ~40m | 2 tasks | 1 files |
 | Phase 03 P10 | ~45m | 3 tasks | 4 files |
 | Phase 3 P11 | 55m | 3 tasks | 4 files |
+| Phase 04 P01 | 15min | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -207,6 +208,9 @@ Recent decisions affecting current work:
 - [Phase 03]: 03-11: Phase 3 pins WHOLE one-line commands in ENTRY_COMMANDS and each pin was verified to occur EXACTLY ONCE in the runbook -- RB-02-03's fragment lesson plus its converse, since a pin that also matches a neighbouring entry's command stays green when the entry that owns it drops it
 - [Phase 03]: 03-11: five PROV requirements complete (01, 02, 05, 08, 09) and five PARTIAL with their RB-03 id named inline (03/RB-03-01, 04/RB-03-03, 06/RB-03-05, 07/RB-03-04, 10/RB-03-02) -- the status table says 'Partial ... Not complete' rather than Phase 1's 'Complete offline', because the file's own legend defines [~] as partial and it is the only shape a skimmer cannot misread as done
 - [Phase 03]: 03-11: a falsification restore via git checkout -- silently DELETED uncommitted Task 2 edits, and two mutations then reported a green 58-test run against the pre-edit file. Commit the change before falsifying it; a mutation run against an unmutated original is indistinguishable from a passing one
+- [Phase 04-01]: unbash Word.value/Word.parts are self-memoizing getters, not own enumerable properties -- a plain Object.keys() tree walk silently never descends into a command substitution or expansion hidden inside a Word; walkableKeys() adds them via an 'in' check
+- [Phase 04-01]: the user-scope re-export stub loads in a real spawned pi process on Windows on the first execution -- no file:// URL or directory-copy fallback needed; this is the mechanism Plan 09's bootstrap wires
+- [Phase 04-01]: ParsedScript.errors is undefined on a clean unbash parse, not [] -- every downstream policy check must read (script.errors ?? []).length
 
 ### Pending Todos
 
@@ -254,8 +258,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T16:36:49.322Z
-Stopped at: Completed 03-11-PLAN.md — docs/RUNBOOK.md RB-03-01..05 (all OUTSTANDING), the three-phase status guard falsified nine ways, and the PROV traceability (five complete, five partial)
+Last session: 2026-08-13T19:44:54.219Z
+Stopped at: Completed 04-01-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
