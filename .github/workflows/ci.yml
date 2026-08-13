@@ -32,6 +32,16 @@
 #     this repo, with a token.
 #     Resolved with `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha` on
 #     2026-08-13. Asserted by tests/unit/ci-pinning.test.ts.
+#
+#     THE COMMENT IS PART OF THE PIN, NOT DECORATION. It shipped once saying
+#     `# v5.0.0` against a commit that `gh api repos/actions/setup-node/tags`
+#     reports as v7.0.0 — two majors out, and nothing in the repo noticed,
+#     because the test only required the comment to be non-empty. Corrected on
+#     2026-08-13 by re-resolving both refs live. The offline half of the gate is
+#     now the explicit (SHA, tag) table in tests/unit/ci-pinning.test.ts; the
+#     online half is the `pin-audit` step below, which re-resolves every comment
+#     through the API on every run. Never edit a SHA or a tag comment without
+#     re-resolving BOTH and updating that table in the same change.
 #   * `defaults.run.shell: bash` at workflow level. Without an explicit shell
 #     the Windows runner defaults to pwsh, `sh bin/bootstrap.sh` then behaves
 #     oddly, and the usual "fix" is a PowerShell script — which this project
@@ -78,6 +88,40 @@ jobs:
           shellcheck --version
           shellcheck --shell=sh --severity=style $files
 
+      # CR-03. The offline gate (tests/unit/ci-pinning.test.ts) can only check a
+      # tag comment against a table someone typed. This step checks it against
+      # the registry of record. It runs here rather than in the matrix because
+      # it needs a token and one resolution is enough; ubuntu already has `gh`.
+      - name: pin-audit -- every tag comment must resolve to the pinned SHA
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Each surviving line is `<owner/repo@sha> <tag>`. A wholly-commented
+          # line cannot match: the pattern anchors uses: to the line start.
+          sed -n 's/^[[:space:]]*-\{0,1\}[[:space:]]*uses:[[:space:]]*\([^[:space:]#]*\)[[:space:]]*#[[:space:]]*\([^[:space:]]*\).*/\1 \2/p' \
+            .github/workflows/*.yml | sort -u > pins.txt
+          if [ ! -s pins.txt ]; then
+            echo "::error::pin-audit matched no pinned action lines -- an audit over nothing is a vacuous pass"
+            exit 1
+          fi
+          fail=0
+          while read -r ref tag; do
+            repo=${ref%@*}
+            sha=${ref#*@}
+            actual=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null || echo "")
+            if [ -z "$actual" ]; then
+              echo "::error::$repo has no tag $tag -- the comment names a release that does not exist"
+              fail=1
+            elif [ "$actual" != "$sha" ]; then
+              echo "::error::$repo is pinned at $sha but $tag resolves to $actual -- the comment is wrong, the SHA may be too"
+              fail=1
+            else
+              echo "  ok  $repo@$sha is $tag"
+            fi
+          done < pins.txt
+          rm -f pins.txt
+          exit $fail
+
   # BOOT-07. Both legs EXECUTE the suite and every shipped script.
   test:
     name: test (${{ matrix.os }})
@@ -93,7 +137,7 @@ jobs:
       # happens to ship (22.23.x today). Testing the minimum is the point: a
       # syntax or API that needs a newer Node must fail here, not on a user's
       # machine that meets the documented requirement.
-      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v5.0.0
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.19.0'
 

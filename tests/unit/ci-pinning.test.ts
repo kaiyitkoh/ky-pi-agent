@@ -170,6 +170,53 @@ describe("the SHA predicate itself is proven, independently of ci.yml", () => {
 	}
 });
 
+/**
+ * The audited (SHA, tag) pairs. THIS TABLE IS THE OFFLINE HALF OF THE GATE.
+ *
+ * A tag comment that nothing checks is a claim, not a pin. The original
+ * assertion here was `expect(comment).toMatch(/^#\s*\S+/)` -- any non-empty
+ * comment passed, `# banana` included -- and that is exactly how
+ * `actions/setup-node@8207627… # v5.0.0` shipped against a commit tagged
+ * v7.0.0, two majors out, with nothing in the repo able to notice.
+ *
+ * Every entry below was resolved live on 2026-08-13 with
+ *   gh api repos/<owner>/<repo>/git/ref/tags/<tag> --jq .object.sha
+ * and cross-checked against
+ *   gh api "repos/<owner>/<repo>/tags?per_page=30" --jq '.[]|select(.commit.sha=="<sha>").name'
+ *
+ *   actions/checkout   v7.0.1 -> 3d3c42e5aac5ba805825da76410c181273ba90b1
+ *   actions/setup-node v7.0.0 -> 820762786026740c76f36085b0efc47a31fe5020
+ *                      (v5.0.0 is a0853c24544627f65ddf259abe73b1d18a591444 --
+ *                       recorded so the specific mislabel cannot come back)
+ *
+ * Bumping an action means re-running those two commands and editing this table
+ * in the same change. That is the point: the edit is where the resolution
+ * happens, so a transcribed-from-memory tag cannot reach main. The `pin-audit`
+ * step in the `posix-lint` job is the online half and re-resolves on every run.
+ */
+export const AUDITED_PINS: ReadonlyArray<{
+	readonly action: string;
+	readonly sha: string;
+	readonly tag: string;
+}> = [
+	{
+		action: "actions/checkout",
+		sha: "3d3c42e5aac5ba805825da76410c181273ba90b1",
+		tag: "v7.0.1",
+	},
+	{
+		action: "actions/setup-node",
+		sha: "820762786026740c76f36085b0efc47a31fe5020",
+		tag: "v7.0.0",
+	},
+];
+
+/** The bare tag from a trailing `# v7.0.1` comment, or undefined. */
+export function tagFromComment(comment: string): string | undefined {
+	const match = /^#\s*(v?\d+(?:\.\d+)*)\s*$/.exec(comment.trim());
+	return match ? match[1] : undefined;
+}
+
 describe("T-01-24 -- no CI action can move under this project", () => {
 	it("declares at least one action", () => {
 		// Zero references would make every assertion below vacuous.
@@ -185,15 +232,69 @@ describe("T-01-24 -- no CI action can move under this project", () => {
 			).toBe(true);
 		});
 
-		it(`keeps the human-readable tag beside ${ref.split("@")[0]}`, () => {
+		it(`keeps a version-shaped tag comment beside ${ref.split("@")[0]}`, () => {
 			// A bare SHA is unreviewable. The tag comment is what lets a reader
-			// tell 'current' from 'two years stale' without a network call.
+			// tell 'current' from 'two years stale' without a network call -- so it
+			// has to actually look like a version, not merely be non-empty.
 			expect(
-				comment,
-				`\`uses: ${ref}\` has no trailing \`# <tag>\` comment`,
-			).toMatch(/^#\s*\S+/);
+				tagFromComment(comment),
+				`\`uses: ${ref}\` needs a trailing \`# v<version>\` comment; got ${JSON.stringify(comment)}`,
+			).toBeDefined();
+		});
+
+		it(`resolves ${ref.split("@")[0]} to the audited (SHA, tag) pair`, () => {
+			// CR-03: this is the assertion that was missing. The comment and the
+			// SHA must BOTH match a pair someone resolved through the API.
+			const [action, sha] = ref.split("@");
+			const audited = AUDITED_PINS.find((p) => p.action === action);
+			expect(
+				audited,
+				`\`${action}\` is not in AUDITED_PINS. Resolve it with ` +
+					`\`gh api repos/${action}/git/ref/tags/<tag> --jq .object.sha\` and add the pair ` +
+					"in this change, or the tag comment is an unchecked claim.",
+			).toBeDefined();
+			if (!audited) {
+				return;
+			}
+			expect(
+				sha,
+				`\`${action}\` is pinned at ${sha} but the audited SHA for ${audited.tag} is ${audited.sha}`,
+			).toBe(audited.sha);
+			expect(
+				tagFromComment(comment),
+				`\`${action}@${sha}\` is commented \`${comment}\` but that SHA is ${audited.tag}. ` +
+					"A tag comment two majors out inverts the reason the comment exists.",
+			).toBe(audited.tag);
 		});
 	}
+
+	it("audits every action the workflow references (no silent additions)", () => {
+		// De-duplicated: `actions/checkout` legitimately appears once per job.
+		const referenced = [...new Set(references.map(({ ref }) => ref.split("@")[0]))].sort();
+		const audited = AUDITED_PINS.map((p) => p.action).sort();
+		expect(
+			referenced,
+			"every `uses:` in ci.yml must have an AUDITED_PINS entry, and every entry must " +
+				"still be used -- a stale entry is a pin nobody re-resolves",
+		).toEqual(audited);
+	});
+
+	it("rejects a mislabelled or malformed tag comment (the assertion is live)", () => {
+		// Proven against inline cases, because a table that only ever sees the
+		// current correct file has never demonstrated that it can fail. The first
+		// three are exactly the shapes the old `/^#\s*\S+/` accepted.
+		expect(tagFromComment("# banana")).toBeUndefined();
+		expect(tagFromComment("# see below")).toBeUndefined();
+		expect(tagFromComment("")).toBeUndefined();
+		expect(tagFromComment("# v5.0.0")).toBe("v5.0.0");
+		expect(tagFromComment("#v7.0.0")).toBe("v7.0.0");
+		expect(tagFromComment("# 4")).toBe("4");
+
+		// The CR-03 defect itself: the real setup-node SHA carrying the v5 label.
+		const setupNode = AUDITED_PINS.find((p) => p.action === "actions/setup-node");
+		expect(setupNode?.tag).toBe("v7.0.0");
+		expect(tagFromComment("# v5.0.0")).not.toBe(setupNode?.tag);
+	});
 });
 
 describe("BOOT-07 -- both matrix legs run, and neither can mask the other", () => {
@@ -301,6 +402,18 @@ describe("T-01-25 / T-01-28 -- the legs execute rather than merely build", () =>
 
 	it("typechecks against Pi's shipped .d.ts", () => {
 		expect(workflow).toMatch(/npx tsc --noEmit/);
+	});
+
+	it("re-resolves every tag comment through the API (the online half of CR-03)", () => {
+		// AUDITED_PINS above is a table someone typed; it can only be as right as
+		// the resolution behind it. This step is what checks the table against the
+		// registry of record, on every run, with the token the job already has.
+		expect(
+			workflow,
+			"the `pin-audit` step is the only thing that can catch a tag comment " +
+				"drifting from its SHA after the table was written",
+		).toMatch(/name:\s*pin-audit/);
+		expect(workflow).toMatch(/gh api "repos\/\$repo\/git\/ref\/tags\/\$tag"/);
 	});
 
 	it("tests the Node floor Pi declares, not the runner default", () => {

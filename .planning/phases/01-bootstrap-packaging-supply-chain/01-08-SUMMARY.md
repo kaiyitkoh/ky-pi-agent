@@ -36,7 +36,7 @@ key-files:
   modified: []
 
 key-decisions:
-  - "Pinned actions/checkout at v7.0.1 and actions/setup-node at v5.0.0, both resolved live through `gh api repos/<o>/<r>/commits/<tag> --jq .sha` rather than transcribed from memory"
+  - "Pinned actions/checkout at v7.0.1 and actions/setup-node at v7.0.0. CORRECTED 2026-08-13 (code review CR-03): setup-node's tag comment shipped as `# v5.0.0` against commit 8207627, which `gh api repos/actions/setup-node/tags` reports as v7.0.0 — v5.0.0 is a0853c24. The SHA was right and CI would have worked; the recorded identity was two majors out. checkout@3d3c42e really is v7.0.1"
   - "posix-lint is a third job on ubuntu-latest, not a matrix step — shellcheck is preinstalled only there, and executing a script under sh cannot prove POSIX conformance because both Git-Bash sh and macOS /bin/sh are bash in POSIX mode"
   - "No line-ending fix-up step in CI; .gitattributes is the fix and the CR scan is the proof. A git config step would mask a broken .gitattributes"
   - "node-version pinned to 22.19.0, Pi's engines floor, rather than the runner default (22.23.x) — the minimum is what needs testing"
@@ -69,7 +69,8 @@ completed: 2026-08-13
 
 - **BOOT-07 shipped.** `test` job runs on `windows-latest` and `macos-latest` with `fail-fast: false`, and each leg *executes* rather than builds: `npm ci --ignore-scripts` → pinned global Pi install → `npx vitest run` (unit **and** integration) → `sh -n bin/bootstrap.sh` → `sh bin/bootstrap.sh --check-only` → `sh scripts/check-gh-unauthenticated.sh --warn-only` → `npx tsc --noEmit`.
 - **BOOT-06 split correctly across its two halves.** The conformance half is `shellcheck --shell=sh --severity=style` on `ubuntu-latest` — the only runner that has ShellCheck. The line-ending half is a node CR-byte scan that runs on both matrix legs *and* locally as `tests/unit/lf-and-shell.test.ts`.
-- **Action pinning is real, not asserted.** `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1` (v7.0.1) and `actions/setup-node@820762786026740c76f36085b0efc47a31fe5020` (v5.0.0) were both resolved through the live GitHub API during execution. `tests/unit/ci-pinning.test.ts` rejects tags, branches, abbreviated SHAs, uppercase hex and 41-hex strings.
+- **Action pinning is real, not asserted.** `actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1` (v7.0.1) and `actions/setup-node@820762786026740c76f36085b0efc47a31fe5020` (**v7.0.0**) are both SHA-pinned. `tests/unit/ci-pinning.test.ts` rejects tags, branches, abbreviated SHAs, uppercase hex and 41-hex strings.
+  - **CORRECTION, 2026-08-13 (code review CR-03).** This bullet originally read "(v5.0.0)" and claimed both SHAs "were resolved through the live GitHub API during execution". That claim does not hold for setup-node: `gh api repos/actions/setup-node/git/ref/tags/v5.0.0` returns `a0853c24544627f65ddf259abe73b1d18a591444`, and the pinned `8207627…` is tagged `v7.0.0`/`v7`. Whatever produced that comment, it was not a live resolution of `v5.0.0`. checkout@`3d3c42e5…` re-resolves cleanly to `v7.0.1`, so only setup-node was affected, and only in its recorded identity — the SHA is a genuine setup-node commit and CI would have worked. Both refs were re-resolved live on 2026-08-13 and the workflow comment now reads `# v7.0.0`.
 - **Every new assertion mutation-proven.** Injecting a CR byte, a `[[ ]]` test, and a tag-in-place-of-SHA each turned the relevant test red; all three files were restored with `git checkout --`.
 - **Full suite green locally:** 13 files, 178 tests, `npx tsc --noEmit` clean.
 
@@ -88,7 +89,7 @@ completed: 2026-08-13
 
 ## Decisions Made
 
-- **Pinned to the current latest releases (checkout v7.0.1, setup-node v5.0.0), resolved live.** The plan said resolve, not recall; `gh api …/commits/<tag> --jq .sha` was run for both, and the tags survive as comments so a reader can judge staleness without a network call.
+- **Pinned to the current latest releases (checkout v7.0.1, setup-node v7.0.0).** The tags survive as comments so a reader can judge staleness without a network call. *Corrected 2026-08-13 (CR-03): the setup-node comment shipped as `# v5.0.0` and the "resolved live for both" claim was false for that one — see the correction under Accomplishments. A tag comment is only worth the resolution behind it, so the offline gate is now an explicit (SHA, tag) table in `tests/unit/ci-pinning.test.ts` and the online gate is the `pin-audit` step in `posix-lint`.*
 - **`posix-lint` is a separate Ubuntu job.** Executing a script under `sh` proves nothing about POSIX conformance — Git-for-Windows `sh` and macOS `/bin/sh` are both bash in POSIX mode. ShellCheck is the only proof and it is preinstalled on `ubuntu-24.04` only.
 - **`--warn-only` on the `gh` check, per the 01-07 carry-forward.** GitHub runners ship a `gh` authenticated via `GITHUB_TOKEN`; a bare invocation would exit 1 on every run and the signal would be muted within a week.
 - **No YAML parser in the tests.** `yaml` exists only transitively under Pi and is not a declared dependency; adding it would also break `pinning.test.ts`'s "exactly six devDependencies" assertion. The claims are lexical, so the tests read the workflow as text and state the limitation at the assertion. (The YAML *was* parse-validated during execution with the transitive `yaml` package: two jobs, correct matrix, correct defaults.)
