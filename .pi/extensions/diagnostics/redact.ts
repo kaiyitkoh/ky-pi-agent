@@ -207,7 +207,16 @@ export function redactString(value: string): string {
 export function redactHeaders(headers: Record<string, string | null>): Record<string, string | null> {
 	const out: Record<string, string | null> = {};
 	for (const [key, value] of Object.entries(headers)) {
-		if (value === null) {
+		if (typeof value !== "string" && value !== null) {
+			// [IN-04] The declared type is `Record<string, string | null>`, so this
+			// cannot happen -- and a provider or another extension deleting a key by
+			// assigning `undefined` rather than `null` makes it happen anyway. Both
+			// branches below would then throw on `value.length`, and `safeHandler`
+			// would discard the WHOLE wire record for that hook: one loose value and
+			// the request disappears from the dump entirely. Normalised to `null`,
+			// which is the map's own spelling of "no value here".
+			out[key] = null;
+		} else if (value === null) {
 			out[key] = null;
 		} else if (isRedactedHeaderKey(key)) {
 			out[key] = redactionPlaceholder(value.length);
@@ -245,22 +254,87 @@ function walk(value: unknown, depth: number, budget: { nodes: number }): unknown
 			// The header rule applies to object keys too: a captured payload can
 			// nest a header map, and `{ authorization: "..." }` there is the same
 			// credential it would be in the header hook.
-			out[key] =
-				isRedactedHeaderKey(key) && typeof item === "string"
-					? redactionPlaceholder(item.length)
-					: walk(item, depth + 1, budget);
+			out[key] = isRedactedHeaderKey(key)
+				? redactUnderCredentialKey(item, budget)
+				: walk(item, depth + 1, budget);
 		}
 		return out;
 	}
-	// Numbers, booleans, null, undefined, and anything with a non-plain
-	// prototype (a Date, a class instance) pass through untouched. JSON payloads
-	// contain none of the latter, and serialising a Date to `{}` would mangle
-	// clean data -- the failure mode the negative control exists to catch.
+	// A `Date` is the one non-plain object worth keeping, and it is kept as the
+	// string `JSON.stringify` would have produced from it rather than as the `{}`
+	// a naive walk yields. An ISO timestamp matches no credential shape, and
+	// mangling clean data is a failure too -- just a quieter one.
+	if (value instanceof Date) {
+		return value.toISOString();
+	}
+	// EVERY OTHER OBJECT-LIKE VALUE IS TRUNCATED RATHER THAN PASSED THROUGH.
+	// `isPlainObject` accepts only `Object.prototype` and `null` prototypes, so a
+	// class instance, a `Map`, a `Set` or a typed array used to be returned BY
+	// REFERENCE and un-walked -- and `JSON.stringify` still serialises its own
+	// enumerable properties, so any credential-shaped string inside it reached
+	// disk verbatim. The old comment asserted "JSON payloads contain none of the
+	// latter", which is an assumption about every current and future adapter made
+	// in the one module whose failure mode is a live key committed to a public
+	// repository. Passing it through also let a CIRCULAR non-plain object reach
+	// `JSON.stringify`, which then throws inside the append.
+	//
+	// So: over-redact. A truncated subtree is recorded as truncated and nothing
+	// else, which is the same trade {@link TRUNCATION_PLACEHOLDER} already makes
+	// for a subtree that blew the depth budget. [threat T-02-02-03]
+	if (typeof value === "object" && value !== null) {
+		return TRUNCATION_PLACEHOLDER;
+	}
+	// Numbers, booleans, null, undefined and every other primitive pass through
+	// untouched. None of them can carry a string.
 	return value;
 }
 
 /**
+ * The value under a key that NAMES a credential.
+ *
+ * The rule used to fire only for `typeof item === "string"`, so
+ * `{ authorization: { scheme: "Bearer", token: "short123" } }` and
+ * `{ api_key: ["short123"] }` fell through to shape matching alone — and a
+ * credential too short, or too unusual, to match any of the eleven
+ * `SECRET_VALUE_PATTERNS` was written out in full. A key that says "this is a
+ * credential" is better evidence than any shape heuristic, so the whole subtree
+ * under it goes.
+ *
+ * `null` and `undefined` are the exception, and for the same reason
+ * {@link redactHeaders} keeps them: `null` means "delete this header"
+ * [VERIFIED: 02-RESEARCH.md §2.1, pi-ai src/types.ts:110], and rewriting it to a
+ * placeholder would misreport a deletion as a secret.
+ */
+function redactUnderCredentialKey(item: unknown, budget: { nodes: number }): unknown {
+	if (typeof item === "string") {
+		return redactionPlaceholder(item.length);
+	}
+	if (item === null || item === undefined) {
+		return item;
+	}
+	// Over-redaction is the right way to be wrong here. `budget` is still charged
+	// so a payload full of credential-named keys cannot escape the node cap.
+	budget.nodes -= 1;
+	return TRUNCATION_PLACEHOLDER;
+}
+
+/**
  * Redact every string leaf of a payload, returning a NEW structure.
+ *
+ * TWO WAYS THIS USED TO BE LESS THAN IT CLAIMED, both closed:
+ *   1. only PLAIN objects were walked. A class instance, a `Map` or a typed array
+ *      came back by reference and un-walked, while `JSON.stringify` still emitted
+ *      its own enumerable properties — so a credential-shaped string inside one
+ *      reached disk verbatim, and a circular one made `JSON.stringify` throw
+ *      inside the append. Anything object-like that is not a plain object or an
+ *      array is now {@link TRUNCATION_PLACEHOLDER}, with `Date` kept as the ISO
+ *      string `JSON.stringify` would itself have produced.
+ *   2. the credential-KEY rule fired only on a string value, so
+ *      `{ authorization: { token: "short123" } }` and `{ api_key: ["short123"] }`
+ *      fell through to shape matching alone and a credential too short or too
+ *      unusual for any of the eleven `SECRET_VALUE_PATTERNS` was written out.
+ *      The whole subtree under a credential-named key now goes — see
+ *      {@link redactUnderCredentialKey}.
  *
  * NON-MUTATING BY CONTRACT. `before_provider_request` hands over the live
  * request payload and any handler that returns a non-`undefined` value replaces

@@ -227,6 +227,150 @@ describe("DIAG-07 — redactDeep walks a payload without mutating it", () => {
 	});
 });
 
+describe("DIAG-07 — the two holes redactDeep used to have", () => {
+	/**
+	 * SHORT AND UNREMARKABLE ON PURPOSE.
+	 *
+	 * It matches NONE of the eleven `SECRET_VALUE_PATTERNS` — that is the whole
+	 * point. Shape matching cannot save a credential this plain; only the KEY that
+	 * names it can, and the key rule used to fire on a string value only.
+	 */
+	const SHORT_SECRET = "s3cr3t42";
+
+	it("the secret really is invisible to shape matching, so the key rule is what is under test", () => {
+		expect(
+			redactString(`token=${SHORT_SECRET}`),
+			"if a pattern started matching this value, every case below would pass through the SHAPE " +
+				"half of the redactor and prove nothing about the key half. Pick a duller secret rather " +
+				"than deleting the assertion",
+		).toBe(`token=${SHORT_SECRET}`);
+	});
+
+	it("redacts a credential nested UNDER a credential-named key", () => {
+		const out = JSON.stringify(
+			redactDeep({
+				model: "deepseek-chat",
+				authorization: { scheme: "Bearer", token: SHORT_SECRET },
+				api_key: [SHORT_SECRET],
+			}),
+		);
+
+		expect(
+			out.includes(SHORT_SECRET),
+			"a key that SAYS `authorization` or `api_key` is better evidence than any shape " +
+				"heuristic, and the rule used to fire only when the value was a string — so " +
+				"`{ authorization: { token } }` and `{ api_key: [secret] }` fell through to pattern " +
+				"matching, and a credential too short or too unusual for the eleven patterns was " +
+				"written to disk in full. Over-redaction is the right way to be wrong here",
+		).toBe(false);
+
+		expect(
+			out,
+			"and something must be recorded in its place, or the dump silently loses the fact that a " +
+				"credential was there at all",
+		).toContain(TRUNCATION_PLACEHOLDER);
+
+		expect(
+			out,
+			"the paired positive: the provenance fields around it must survive, or a redactor that " +
+				"blanked the whole payload would pass the assertion above",
+		).toContain("deepseek-chat");
+	});
+
+	it("does not pass a non-plain object through un-walked", () => {
+		class Credentialed {
+			public note = "harmless";
+			public secret = SHORT_SECRET;
+			public awsKey = `${["AK", "IA"].join("")}IOSFODNN7EXAMPLE`;
+		}
+
+		const out = JSON.stringify(redactDeep({ model: "deepseek-chat", holder: new Credentialed() }));
+
+		expect(
+			out.includes(SHORT_SECRET),
+			"`isPlainObject` accepts only Object.prototype and null prototypes, so a class instance " +
+				"used to come back BY REFERENCE and un-walked — and JSON.stringify still serialises its " +
+				"own enumerable properties, so every string inside it reached disk having never seen " +
+				"the redactor. The old comment asserted `JSON payloads contain none of the latter`, " +
+				"which is an assumption about every current and future adapter made in the one module " +
+				"whose failure is a live key in a public repository",
+		).toBe(false);
+
+		expect(
+			out.includes("IOSFODNN7EXAMPLE"),
+			"the AWS-shaped key inside the same instance must be gone too. It would have leaked for " +
+				"exactly the same reason — being inside an object the walk never entered",
+		).toBe(false);
+
+		expect(out, "and the subtree must be recorded as truncated").toContain(TRUNCATION_PLACEHOLDER);
+		expect(out, "with the surrounding plain payload intact").toContain("deepseek-chat");
+	});
+
+	it("does not throw on a CIRCULAR non-plain object", () => {
+		// The same hole, in its other failure mode: a circular non-plain object used
+		// to survive the walk by reference and then make `JSON.stringify` throw inside
+		// `appendJsonl` -- which, on the nested path, killed the request being
+		// measured (CR-01's trigger list).
+		class Looped {
+			public self: unknown = undefined;
+			public secret = SHORT_SECRET;
+		}
+		const looped = new Looped();
+		looped.self = looped;
+
+		const out = redactDeep({ payload: looped });
+
+		expect(
+			() => JSON.stringify(out),
+			"the redacted structure must be serialisable. A cycle surviving the walk turns every " +
+				"append into a throw, and on the nested path a throwing append used to fail the real " +
+				"model request",
+		).not.toThrow();
+
+		expect(JSON.stringify(out).includes(SHORT_SECRET), "and the secret inside it is gone").toBe(
+			false,
+		);
+	});
+
+	it("keeps a Date as the string JSON.stringify would have produced", () => {
+		// THE NEGATIVE CONTROL FOR THE CHANGE ABOVE. Over-redaction is a failure too,
+		// just a quieter one: truncating everything object-like without exception
+		// would turn every timestamp in a payload into a sentinel. An ISO timestamp
+		// matches no credential shape and is what `JSON.stringify` emits anyway.
+		const when = new Date(Date.UTC(2026, 7, 13, 3, 57, 24, 428));
+		const out = redactDeep({ createdAt: when, model: "deepseek-chat" }) as {
+			createdAt: unknown;
+			model: string;
+		};
+
+		expect(
+			out.createdAt,
+			"a Date must survive as its own ISO form. Truncating it would mangle clean data, and " +
+				"serialising it to `{}` — which a naive walk of its own enumerable properties yields — " +
+				"would lose it entirely",
+		).toBe(when.toISOString());
+
+		expect(
+			JSON.stringify(out).includes(TRUNCATION_PLACEHOLDER),
+			"nothing in this clean payload may be reported as truncated",
+		).toBe(false);
+	});
+
+	it("leaves null and undefined under a credential-named key alone", () => {
+		// `null` means "delete this header" (pi-ai src/types.ts:110). Rewriting it to
+		// a placeholder would misreport a deletion as a credential, which is the same
+		// reason `redactHeaders` keeps it.
+		const out = redactDeep({ authorization: null, "x-api-key": undefined }) as Record<
+			string,
+			unknown
+		>;
+
+		expect(out.authorization, "a deletion marker is not a secret").toBeNull();
+		expect(Object.keys(out), "and an absent value stays absent-shaped").toContain("x-api-key");
+		expect(out["x-api-key"]).toBeUndefined();
+	});
+});
+
 describe("DIAG-07 — redactHeaders on resolved provider auth headers", () => {
 	const bearer = ["Bearer", "abcdefghij.klmno-pqrst"].join(" ");
 
@@ -274,6 +418,31 @@ describe("DIAG-07 — redactHeaders on resolved provider auth headers", () => {
 			"null means 'delete this header' (pi-ai src/types.ts:110); rewriting it to a placeholder " +
 				"would misreport a deletion as a credential",
 		).toBeNull();
+	});
+
+	it("normalises a non-string, non-null value instead of throwing", () => {
+		// [IN-04] The declared type is `Record<string, string | null>`, so this cannot
+		// happen -- and a provider or another extension deleting a key by assigning
+		// `undefined` rather than `null` makes it happen anyway. Both branches read
+		// `value.length`, so it used to throw, and `safeHandler` would then discard
+		// the WHOLE wire record for that hook: one loose value and the request
+		// disappears from the dump entirely.
+		const loose = { authorization: undefined, "x-count": 7 } as unknown as Record<
+			string,
+			string | null
+		>;
+
+		expect(
+			() => redactHeaders(loose),
+			"a header map carrying anything but a string or null must not take the record down with it",
+		).not.toThrow();
+
+		const normalised = redactHeaders(loose);
+		expect(
+			normalised,
+			"both keys must still be PRESENT, normalised to the map's own spelling of `no value here`. " +
+				"Dropping them would make the dump claim headers that were sent were not",
+		).toEqual({ authorization: null, "x-count": null });
 	});
 
 	it("leaves non-credential headers intact", () => {
