@@ -138,7 +138,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 03-01-PLAN.md — Wave 0 test seams: `wrapFauxWithStatus` (faux hard-codes HTTP 200) and `withModelsConfig`, an offline `ModelRuntime` over an arbitrary `models.json`
+- [x] 03-01-PLAN.md — Wave 0 test seams: `wrapFauxWithStatus` (faux hard-codes HTTP 200) and `withModelsConfig`, an offline `ModelRuntime` over an arbitrary `models.json`
 - [ ] 03-02-PLAN.md — `models-template.json`, `auth-template.json`, the `KYPI_DASHSCOPE_BASE_URL` seam, and the Trap T1 filename guard (PROV-01, PROV-03, PROV-04, PROV-06)
 
 **Wave 2** *(blocked on Wave 1 completion)*

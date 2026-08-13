@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Phase 03 planned — 11 plans in 4 waves, plan-checker VERIFICATION PASSED after one revision; ready to execute
-last_updated: "2026-08-13T13:38:30.256Z"
-last_activity: 2026-08-13 -- Phase 03 planning complete
+stopped_at: Completed 03-01-PLAN.md — the two Wave-0 provider test seams (wrapFauxWithStatus, withModelsConfig), both falsified
+last_updated: "2026-08-13T13:54:34.631Z"
+last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 32
-  completed_plans: 21
+  completed_plans: 22
   percent: 18
 ---
 
@@ -21,20 +21,21 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 3 — providers & credentials
+**Current focus:** Phase 03 — providers-credentials
 
 ## Current Position
 
-Phase: 3
-Plan: Not started
+Phase: 03 (providers-credentials) — EXECUTING
+Plan: 2 of 11
 Status: Ready to execute
-Last activity: 2026-08-13 -- Phase 03 planning complete
+Last activity: 2026-08-13
 
-Progress: [██████████] 100%
+Progress: [███████░░░] 69%
 
-**Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
-10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
-percentage will fall. The honest phase-level figure is **1 of 11 phases complete**.
+**Read that 69% carefully.** The denominator is *plans written so far* — Phase 1's
+10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
+grow and the percentage will fall. The honest phase-level figure is **2 of 11
+phases complete**.
 
 ## Performance Metrics
 
@@ -78,6 +79,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 02 P09 | ~40m | 2 tasks | 4 files |
 | Phase 02 P10 | 55m | 3 tasks | 6 files |
 | Phase 02 P11 | 25m | 3 tasks | 3 files |
+| Phase 03 P01 | 35m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -159,6 +161,10 @@ Recent decisions affecting current work:
 - [Phase 2]: 02-11: RB-02-02 targets the DeepSeek/DashScope bearer path and never Bedrock — SigV4 is applied by Smithy middleware downstream of Pi and reserved headers are silently ignored (pi-ai types.ts:148-153), so a Bedrock-aimed credential-leak check would report a clean pass while exercising nothing
 - [Phase 2]: 02-11: docs/DIAGNOSTICS.md declares the CODE authoritative and itself a bug on disagreement, and its TurnRow field list was checked against schema.ts by script with the checker falsified — a schema document nobody can verify is a second source of truth
 - [Phase 2]: 02-11: DIAG-01 and DIAG-05 stay Pending at phase end — six of eight DIAG requirements are complete, and the two [RUNBOOK] halves (RB-02-01, RB-02-03) are OUTSTANDING because this machine has no live credentials
+- [Phase 03]: 03-01: wrapFauxWithStatus SUBSTITUTES onResponse in a copy of the options bag, never pre-calls it -- a pre-call leaves faux's hard-coded 200 firing afterwards, so the caller sees [503, 200], the wire log gets two main.response records under one correlation id and /budget counts a row that never happened. Falsified: the pre-call form turns two cases red.
+- [Phase 03]: 03-01: withModelsConfig COPIES the models config into its own temp agent dir even when handed a template path -- Pi defaults the models store to dirname(modelsPath)/models-store.json, so a modelsPath aimed at .pi/templates/ would aim a writer at this repository
+- [Phase 03]: 03-01: $ENV_VAR config values resolve LAZILY at getProviderAuth() time, not at composition time -- falsified by moving applyEnv below ModelRuntime.create and watching the test stay green; the assertion message was rewritten to claim only what it proves
+- [Phase 03]: 03-01: Pi's process-lifetime !command cache cannot be cleared from a test -- clearApiKeyCache is re-exported from core/model-registry.ts but not from the package root, so PROV-02's cached-vs-uncached proof must do both resolutions inside ONE withModelsConfig callback
 
 ### Pending Todos
 
@@ -204,8 +210,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T07:01:53.226Z
-Stopped at: Completed 02-11-PLAN.md — the Phase 2 runbook section, the generalised status guard and docs/DIAGNOSTICS.md; Phase 2 execution complete
+Last session: 2026-08-13T13:54:34.623Z
+Stopped at: Completed 03-01-PLAN.md — the two Wave-0 provider test seams (wrapFauxWithStatus, withModelsConfig), both falsified
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
