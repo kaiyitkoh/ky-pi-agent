@@ -42,7 +42,7 @@
  * about the template, never about a provider.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -418,6 +418,68 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 				).not.toContain(TEMPLATE_SENTINEL_PREFIX);
 			},
 		);
+	}, TIMEOUT_MS);
+
+	it("case 1c -- CR-02: the agent directory and auth.json are created with Pi's own modes", () => {
+		// WHY THIS MATTERS EVEN THOUGH BOOTSTRAP WRITES NO SECRET. Pi creates
+		// ~/.pi/agent 0700 and auth.json 0600, but only when they are ABSENT
+		// [VERIFIED: pi 0.84.1 dist/core/auth-storage.js:21-31 -- both guards are
+		// `if (!existsSync(...))`]. Bootstrap gets there first, so a plain
+		// `mkdir -p` permanently disables that control: Pi re-chmods auth.json on
+		// every write and repairs the FILE at the first `pi auth login`, but it
+		// never re-chmods the DIRECTORY. That directory then holds auth.json,
+		// models.json and Pi's session transcripts at 0755 for the life of the
+		// machine.
+		// A path the SCRIPT must create, not one `mkdtempSync` already created.
+		// mkdtempSync makes its directory 0700 by definition, so pointing at one
+		// would make this case green whatever bootstrap did -- the tautology the
+		// assertion is meant to rule out.
+		const agentDir = join(tempDir("kypi-agentroot-"), "agent");
+		expect(
+			existsSync(agentDir),
+			"the agent directory already exists before the run, so its mode is this test's " +
+				"doing rather than the script's",
+		).toBe(false);
+
+		const run = runFullBootstrap(agentDir);
+		expectReachedTheScript(run);
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+		const authPath = join(agentDir, "auth.json");
+		expect(
+			existsSync(authPath),
+			"no auth.json was created, so the mode assertions below would be about a file " +
+				"that does not exist",
+		).toBe(true);
+
+		if (process.platform === "win32") {
+			// STATED, NOT SKIPPED. Windows has no POSIX mode bits: Node synthesises
+			// 0o666/0o444 from the read-only attribute, so an assertion here would be
+			// about Node's synthesis rather than about the script. The real check runs
+			// on the macos-latest matrix leg. What IS checkable here is that both
+			// paths exist and are the kinds of thing the modes would apply to -- a
+			// script that never created them would look identical to a tightened one.
+			expect(statSync(agentDir).isDirectory()).toBe(true);
+			expect(statSync(authPath).isFile()).toBe(true);
+			return;
+		}
+
+		expect(
+			(statSync(agentDir).mode & 0o777).toString(8),
+			"the agent directory is looser than the 0700 Pi would have created " +
+				"(auth-storage.js:23). Because bootstrap created it first, Pi's " +
+				"`if (!existsSync(dir))` guard will never fire again and this mode is " +
+				"permanent -- any other local account can list and read the directory holding " +
+				"auth.json, models.json and every session transcript [CR-02]",
+		).toBe("700");
+
+		expect(
+			(statSync(authPath).mode & 0o777).toString(8),
+			"auth.json is looser than the 0600 Pi would have created (auth-storage.js:27-29). " +
+				"Pi repairs this one on its first write, so the window is smaller than the " +
+				"directory's -- but it is the file a credential is about to be written into and " +
+				"there is no reason to open it wider than its owner [CR-02]",
+		).toBe("600");
 	}, TIMEOUT_MS);
 
 	it("case 2 -- a second run is byte-identical in both files", () => {

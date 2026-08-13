@@ -342,7 +342,37 @@ assert_user_scope() {
 #
 # Byte-idempotent: the repair branch leaves `ignore-scripts=true` in the file,
 # so every later run takes the "already hardened" branch and writes nothing.
+# Create the agent directory the way PI would, and never any looser.
+#
+# Pi creates it 0700 and the auth file 0600, but ONLY when they are absent:
+#
+#   pi 0.84.1 dist/core/auth-storage.js:21-31
+#     ensureParentDir()  { if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 }); }
+#     ensureFileExists() { if (!existsSync(this.authPath)) { writeFileSync(..., { mode: 0o600 }); ... } }
+#
+# So a plain `mkdir -p` gets there first, 0777 & ~umask lands 0755, and Pi's
+# existence guard then short-circuits FOREVER. Pi re-chmods auth.json on every
+# write, so the FILE is repaired at the first `pi auth login` - but the
+# DIRECTORY MODE IS NEVER REPAIRED AT ALL. That directory holds auth.json,
+# models.json and Pi's session transcripts, which .gitignore already describes
+# as able to contain source code, prompts and secrets.
+#
+# CALLED FROM harden_pi_npm_root TOO, and that is the load-bearing call: it runs
+# FIRST in a full run and `mkdir -p "$PI_AGENT_DIR/npm"` creates the parent as a
+# side effect. Tightening only the three merge_* sites would leave the ordinary
+# path creating the directory 0755 before any of them is reached.
+#
+# chmod is best-effort: on Windows it toggles the read-only bit and nothing
+# else, which is why docs/RUNBOOK.md carries the Phase 1 note that 0600 is a
+# no-op there. A failure to tighten is not a reason to abort a bootstrap.
+ensure_agent_dir() {
+	mkdir -p "$PI_AGENT_DIR"
+	chmod 700 "$PI_AGENT_DIR" 2>/dev/null || true
+}
+
 harden_pi_npm_root() {
+	# Before the npm root, so the PARENT is never created 0755 as a side effect.
+	ensure_agent_dir
 	mkdir -p "$PI_NPM_ROOT"
 	_rc_file="$PI_NPM_ROOT/.npmrc"
 
@@ -439,7 +469,7 @@ install_pi() {
 # list and their own settings, and `pi remove <source>` is the documented undo
 # for the part we do not own.
 merge_settings() {
-	mkdir -p "$PI_AGENT_DIR"
+	ensure_agent_dir
 	KYPI_SETTINGS="$PI_AGENT_DIR/settings.json" \
 		KYPI_BOOTSTRAP_VERSION="$BOOTSTRAP_VERSION" \
 		KYPI_HARDENED_NPM_ROOT="$PI_NPM_ROOT" \
@@ -551,17 +581,24 @@ console.log("  .env.example written from .pi/templates/env.example");
 # templates). Both run in run_full after install_pi: they configure Pi, they do
 # not gate the BOOT-01 hardening ordering.
 #
-# NOTHING HERE WRITES A SECRET. Both templates carry $ENV_VAR references only,
-# which is why the file mode is not this script's business - and why the
-# "auth.json mode 0600 is a no-op on Windows" note in docs/RUNBOOK.md (Phase 1
-# machine-state notes) is referenced here rather than restated.
+# NOTHING HERE WRITES A SECRET. Both templates carry $ENV_VAR references only.
+#
+# THAT IS NOT A REASON TO IGNORE FILE MODES, AND TREATING IT AS ONE WAS A BUG.
+# This script does not write a secret, but it CREATES THE CONTAINER THE SECRETS
+# WILL LIVE IN, and by creating it first it disables Pi's own control: Pi
+# creates ~/.pi/agent 0700 and auth.json 0600 only when they are ABSENT
+# (dist/core/auth-storage.js:21-31). Both creation sites therefore match Pi's
+# modes - see ensure_agent_dir above and the explicit mode on the auth write
+# below. The "0600 is a no-op on Windows" note in docs/RUNBOOK.md (Phase 1
+# machine-state notes) is referenced rather than restated, and is why both are
+# best-effort rather than fatal.
 merge_models_json() {
 	_src="$REPO_ROOT/.pi/templates/models-template.json"
 	if [ ! -f "$_src" ]; then
 		printf 'FATAL: missing template %s\n' "$_src" >&2
 		exit 1
 	fi
-	mkdir -p "$PI_AGENT_DIR"
+	ensure_agent_dir
 	# Every value crosses into node through a KYPI_* variable, never through
 	# shell interpolation into the JS source: a base URL is caller-supplied text
 	# and would otherwise be a code-injection seam in this script.
@@ -637,7 +674,7 @@ merge_auth_json() {
 		printf 'FATAL: missing template %s\n' "$_src" >&2
 		exit 1
 	fi
-	mkdir -p "$PI_AGENT_DIR"
+	ensure_agent_dir
 	KYPI_AUTH_SRC="$_src" \
 		KYPI_AUTH_DST="$PI_AGENT_DIR/auth.json" \
 		node -e '
@@ -723,7 +760,13 @@ if (added.length === 0) {
   console.log("  auth.json already current - unchanged");
   process.exit(0);
 }
-fs.writeFileSync(dst, JSON.stringify(obj, null, 2) + "\n", "utf8");
+// mode 0600 on CREATION, then an explicit chmod for the update case: `mode` is
+// honoured by open(2) only when the file does not already exist, so a file this
+// script created 0644 on an earlier run would keep that mode forever otherwise.
+// Pi does exactly this pair (dist/core/auth-storage.js:26-30) and is right to:
+// this is the file a credential is about to be written into.
+fs.writeFileSync(dst, JSON.stringify(obj, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+try { fs.chmodSync(dst, 0o600); } catch (e) { /* Windows: toggles the read-only bit only */ }
 console.log("  auth.json provider entries added: " + added.join(", "));
 '
 }
