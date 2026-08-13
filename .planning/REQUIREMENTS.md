@@ -57,14 +57,14 @@
 - [x] **SAFE-03**: Anything unparseable — command substitution, backticks, heredocs, backgrounding — **fails closed** **[FAUX]**
 - [ ] **SAFE-04**: Writes are blocked when `HEAD == main`, while read-only operations against main (`fetch`, `rebase`, `diff`, `log`, `worktree add -b feat main`) remain allowed **[FAUX]**
 - [ ] **SAFE-05**: `glab mr merge` is blocked — in the user's work repo, the MR merge is the deploy trigger **[FAUX]**
-- [ ] **SAFE-06**: Reads of `.env`, `~/.aws/credentials`, kubeconfig, and `*.tfstate` are blocked — tfstate holds plaintext secrets that would enter model context **[FAUX]**
+- [x] **SAFE-06**: Reads of `.env`, `~/.aws/credentials`, kubeconfig, and `*.tfstate` are blocked — tfstate holds plaintext secrets that would enter model context **[FAUX]**
 - [ ] **SAFE-07**: `terraform apply|destroy|import`, mutating `aws` CLI calls, and `kubectl delete` require explicit confirmation **[FAUX]**
-- [ ] **SAFE-08**: File writes and deletes outside the project directory are blocked **[FAUX]**
+- [x] **SAFE-08**: File writes and deletes outside the project directory are blocked **[FAUX]**
 - [ ] **SAFE-09**: Enforcement happens **twice** — at the `tool_call` hook and inside a wrapped `bash` tool — because later hooks can mutate `event.input` after approval and Pi performs no re-validation **[FAUX]**
 - [ ] **SAFE-10**: Confirmation uses block → approval-tool → re-issue, not an inline `confirm()`, and is **deny-by-default**; a CI test asserts the deny under `--mode json` where `noOpUIContext.confirm` returns `false` **[FAUX]**
 - [x] **SAFE-11**: Safety extensions install at **user scope** — project-scoped extensions don't load in subagents, which spawn headless and therefore never grant trust **[FAUX]**
 - [ ] **SAFE-12**: The blocked-command test passes **inside a spawned subagent**, not only in the interactive session **[FAUX]**
-- [ ] **SAFE-13**: The non-bash surface is guarded — `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.gitconfig`, CI workflow files **[FAUX]**
+- [x] **SAFE-13**: The non-bash surface is guarded — `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.gitconfig`, CI workflow files **[FAUX]**
 - [x] **SAFE-14**: Every allow and every block is written to an audit JSONL **[FAUX]**
 - [ ] **SAFE-15**: A documented table lists known bypasses the guard does not catch — an honest limits statement, not a claim of completeness
 - [ ] **SAFE-16**: `gh` is left unauthenticated on the work laptop and this is stated in the runbook — `/share` cannot be blocked by any extension, and aborting on `gh auth status` is the only control
@@ -261,14 +261,14 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-03 | Phase 4 | Complete |
 | SAFE-04 | Phase 4 | Pending |
 | SAFE-05 | Phase 4 | Pending |
-| SAFE-06 | Phase 4 | Pending |
+| SAFE-06 | Phase 4 | Complete |
 | SAFE-07 | Phase 4 | Pending |
-| SAFE-08 | Phase 4 | Pending |
+| SAFE-08 | Phase 4 | Complete |
 | SAFE-09 | Phase 4 | Pending |
 | SAFE-10 | Phase 4 | Pending |
 | SAFE-11 | Phase 4 | Complete |
 | SAFE-12 | Phase 4 | Pending |
-| SAFE-13 | Phase 4 | Pending |
+| SAFE-13 | Phase 4 | Complete |
 | SAFE-14 | Phase 4 | Complete |
 | SAFE-15 | Phase 4 | Pending |
 | SAFE-16 | Phase 1 | Pending — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING — `gh auth logout` has not been run on the work laptop. Not completable from this machine |

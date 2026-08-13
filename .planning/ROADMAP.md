@@ -189,7 +189,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 04-04-PLAN.md — `paths.ts`: Windows/Git-Bash canonicalisation, sensitive reads, out-of-project writes, detonation targets
+- [x] 04-04-PLAN.md — `paths.ts`: Windows/Git-Bash canonicalisation, sensitive reads, out-of-project writes, detonation targets
 - [ ] 04-05-PLAN.md — `git.ts`: per-subcommand write/read table, the `HEAD == main` oracle, `glab mr merge`
 - [ ] 04-06-PLAN.md — `infra.ts`: terraform / aws / kubectl mutating-vs-read classification
 
