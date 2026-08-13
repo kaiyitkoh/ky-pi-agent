@@ -279,13 +279,63 @@ function appendWire(cwd: string, record: WireRecord): void {
 	noteRowWritten();
 }
 
-/** Append one turns row for the nested path and count it. */
-function appendTurn(cwd: string, row: TurnRow): void {
-	appendJsonl(cwd, TURNS_LOG_BASE, row, {
-		rotateBytes: TURNS_ROTATE_BYTES,
-		maxRotated: MAX_ROTATED_FILES,
+/**
+ * Run one capture — redact, compose, append — with TOTAL failure containment.
+ *
+ * THIS IS `safeHandler` FOR THE NESTED PATH, AND IT IS NOT OPTIONAL. Every
+ * capture below runs inside a call the provider is waiting on, and each of the
+ * three per-call callbacks propagates a throw somewhere that changes the
+ * behaviour of the thing being measured rather than merely losing a record:
+ *
+ *   - `transformHeaders` runs inside `ModelRuntime.prepareRequest`
+ *     [VERIFIED: pi src/core/model-runtime.ts:590-593], and a throw out of
+ *     `prepareRequest` is caught by `lazyStream` and converted into a
+ *     `createSetupErrorMessage` — i.e. the completion FAILS (see the two
+ *     failure classes documented on {@link errorMessageFor});
+ *   - `onPayload` throws straight into the adapter and kills the request;
+ *   - `onResponse` throws into the adapter after the response was received.
+ *
+ * The reachable triggers are ordinary: `ENOSPC`, `EACCES`, `mkdirSync` failing
+ * with `ENOTDIR`/`EEXIST` because something occupies `logDir(cwd)` (exactly the
+ * fixture `tests/unit/wire-nonmutating.test.ts` plants), Windows `EBUSY`/`EPERM`
+ * on the live file, and `JSON.stringify` refusing a payload holding a `BigInt`.
+ *
+ * `wire.ts` routes every equivalent main-loop append through `safeHandler` for
+ * the same reason, and `tests/unit/wire-nonmutating.test.ts:216-255` asserts the
+ * main-loop swallow. `tests/unit/call-model-containment.test.ts` is the nested
+ * counterpart. [threat T-02-07-03]
+ */
+function contained(fn: () => void): void {
+	try {
+		fn();
+	} catch {
+		// A capture that cannot reach disk must not fail the request it is
+		// capturing. The instrument cannot instrument its own inability to write,
+		// and this module's contract is that it "decides nothing" — breaking a
+		// billable request because a log line did not land is a decision.
+	}
+}
+
+/**
+ * Compose and append one nested turns row, and count it. NEVER THROWS.
+ *
+ * Composition is inside the containment, not only the append: `composeTurnRow`
+ * calls `calculateCost` and the redactor, and on the success path this runs
+ * AFTER the provider has already billed the caller for an `AssistantMessage`.
+ * A throw here would discard that message and hand the caller a filesystem
+ * error instead — and the caller, which this module says "owns the fallback
+ * decision", would then retry or downgrade because a disk was full.
+ * [threat T-02-07-03]
+ */
+function recordTurn(cwd: string, input: Parameters<typeof composeTurnRow>[0]): void {
+	contained(() => {
+		const row: TurnRow = composeTurnRow(input);
+		appendJsonl(cwd, TURNS_LOG_BASE, row, {
+			rotateBytes: TURNS_ROTATE_BYTES,
+			maxRotated: MAX_ROTATED_FILES,
+		});
+		noteRowWritten();
 	});
-	noteRowWritten();
 }
 
 /**
@@ -296,7 +346,16 @@ function appendTurn(cwd: string, row: TurnRow): void {
  * `kind: "nested"` row in `turns-*.jsonl`. The turns row is written on BOTH the
  * success and the failure path — a thrown error is rethrown to the caller
  * afterwards, because the caller decides what to do about it and the instrument
- * decides nothing, but the measurement is never lost.
+ * decides nothing.
+ *
+ * EVERY APPEND IS TOTAL, AND THE PRECEDENCE IS EXPLICIT. "The measurement is
+ * never lost" would be the wrong contract, because honouring it costs the thing
+ * being measured: a diagnostics write that cannot reach disk would have to fail
+ * the request. So the contract is the other way round — a record that cannot be
+ * written is DROPPED, silently, and the request proceeds. `noteRowWritten` is
+ * only called on a successful append, so `/budget`'s count still matches the
+ * file, and that count going flat is how a reader sees the drop. See
+ * {@link contained} and {@link recordTurn}.
  *
  * The correlation id is issued HERE, explicitly, and passed to every record.
  * `wireRecord` otherwise stamps `currentCorrelationId()`, and the main loop may
@@ -331,9 +390,16 @@ export async function callModel<TApi extends Api>(
 		signal: opts.signal ?? ctx.signal,
 		sessionId,
 		transformHeaders: (headers: Record<string, string | null>) => {
-			record("nested.headers", { headers: redactHeaders(headers) });
-			// RETURNED UNCHANGED. This is a transform: `prepareRequest` uses what
-			// comes back as the real request's headers
+			// CONTAINED, because a throw from here propagates out of
+			// `prepareRequest` and FAILS the completion. The redaction is inside the
+			// containment too: `redactHeaders` is the thing most likely to throw on
+			// an unexpected value shape.
+			contained(() => {
+				record("nested.headers", { headers: redactHeaders(headers) });
+			});
+			// RETURNED UNCHANGED, and returned OUTSIDE the containment so the real
+			// headers survive a failed capture. This is a transform: `prepareRequest`
+			// uses what comes back as the real request's headers
 			// [VERIFIED: pi src/core/model-runtime.ts:590-593]. Returning the
 			// redacted map would send `[redacted:N chars]` as the bearer token.
 			return headers;
@@ -341,16 +407,24 @@ export async function callModel<TApi extends Api>(
 		onPayload: (payload: unknown) => {
 			// `redactDeep` returns a NEW structure and never touches the live
 			// payload, so what the provider receives stays byte-identical.
-			record("nested.request", { payload: redactDeep(payload) });
+			// CONTAINED: a throw from here goes straight into the adapter and kills
+			// the request outright.
+			contained(() => {
+				record("nested.request", { payload: redactDeep(payload) });
+			});
 			// NO value returned. A non-`undefined` return REPLACES the outgoing
 			// payload [VERIFIED: pi-ai src/types.ts:66-70]. [threat T-02-07-03]
 			return undefined;
 		},
 		onResponse: (response: { status: number; headers: Record<string, string> }) => {
+			// Assigned BEFORE the capture, so the turns row still carries the status
+			// the provider reported even when the wire record cannot be written.
 			httpStatus = response.status;
-			record("nested.response", {
-				status: response.status,
-				headers: redactHeaders(response.headers),
+			contained(() => {
+				record("nested.response", {
+					status: response.status,
+					headers: redactHeaders(response.headers),
+				});
 			});
 		},
 		// The double cast is unavoidable, and it is not a shrug. `ApiStreamOptions<TApi>`
@@ -365,7 +439,13 @@ export async function callModel<TApi extends Api>(
 	// ONLY the completion sits inside the `try`, and there is no `finally`. The
 	// success row is appended after it, deliberately: a `finally` would append on
 	// both paths and produce two rows for one call, and an append that itself
-	// throws inside the `try` would be caught below and attempted a second time.
+	// threw inside the `try` would be caught below and attempted a second time.
+	//
+	// Both `recordTurn` calls are TOTAL (see {@link recordTurn}), so neither the
+	// provider error below nor the already-billed message returned at the end can
+	// be replaced by a filesystem failure. That symmetry is the point: the
+	// error-path row was contained from the start while the success-path one was
+	// not, and an asymmetry in a containment rule is a bug, not a design.
 	let message: AssistantMessage;
 	try {
 		message = await ctx.modelRegistry.complete(
@@ -374,48 +454,35 @@ export async function callModel<TApi extends Api>(
 			options,
 		);
 	} catch (error) {
-		try {
-			appendTurn(
-				cwd,
-				composeTurnRow({
-					kind: "nested",
-					role,
-					sessionId,
-					corr,
-					message: errorMessageFor(opts.model, error),
-					model: opts.model,
-					latencyMs: Date.now() - started,
-					httpStatus,
-				}),
-			);
-		} catch {
-			// The instrument cannot instrument its own inability to write, and a
-			// logging failure here would REPLACE the provider error the caller is
-			// waiting for with a filesystem one. `index.ts`'s safeHandler makes the
-			// same trade at the same kind of boundary.
-		}
+		recordTurn(cwd, {
+			kind: "nested",
+			role,
+			sessionId,
+			corr,
+			message: errorMessageFor(opts.model, error),
+			model: opts.model,
+			latencyMs: Date.now() - started,
+			httpStatus,
+		});
 		// Rethrown deliberately. Swallowing it would make the instrument change the
 		// behaviour of the thing it measures, and the caller — not this function —
 		// owns the fallback decision.
 		throw error;
 	}
 
-	appendTurn(
-		cwd,
-		composeTurnRow({
-			kind: "nested",
-			role,
-			sessionId,
-			corr,
-			message,
-			model: opts.model,
-			latencyMs: Date.now() - started,
-			// Omitted when `onResponse` never fired. `composeTurnRow` leaves the key
-			// off rather than defaulting it to 200: a defaulted status would claim a
-			// success that was never observed.
-			httpStatus,
-		}),
-	);
+	recordTurn(cwd, {
+		kind: "nested",
+		role,
+		sessionId,
+		corr,
+		message,
+		model: opts.model,
+		latencyMs: Date.now() - started,
+		// Omitted when `onResponse` never fired. `composeTurnRow` leaves the key
+		// off rather than defaulting it to 200: a defaulted status would claim a
+		// success that was never observed.
+		httpStatus,
+	});
 
 	return message;
 }
