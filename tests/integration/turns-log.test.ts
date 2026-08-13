@@ -484,6 +484,47 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 		).not.toContain("httpStatus");
 	});
 
+	it("case 4b — NO main-loop row anywhere carries an httpStatus", () => {
+		// THE DOCUMENTED CLAIM, ASSERTED ACROSS EVERY SESSION IN THIS FILE. Case 4
+		// asserts the absence on ONE errored row, which reads as "absent when the turn
+		// failed" and left the schema table free to say `httpStatus` is present
+		// otherwise. It never is: `turn_end` does not derive it, so no `kind:"turn"`
+		// row has ever carried one, and a reader following the old wording would look
+		// for a column that does not exist.
+		//
+		// Every session here is a successful or tool-using one as well as the errored
+		// one, so this is the four-session version of the same structural guard: if the
+		// spine ever learns to depend on `after_provider_response`, this goes red
+		// before a reader is misled [threat T-02-08-01].
+		const captures = [onePrompt, toolTurn, errorTurn, twoPrompts];
+		const rows = captures.flatMap((capture) => turnRowsOf(capture));
+
+		expect(
+			rows.length,
+			"no main-loop rows were found at all, so the absence below is a pass over an empty list — " +
+				"the vacuous-pass shape this whole phase exists to eliminate",
+		).toBeGreaterThanOrEqual(captures.length);
+
+		expect(
+			rows.filter((row) => Object.keys(row).includes("httpStatus")).length,
+			"a `kind:\"turn\"` row carries an httpStatus. It can only have come from " +
+				"`after_provider_response`, which sits after the retry wrapper and never fires on a " +
+				"4xx/5xx — so a spine that learned to depend on it would lose exactly the turns most " +
+				"worth having. If a main-loop status is genuinely wanted, thread it deliberately and " +
+				"update `TurnRow.httpStatus`'s docstring and docs/DIAGNOSTICS.md in the same change",
+		).toBe(0);
+
+		// THE PAIRED POSITIVE lives in tests/integration/call-model.test.ts case 2,
+		// which asserts a NESTED row does carry `httpStatus: 200`. Without that, this
+		// absence would be equally satisfied by a composer that dropped the field on
+		// every path, and the column would be dead rather than nested-only.
+		expect(
+			rows.every((row) => Object.keys(row).includes("stopReason")),
+			"the rows really are complete rows and not stubs; otherwise the absence above says " +
+				"nothing about httpStatus specifically",
+		).toBe(true);
+	});
+
 	it("case 5 — the second turn of a session reads from cache", () => {
 		// This is faux's SIMULATION, not a provider measurement: it keys a prompt
 		// cache on `options.sessionId` and reports the common prefix as `cacheRead`

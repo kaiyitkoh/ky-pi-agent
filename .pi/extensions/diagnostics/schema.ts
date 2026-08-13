@@ -275,10 +275,24 @@ export interface TurnRow {
 	toolCalls: number;
 	toolResults?: number;
 	/**
-	 * `after_provider_response.status`.
+	 * HTTP status as a per-call `onResponse` reported it.
 	 *
-	 * Absent on error and on every nested call unless `callModel` supplies its
-	 * own `onResponse` — the response hook is not wired for nested calls.
+	 * **ONLY EVER PRESENT ON A `kind:"nested"` ROW.** `index.ts`'s `turn_end` never
+	 * passes an `httpStatus` to `composeTurnRow` at all, so a main-loop row never
+	 * carries one — successful or not. That is deliberate: no field of a main-loop
+	 * row may be derived from `after_provider_response`, which sits after the retry
+	 * wrapper [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:239] and so
+	 * never fires on a 4xx/5xx (Pitfall 3).
+	 *
+	 * On the nested path `callModel` ALWAYS supplies an `onResponse`, so the field
+	 * is present whenever an HTTP response was seen — including on an errored row,
+	 * where `outcome: "error"` and `httpStatus: 200` legitimately sit side by side
+	 * (a 200 whose stream then ended with an error event). It is absent on a nested
+	 * call where no response was reached at all.
+	 *
+	 * Wanting a main-loop `httpStatus` is a CODE change — threading
+	 * `after_provider_response.status` onto the accumulator — and it must come with
+	 * the Pitfall 3 caveat. It is not a documentation change.
 	 */
 	httpStatus?: number;
 	/** The REQUESTED thinking level, recorded because Bedrock makes it undecomposable. */

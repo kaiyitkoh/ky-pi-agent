@@ -101,10 +101,11 @@ export interface TurnRowInput {
 	latencyMs: number;
 	turnIndex?: number;
 	/**
-	 * `after_provider_response.status`.
+	 * HTTP status as a per-call `onResponse` reported it.
 	 *
-	 * Optional and usually absent: the response hook does not fire on error, and
-	 * nested calls only have one if `callModel` supplied its own `onResponse`.
+	 * Passed only by `callModel`. `index.ts`'s `turn_end` never supplies one, so a
+	 * `kind:"turn"` row never carries the key — see `TurnRow.httpStatus` in
+	 * `schema.ts` for why that is deliberate rather than an omission.
 	 */
 	httpStatus?: number;
 	/** `turn_end.toolResults.length`. */
@@ -262,9 +263,11 @@ export function composeTurnRow(input: TurnRowInput): TurnRow {
 		row.turnIndex = input.turnIndex;
 	}
 
-	// Absent on error, and absent on every nested call unless `callModel` supplied
-	// its own `onResponse`. See the sourcing rule: this is the ONLY field the
-	// response hook is allowed to contribute.
+	// SUPPLIED BY THE NESTED PATH AND BY NOTHING ELSE. `index.ts`'s `turn_end` never
+	// passes one, so a `kind:"turn"` row never carries this key at all; `callModel`
+	// always supplies an `onResponse`, so a `kind:"nested"` row carries it whenever a
+	// response was seen — errored rows included. See the sourcing rule: this is the
+	// ONLY field a response callback is allowed to contribute.
 	if (input.httpStatus !== undefined) {
 		row.httpStatus = input.httpStatus;
 	}
