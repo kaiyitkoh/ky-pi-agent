@@ -91,6 +91,7 @@ import {
 	CHAIN,
 	CLASS_FIXTURES,
 	DASHSCOPE_QUOTA_FIXTURES,
+	NON_QUOTA_BILLING_FIXTURES,
 	SSO_FIXTURES,
 	type FailureClass,
 } from "../../.pi/extensions/providers/schema.ts";
@@ -563,6 +564,42 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 		expect(walk.message.stopReason, "the returned fatal message is no longer error-stopped").toBe(
 			"error",
 		);
+
+		// THE CLASS THE LIVE WALK IS SILENT ABOUT. `CLASS_FIXTURES.fatal.text`
+		// carries no billing wording, so it is correct about the string it holds
+		// and says nothing about every other 400/403 that happens to mention
+		// billing. QUOTA_PATTERN borrowed a bare `billing` alternative from Pi's
+		// NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN, where a match means "do not
+		// retry" and costs nothing; here a match means "forward the whole prompt to
+		// a second vendor". Same token, inverted consequence. [CR-03]
+		expect(
+			NON_QUOTA_BILLING_FIXTURES.length,
+			"the non-quota billing table is empty, so the loop below iterates nothing and the " +
+				"only control on QUOTA_PATTERN's borrowed tokens is gone with nothing red",
+		).toBeGreaterThanOrEqual(2);
+
+		for (const billingFixture of NON_QUOTA_BILLING_FIXTURES) {
+			expect(
+				classifyFailure(billingFixture.text),
+				`${JSON.stringify(billingFixture.text.slice(0, 56))}... classifies as advancing. ` +
+					"It merely MENTIONS billing: it is not a quota wall, it fails identically at " +
+					"every vendor, and advancing forwards the user's prompt, system prompt and tool " +
+					"schemas to a second vendor to be rejected a second time. This is a prompt " +
+					"disclosure, not a wasted call [CR-03, threat T-03-10-01, T-03-10-02]",
+			).toBe("fatal");
+		}
+
+		// The paired positive, in the same case: a real quota wall that ALSO
+		// mentions billing must still advance. Without it, anchoring the borrowed
+		// token could be satisfied by a pattern that stopped matching quota
+		// failures altogether.
+		expect(
+			classifyFailure(CLASS_FIXTURES.quota.text),
+			"the real quota fixture stopped classifying as quota. The anchoring of the borrowed " +
+				"billing token has narrowed the pattern past the failure it exists to catch, which " +
+				"is the opposite mistake and just as costly: the chain would stop on the one " +
+				"failure a second provider is most certain to survive",
+		).toBe("quota");
 	});
 
 	it("case 4 — the chain does not call ahead when the first hop answers", () => {

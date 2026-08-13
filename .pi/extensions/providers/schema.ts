@@ -379,14 +379,33 @@ export const ADVANCING_CLASSES: readonly FailureClass[] = FAILURE_CLASSES.filter
  * so the chain advances on it. This table is therefore checked BEFORE the
  * retryable predicate, not after it.
  *
- * The first four alternatives are transcribed from Pi's own
- * `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` [VERIFIED: pi-ai 0.84.1
- * src/utils/retry.ts:7-23 — `insufficient_quota`, `out of budget`,
- * `quota exceeded`, `billing`] so the two agree about the strings they share.
- * The last two are DashScope's own wording, which Pi's table does not carry:
- * against DashScope, `Arrearage` is the account-balance failure and
- * `Allocated quota exceeded` the rate/quota one, and both are EXECUTED as
- * non-retryable under Pi today (see {@link CLASS_FIXTURES}).
+ * THE ALTERNATIVES ARE BORROWED FROM PI, BUT NOT TRANSCRIBED — AND THE REASON
+ * IS THE WHOLE POINT OF THIS TABLE. Pi's
+ * `NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN` carries `insufficient_quota`,
+ * `out of budget`, `quota exceeded` and a bare `billing` [VERIFIED: pi-ai 0.84.1
+ * src/utils/retry.ts:7-23]. In Pi, matching that table means "DO NOT RETRY" —
+ * the conservative direction, where a match costs nothing but a lost retry.
+ * Here, matching means "SEND THIS USER'S PROMPT, SYSTEM PROMPT AND TOOL SCHEMAS
+ * TO A DIFFERENT VENDOR". **The consequence is inverted, so the looseness that
+ * is safe in Pi is not safe here**, and the bare `billing` was carried across
+ * anyway on the first pass.
+ *
+ * `billing` is an unanchored six-letter substring, and provider error bodies
+ * routinely carry billing URLs and billing prose on failures that are not quota
+ * failures at all — a 400 whose message links `/billing for plan limits`, a 403
+ * phrased as "your account is not enabled for billing". Every one of those used
+ * to advance the chain. So the borrowed token is anchored to quota/limit
+ * wording instead of left as a bare noun, and
+ * {@link NON_QUOTA_BILLING_FIXTURES} is the control that keeps it that way.
+ *
+ * `exceeded your current quota` is added because `quota exceeded` does not match
+ * the OpenAI-compatible phrasing DeepSeek-direct actually emits (see
+ * {@link CLASS_FIXTURES}.quota), and losing that would collapse the real quota
+ * wall into `fatal`. `arrearage` and `allocated quota` are DashScope's own
+ * wording, which Pi's table does not carry at all: against DashScope,
+ * `Arrearage` is the account-balance failure and `Allocated quota exceeded` the
+ * rate/quota one, and both are EXECUTED as non-retryable under Pi today (see
+ * {@link DASHSCOPE_QUOTA_FIXTURES}).
  *
  * No `g` flag and no `.`: a `g` pattern carries a persistent `lastIndex` and
  * makes `.test()` lie on every other call (`sso.ts`'s recorded lesson), and a
@@ -394,7 +413,7 @@ export const ADVANCING_CLASSES: readonly FailureClass[] = FAILURE_CLASSES.filter
  * matching things nobody wrote it for. [threat T-03-10-03]
  */
 export const QUOTA_PATTERN =
-	/insufficient_quota|out of budget|quota exceeded|billing|arrearage|allocated quota/i;
+	/insufficient_quota|out of budget|quota exceeded|exceeded your current quota|allocated quota|arrearage|billing (?:details|quota|limit)/i;
 
 /**
  * Availability and transport failures, within the set Pi already calls
@@ -480,6 +499,37 @@ export const DASHSCOPE_QUOTA_FIXTURES: readonly ProviderErrorFixture[] = [
 	{
 		text: "Allocated quota exceeded, please increase your quota limit",
 		why: "DashScope's allocation failure; `quota exceeded` is in Pi's limit table, so Pi agrees it is not retryable",
+		retryableToday: false,
+	},
+];
+
+/**
+ * Failures that MENTION billing and are not quota failures. [CR-03]
+ *
+ * THE CONTROL FOR {@link QUOTA_PATTERN}'s BORROWED TOKENS, and the one that was
+ * missing when the bare `billing` alternative shipped. {@link CLASS_FIXTURES}'s
+ * `fatal` entry carries no billing wording at all, so it was correct about the
+ * string it holds and silent about the whole class beside it — every one of
+ * these classified `quota` and advanced the chain, forwarding the user's prompt,
+ * system prompt and tool schemas to a second vendor to be rejected a second
+ * time. [threat T-03-10-01, T-03-10-02]
+ *
+ * Every entry must classify `fatal`. They are deliberately NOT folded into
+ * {@link CLASS_FIXTURES}: that record is one representative per class and the
+ * chain test drives each of them through a live session, whereas these are
+ * asserted against the classifier directly.
+ */
+export const NON_QUOTA_BILLING_FIXTURES: readonly ProviderErrorFixture[] = [
+	{
+		text:
+			"Error code: 400 - {'error': {'message': 'Invalid request: unsupported parameter " +
+			"reasoning_effort. See https://platform.example.com/billing for plan limits.'}}",
+		why: "a malformed request that merely LINKS a billing page: fatal at every vendor, so advancing spends a second one to be rejected again",
+		retryableToday: false,
+	},
+	{
+		text: "Error code: 403 - {'error': {'message': 'Your account is not enabled for billing on this API'}}",
+		why: "an authorisation failure phrased in billing prose — a second vendor cannot enable an account on the first one",
 		retryableToday: false,
 	},
 ];
