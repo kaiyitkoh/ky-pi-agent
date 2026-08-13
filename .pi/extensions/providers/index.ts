@@ -105,6 +105,7 @@ import {
 	BEDROCK_PROVIDER_ID,
 	PROFILE_PLACEHOLDER,
 	PROFILE_PLACEHOLDER_HINT,
+	PROFILE_TEMPLATE_SENTINEL,
 	SAFE_PROFILE_NAME,
 	SSO_DIAGNOSTIC_ORIGINAL_KEY,
 	SSO_DIAGNOSTIC_TYPE,
@@ -140,12 +141,22 @@ interface MessageEndReplacement {
  * absent — which is also Pi's own reading of a blank environment variable
  * [VERIFIED: pi-ai 0.84.1 dist/auth/context.js — a value is returned only when
  * `value.trim().length > 0`]. [threat T-03-08-04]
+ *
+ * THE SENTINEL CHECK IS NOT REDUNDANT WITH THE SHAPE CHECK. The unedited
+ * template value is 29 characters drawn entirely from the AWS profile-name
+ * charset, so it passes {@link SAFE_PROFILE_NAME} however tightly that pattern
+ * is bounded. Only an equality test rejects it, and rejecting it is what makes
+ * the placeholder and its RB-03-03 pointer appear instead of a copy-pasteable
+ * command that cannot work. See {@link PROFILE_TEMPLATE_SENTINEL}.
  */
 function usableProfileName(value: string | undefined): string | undefined {
 	if (value === undefined) {
 		return undefined;
 	}
 	const trimmed = value.trim();
+	if (trimmed === PROFILE_TEMPLATE_SENTINEL) {
+		return undefined;
+	}
 	return SAFE_PROFILE_NAME.test(trimmed) ? trimmed : undefined;
 }
 

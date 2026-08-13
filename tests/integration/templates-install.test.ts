@@ -48,6 +48,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import {
+	BEDROCK_PROVIDER_ID,
+	TEMPLATE_SENTINEL_PREFIX,
+} from "../../.pi/extensions/providers/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
@@ -199,6 +203,64 @@ function installedProviders(agentDir: string): Record<string, unknown> {
 	return (readJson(join(agentDir, "models.json")).providers ?? {}) as Record<string, unknown>;
 }
 
+/** True when any string anywhere under `node` still begins with the sentinel. */
+function carriesSentinel(node: unknown): boolean {
+	if (typeof node === "string") {
+		return node.startsWith(TEMPLATE_SENTINEL_PREFIX);
+	}
+	if (Array.isArray(node)) {
+		return node.some(carriesSentinel);
+	}
+	if (node !== null && typeof node === "object") {
+		return Object.values(node).some(carriesSentinel);
+	}
+	return false;
+}
+
+/**
+ * The auth template split the way `merge_auth_json` splits it.
+ *
+ * Computed from the committed bytes rather than written down as two id lists:
+ * a hand-typed list is how an assertion silently stops describing the file it
+ * claims to be about. [CR-01]
+ */
+function authTemplatePartition(): { installable: string[]; withheld: string[] } {
+	const tpl = readJson(AUTH_TEMPLATE);
+	const installable: string[] = [];
+	const withheld: string[] = [];
+	for (const key of Object.keys(tpl)) {
+		(carriesSentinel(tpl[key]) ? withheld : installable).push(key);
+	}
+	return { installable: installable.sort(), withheld: withheld.sort() };
+}
+
+/**
+ * Every environment variable Pi's Bedrock `resolve()` consults, in its own
+ * order [VERIFIED: pi-ai 0.84.1 src/providers/amazon-bedrock.ts:54-79].
+ *
+ * Duplicated from `tests/unit/bedrock-auth.test.ts` for the reason recorded
+ * there: a case that blanked only the variable it talks about would still
+ * resolve through an ambient bearer token on a machine that has one, and would
+ * then pass for the wrong reason.
+ */
+const AWS_CHAIN_VARIABLES = [
+	"AWS_BEARER_TOKEN_BEDROCK",
+	"AWS_PROFILE",
+	"AWS_ACCESS_KEY_ID",
+	"AWS_SECRET_ACCESS_KEY",
+	"AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+	"AWS_CONTAINER_CREDENTIALS_FULL_URI",
+	"AWS_WEB_IDENTITY_TOKEN_FILE",
+] as const;
+
+function scopedAwsEnv(overrides: Record<string, string> = {}): Record<string, string> {
+	const env: Record<string, string> = {};
+	for (const name of AWS_CHAIN_VARIABLES) {
+		env[name] = "";
+	}
+	return { ...env, ...overrides };
+}
+
 describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	// `.env.example` is a TRACKED file the full run legitimately owns. Snapshot
 	// its bytes so the working tree is restored no matter what any case does.
@@ -263,11 +325,99 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		).toBe("qwen");
 
 		const installedAuth = readJson(auth);
+		const { installable, withheld } = authTemplatePartition();
+
+		expect(
+			installable.length,
+			"the auth template has no entry free of a REPLACE_WITH_ placeholder, so the " +
+				"assertion below would be `[] === []` and the installer could have written " +
+				"nothing at all",
+		).toBeGreaterThan(0);
+		expect(
+			withheld.length,
+			"the auth template carries no placeholder entry at all, so the withholding " +
+				"assertion below is about a rule nothing exercises. CR-01 is the reason that " +
+				"rule exists; if the template genuinely stopped shipping one, delete this pair " +
+				"deliberately rather than letting it pass vacuously",
+		).toBeGreaterThan(0);
+
 		expect(
 			Object.keys(installedAuth).sort(),
-			"every provider entry the template ships must arrive; a partial install is a " +
-				"provider that reports no credentials on a machine that has one",
-		).toEqual(Object.keys(readJson(AUTH_TEMPLATE)).sort());
+			"every provider entry the template ships with a REAL value must arrive, and every " +
+				"entry still holding a REPLACE_WITH_ placeholder must NOT. Installing a " +
+				"placeholder is worse than installing nothing: Pi's Bedrock chain is " +
+				"`credential?.env?.AWS_PROFILE ?? ambient AWS_PROFILE` " +
+				"(pi-ai amazon-bedrock.ts:65), so a stored placeholder SHADOWS a working " +
+				"exported AWS_PROFILE and silently breaks a machine where Bedrock worked " +
+				"before bootstrap ran [CR-01]",
+		).toEqual(installable);
+
+		expect(
+			run.stdout,
+			"the withheld entries must be REPORTED. A silent omission is indistinguishable " +
+				"from a merge step that never ran, and the operator has no way to learn that " +
+				"they still have to configure that provider",
+		).toContain(withheld.join(", "));
+	}, TIMEOUT_MS);
+
+	it("case 1b -- CR-01: a working ambient AWS_PROFILE survives a bootstrap run", async () => {
+		// THE REGRESSION THIS PHASE SHIPPED AND THIS CASE CLOSES. On a laptop where
+		// `export AWS_PROFILE=...` already made Bedrock work, running bootstrap used
+		// to write the template's placeholder into ~/.pi/agent/auth.json, and Pi
+		// prefers the stored value over the ambient one -- so every subsequent
+		// Bedrock request resolved a profile that does not exist, with no error and
+		// no output saying so.
+		const agentDir = tempDir("kypi-agentdir-");
+		const run = runFullBootstrap(agentDir);
+		expectReachedTheScript(run);
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+		const ambient = "kypi-fixture-ambient-profile";
+		const installedAuth = readJson(join(agentDir, "auth.json"));
+
+		// WHAT PI ACTUALLY REPORTS ON THE AMBIENT BRANCH, read at source rather
+		// than assumed: `resolve()` returns `{ auth: {}, env: credential?.env,
+		// source: credential?.env?.AWS_PROFILE ? "stored credential" : "AWS_PROFILE" }`
+		// [VERIFIED: pi-ai 0.84.1 dist/providers/amazon-bedrock.js:64-71]. So the
+		// ambient value is NEVER echoed back in `env` -- `env` is undefined on that
+		// branch. `source` is the discriminator, and it is the exact field that
+		// flips from "AWS_PROFILE" to "stored credential" the moment a placeholder
+		// is installed. Asserting on `env.AWS_PROFILE === ambient` would be
+		// asserting something Pi cannot produce.
+		await withModelsConfig(
+			{
+				models: join(agentDir, "models.json"),
+				auth: installedAuth,
+				env: scopedAwsEnv({ AWS_PROFILE: ambient }),
+			},
+			async (handle) => {
+				const result = await handle.registry.getProviderAuth(BEDROCK_PROVIDER_ID);
+
+				expect(
+					result,
+					"Bedrock resolved NO credential at all with an exported AWS_PROFILE, so the " +
+						"source assertion below would be vacuous",
+				).toBeDefined();
+
+				expect(
+					result?.source,
+					`the exported AWS_PROFILE=${ambient} must still be what answers after bootstrap ` +
+						'ran. "stored credential" here means the installer wrote an auth.json entry ' +
+						"that WINS over the ambient variable (pi-ai amazon-bedrock.js:64-71), which " +
+						"on a laptop where Bedrock worked before is a silent outage: every request " +
+						"then resolves the profile that entry names. docs/RUNBOOK.md RB-03-03 step 1 " +
+						"asks the operator to check exactly this variable [CR-01]",
+				).toBe("AWS_PROFILE");
+
+				expect(
+					JSON.stringify(result?.env ?? null),
+					"the resolved credential carries a stored env block. On the ambient branch Pi " +
+						"returns `env: credential?.env`, i.e. undefined, so anything here means a " +
+						"stored entry answered -- and a REPLACE_WITH_ placeholder is the one this " +
+						"installer used to write [CR-01]",
+				).not.toContain(TEMPLATE_SENTINEL_PREFIX);
+			},
+		);
 	}, TIMEOUT_MS);
 
 	it("case 2 -- a second run is byte-identical in both files", () => {
@@ -341,12 +491,24 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 
 		// The paired positive. Without it, a bootstrap that crashed before ever
 		// reaching merge_auth_json would satisfy both assertions above perfectly.
+		const { installable, withheld } = authTemplatePartition();
 		expect(
 			Object.keys(after).sort(),
-			"the two absent template entries must have been ADDED in the same run that left " +
-				"the two existing ones alone. If they were not, this case proves only that the " +
-				"installer did nothing, which is not the same claim",
-		).toEqual(["amazon-bedrock", DASHSCOPE, "deepseek", "some-other-vendor"].sort());
+			"the absent, installable template entries must have been ADDED in the same run " +
+				"that left the two existing ones alone. If they were not, this case proves only " +
+				"that the installer did nothing, which is not the same claim. A placeholder " +
+				"entry must still be withheld even here [CR-01]",
+		).toEqual([...new Set([...installable, ...Object.keys(existing)])].sort());
+
+		for (const key of withheld) {
+			expect(
+				Object.hasOwn(after, key),
+				`'${key}' still carries a REPLACE_WITH_ placeholder in the template and was ` +
+					"installed anyway. A stored placeholder beats the ambient AWS_PROFILE in Pi's " +
+					"own resolution order, so this is a silent outage rather than an unhelpful " +
+					"default [CR-01]",
+			).toBe(false);
+		}
 	}, TIMEOUT_MS);
 
 	it("case 4 -- invalid JSON in models.json is refused, not overwritten", () => {

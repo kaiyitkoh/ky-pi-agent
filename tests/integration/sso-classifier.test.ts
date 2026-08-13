@@ -81,6 +81,7 @@ import {
 	AWS_SSO_LOGIN_PREFIX,
 	NON_SSO_FIXTURES,
 	PROFILE_PLACEHOLDER,
+	PROFILE_TEMPLATE_SENTINEL,
 	RETRYABLE_CONTROL_FIXTURE,
 	SSO_DIAGNOSTIC_ORIGINAL_KEY,
 	SSO_DIAGNOSTIC_TYPE,
@@ -240,8 +241,24 @@ interface SsoRun {
 	capture: Capture;
 }
 
+/**
+ * Values that pass every SHAPE bound and are still not profile names.
+ *
+ * The unedited auth-template placeholder is 29 characters drawn entirely from
+ * the AWS profile-name charset, so NO tightening of `SAFE_PROFILE_NAME` can
+ * reject it — only the equality check added for CR-01 does. Interpolating it
+ * produces `aws sso login --profile REPLACE_WITH_AWS_PROFILE_NAME`, a
+ * copy-pasteable command that cannot work, with the RB-03-03 pointer
+ * suppressed. That is the exact dead end `PROFILE_PLACEHOLDER` exists to
+ * expose, reached by the one value the template itself ships.
+ */
+const NOT_A_PROFILE: ReadonlyArray<readonly [string, string]> = [
+	["the unedited auth-template placeholder", PROFILE_TEMPLATE_SENTINEL],
+];
+
 let ssoRuns: SsoRun[];
 let placeholderRun: Capture;
+let notAProfileRuns: { label: string; value: string; capture: Capture }[];
 let control: Capture;
 
 describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
@@ -259,6 +276,15 @@ describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 		// asserting its absence above would be satisfied by a string that never
 		// occurs under any condition.
 		placeholderRun = await drive({ errorText: SSO_FIXTURES[0].text, profile: undefined });
+
+		notAProfileRuns = [];
+		for (const [label, value] of NOT_A_PROFILE) {
+			notAProfileRuns.push({
+				label,
+				value,
+				capture: await drive({ errorText: SSO_FIXTURES[0].text, profile: value }),
+			});
+		}
 
 		// The negative control. Retryable on purpose, and scripted with a second
 		// response so the retry has somewhere to land.
@@ -434,6 +460,49 @@ describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 				"actually isolated and case 1 may be reading a name the environment supplied rather " +
 				"than one the handler resolved",
 		).not.toContain(FIXTURE_PROFILE);
+	});
+
+	it("case 4b — a value that is not a profile name falls back to the placeholder, never into the command", () => {
+		// THE FLOOR THAT MAKES THIS A TABLE RATHER THAN A LOOP OVER ITSELF. An
+		// emptied NOT_A_PROFILE would iterate nothing and report green, which is
+		// the same disarm-by-deletion the guard in 03-11 was written to close.
+		expect(
+			notAProfileRuns.length,
+			"no not-a-profile value was driven, so every assertion below iterates nothing. " +
+				"The table is the whole case; a truncated one removes coverage without turning " +
+				"anything red",
+		).toBeGreaterThanOrEqual(NOT_A_PROFILE.length);
+		expect(NOT_A_PROFILE.length).toBeGreaterThanOrEqual(1);
+
+		for (const { label, value, capture } of notAProfileRuns) {
+			const message = firstError(capture.settled);
+			expect(
+				message,
+				`the ${label} run produced no error-stopped message, so this row checks nothing`,
+			).toBeDefined();
+
+			expect(
+				message?.errorMessage,
+				`${label} (${JSON.stringify(value)}) was interpolated into the surfaced command. ` +
+					"The user is being handed `aws sso login --profile <that>` and trained to paste " +
+					"it: for the auth-template placeholder that is a command which cannot work with " +
+					"the RB-03-03 pointer suppressed, and for a metacharacter-bearing value it is a " +
+					"shell line this repository composed [CR-01, WR-01]",
+			).not.toContain(value);
+
+			expect(
+				message?.errorMessage,
+				`${label} must fall back to the placeholder. Falling back is the whole remedy: it ` +
+					"is what makes the dead end visible instead of dressing it up as a command",
+			).toContain(PROFILE_PLACEHOLDER);
+
+			expect(
+				message?.errorMessage,
+				"the fallback line must carry the RB-03-03 pointer, which is the exit from the " +
+					"dead end. Without it the user is told a profile is missing and not where to " +
+					"put one",
+			).toContain("RB-03-03");
+		}
 	});
 
 	it("case 5 — the direction: every rewritten fixture is non-retryable, and what was already true", () => {

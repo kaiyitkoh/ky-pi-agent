@@ -113,6 +113,44 @@ export const PROFILE_PLACEHOLDER_HINT =
 	" — no AWS profile is configured; see RB-03-03 in docs/RUNBOOK.md";
 
 /**
+ * The prefix every unedited value in `.pi/templates/auth-template.json` carries.
+ *
+ * WHY A PREFIX AND NOT A WHOLE STRING. `bin/bootstrap.sh` refuses to install any
+ * template entry that still carries a value beginning with this, so a second
+ * templated placeholder added later is covered without a second edit in two
+ * files. The one that exists today is {@link PROFILE_TEMPLATE_SENTINEL}.
+ */
+export const TEMPLATE_SENTINEL_PREFIX = "REPLACE_WITH_";
+
+/**
+ * The literal `.pi/templates/auth-template.json` ships as `env.AWS_PROFILE`,
+ * which is NOT a profile name and must never be interpolated as one.
+ *
+ * THIS IS A SENTINEL, NOT A NAME, AND THE DISTINCTION IS LOAD-BEARING TWICE:
+ *
+ *   1. It is 29 characters with no whitespace, so it satisfies any shape bound
+ *      {@link SAFE_PROFILE_NAME} could reasonably impose — including the
+ *      tightened AWS charset, which is `[-_.@A-Za-z0-9]` and therefore matches
+ *      this string exactly. Shape alone can never reject it; only an equality
+ *      check can. Without one, `resolveProfileName` never reaches
+ *      {@link PROFILE_PLACEHOLDER}, {@link PROFILE_PLACEHOLDER_HINT} never
+ *      fires, and PROV-05 surfaces `aws sso login --profile
+ *      REPLACE_WITH_AWS_PROFILE_NAME` — a copy-pasteable command that cannot
+ *      work, with the RB-03-03 pointer suppressed. That is precisely the state
+ *      {@link PROFILE_PLACEHOLDER} exists to make visible.
+ *   2. Pi's Bedrock resolver prefers the STORED value over the ambient one —
+ *      `credential?.env?.AWS_PROFILE ?? (await env("AWS_PROFILE"))` [VERIFIED:
+ *      pi-ai 0.84.1 src/providers/amazon-bedrock.ts:65-71]. So an installed
+ *      copy of this string does not merely fail to help, it SHADOWS a working
+ *      `AWS_PROFILE` on a laptop where Bedrock worked before bootstrap ran.
+ *      That is why `bin/bootstrap.sh`'s `merge_auth_json` refuses to install
+ *      any entry whose values still begin with {@link TEMPLATE_SENTINEL_PREFIX}
+ *      rather than relying on this check alone: one guard covers the message,
+ *      the other covers the regression.
+ */
+export const PROFILE_TEMPLATE_SENTINEL = `${TEMPLATE_SENTINEL_PREFIX}AWS_PROFILE_NAME`;
+
+/**
  * What a resolved profile name must look like before it is interpolated.
  *
  * Bounded on purpose: the value arrives from `auth.json` or the process

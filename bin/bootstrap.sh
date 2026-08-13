@@ -672,16 +672,52 @@ if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
   process.exit(1);
 }
 
+// An entry still carrying an unedited REPLACE_WITH_ placeholder is NOT installed.
+//
+// This is not cosmetic. Pi resolves Bedrock as
+//   credential?.env?.AWS_PROFILE ?? (await env("AWS_PROFILE"))
+// [pi-ai 0.84.1 src/providers/amazon-bedrock.ts:65], i.e. the STORED value wins
+// over the ambient one. Installing REPLACE_WITH_AWS_PROFILE_NAME on a laptop
+// where `export AWS_PROFILE=work` already made Bedrock work therefore does not
+// merely fail to help - it silently breaks a working machine, and every later
+// request resolves a profile that does not exist. docs/RUNBOOK.md RB-03-03
+// step 1 tells the operator to check `echo $AWS_PROFILE`, which is exactly the
+// state this would have shadowed.
+//
+// Skipping leaves the ambient branch in Pi working, and leaves `pi auth login`
+// free to write the real entry. The template still documents the SHAPE; it just
+// stops being installed as though it were configuration.
+//
+// NO APOSTROPHE MAY APPEAR ANYWHERE IN THIS EMBEDDED SCRIPT, comments included:
+// the whole block is a POSIX sh single-quoted string, so one apostrophe ends it
+// and the rest is parsed as shell. `sh -n bin/bootstrap.sh` catches it, and
+// tests/unit/lf-and-shell.test.ts runs that parse over every tracked *.sh.
+const SENTINEL = "REPLACE_WITH_";
+const carriesSentinel = (node) => {
+  if (typeof node === "string") { return node.startsWith(SENTINEL); }
+  if (Array.isArray(node)) { return node.some(carriesSentinel); }
+  if (node !== null && typeof node === "object") { return Object.values(node).some(carriesSentinel); }
+  return false;
+};
+
 // MERGE-IF-ABSENT, per provider key. An existing entry is left exactly as it
 // was - not merged into, not normalised, not reordered. "Absent" means absent,
 // never "absent or different": a dashscope entry holding the real key must
 // survive a re-run untouched, and so must a provider this template never heard
 // of. [threat T-03-06-01]
 const added = [];
+const skipped = [];
 for (const key of Object.keys(tpl)) {
   if (Object.prototype.hasOwnProperty.call(obj, key)) { continue; }
+  if (carriesSentinel(tpl[key])) { skipped.push(key); continue; }
   obj[key] = tpl[key];
   added.push(key);
+}
+if (skipped.length > 0) {
+  console.log("  auth.json entries NOT installed (still hold a " + SENTINEL + " placeholder): " + skipped.join(", "));
+  console.log("       installing one would SHADOW a working ambient value, so it is left out on purpose.");
+  console.log("       Configure it with `pi auth login` (choose \"AWS profile\"), or add the entry to");
+  console.log("       " + dst + " by hand. See RB-03-03 in docs/RUNBOOK.md.");
 }
 if (added.length === 0) {
   console.log("  auth.json already current - unchanged");
