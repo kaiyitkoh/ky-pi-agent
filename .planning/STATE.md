@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 01-04-PLAN.md — BOOT-01 effectiveness + BOOT-08 pinning gates
-last_updated: "2026-08-12T18:45:41.617Z"
-last_activity: 2026-08-12
+last_updated: "2026-08-13T00:37:11.921Z"
+last_activity: 2026-08-13 -- completed 01-05 (cold-machine bootstrap + BOOT-04 gate)
 progress:
   total_phases: 11
   completed_phases: 0
   total_plans: 10
-  completed_plans: 4
+  completed_plans: 5
   percent: 0
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 01 (bootstrap-packaging-supply-chain) — EXECUTING
-Plan: 5 of 10
-Status: Ready to execute
-Last activity: 2026-08-12
+Plan: 6 of 10
+Status: Executing Phase 01
+Last activity: 2026-08-13 -- completed 01-05 (cold-machine bootstrap + BOOT-04 gate)
 
-Progress: [████░░░░░░] 40%
+Progress: [█████░░░░░] 50%
 
 ## Performance Metrics
 
@@ -56,6 +56,7 @@ Progress: [████░░░░░░] 40%
 | Phase 01 P02 | 20m | 2 tasks | 6 files |
 | Phase 01 P03 | 18m | 3 tasks | 3 files |
 | Phase 01 P04 | 18m | 2 tasks | 2 files |
+| Phase 01 P05 | 35m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -78,8 +79,12 @@ Recent decisions affecting current work:
 - [Phase 01]: PI_CODING_AGENT_DIR relocates trust.json (dist/config.js:397,412-418) — every load-path test uses a fresh one so verdicts come from the gate, not from this machine's saved decisions
 - [Phase 01]: the sentinel extension registers a command and a dead-endpoint provider and never a tool — BOOT-10's boundary rule dogfooded on the first commit of real code
 - [Phase 01]: npx and npm run export the resolved config as npm_config_* and npm ranks env above every .npmrc — supply-chain probes must strip npm_config_* or they measure the launcher, not the control
-- [Phase 01]: user-scope npm hardening is asserted as a MECHANISM against a throwaway agent dir; the live machine-state check belongs to bin/bootstrap.sh --assert-hardening and stays OUTSTANDING until then
+- [Phase 01]: user-scope npm hardening is asserted as a MECHANISM against a throwaway agent dir; the live machine-state check belongs to bin/bootstrap.sh --assert-hardening which has now been run for real on this machine (~/.pi/agent/npm/.npmrc exists, --assert-hardening exits 0)
 - [Phase 01]: isPinnedPackageSpec is exported from tests/unit/pinning.test.ts for Phase 7 to import — no production module exists yet and a second regex is how the two drift apart
+- [Phase 01]: bootstrap splits --check-only (CI, exits 0 on a clean runner) from --assert-hardening (the ordering proof, exits 1 there) — one flag cannot be both
+- [Phase 01]: bootstrap strips npm_config_* before every npm query — run under npm/npx it would otherwise certify a control it never exercised, the same trap Plan 04 hit
+- [Phase 01]: E404-token discrimination replaces RESEARCH's leading-quote-zero heuristic, which would misclassify any 1.x pin as unpublished
+- [Phase 01]: the full bootstrap was run for real on this machine — ~/.pi/agent/npm/.npmrc now exists, so BOOT-01 user-scope is live-verified, not just mechanism-verified
 
 ### Pending Todos
 
@@ -121,7 +126,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-12T18:45:41.606Z
+Last session: 2026-08-13T00:35:04.547Z
 Stopped at: Completed 01-04-PLAN.md — BOOT-01 effectiveness + BOOT-08 pinning gates
 Resume file: None
 
