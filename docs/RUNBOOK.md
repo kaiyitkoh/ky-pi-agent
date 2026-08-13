@@ -383,3 +383,429 @@ same agent run, a second prose response logged as
 `prose_tool_call_retry_exhausted`, and no third model call. Together they prove
 the predicate and the capped retry. They say nothing about whether the detector
 has ever fired on real traffic, or at what rate — which is the entire question.
+
+---
+
+## Phase 3 — Providers & Credentials
+
+Phase 3 made every provider the harness routes to structurally complete in the
+repository: a DashScope provider whose `compat` block is written out in full, a
+Bedrock credential that carries a profile name and no secret, an SSO-expiry
+classifier, a DeepSeek-direct → DashScope fallback chain, and the templates and
+installer that put the first two into `~/.pi/agent/`. Everything above was
+verified offline — against Pi's real `openai-completions` adapter, a loopback
+capture server, and a composed `ModelRuntime` — and every one of those proofs
+answers the same question: *what does Pi emit?* The five checks below ask the
+other question — *what does the provider accept, and what are the real
+numbers?* — and none of them can be asked from a machine that holds no
+credential and issues no provider request.
+
+This section is PROV-09 itself. It is the deliverable that makes the other four
+`[RUNBOOK]` requirements honest: PROV-03, PROV-04, PROV-07 and PROV-10 are
+built and unit-verified, and each is recorded in `.planning/REQUIREMENTS.md` as
+partial with its `RB-03-xx` id named inline, never as complete.
+
+`tests/unit/docs-policy.test.ts` guards these statuses exactly as it guards the
+Phase 1 and Phase 2 ones: it parses both the summary-table row and the
+`**Status:**` line of every `RB-<phase>-<n>` entry, and a disagreement between
+the two is reported as `INCONSISTENT`, which is never an acceptable status.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-03-01 | PROV-03 — the explicit DashScope `compat` block is correct on the wire and DashScope accepts it | OUTSTANDING |
+| RB-03-02 | PROV-10 — a two-turn tool-calling sequence against DashScope returns 200 on the second turn | OUTSTANDING |
+| RB-03-03 | PROV-04 — Bedrock authenticates from a fresh shell via `credential.env.AWS_PROFILE` | OUTSTANDING |
+| RB-03-04 | PROV-07 — the R1 experiment, run and recorded | OUTSTANDING |
+| RB-03-05 | PROV-06 — the real DashScope context cap and per-token price | OUTSTANDING |
+
+### RB-03-01 — PROV-03: the explicit DashScope compat block is correct on the wire and DashScope accepts it
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** There is no DashScope credential on the
+development machine and no egress to `aliyuncs.com` from it.
+`tests/integration/dashscope-payload.test.ts` drives Pi's **real**
+`openai-completions` adapter and reads the **real bytes** off a socket, so the
+emitted body is not a fixture — but the server on the other end of that socket
+is one this repository wrote, and it accepts everything it is sent. Whether
+Alibaba accepts the same body is a fact about Alibaba.
+
+**Procedure, on the work laptop:**
+
+1. Select `dashscope/deepseek-v4-flash` and run one ordinary turn — any prompt
+   that produces an assistant message will do.
+2. `cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 1`
+3. `grep -F '"kind":"main.response"' .pi/logs/wire-$(date +%F).jsonl | tail -n 1`
+
+**Expected output.** Step 3 must show `status: 200`. Step 2's `payload` is the
+body Pi handed the adapter, and every key below is checked **individually** —
+"the payload looked right" is not a result:
+
+- **`enable_thinking`**, at the top level of the payload. Its absence means
+  `compat.thinkingFormat` never resolved to `"qwen"` and thinking was silently
+  never enabled — the failure that is invisible from the UI.
+- **`reasoning_effort`**, also at the **top level**, a sibling of
+  `enable_thinking` and not nested inside any object.
+- **`max_tokens`**, and **not** `max_completion_tokens`. Pi emits this key only
+  when the caller sets `options.maxTokens`; if neither key is present, re-run
+  the turn through a path that sets one rather than recording an absence as a
+  pass.
+- **no `store`** key anywhere in the payload.
+- **no message whose `role` is `developer`**.
+- **no `strict`** on any entry of `tools[]`.
+- **no `prompt_cache_key`** and **no `prompt_cache_retention`**.
+
+Paste the payload fragment verbatim into this entry when the status flips. A
+200 with a missing `enable_thinking` is a finding, not a pass: the request
+succeeded and the capability did not.
+
+**If the host does not resolve, or returns 404 — read this first.** Whether the
+DeepSeek models are served on the legacy shared Singapore domain is
+**UNVERIFIED**: Alibaba's DeepSeek page lists Singapore only in
+workspace-dedicated form, and lists `dashscope-intl.aliyuncs.com` under "legacy
+domains (still functional)". That is the single most likely reason this entry
+fails the first time, and the remedy is already built:
+
+```
+export KYPI_DASHSCOPE_BASE_URL="https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" && sh bin/bootstrap.sh
+```
+
+`<WorkspaceId>` is the caller's own workspace id, read from the Model Studio
+console. It is deliberately **not** committed — `baseUrl` is never interpolated
+by Pi, so a dedicated URL in the repository would be a hard-coded,
+account-identifying literal in a public repo and wrong on every other machine.
+`merge_models_json` **replaces** `providers.dashscope`, so this works on a
+machine that has already bootstrapped and not only on a clean install.
+
+**The `thinkingFormat` contingency.** If the dump shows DashScope rejecting
+`enable_thinking` for a DeepSeek model, flipping `compat.thinkingFormat` from
+`"qwen"` to `"deepseek"` in `.pi/templates/models-template.json` is a one-key
+change: `tests/unit/dashscope-compat.test.ts` deep-equals the **composed**
+compat block, so the flip is one key plus one expected value and cannot be made
+silently. Do not flip it on a hunch — upstream issue
+`earendil-works/pi#6998` was closed in favour of `"qwen"` for exactly these
+models.
+
+**Offline proxies:** `tests/unit/dashscope-compat.test.ts` — deep-equals the
+compat block Pi composes from the shipped template, so a typo'd key (which
+typebox accepts in silence) fails rather than doing nothing — and
+`tests/integration/dashscope-payload.test.ts`, which asserts each of the seven
+present/absent conditions above on real emitted bytes, with a control body that
+proves the absences are evidence rather than an artefact of the request shape.
+Together they prove what Pi **composes** and what Pi **emits**. They say
+nothing about what DashScope **accepts**, which is this entry.
+
+### RB-03-02 — PROV-10: a two-turn tool-calling sequence against DashScope returns 200
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Same missing thing as RB-03-01: no DashScope
+credential, no provider egress. The specific failure this entry tests is a
+**provider-side** 400 on the second request of a tool sequence, so a loopback
+server that returns 200 to everything cannot produce it — and the first turn of
+such a sequence always works, which is why the failure reads as intermittent
+rather than as a misconfiguration.
+
+**Procedure, on the work laptop:**
+
+1. Select `dashscope/deepseek-v4-flash`.
+2. Ask something that forces **two tool turns**, e.g. `Read package.json, then
+   read the file its "main" field points at.` Two turns of chat will not do:
+   the round-trip that carries an assistant message back to the provider is
+   what triggers the 400.
+3. `cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 2`
+4. `cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"kind":"turn"' | tail -n 2`
+
+**Expected output.** Step 3 gives two `main.request` records. The **second**
+must contain a replayed assistant message carrying `tool_calls` **and** a
+`reasoning_content` key. A value of `""` is correct and expected — Pi inserts
+the empty string, and the requirement is that the key is present at all. A
+`main.response` record must follow that second request with `status: 200`.
+
+**An absent `main.response` after the second request is the signal.** A 4xx
+throws before the response hook runs, so the record is never written — its
+absence *is* the finding. Step 4's second turns row will then carry
+`outcome: "error"` with the provider's own message, which is the text to record
+here verbatim. That is a finding, not a pass, and it means
+`requiresReasoningContentOnAssistantMessages` did not take effect.
+
+**Offline proxy:** `tests/integration/dashscope-payload.test.ts` — drives Pi's
+real `openai-completions` adapter against a loopback server with the shipped
+compat block over a replayed two-turn context, and asserts
+`reasoning_content` is present on the replayed assistant message, with the
+paired negative that deleting the compat key removes it. It proves the exact
+mechanism. It says nothing about the provider's 200 on the second turn, which
+is this entry and cannot be substituted.
+
+### RB-03-03 — PROV-04: Bedrock authenticates from a fresh shell via `credential.env.AWS_PROFILE`
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** There is no AWS profile, no IAM Identity
+Center session and no Bedrock access on the development machine.
+`tests/unit/bedrock-auth.test.ts` blanks all seven variables in Pi's resolution
+chain and asserts the stored `env.AWS_PROFILE` wins — which proves the
+*mechanism* without reading this machine's state, and is exactly why it cannot
+also prove that a real session authenticates.
+
+**Procedure, on the work laptop, from a shell that has just been opened:**
+
+1. `aws sso login --profile X && echo $AWS_PROFILE`
+
+   `X` is the profile name from `~/.aws/config`. Do not paste the real profile
+   name, an account id or an SSO start URL into this file — it is public. **An
+   empty echo means Bedrock will not work regardless of a successful SSO
+   login**: `aws sso login` writes a token cache under `~/.aws/sso/cache/` and
+   sets no environment variable at all, so with nothing in `AWS_PROFILE` Pi
+   reports no Bedrock credentials even though the AWS SDK itself would resolve
+   fine. A single `[default]` SSO profile does not help.
+2. Configure the persisting form: `pi auth login` → **Amazon Bedrock** → **"AWS
+   profile"**, and enter that same profile name. Never choose **"Existing AWS
+   credential chain"** — that branch stores `{ "type": "api_key" }` with no
+   `key` and no `env`. It is a no-op that looks like configuration, and it is
+   the single most likely way this check is reported as done while nothing was
+   configured. `bin/bootstrap.sh` writes the same shape from
+   `.pi/templates/auth-template.json`, replacing the literal placeholder
+   `REPLACE_WITH_AWS_PROFILE_NAME`; an existing `amazon-bedrock` entry is left
+   untouched, so a hand-configured one is never clobbered.
+3. Open a **new** shell, export nothing, select a Bedrock Claude model and run
+   one ordinary turn.
+4. `cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"provider":"amazon-bedrock"' | tail -n 1`
+
+**Expected output.** Step 4 prints a turns row with `outcome: "ok"` and a
+non-zero token count. The fresh shell in step 3 is the whole point: it is what
+distinguishes a credential that persists from one that happened to be in the
+environment of the terminal where it was configured.
+
+**The one live check of the SSO classifier, folded in here.** Plan 03-08 ships
+a `message_end` classifier that rewrites six credential-failure strings into a
+single actionable line naming `aws sso login --profile <resolved>` and marks
+them non-retryable. **All six strings are fixtures this repository wrote.**
+When the SSO session next expires — 8 to 12 hours, so roughly once a working
+day — run one more turn and record here, verbatim:
+
+- the exact error text the run produced, and
+- whether the `aws sso login --profile …` line appeared.
+
+Both outcomes are results. If the reauth line did **not** appear, the real
+message is a seventh shape and belongs in `SSO_FIXTURES` with its source
+recorded; paste the raw text into this entry either way. Do not report this
+sub-check as passed on the strength of a green offline suite: the suite proves
+the matcher, not the message.
+
+**Closed door — do not re-litigate.** The classifier is a `message_end` handler
+and must not be rewritten as an `after_provider_response` one.
+`after_provider_response` never fires on a provider error — a 4xx/5xx throws
+before the response hook is reached — so such a handler would be dead code, and
+its test would have to fabricate the event to pass. `message_end` runs before
+the retry gate reads the mutated message, which is what makes the
+non-retryable classification take effect.
+
+**Offline proxies:** `tests/unit/bedrock-auth.test.ts` — resolves
+`credential.env.AWS_PROFILE` through Pi's own auth context in both directions,
+with every variable in the resolution chain blanked so the assertion is about
+the stored credential and not about this machine — and
+`tests/integration/sso-classifier.test.ts`, which drives the classifier over
+all six fixtures on a live in-memory session and proves non-retryability by
+call count (`callCount === 1`) against a retryable control in the same harness.
+They prove the resolution order and the classifier. They say nothing about
+whether a real SSO session authenticates, or what a real expiry says.
+
+### RB-03-04 — PROV-07: the R1 experiment, run and recorded
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** R1 asks two questions and only the second one
+matters: (a) does `api.deepseek.com` accept `reasoning_effort: "low"`, and (b)
+does `"low"` produce materially fewer reasoning tokens than `"high"`. Two
+researchers reached opposite conclusions on (a) without either issuing a
+request. (b) is a **token count** from a real provider and cannot be desk-work
+at all. Note the mechanical obstacle, which is settled and is not the question:
+`deepseek-v4-flash` ships `thinkingLevelMap.low = null`, so
+`clampThinkingLevel` walks `"low"` forward to `"high"` and **Pi 0.84.1 with the
+built-in catalogue can never send `"low"`**. The null mapping suppresses
+*selection*, not *emission* — unclamping is therefore sufficient and no adapter
+change is needed.
+
+**Preparation, one-time, on the work laptop.** Add the unclamp to
+`~/.pi/agent/models.json`. It is a `modelOverrides` entry because
+`applyModelOverride` **merges** `thinkingLevelMap`, so the rest of the map, the
+compat block and the cost table are untouched:
+
+```jsonc
+{
+  "providers": {
+    "deepseek": {
+      "modelOverrides": {
+        "deepseek-v4-flash": { "thinkingLevelMap": { "low": "low" } }
+      }
+    }
+  }
+}
+```
+
+**Procedure:**
+
+1. `pi --list-models | grep deepseek-v4-flash`
+
+   Confirms the override parsed. A `Warning: errors loading models.json` line
+   means the edit is malformed and **everything below is invalid** — stop and
+   fix the file first.
+2. Start `pi`, select `deepseek/deepseek-v4-flash`, and set the thinking level
+   to **low**. If the picker does not offer `low`, the override did not apply —
+   stop. `tests/unit/r1-unclamp.test.ts` proves the picker *does* offer it once
+   the override is present, so this step failing is about the edit and not
+   about Pi.
+3. Send this fixed prompt, and use the **same string** in both legs:
+
+   `Prove that the sum of the first n odd positive integers is n squared, then state the value for n = 47.`
+4. `tail -n 5 .pi/logs/wire-$(date +%F).jsonl`
+
+   Find the record whose `kind` is `main.request`.
+5. `cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"kind":"turn"' | tail -n 1`
+6. Set the thinking level to **high**, send the **same** prompt, and repeat
+   steps 4 and 5.
+
+**Expected output, by outcome:**
+
+| Outcome | `main.request` payload | `main.response` / turns row |
+|---|---|---|
+| **accepted-and-cheaper** | `"thinking":{"type":"enabled"}` and a top-level `"reasoning_effort":"low"` | `main.response` `status: 200`; the low leg's `reasoning` is materially below the high leg's |
+| **accepted-but-not-cheaper** | same | `status: 200`, and the low leg's `reasoning` is between 60% and 100% of the high leg's |
+| **rejected** | same | **no `main.response` record at all** — a 4xx throws before the response hook, so its absence *is* the signal — and the turns row carries `outcome: "error"` with an `Error code: 400 …` message quoting the offending parameter |
+| **no breakdown reported** | same | the `reasoning` key is **absent from both** turns rows. `reasoning` is omitted when the provider reports no breakdown, so this is a fourth outcome — "DeepSeek V4 Flash reports no reasoning-token breakdown through this adapter" — and it is a **result worth recording, not a failed run** |
+
+**"Materially" is pre-committed, before the numbers are seen:**
+
+```
+low.reasoning <= 0.6 * high.reasoning
+```
+
+It is written down here in advance so the outcome is a **decision and not a
+vibe**. Do not renegotiate the threshold after reading the two numbers.
+
+**Recording.** The status flips to `PASSED — YYYY-MM-DD` only when **four
+fragments are pasted verbatim into this entry**: both `main.request` payloads
+and both turns rows. Then, and only then, append the one-line conclusion to the
+R1 row of `.planning/ROADMAP.md`'s Carried-Forward Unknowns and to
+`.planning/PROJECT.md`'s Key Decisions.
+
+**Not part of Phase 3.** If the answer is accepted-and-cheaper, graduating the
+`modelOverrides` unclamp from a manual edit into
+`.pi/templates/models-template.json` is a **follow-up**, because `/cheap` is
+Phase 5. Until this entry has a result, `/cheap` must not be defined in terms
+of a cheap thinking tier.
+
+**Offline proxy:** `tests/unit/r1-unclamp.test.ts` — composes the override
+through a real `ModelRuntime` and proves the experiment is *executable*: that
+the clamp exists without the override, that the override removes it, and that
+`"low"` survives selection. It answers **nothing** about what
+`api.deepseek.com` does with the value, which is the entire question.
+
+### RB-03-05 — PROV-06: the real DashScope context cap and per-token price
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Alibaba's public English documentation gives
+no per-token price for these models — it says to see the Model Studio console —
+and gives no per-model output cap for these ids. Both figures are therefore
+UNVERIFIED in the shipped template: the cost block is an all-zero **visible
+placeholder** and `maxTokens` is a deliberately conservative `65536`, low
+enough that being wrong costs a truncation rather than an unexplained 400. A
+console is behind a login this machine does not have.
+
+**The two models this entry owns**, which are exactly the `COST_UNVERIFIED`
+allowlist in `tests/unit/model-metadata.test.ts`:
+
+- `dashscope/deepseek-v4-flash`
+- `dashscope/deepseek-v4-pro`
+
+**Procedure, on the work laptop:**
+
+1. In the Model Studio console, open each model's card and read three numbers:
+   the **per-million input price**, the **per-million output price** (and the
+   cached-input price if one is listed), and the **maximum output tokens**.
+   Record the currency and the date read — prices move, and an undated figure
+   is the next unverified number.
+2. Confirm the context window on the same card. The template ships `393216`,
+   sourced from Alibaba's DeepSeek-on-Model-Studio page ("393,216 in total").
+   If the console disagrees, the console wins and the template comment's
+   citation must be replaced rather than supplemented.
+3. Write all of it back into `.pi/templates/models-template.json`: real `cost`
+   numbers, the real `maxTokens`, and the `UNVERIFIED` comment markers removed
+   from exactly the figures that are now sourced — each replaced by the source
+   and the date, in the file's existing citation style.
+4. In the **same commit**, remove each newly-priced model from `COST_UNVERIFIED`
+   in `tests/unit/model-metadata.test.ts`. The list is asserted in both
+   directions, so a stale entry fails as loudly as a missing one.
+5. `npx vitest run tests/unit/model-metadata.test.ts`
+6. `pi --list-models | grep -F 'deepseek-v4-pro'`
+
+**Expected output.** Step 5 exits 0. Step 6 shows the DashScope entry beside
+Pi's built-in DeepSeek-direct entry for the same id, with **different**
+numbers — that contrast is PROV-06's whole point, and two identical rows means
+one provider's figures were copied into the other's entry.
+
+**Why this entry exists at all.** An all-zero cost renders as "free" in a cost
+report, and a number nobody sourced is eventually believed.
+`tests/unit/model-metadata.test.ts` asserts that every all-zero-cost templated
+model is on the allowlist **and** that every id on the allowlist is named in
+this file, so a placeholder price cannot ship without a live check that will
+replace it. This entry is that check.
+
+**Offline proxy:** `tests/unit/model-metadata.test.ts` — proves the DashScope
+entry never inherits the identically-named DeepSeek-direct context window or
+cost table, that every placeholder is on the allowlist and named here, and that
+the template keeps its `UNVERIFIED` mark. It cannot learn the numbers; that is
+what a console login is for.
+
+---
+
+### Phase 3 machine-state notes
+
+These belong to no single entry and are each easy to get wrong.
+
+**Do not use the built-in Qwen token-plan providers.** `qwen-token-plan` and
+its siblings are a **different Alibaba product**: a different host
+(`token-plan.ap-southeast-1.maas.aliyuncs.com`), a different environment
+variable (`QWEN_TOKEN_PLAN_API_KEY`) and a different key namespace (`sk-sp-`
+prepaid keys). The named regression is a user running `pi auth login`, seeing
+"Qwen", pasting a pay-as-you-go DashScope `sk-` key into it, receiving a 401
+and concluding that DashScope is broken. The harness defines its own
+`dashscope` provider and that is the only one to configure.
+
+**Closed door — do not re-litigate.** The built-in Qwen token-plan provider is
+not a shortcut to DashScope and never will be. It is a separate product with a
+separate key namespace, not a differently-named endpoint for the same one.
+
+**DashScope keys are region- and workspace-scoped, and non-portable.** A
+Singapore key fails against the Beijing domain. A key issued in a different
+workspace authenticates and then sees a different model list, which surfaces as
+"the model does not exist" rather than as an auth error. When a key that works
+elsewhere fails here, check the region and the workspace before checking
+anything else.
+
+**Closed door — do not re-litigate.** No Phase 3 check may look for a Bedrock
+SigV4 signature in a wire dump. `RB-02-02` already owns that closed door:
+signing is applied by the AWS SDK's Smithy middleware downstream of everything
+Pi hands over, and on Bedrock the reserved headers are silently ignored to
+preserve SigV4 auth. A Bedrock-aimed credential-leak check would report a clean
+pass while exercising nothing at all — the worst possible outcome for a
+security check.
+
+**`auth.json` file permissions.** See the `0600`-on-Windows note in the Phase 1
+machine-state notes above. It is unchanged and is not restated here; the Phase 3
+templates keep secrets out of `auth.json` entirely for exactly that reason —
+`amazon-bedrock` stores a **profile name**, and every other provider stores a
+`$ENV_VAR` reference.
+
+**One fixture-fidelity gap with no id of its own.** Every error string the
+DeepSeek-direct → DashScope fallback chain classifies is a fixture this
+repository wrote; only the retryable/fatal split is anchored on Pi's own
+exported predicate. Whether a real DashScope arrears failure actually says
+`Arrearage`, and whether a real rate limit and a real 5xx classify as
+`transient` and `unavailable`, is unproven and unprovable here. It gets no
+`RB-03-xx` id because PROV-08 is `[FAUX]` and every input is exercised offline
+by `tests/integration/fallback-chain.test.ts`; it is recorded here so that the
+first real failure of each kind on the work laptop is captured and compared
+rather than merely survived.
