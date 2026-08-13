@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 04-10-PLAN.md
-last_updated: "2026-08-13T23:15:00.274Z"
+status: verifying
+stopped_at: Completed 04-12-PLAN.md
+last_updated: "2026-08-13T23:27:08.826Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
-  completed_phases: 3
+  completed_phases: 4
   total_plans: 44
-  completed_plans: 43
-  percent: 27
+  completed_plans: 44
+  percent: 36
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 Phase: 04 (safety-deployment-guardrails) — EXECUTING
 Plan: 12 of 12
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-13
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -105,6 +105,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 04 P09 | 44min | 2 tasks | 3 files |
 | Phase 04 P11 | 65min | 2 tasks | 5 files |
 | Phase 04 P10 | 35min | 2 tasks | 2 files |
+| Phase 04 P12 | 25m | 3 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -245,6 +246,10 @@ Recent decisions affecting current work:
 - [Phase 04-10]: subagent-block.test.ts scripts blocked-then-benign commands into ONE spawned pi child via a two-turn faux driver, keeping the phase's most expensive test to a single process launch while proving both BLOCK and allow-as-evidence in the same run
 - [Phase 04-10]: audit-concurrency.test.ts hand-constructs AuditRow-shaped JSON in generated child scripts rather than importing the TS writer into a spawned process, mirroring jsonl-concurrency.test.ts's DIAG-08 pattern of testing the writer's documented contract against real OS concurrency
 - [Phase 04-10]: project-scoped sentinel evidence is an import-time file write, not a registered command -- proves jiti never imported the module, the strongest available proof of SAFE-11's mechanism from outside Pi's own source
+- [Phase 04-12]: SAFE-01 stays [~] partial, never [x] -- the offline proxy proves the harness reads and classifies a server-side rejection correctly, not that GitLab is configured; RB-04-01 is OUTSTANDING
+- [Phase 04-12]: The non-fast-forward negative control for classifyPushFailure() is a genuinely diverged real git rejection, not a fabricated string, so the classifier's negative direction is measured against real git output
+- [Phase 04-12]: RB-04-01 names the work repo as <work-repo> rather than a real URL, following the RB-03-01/RB-03-03 precedent for account-identifying information in a public repo
+- [Phase 04-12]: Phase 4 is complete -- all seventeen SAFE requirements accounted for: sixteen [x] (SAFE-02..15, SAFE-17), SAFE-01 [~] partial with RB-04-01 OUTSTANDING, SAFE-16 untouched (Phase 1's). Full suite (1083 tests, 64 files) and tsc --noEmit green
 
 ### Pending Todos
 
@@ -292,8 +297,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T23:15:00.265Z
-Stopped at: Completed 04-10-PLAN.md
+Last session: 2026-08-13T23:27:08.817Z
+Stopped at: Completed 04-12-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

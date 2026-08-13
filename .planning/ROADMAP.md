@@ -20,7 +20,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 1: Bootstrap, Packaging & Supply Chain** - Harden the machine and establish the repo shape before the first `pi install` executes third-party code (completed 2026-08-13)
 - [x] **Phase 2: Diagnostics — The Instrument** - Wire inspector, the `callModel()` chokepoint, per-turn JSONL, and the prose-tool-call detector (completed 2026-08-13)
 - [x] **Phase 3: Providers & Credentials** - Structurally complete providers with zero secrets, verified by Phase 2's instrument and a first-run runbook (all 11 plans executed 2026-08-14; **five live checks `RB-03-01..05` are OUTSTANDING** and five of its ten requirements are partial until they run — see `docs/RUNBOOK.md`)
-- [ ] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents
+- [x] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents (all 12 plans executed 2026-08-14; **one live check `RB-04-01` is OUTSTANDING** and SAFE-01 is partial until it runs — see `docs/RUNBOOK.md`)
 - [ ] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes
 - [ ] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size
 - [ ] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified
@@ -215,7 +215,7 @@ Plans:
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
-- [ ] 04-12-PLAN.md — SAFE-01's offline proxy, `RB-04-01` (OUTSTANDING), and requirements traceability
+- [x] 04-12-PLAN.md — SAFE-01's offline proxy, `RB-04-01` (OUTSTANDING), and requirements traceability
 
 **Research**: DONE — `04-RESEARCH.md`. Settled by execution: `unbash` parses every Git-Bash and Windows path form cleanly in argument position, but an unquoted Windows path collapses its backslashes in `Word.value`, so path policy must normalise on `Word.text`. The larger finding is that `unbash` is a TOLERANT parser (`errors.length === 0` for command substitution, heredocs, `sh -c` and backgrounding), so SAFE-03's fail-closed mechanism is a node-type deny-list, not a parse-error check. `@ramtinj95/pi-infra-command-guard@0.9.1` was read via `npm pack` and not installed.
 
