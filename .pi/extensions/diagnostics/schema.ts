@@ -21,6 +21,18 @@
  */
 import type { StopReason } from "@earendil-works/pi-ai";
 
+/**
+ * pi-ai types the rest of the subsystem needs, re-exported from the one place
+ * allowed to name that package.
+ *
+ * `prose.ts` takes a finalized assistant message and reads `stopReason` and the
+ * `content` block union off it. Re-declaring that shape locally would trade a
+ * compile error for a silent miss the day Pi renames a block type, and
+ * importing pi-ai directly from a second module would break the concentration
+ * rule stated above. So it comes through here, type-only and fully erased.
+ */
+export type { AssistantMessage, StopReason } from "@earendil-works/pi-ai";
+
 // ---------------------------------------------------------------------------
 // Log file naming
 // ---------------------------------------------------------------------------
