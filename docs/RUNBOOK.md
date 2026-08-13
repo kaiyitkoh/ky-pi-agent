@@ -177,6 +177,10 @@ sh bin/bootstrap.sh --assert-hardening
 ```
 
 `--check-only` mutates nothing and exits 0 on a clean runner where bootstrap
-has never been applied. `--assert-hardening` is the stricter one: it asks npm
-about all three scopes including the user scope, and exits 1 if any of them
-still permits lifecycle scripts.
+has never been applied. **It does, however, require network access**: its
+published-pin preflight asks the npm registry whether the pin still exists, and
+exits 1 when the registry does not answer rather than guessing which of
+"withdrawn" and "offline" it is looking at. On a plane, skip it.
+`--assert-hardening` is the stricter one *and* the offline-safe one: it asks npm
+about all three scopes including the user scope, touches no network, and exits 1
+if any of them still permits lifecycle scripts.

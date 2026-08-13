@@ -113,6 +113,13 @@ The repo-scoped `.npmrc` travels with the clone. The user-scope control does
 performs every probe and every repo-side assertion, changes nothing, and exits
 0 on a clean runner where bootstrap has never been applied.
 
+**`--check-only` needs the network.** One of its probes is the published-pin
+preflight (BOOT-04), which asks the npm registry whether the pinned Pi version
+still exists, and a registry that does not answer is a hard `exit 1` — the
+script refuses to guess whether a pin was withdrawn or the network was down.
+Offline, use `sh bin/bootstrap.sh --assert-hardening`, which touches nothing but
+the local npm configuration.
+
 ## Session sharing
 
 Pi's built-in `/share` uploads the **entire session transcript** — source,

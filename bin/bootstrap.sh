@@ -37,8 +37,11 @@
 #   (no args)           full run: probe, verify, harden, install, configure
 #   --check-only        every probe and repo-side assertion, mutates nothing,
 #                       exits 0 on a clean CI runner. Deterministic stdout.
+#                       NEEDS NETWORK: one of the probes is the published-pin
+#                       preflight, which exits 1 when the registry is silent.
 #   --assert-hardening  the three ignore-scripts assertions only, including the
-#                       user scope. Exits 1 if any scope is ineffective.
+#                       user scope. Exits 1 if any scope is ineffective. The
+#                       offline-safe mode: it touches no network.
 #   --check-version     the published-pin preflight only.
 #   --help              this list.
 #
@@ -61,8 +64,21 @@ PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 # A Windows-style value (from a Node-launched test, say) arrives with
 # backslashes. MSYS tools take C:/x happily and C:\x not at all, so normalise -
 # but only for a drive-letter path, never for a genuine POSIX one.
+# A UNC path (\\server\share\pi) arrives the same way and is NOT drive-lettered;
+# Windows roaming profiles genuinely land on them. `//server/share/...` is the
+# form MSYS accepts, and `tr` maps the leading pair too, which is what we want.
 case "$PI_AGENT_DIR" in
-	[A-Za-z]:*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
+[A-Za-z]:* | '\\'*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
+*'\'*)
+	# Any other value carrying a backslash and no forward slash is a Windows
+	# path in some shape we did not enumerate. A genuine POSIX path may legally
+	# contain a backslash, so the no-forward-slash condition is what keeps this
+	# from corrupting one.
+	case "$PI_AGENT_DIR" in
+	*/*) : ;;
+	*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
+	esac
+	;;
 esac
 PI_NPM_ROOT="$PI_AGENT_DIR/npm"
 REPO_NPM_PREFIX="$REPO_ROOT/.pi/npm"
@@ -240,12 +256,26 @@ EOF
 		exit 1
 		;;
 	*)
-		# Deliberately says nothing about the pin being withdrawn. The registry
-		# did not answer, so we do not know, and guessing here is the bug.
-		printf 'WARN: could not reach the npm registry to verify %s@%s.\n' \
+		# Deliberately says nothing about the pin being withdrawn. We do not
+		# know, and guessing there is the bug the E404 split exists to avoid.
+		#
+		# It says nothing about the CAUSE either, for the same reason. Only E404
+		# is discriminated above; everything else lands here - E403 (a proxy or
+		# registry policy), E401/ENEEDAUTH (a scoped registry wanting
+		# credentials), ETARGET, and a corporate mirror carrying the package but
+		# not the version. "Check your network or proxy settings" is actionable
+		# for one of those and misdirection for the rest, so report the token npm
+		# actually produced and let the operator read it.
+		printf 'WARN: could not verify %s@%s against the registry.\n' \
 			"$PI_PKG" "$PI_PINNED" >&2
-		printf '      The registry did not answer; the pin itself was not checked.\n' >&2
-		printf '      Check your network or proxy settings and re-run.\n' >&2
+		if [ -n "$_out" ]; then
+			printf '      npm said: %s\n' "$_out" >&2
+		else
+			printf '      npm produced no output; the registry did not answer.\n' >&2
+		fi
+		printf '      The pin itself was NOT checked. Look for E401/ENEEDAUTH (registry\n' >&2
+		printf '      auth), E403 (proxy or policy), ETARGET (version absent from a\n' >&2
+		printf '      mirror), or no output at all (network).\n' >&2
 		exit 1
 		;;
 	esac
@@ -370,8 +400,14 @@ report_user_scope() {
 # Install and configure
 # ---------------------------------------------------------------------------
 
+# `npm ls` exits 1 for a global tree holding any extraneous, invalid or
+# unmet-peer package - a very common state - while still printing perfectly good
+# JSON on stdout. Discarding the output on a non-zero exit would therefore make
+# this answer "not installed" on such a machine and re-run `npm install -g` on
+# every single bootstrap, contradicting BOOT-03's "safe to re-run: every step is
+# idempotent". Judge the JSON, not the exit code.
 pi_global_matches_pin() {
-	_ls=$(npm ls -g --depth=0 --json 2>/dev/null) || _ls=""
+	_ls=$(npm ls -g --depth=0 --json 2>/dev/null || true)
 	[ -n "$_ls" ] || return 1
 	printf '%s' "$_ls" | KYPI_Q_PKG="$PI_PKG" KYPI_Q_VER="$PI_PINNED" node -e '
 const fs = require("node:fs");
@@ -500,10 +536,12 @@ Modes:
   --check-only        Every probe and every repo-side assertion; mutates
                       nothing. Exits 0 on a clean CI runner. Deterministic
                       output, so two consecutive runs are byte-identical.
+                      REQUIRES NETWORK: the published-pin preflight is one of
+                      the probes and exits 1 if the registry does not answer.
   --assert-hardening  Only the three ignore-scripts assertions, including the
                       user scope. Exits 1 with ignore-scripts on stderr if any
                       scope is ineffective. This is the BOOT-01 ordering proof
-                      and the runbook re-check.
+                      and the runbook re-check, and it needs no network.
   --check-version     Only the published-pin preflight.
   --help              This message.
 
@@ -573,6 +611,18 @@ run_full() {
 	printf '  hardened scopes    repo root, %s, %s\n' "$REPO_NPM_PREFIX" "$PI_NPM_ROOT"
 	printf 'Bootstrap complete. Re-check any time with: sh bin/bootstrap.sh --assert-hardening\n'
 }
+
+# `case "${1:-}"` inspects $1 only, so every later operand would be silently
+# discarded: `--check-only --assert-hardening` would run check-only and drop the
+# ordering proof without a word, and `--check-only --chek-only` would not even
+# catch the typo the single-argument form does. This script's entire contract is
+# WHICH assertions ran, so a dropped mode flag is a false report of what was
+# checked, not a convenience.
+if [ "$#" -gt 1 ]; then
+	printf 'FATAL: this script takes at most one mode argument; got %s: %s\n' "$#" "$*" >&2
+	usage >&2
+	exit 2
+fi
 
 case "${1:-}" in
 "")

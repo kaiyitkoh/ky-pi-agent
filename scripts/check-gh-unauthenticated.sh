@@ -47,6 +47,16 @@
 #
 set -e
 
+# `case "${1:-}"` inspects $1 and nothing else, so a second operand would be
+# silently discarded. For a script whose whole output is a claim about which
+# check ran, a dropped flag is a false report: `--warn-only --oops` would
+# downgrade a failure and never mention the typo.
+if [ "$#" -gt 1 ]; then
+	printf 'FATAL: this script takes at most one argument; got %s: %s\n' "$#" "$*" >&2
+	printf 'Usage: sh scripts/check-gh-unauthenticated.sh [--warn-only]\n' >&2
+	exit 2
+fi
+
 warn_only=0
 case "${1:-}" in
 "")
