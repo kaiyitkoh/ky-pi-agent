@@ -805,12 +805,24 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 		[".pi/templates/auth-template.json", readFileSync(AUTH_TEMPLATE, "utf-8")],
 	];
 
+	// THE WHOLE PARSED DOCUMENT, NOT ONE KEY. This used to read
+	// `templateDashscope()`, i.e. `providers.dashscope` alone, so the value-level
+	// checks never saw anything outside that one sub-object. The text-level
+	// TOKEN_SHAPED scan does cover the whole file but needs a 40+ character run
+	// and excludes pure-alphabetic runs of any length, so a second provider added
+	// to the template with a SHORT key -- `"scratch": { "apiKey": "sk-abc123def456" }`,
+	// 14 characters -- evaded both. `tests/unit/command-interpolation.test.ts`
+	// already walks every leaf of the same file, so the two scans disagreed about
+	// their own scope. [WR-02]
 	const parsed: ReadonlyArray<readonly [string, string[]]> = [
-		[".pi/templates/models-template.json", stringValues(templateDashscope())],
+		[
+			".pi/templates/models-template.json",
+			stringValues(parseModelsTemplate(readFileSync(MODELS_TEMPLATE, "utf-8"))),
+		],
 		[".pi/templates/auth-template.json", stringValues(readJson(AUTH_TEMPLATE))],
 	];
 
-	it("case 7 guard -- the scanned sets are non-empty", () => {
+	it("case 7 guard -- the scanned sets are non-empty, and the models walk is not one key deep", () => {
 		// Every assertion below iterates these, so an empty one turns the whole
 		// scan into a pass that verified nothing.
 		expect(templates.length).toBe(2);
@@ -820,6 +832,26 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 		for (const [path, values] of parsed) {
 			expect(values.length, `${path} parsed to zero string values`).toBeGreaterThan(0);
 		}
+
+		// COVERAGE, AND AN HONEST NOTE ABOUT WHAT IT CAN CATCH TODAY. The scanned
+		// set must contain every string value in the document.
+		//
+		// The template currently declares exactly one provider, so a walk of
+		// `providers.dashscope` and a walk of the whole document produce the SAME
+		// set and this assertion cannot distinguish them right now. Stated rather
+		// than dressed up: it is a tripwire for the day a second provider, a model
+		// override or a top-level field is added -- at which point narrowing the
+		// walk fails here loudly. The LIVE proof that the scan walks depth-wise
+		// past one key is case 7b, which drives a document that does discriminate
+		// and shows the old walk missing both plants. [WR-02]
+		const scanned = new Set(parsed[0]?.[1] ?? []);
+		const whole = stringValues(parseModelsTemplate(readFileSync(MODELS_TEMPLATE, "utf-8")));
+		expect(
+			whole.filter((value) => !scanned.has(value)),
+			"a string value in .pi/templates/models-template.json is not in the scanned set, " +
+				"so the value checks below cannot see it. A credential pasted there would pass " +
+				"every assertion in this describe block [WR-02]",
+		).toEqual([]);
 	});
 
 	for (const [path, text] of templates) {
@@ -857,6 +889,49 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 			).toEqual([]);
 		});
 	}
+
+	it("case 7b -- WR-02: the value scan reaches a provider that is not dashscope", () => {
+		// THE PAIRED NEGATIVE FOR THE WIDENED WALK. The committed template is
+		// clean, so every assertion above is a `[] === []` that a one-key walk
+		// satisfies just as well as a whole-document one. This drives a synthetic
+		// document shaped like the evasion the narrow scan allowed: a second
+		// provider whose key is SHORT enough to slip under TOKEN_SHAPED's 40-char
+		// floor and which lives outside providers.dashscope entirely.
+		const evasive = {
+			providers: {
+				dashscope: { name: "DashScope", baseUrl: "https://example.invalid/v1" },
+				scratch: { apiKey: `sk${"-"}abc123def456` },
+				other: { apiKey: "!kypi-fixture-print-secret --now" },
+			},
+		};
+
+		const values = stringValues(evasive);
+
+		expect(
+			values.filter((value) => /\bsk-/.test(value)),
+			"the value walk did not reach providers.scratch, so a short API key outside the " +
+				"dashscope sub-object is invisible to the scan. That is exactly the hole the " +
+				"one-key walk left: 14 characters is under TOKEN_SHAPED's 40-character floor, so " +
+				"the text scan does not see it either [WR-02]",
+		).not.toEqual([]);
+
+		expect(
+			values.filter((value) => value.startsWith("!")),
+			"the value walk did not reach providers.other, so a `!command` value outside " +
+				"dashscope is invisible here -- while tests/unit/command-interpolation.test.ts " +
+				"walks every leaf of the same file and DOES catch it. Two scans of one document " +
+				"disagreeing about their own scope is how one of them stops being a check [WR-02]",
+		).not.toEqual([]);
+
+		// …and the narrow walk really would have missed both, so the widening is a
+		// widening rather than a restatement.
+		const narrow = stringValues(evasive.providers.dashscope);
+		expect(
+			narrow.filter((value) => /\bsk-/.test(value) || value.startsWith("!")),
+			"the OLD one-key walk finds the planted values too, so this case does not " +
+				"demonstrate a difference and proves nothing about the change",
+		).toEqual([]);
+	});
 
 	it("case 7 -- the scan is live: it flags a synthetic token in every shape", () => {
 		// A scan that has only ever seen clean input has never demonstrated that it
