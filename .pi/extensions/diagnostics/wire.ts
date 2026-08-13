@@ -61,6 +61,31 @@
  * be derived from it — it contributes an optional `httpStatus` and nothing
  * else. (RESEARCH §3.2, Pitfall 3.)
  *
+ * **ONE PROVIDER REQUEST AT A TIME, PER PROCESS. Concurrent main-loop requests
+ * would mis-join, and that is an accepted limitation rather than a solved
+ * problem.** `before_provider_headers` issues the id for a triple and
+ * {@link lastCorrelationId} holds it in a SINGLE SLOT until the request and
+ * response hooks for that same triple read it back. If a second provider request
+ * begins between them, it re-stamps the slot and the first request's bytes are
+ * filed under the second request's id — and `docs/DIAGNOSTICS.md:191` is explicit
+ * that a wrong join is worse than no id, because the wrong answer looks like an
+ * answer.
+ *
+ * `call-model.ts` has no such exposure: it issues its own id and threads it
+ * through every record precisely because "the main loop may have issued one in
+ * between". The main loop is the mirror image and cannot do the same, because the
+ * id is issued in one hook and consumed in two others.
+ *
+ * The assumption holds for ONE serial agent loop, which is what a `tui` session
+ * is. It is NOT known to hold for a process running more than one — `rpc` mode, or
+ * the in-process background and subagent work Phase 7 composes. `index.ts`'s
+ * `inFlight` accumulator and `proseRetriesThisRun` rest on exactly the same
+ * "the agent loop is serial" justification and would break in the same way. Fixing
+ * it properly means keying the in-flight state by session id and threading the id
+ * through the hook chain, which is a design change with cross-phase consequences
+ * and not a review fix. Recorded here so the next reader inherits the limit rather
+ * than the surprise. [threat T-02-05-04, accepted]
+ *
  * **The response body is not reachable.** The hook receives `{ status, headers }`
  * and nothing more [VERIFIED: pi src/core/extensions/types.ts:691-696]. Token
  * counts and content come from the finalized `AssistantMessage` in `message_end`
@@ -157,7 +182,14 @@ export const UNCORRELATED = "uncorrelated";
  */
 const COUNTER_KEY = "__kypiDiagnosticsRequestCounter";
 
-/** The most recently issued correlation id. See {@link currentCorrelationId}. */
+/**
+ * The most recently issued correlation id. See {@link currentCorrelationId}.
+ *
+ * A SINGLE SLOT, which is the limitation the module docstring records: it is
+ * written by `before_provider_headers` and read back by the request and response
+ * hooks for the same triple, so a second provider request starting in between
+ * re-stamps it and the first request's bytes are filed under the wrong id.
+ */
 let lastCorrelationId: string | undefined;
 
 /** Increment and return the process-wide request counter. */
@@ -279,6 +311,14 @@ export function registerWireHooks(
 			append(
 				ctx.cwd,
 				wireRecord("main.request", {
+					// PASSED EXPLICITLY, matching `call-model.ts`. `wireRecord` would fall
+					// back to the same read, but a record whose join key is supplied by
+					// its composer is a record whose join key a reader can locate; one
+					// that inherits a module default is a record whose provenance is a
+					// paragraph elsewhere. The single-slot limitation this read carries is
+					// stated in the module docstring, not implied by the absence of an
+					// argument.
+					corr: currentCorrelationId() ?? UNCORRELATED,
 					sessionId: ctx.sessionManager.getSessionId(),
 					// `redactDeep` returns a NEW structure; the live payload is never
 					// touched, so what the provider receives is byte-identical.
@@ -299,6 +339,8 @@ export function registerWireHooks(
 			append(
 				ctx.cwd,
 				wireRecord("main.response", {
+					// Explicit, for the reason given on `before_provider_request` above.
+					corr: currentCorrelationId() ?? UNCORRELATED,
 					sessionId: ctx.sessionManager.getSessionId(),
 					status: event.status,
 					headers: redactHeaders(event.headers),
