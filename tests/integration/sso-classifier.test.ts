@@ -344,10 +344,20 @@ describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 		// EVERY case below reads one of these captures. An empty one means the
 		// probe never ran, which means the extension never loaded, which means
 		// every "contains"/"does not contain" assertion below is about nothing.
+		// A FLOOR, NOT A COMPARISON WITH THE SOURCE OF THE LOOP. `ssoRuns` is built
+		// by `for (const fixture of SSO_FIXTURES) ssoRuns.push(...)`, so
+		// `ssoRuns.length === SSO_FIXTURES.length` compares two views of one
+		// iteration: it can only differ if `beforeAll` threw, in which case the
+		// whole file is already red. Emptying SSO_FIXTURES gave `0 === 0` and the
+		// stated purpose — "no SSO fixture was driven at all" — was unreachable by
+		// that comparison. Only the unrelated `SSO_FIXTURES[0].text` at the
+		// placeholder run saved it, by accident. [WR-04]
 		expect(
 			ssoRuns.length,
-			"no SSO fixture was driven at all, so the whole file asserts nothing",
-		).toBe(SSO_FIXTURES.length);
+			"the six credential fixtures PROV-05 is written against must each be driven. " +
+				"Comparing against SSO_FIXTURES.length compares the loop with itself and is " +
+				"satisfied by an empty table [WR-04]",
+		).toBeGreaterThanOrEqual(6);
 
 		for (const run of ssoRuns) {
 			expect(
@@ -714,6 +724,26 @@ describe("PROV-05 — the SSO classifier on a live in-memory session", () => {
 			"the pattern table is empty, so the classifier matches nothing and every SSO case above " +
 				"would have to be failing already — assert the set non-empty before looping over it",
 		).toBeGreaterThanOrEqual(5);
+
+		// THE OTHER HALF OF THE SAME GUARD. `SSO_PATTERNS.length` is asserted
+		// above; `NON_SSO_FIXTURES` is only partially protected, because
+		// `RETRYABLE_CONTROL_FIXTURE` indexes `[0]`. Truncating the table to just
+		// that entry silently removes the throttling and 400 fixtures from the
+		// exclusion rule with nothing red — `overreaching` simply becomes a
+		// shorter loop. [WR-03]
+		expect(
+			NON_SSO_FIXTURES.length,
+			"the exclusion rule is asserted over this set; an emptied or truncated one makes " +
+				"`overreaching` trivially [] for every pattern, and the classifier could then " +
+				"match a retryable 503 with the whole file still green [WR-03]",
+		).toBeGreaterThanOrEqual(3);
+
+		expect(
+			SSO_FIXTURES.length,
+			"the dead-pattern check below is asserted over this set; an emptied one makes every " +
+				"pattern dead and the `dead` list is then everything, which is loud — but a " +
+				"TRUNCATED one quietly narrows what 'not dead' means [WR-03]",
+		).toBeGreaterThanOrEqual(6);
 
 		const overreaching: string[] = [];
 		for (const entry of SSO_PATTERNS) {

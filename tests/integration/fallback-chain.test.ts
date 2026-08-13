@@ -471,6 +471,19 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 		// native registration had not replaced it, the chain would have resolved
 		// the real entry, produced a setup error for want of a credential, and
 		// every count below would be a measurement of the wrong thing.
+		// THE FILE'S OWN HOUSE RULE, APPLIED TO THIS LOOP TOO. `fixture.runs` is
+		// empty when the probe failed to hand over an ExtensionContext, and this
+		// loop then iterates nothing and reports green in exactly the scenario
+		// where the identity guard matters most. Case 0 does go red in that
+		// situation, so something in the file fails — but a guard that is not
+		// self-guarding is one refactor away from being the only one left.
+		// [IN-06]
+		expect(
+			Object.keys(fixture.runs).length,
+			"no chain walk was recorded, so the identity guard below iterates nothing and " +
+				"passes without checking a single hop [IN-06]",
+		).toBeGreaterThanOrEqual(5);
+
 		for (const name of Object.keys(fixture.runs)) {
 			const walk = run(name);
 			expect(
@@ -827,6 +840,27 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 8 — DashScope's own quota wording advances, and a dead credential does not", () => {
+		// DISARMED BY DELETION, NOT BY BREAKAGE. `DASHSCOPE_QUOTA_FIXTURES` has
+		// exactly one consumer in the repository — this loop. Emptying it in
+		// schema.ts made the loop iterate nothing, dropped the ENTIRE proof that
+		// DashScope's `Arrearage` / `Allocated quota exceeded` wording is handled
+		// at all, and left the suite GREENER than before. Same shape as the
+		// ALL_IDS hole `docs-policy.test.ts:406-435` was written to close, and the
+		// same remedy: a floor on the table itself, before it is iterated.
+		// [WR-03]
+		expect(
+			DASHSCOPE_QUOTA_FIXTURES.length,
+			"the DashScope quota table is the only reason QUOTA_PATTERN carries wording Pi's " +
+				"limit table does not. Shrinking it removes coverage without turning anything " +
+				"red, which is the one way a guard fails silently [WR-03]",
+		).toBeGreaterThanOrEqual(2);
+
+		expect(
+			SSO_FIXTURES.length,
+			"the credential table is the disclosure control below: an emptied one makes 'no " +
+				"credential failure advances the chain' true of nothing [WR-03]",
+		).toBeGreaterThanOrEqual(6);
+
 		for (const quotaFixture of DASHSCOPE_QUOTA_FIXTURES) {
 			expect(
 				classifyFailure(quotaFixture.text),
