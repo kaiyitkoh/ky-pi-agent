@@ -199,7 +199,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 04-08-PLAN.md — `safety/index.ts`: hook + wrapped tools + `approve_ky_command`, and the mutated-input proof
+- [x] 04-08-PLAN.md — `safety/index.ts`: hook + wrapped tools + `approve_ky_command`, and the mutated-input proof
 
 **Wave 6** *(blocked on Wave 5 completion)*
 

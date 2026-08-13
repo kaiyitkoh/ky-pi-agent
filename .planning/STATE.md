@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-06-PLAN.md
-last_updated: "2026-08-13T21:21:12.770Z"
+stopped_at: Completed 04-08-PLAN.md
+last_updated: "2026-08-13T21:49:45.075Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 3
   total_plans: 44
-  completed_plans: 39
+  completed_plans: 40
   percent: 27
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 04 (safety-deployment-guardrails) — EXECUTING
-Plan: 8 of 12
+Plan: 9 of 12
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [█████████░] 89%
+Progress: [█████████░] 91%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -101,6 +101,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 04 P05 | 25min | 2 tasks | 3 files |
 | Phase 04 P06 | 25min | 2 tasks | 2 files |
 | Phase 04 P07 | 45min | 2 tasks | 4 files |
+| Phase 04 P08 | 50min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -231,6 +232,9 @@ Recent decisions affecting current work:
 - [Phase 04-06]: SAFE-07: unknown terraform subcommands and unknown kubectl verbs default to confirm, not allow or a hard block -- distinct from git.ts's protected-HEAD posture
 - [Phase 04]: policy.ts's bash argument scan applies classifyPathRead only (never classifyPathWrite) to avoid blocking ordinary absolute-path arguments — classifyPathWrite's project-root containment would false-positive on most bash args outside the repo; SAFE-13 detonation targets are exercised directly via the write/edit tool surface instead
 - [Phase 04]: approvals.ts grants are keyed on requestKey (a content fingerprint), never on the caller-chosen request id — the id identifies one approval conversation; only a fingerprint of the actual command/tool/cwd is safe to trust as the thing being authorised, preventing a laundered-command approval (T-04-09)
+- [Phase 04]: safety/index.ts: wrapped-tool delegate calls omit ctx (4 args, not 5) -- matches AgentTool.execute's real declared type at pi-agent-core/dist/types.d.ts:348
+- [Phase 04]: safety/index.ts: classifyAtWrapper() (never throws) and wrapperOutcome() (writes exactly one audit row, then returns or throws) are split to avoid a double-audit-row bug found and fixed before the first commit
+- [Phase 04]: approve_ky_command's schema cost was MEASURED (1099 bytes -> 275 tokens via diagnostics/budget.ts's chars/4 estimator), not estimated, per CONTRIBUTING.md boundary rule (b)
 
 ### Pending Todos
 
@@ -278,8 +282,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T21:21:12.760Z
-Stopped at: Completed 04-06-PLAN.md
-Resume file: Completed 04-07-PLAN.md
+Last session: 2026-08-13T21:49:45.067Z
+Stopped at: Completed 04-08-PLAN.md
+Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
