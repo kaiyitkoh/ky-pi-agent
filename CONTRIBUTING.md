@@ -185,8 +185,19 @@ npx vitest run tests/unit          # quick
 npx vitest run && npx tsc --noEmit # full
 ```
 
-CI additionally runs `shellcheck --shell=sh` over every tracked `*.sh` on
-Ubuntu, and executes `sh bin/bootstrap.sh --check-only` on `windows-latest` and
-`macos-latest` with `fail-fast: false`. `shellcheck` is not installed on the
-development machine, so POSIX conformance is a CI-only gate — do not assume a
-green local run covers it.
+`tests/unit/lf-and-shell.test.ts` parses every tracked `*.sh` with
+`dash -n`. `dash` is a genuine POSIX shell — unlike `sh`, which is bash in
+POSIX mode on both Windows and macOS — and it ships with Git for Windows at
+`/usr/bin/dash` and is `/bin/sh` itself on Debian-family runners. It catches
+`local`, `echo -e`, `${var:offset:len}`, `$'…'`, `function f()`, arrays and
+`+=`, none of which the four-pattern bashism regex can see. Those cases skip
+where no `dash` exists (macOS ships none), and the skip is asserted rather than
+silent.
+
+A parse is not a lint, so that gate is a floor, not the ceiling. CI additionally
+runs `shellcheck --shell=sh --severity=style` over every tracked `*.sh` on
+Ubuntu — the only runner that has it — and executes `sh bin/bootstrap.sh
+--check-only` on `windows-latest` and `macos-latest` with `fail-fast: false`.
+`shellcheck` is not installed on the development machine, so unquoted
+expansions and BSD-vs-GNU flag differences remain a CI-only gate: a green local
+run does not cover them.

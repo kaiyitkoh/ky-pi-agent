@@ -17,18 +17,38 @@
  *   constructs that die there -- `[[`, `sort -V`, `declare -A`, `${v^^}` -- are
  *   asserted absent.
  *
- *   CONFORMANCE (NOT here, and it cannot be). Executing a script does not prove
+ *   CONFORMANCE (partially here). Executing a script under `sh` does not prove
  *   it is POSIX `sh`: Git-for-Windows `sh` and macOS `/bin/sh` are both bash in
  *   POSIX mode, so `sh script.sh` passing proves only that bash-in-posix-mode
- *   accepted it. ShellCheck under `--shell=sh` is what proves conformance, and
- *   it is preinstalled on ubuntu-24.04 only. That is the `posix-lint` job in
- *   `.github/workflows/ci.yml`, and it is deliberately not simulated here --
- *   a fake local conformance check would be worse than none.
+ *   accepted it. ShellCheck under `--shell=sh` is the full conformance gate and
+ *   is preinstalled on ubuntu-24.04 only -- that is the `posix-lint` job in
+ *   `.github/workflows/ci.yml`.
+ *
+ *   But `dash` IS a genuine POSIX shell rather than bash in a costume, and it
+ *   ships with Git for Windows (`/usr/bin/dash`) and is `/bin/sh` itself on
+ *   every Debian-family runner. `dash -n` therefore parses each script under a
+ *   real `sh` grammar, which catches `local`, `echo -e`, `${var:offset:len}`,
+ *   `$'…'`, `function f()`, arrays and `+=` -- none of which the four-pattern
+ *   bashism regex below can see. That gate runs here. It is not a substitute
+ *   for ShellCheck (a parse is not a lint: `dash -n` says nothing about
+ *   unquoted expansions or BSD-vs-GNU flag differences), and it is not a fake
+ *   local conformance check either -- it is a real POSIX parser giving a real
+ *   verdict.
+ *
+ *   The `dash -n` cases SKIP when no `dash` is on the machine, which is the one
+ *   place this file departs from the repo's usual throw-rather-than-skip rule.
+ *   The reason is specific: macOS ships no `dash` at all, so throwing would
+ *   turn the macos-latest leg red for a tool that platform has never had, and a
+ *   red build nobody can fix is how a gate gets deleted. The resolution outcome
+ *   is asserted and printed by its own always-running case, so a skip is
+ *   visible rather than silent.
  *
  * Why bytes and not `grep -P` / `file`: neither behaves identically on Windows,
  * macOS and Linux. A Buffer byte comparison behaves identically everywhere.
  */
-import { readFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -36,6 +56,27 @@ import { describe, expect, it } from "vitest";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
 const ROOT = repoRoot();
+
+/**
+ * A real POSIX shell, if this machine has one.
+ *
+ * Ordered by specificity. `/usr/bin/dash` is where Git for Windows puts it;
+ * `/bin/dash` is Debian/Ubuntu, where it is also `/bin/sh`; a bare `dash` picks
+ * up a PATH install. Deliberately does NOT fall back to `sh` -- the entire
+ * point is that `sh` is bash in POSIX mode on both platforms this project
+ * targets, so accepting it would turn a real gate into a tautology.
+ */
+export function resolvePosixShell(): string | undefined {
+	for (const candidate of ["/usr/bin/dash", "/bin/dash", "dash"]) {
+		const probe = spawnSync(candidate, ["-c", ":"], { encoding: "utf-8", windowsHide: true });
+		if (!probe.error && probe.status === 0) {
+			return candidate;
+		}
+	}
+	return undefined;
+}
+
+const POSIX_SHELL = resolvePosixShell();
 
 /** ASCII carriage return. The single byte that breaks a script on macOS. */
 const CR = 0x0d;
@@ -163,6 +204,83 @@ describe("BOOT-06 -- every shipped script is POSIX sh, not bash", () => {
 			"[[ ... ]] double-bracket test",
 		);
 	});
+});
+
+describe("BOOT-06 -- every shipped script parses under a REAL POSIX shell", () => {
+	it("reports whether a real POSIX shell was found (a skip must be visible)", () => {
+		// This case always runs. Without it, `dash` silently vanishing from the
+		// machine would turn the whole block below into skipped-and-green, which
+		// is the same false assurance as having no gate. On Windows and on any
+		// Debian-family runner this must resolve; only macOS legitimately cannot.
+		if (POSIX_SHELL === undefined) {
+			expect(
+				process.platform,
+				"no dash found. Windows (Git for Windows ships /usr/bin/dash) and Linux " +
+					"(dash IS /bin/sh) both have one, so its absence there is a broken " +
+					"environment, not a portability fact. Install dash rather than " +
+					"accepting the skip.",
+			).toBe("darwin");
+			return;
+		}
+		expect(POSIX_SHELL).toMatch(/dash/);
+	});
+
+	for (const rel of shellScripts) {
+		it.skipIf(POSIX_SHELL === undefined)(
+			`${rel} parses under dash, not merely under bash-in-posix-mode`,
+			() => {
+				const result = spawnSync(POSIX_SHELL as string, ["-n", join(ROOT, rel)], {
+					encoding: "utf-8",
+					windowsHide: true,
+				});
+				expect(result.error, `${POSIX_SHELL} failed to run`).toBeUndefined();
+				expect(
+					result.status,
+					`${rel} is not POSIX sh. ${POSIX_SHELL} said:\n${result.stderr}\n` +
+						"Git-Bash `sh` and macOS /bin/sh are bash in POSIX mode and will " +
+						"happily accept constructs dash rejects; dash is the arbiter here.",
+				).toBe(0);
+			},
+		);
+	}
+
+	it.skipIf(POSIX_SHELL === undefined)(
+		"rejects a bashism the four-pattern regex cannot see (the gate is live)",
+		() => {
+			// A parse gate that only ever sees valid input has never demonstrated
+			// that it can fail. `function f() { ... }` is a ksh/bash function
+			// definition, is a syntax error in POSIX sh, and matches none of the
+			// BASHISMS patterns above -- which is precisely why this gate is worth
+			// having alongside them.
+			const dir = mkdtempSync(join(tmpdir(), "kypi-dash-"));
+			try {
+				const bad = join(dir, "bashism.sh");
+				writeFileSync(bad, "#!/bin/sh\nfunction greet() {\n  echo hi\n}\ngreet\n", "utf-8");
+				const rejected = spawnSync(POSIX_SHELL as string, ["-n", bad], {
+					encoding: "utf-8",
+					windowsHide: true,
+				});
+				expect(
+					rejected.status,
+					`${POSIX_SHELL} accepted \`function f() { … }\`, so it is not behaving as a ` +
+						"POSIX shell and this gate proves nothing",
+				).not.toBe(0);
+				expect(findBashisms("function greet() {\n  echo hi\n}\n")).toEqual([]);
+
+				// …and accepts the POSIX spelling of the same thing, so the gate is
+				// not simply rejecting everything.
+				const good = join(dir, "posix.sh");
+				writeFileSync(good, "#!/bin/sh\ngreet() {\n  echo hi\n}\ngreet\n", "utf-8");
+				const accepted = spawnSync(POSIX_SHELL as string, ["-n", good], {
+					encoding: "utf-8",
+					windowsHide: true,
+				});
+				expect(accepted.status, accepted.stderr).toBe(0);
+			} finally {
+				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+			}
+		},
+	);
 });
 
 describe("BOOT-06 -- .gitattributes is what makes the byte assertion hold", () => {
