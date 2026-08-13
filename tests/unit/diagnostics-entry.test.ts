@@ -174,13 +174,18 @@ describe("the extension entry point registers session_start and prunes there", (
 				registered,
 				"retention runs at session start because it is cheap, deterministic and off the hot " +
 					"path (RESEARCH §10.5); plan 02-05 added the three main-loop provider hooks " +
-					"(DIAG-01/DIAG-07) beside it, and plan 02-08 the three turn hooks (DIAG-04). If " +
+					"(DIAG-01/DIAG-07) beside it, plan 02-08 the three turn hooks (DIAG-04), and plan " +
+					"02-09 `agent_start`, which resets the per-run prose-retry budget (DIAG-05). If " +
 					"this list changes, a later plan in this phase is adding hooks and this assertion " +
 					"should grow with them — not be deleted. The wire hooks' own non-mutating contract " +
-					"is asserted in tests/unit/wire-nonmutating.test.ts, and the turn row itself in " +
-					"tests/integration/turns-log.test.ts. `after_provider_response` is registered for " +
+					"is asserted in tests/unit/wire-nonmutating.test.ts, the turn row itself in " +
+					"tests/integration/turns-log.test.ts, and the prose retry in " +
+					"tests/integration/prose-retry.test.ts. `after_provider_response` is registered for " +
 					"the WIRE dump only: no field of a turns row may be derived from it, because it " +
-					"never fires on a provider error (RESEARCH §3.2, Pitfall 3)",
+					"never fires on a provider error (RESEARCH §3.2, Pitfall 3). A NINTH entry named " +
+					"`before_provider_request` appearing twice would mean the `tool_choice: \"required\"` " +
+					"lever has been switched on — PROSE_RETRY_FORCES_TOOL_CHOICE is `false` and its " +
+					"effect is UNVERIFIED, so that is Phase 10's experiment, not a Phase 2 default",
 			).toEqual([
 				"session_start",
 				"before_provider_headers",
@@ -189,6 +194,7 @@ describe("the extension entry point registers session_start and prunes there", (
 				"turn_start",
 				"message_end",
 				"turn_end",
+				"agent_start",
 			]);
 
 			expect(

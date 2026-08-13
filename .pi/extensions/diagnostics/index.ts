@@ -10,7 +10,7 @@
  * LIFETIME. Permanent. It grows across this phase: plan 02-05 added the wire
  * capture, 02-08 the per-turn rows, 02-09 the prose-tool-call retry and 02-10
  * the `/budget` command. Today it registers `session_start`, the three
- * main-loop provider hooks, and the three turn hooks.
+ * main-loop provider hooks, the three turn hooks, and `agent_start`.
  *
  * THE TURN ROW IS BUILT FROM THE HOOKS THAT ALWAYS FIRE. `turn_start` supplies
  * the clock, `message_end` the finalized assistant message, `turn_end` the turn
@@ -50,7 +50,23 @@
  *   call-model.ts — THE chokepoint for nested model calls. It writes its
  *                   own `kind:"nested"` rows and counts them through
  *                   {@link noteRowWritten}.                      DIAG-02/03.
- *   prose.ts      — the prose-tool-call predicate (effect is 02-09). DIAG-05.
+ *   prose.ts      — the prose-tool-call PREDICATE. Its EFFECT — the row,
+ *                   the capped follow-up and the exhaustion record —
+ *                   lives in the `message_end` handler below.       DIAG-05.
+ *
+ * THE PROSE RETRY IS A FOLLOW-UP MESSAGE, NOT A FABRICATED TOOL CALL. The
+ * alternative — returning `{ message }` from `message_end` with the parsed
+ * prose promoted into a real `toolCall` content block — was executed during
+ * research and it works, at zero extra model calls [RESEARCH §6.4, executed
+ * 2026-08-13]. It is deliberately not built here for three reasons: it executes
+ * a tool whose arguments were regex-scraped out of untrusted prose, on a laptop
+ * where merging to `main` auto-deploys and Phase 4's command guard has not
+ * shipped; it rewrites session history to claim the model emitted a call it
+ * never emitted, corrupting the very measurement Phase 10 reads; and a wrong
+ * parse produces a silently wrong ACTION rather than a visible retry. It becomes
+ * an available lever for read-only tools once Phase 4 ships, and
+ * `docs/DIAGNOSTICS.md` (plan 02-11) documents it as one. Nothing in this file
+ * constructs a content block. [threat T-02-09-01]
  *
  * Only this file is an entry point: `.pi/extensions/<dir>/index.ts` is one of
  * the four auto-discovered shapes [CITED: pi 0.84.1 docs/extensions.md:115-120]
@@ -68,6 +84,7 @@
  * and {@link rowsWrittenThisSession} exist for that single reason.
  */
 import type {
+	AgentStartEvent,
 	ExtensionAPI,
 	ExtensionContext,
 	MessageEndEvent,
@@ -77,10 +94,15 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { appendJsonl, pruneLogs } from "./jsonl.ts";
+import { isProseToolCall, proseToolCallName } from "./prose.ts";
 import { redactString } from "./redact.ts";
 import {
 	DIAGNOSTICS_ERROR_EVENT,
+	MAX_PROSE_RETRIES,
 	MAX_ROTATED_FILES,
+	PROSE_EVENT,
+	PROSE_EXHAUSTED_EVENT,
+	PROSE_RETRY_PROMPT,
 	TURNS_LOG_BASE,
 	TURNS_ROTATE_BYTES,
 	type Api,
@@ -132,8 +154,44 @@ export const TURN_NO_MESSAGE_WHERE = "turn_end.no_message";
  */
 export const MODEL_UNAVAILABLE_EVENT = "diagnostics.model_unavailable";
 
+/**
+ * Whether the prose retry forces `tool_choice: "required"` on its one extra
+ * request. **`false`, and it must stay `false` until Phase 10 says otherwise.**
+ *
+ * THE MECHANISM EXISTS. On the main loop it is a second `before_provider_request`
+ * handler returning a payload with `tool_choice: "required"` for exactly the
+ * retry request — Pi treats any non-`undefined` return from that hook as a
+ * REPLACEMENT for the outgoing body [RESEARCH §1.2]. On the nested path it is
+ * `options.toolChoice` [RESEARCH §4.2]. Neither is hard to build.
+ *
+ * ITS EFFECT IS **UNVERIFIED**, which is why it is off. Nobody here has measured
+ * whether DeepSeek honours the field, and PITFALLS Pitfall 7 note 3 flags the
+ * open possibility that it trades a prose tool call for a *wrong* tool call —
+ * which would look like a fixed turn and be a worse one. Turning it on before
+ * the detector has produced a baseline prose rate would also destroy the
+ * baseline: the retry would be measuring the intervention rather than the
+ * problem. RESEARCH Open Question 1 assigns the experiment to Phase 10.
+ *
+ * NO HANDLER IS REGISTERED WHILE THIS IS FALSE. A registered-but-inert handler
+ * is one edit away from being live and, worse, would appear in the hook list
+ * `tests/unit/diagnostics-entry.test.ts` asserts, implying a capability this
+ * subsystem does not have. [threat T-02-09-06, disposition: accept]
+ */
+export const PROSE_RETRY_FORCES_TOOL_CHOICE = false;
+
 /** Rows this process has written. Read through {@link rowsWrittenThisSession}. */
 let rowsWritten = 0;
+
+/**
+ * Prose-tool-call retries spent in the CURRENT agent run. Reset on `agent_start`.
+ *
+ * PER RUN, NOT PER SESSION AND NOT PER TURN. Per turn would be no cap at all —
+ * the retry creates a new turn, so the counter would reset the instant it
+ * mattered. Per session would silently stop retrying after the first prose call
+ * of the day, which is a different behaviour wearing the same name.
+ * [threat T-02-09-02]
+ */
+let proseRetriesThisRun = 0;
 
 /**
  * How many diagnostic rows this process has written.
@@ -192,6 +250,16 @@ interface TurnAccumulator {
 	message?: AssistantMessage;
 	/** `ctx.thinkingLevel` as REQUESTED at turn start. */
 	thinkingLevel?: string;
+	/**
+	 * Out-of-band verdict to stamp on this turn's row — today only
+	 * {@link PROSE_EVENT}.
+	 *
+	 * It rides on the accumulator rather than being appended as its own turn row
+	 * because `turn_end` already writes exactly one row per turn and counts it;
+	 * a second `kind:"turn"` row from `message_end` would double every per-turn
+	 * total Phase 8 computes (02-08's handover note).
+	 */
+	event?: string;
 }
 
 /** The turn currently in flight, or `undefined` between turns. */
@@ -343,12 +411,86 @@ export default function (pi: ExtensionAPI): void {
 			// `message_end` fires for user and toolResult messages too
 			// [pi 0.84.1 dist/core/extensions/types.d.ts:573], so the role check is
 			// what keeps a tool result from overwriting the turn's real message.
-			if (event.message.role === "assistant") {
-				const turn = inFlight ?? { startedAt: Date.now(), thinkingLevel: ctx.thinkingLevel };
-				turn.message = event.message;
-				turn.corr = captureCorrelationId();
-				inFlight = turn;
+			if (event.message.role !== "assistant") {
+				return;
 			}
+
+			const turn = inFlight ?? { startedAt: Date.now(), thinkingLevel: ctx.thinkingLevel };
+			turn.message = event.message;
+			turn.corr = captureCorrelationId();
+			inFlight = turn;
+
+			// DIAG-05 — the prose-tool-call effect. The predicate is `prose.ts`;
+			// everything from here down is what the harness DOES about it.
+			//
+			// The active-tool list comes from `pi.getActiveTools()` and is never
+			// hardcoded: `isProseToolCall` refuses on an empty list by design
+			// (gate 3), so a mis-wired call is a detector that reports 0% rather
+			// than one that reports 100% against a generic `\w+\(\{`.
+			const activeTools = pi.getActiveTools();
+			if (!isProseToolCall(event.message, activeTools)) {
+				return;
+			}
+
+			// ALONGSIDE `stopReason`, NEVER INSTEAD OF IT. `composeTurnRow` writes
+			// both columns, so the row still says the provider stopped cleanly AND
+			// that this project judged the turn a prose tool call. RESEARCH §3.3 is
+			// explicit that the verdict sits next to the provider's own word: the
+			// mapping is an interpretation and the evidence for it must stay
+			// readable by someone who disagrees. [threat T-02-09-03]
+			turn.event = PROSE_EVENT;
+
+			const sessionId = ctx.sessionManager.getSessionId();
+			// The tool the model MEANT to call. This is the column Phase 10 groups
+			// by, and it is read here rather than re-derived later because the
+			// active-tool list is a live value that may differ by the time anyone
+			// reads the log.
+			const tool = proseToolCallName(event.message, activeTools);
+
+			if (proseRetriesThisRun >= MAX_PROSE_RETRIES) {
+				// A SECOND PROSE RESPONSE IS A SIGNAL, NOT SOMETHING TO KEEP PAYING
+				// FOR (RESEARCH §6.6). Against a model that reliably writes prose an
+				// uncapped detector is an unbounded spend, and the loop would be
+				// invisible: every iteration looks like an ordinary extra turn.
+				// [threat T-02-09-02]
+				writeTurnsRow(ctx.cwd, {
+					ts: Date.now(),
+					event: PROSE_EXHAUSTED_EVENT,
+					tool,
+					sessionId,
+					corr: turn.corr,
+				});
+				return;
+			}
+
+			proseRetriesThisRun += 1;
+
+			// AN IMMEDIATE RECORD, IN ADDITION TO THE VERDICT ON THE TURN ROW. The
+			// turn row is written later, by `turn_end`, and this record is what
+			// survives if that never happens — a handler that throws there is
+			// swallowed by Pi (runner.ts:861-870). It carries no `kind`, exactly
+			// like the `session_start` and `diagnostics.error` rows, so it is never
+			// counted as a turn: `kind:"turn"` is what a per-turn total sums over.
+			writeTurnsRow(ctx.cwd, {
+				ts: Date.now(),
+				event: PROSE_EVENT,
+				tool,
+				sessionId,
+				corr: turn.corr,
+			});
+
+			// `deliverAs` IS MANDATORY HERE. Inside `message_end` the agent is
+			// always streaming (`isIdle()` logged `false` in the research probe),
+			// and `AgentSession.prompt` throws "Agent is already processing" when
+			// no streaming behaviour is given [VERIFIED: pi 0.84.1
+			// agent-session.ts:1167-1172]. `followUp` resumes the SAME agent run at
+			// the loop's own resumption point [VERIFIED: pi-agent-core
+			// agent-loop.ts:262-268], so there is one `agent_end` for the pair and
+			// `/session` accounting stays coherent. `steer` would also be drained
+			// (agent-loop.ts:259) but means "interrupt", and the stream has already
+			// finished — a follow-up is the honest queue.
+			pi.sendUserMessage(PROSE_RETRY_PROMPT, { deliverAs: "followUp" });
+
 			// THIS HANDLER RETURNS NOTHING, AND THAT IS A CONTRACT, NOT A STYLE.
 			// A returned `{ message }` REPLACES the finalized message, and the
 			// replacement must keep the original role
@@ -357,10 +499,11 @@ export default function (pi: ExtensionAPI): void {
 			// `Object.assign`-ing the replacement onto it
 			// (`agent-session.ts:710-724`), which the agent loop then reads back
 			// immediately (`pi-agent-core agent-loop.ts:350-352`). Diagnostics never
-			// replaces a message. The only thing in this subsystem that interacts
-			// with this hook's semantics is the prose retry (plan 02-09), and it
-			// does so by sending a follow-up user message, not by rewriting this
-			// one. [threat T-02-08-04]
+			// replaces a message. The prose retry above is the one thing in this
+			// subsystem with a reason to want to, and it deliberately does not: the
+			// replacement path is how a regex-scraped argument becomes an executed
+			// tool call. See the promotion paragraph in the module docstring.
+			// [threats T-02-08-04, T-02-09-04]
 		}),
 	);
 
@@ -413,7 +556,17 @@ export default function (pi: ExtensionAPI): void {
 						thinkingLevel: turn?.thinkingLevel,
 						// `composeTurnRow` omits the key when this is undefined, so a
 						// healthy row carries no `event` at all.
-						event: model === undefined ? MODEL_UNAVAILABLE_EVENT : undefined,
+						//
+						// PRECEDENCE, AND WHY THIS WAY ROUND. `event` is one string and
+						// two things want it: the degraded-cost marker, and the prose
+						// verdict `message_end` stamped on the accumulator. The marker
+						// wins, because losing it means a fabricated zero cost enters a
+						// Phase 8 spend total with nothing anywhere saying so
+						// [threat T-02-08-05]. Losing the prose verdict here costs
+						// nothing equivalent: `message_end` already appended a standalone
+						// record carrying it, which is exactly the case that record
+						// exists for.
+						event: model === undefined ? MODEL_UNAVAILABLE_EVENT : turn?.event,
 					}),
 				);
 			}
@@ -423,6 +576,26 @@ export default function (pi: ExtensionAPI): void {
 			// REPLACEMENT — so a reader never has to remember which is which.
 			// `tests/unit/wire-nonmutating.test.ts` asserts the value, rather than
 			// trusting this comment.
+		}),
+	);
+
+	// DIAG-05 — the retry budget is per agent RUN, so it is reset here.
+	//
+	// Registered last and fired first: Pi emits `agent_start` before the run's
+	// first `turn_start`, and registration order across different events has no
+	// bearing on emission order. It sits at the bottom so the whole prose effect
+	// reads in one place — the detector and the cap in `message_end` above, the
+	// reset here — rather than being spliced into the DIAG-04 block.
+	//
+	// It goes through `safeHandler` like everything else. A reset that threw and
+	// vanished would leave the counter at its cap forever, and the symptom would
+	// be a detector that logs `prose_tool_call_retry_exhausted` on every single
+	// prose turn and never retries once — a plausible-looking log with no error
+	// in it anywhere.
+	pi.on(
+		"agent_start",
+		safeHandler<AgentStartEvent>("agent_start", () => {
+			proseRetriesThisRun = 0;
 		}),
 	);
 }

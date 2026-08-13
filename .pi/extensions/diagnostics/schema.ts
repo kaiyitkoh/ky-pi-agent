@@ -126,6 +126,25 @@ export const PROSE_EVENT = "prose_tool_call";
 export const PROSE_EXHAUSTED_EVENT = "prose_tool_call_retry_exhausted";
 
 /**
+ * The follow-up user message the detector injects on a prose tool call.
+ *
+ * One sentence: the failure, then the remedy. It lives here rather than inline
+ * in `index.ts` because `tests/integration/prose-retry.test.ts` asserts the
+ * retry reached the model by finding this text in the outgoing context, and the
+ * house rule (`.pi/extensions/harness/index.ts:50-56`) is that a literal spelled
+ * in both the writer and the assertion is how the assertion silently stops
+ * matching the thing it checks.
+ *
+ * It names no tool and quotes nothing the model wrote. Interpolating the matched
+ * tool name would splice untrusted model output back into a prompt for a second
+ * pass, and the harness has no way to tell a genuine failed call from a name the
+ * model printed in a code block.
+ */
+export const PROSE_RETRY_PROMPT =
+	"Your previous message described a tool call in prose instead of emitting one. " +
+	"Re-issue it as a real tool call.";
+
+/**
  * `event` value on the row a failed diagnostics handler writes.
  *
  * Pi swallows handler exceptions (`runner.ts:861-870`, observed live during
