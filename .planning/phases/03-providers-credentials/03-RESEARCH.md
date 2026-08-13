@@ -787,12 +787,16 @@ Optional split if the planner wants finer grain: 03-02 → template / invariant-
 
 ---
 
-## Open Questions
+## Open Questions (RESOLVED — disposition recorded for each; no further desk work required)
 
-1. **Does DashScope serve DeepSeek on the legacy Singapore domain?** Known: the compatibility page lists `dashscope-intl.aliyuncs.com` as legacy-but-functional; the DeepSeek page lists Singapore only in workspace-dedicated form. Unclear: whether the legacy host routes DeepSeek model ids. Handling: template the legacy host, ship the `KYPI_DASHSCOPE_BASE_URL` escape hatch, and make it the first troubleshooting line in RB-03-01.
-2. **`thinkingFormat: "qwen"` vs `"deepseek"` for DeepSeek-on-DashScope.** Known: Alibaba documents `enable_thinking`, and upstream `pi#6998` closed in favour of `qwen`. Unclear: whether DashScope *also* accepts the `thinking:{type}` object. Handling: ship `"qwen"`, and make RB-03-01's expected output name the key explicitly so a mismatch is a one-key fix with the test already written.
-3. **Does `deepseek-v4-flash` report `completion_tokens_details.reasoning_tokens` through Pi's adapter at all?** Known: the adapter reads it (`:1404`) and the turns row carries it. Unclear: whether the provider populates it. Handling: recorded as R1's fourth outcome — an absent `reasoning` key on both legs is a result, not a failed run.
-4. **`wrapFauxWithStatus` double-firing `onResponse`.** Known: faux's own 200 always fires. Unclear: whether the test wants it suppressed. Handling: the planner picks one and states it in the task; a double fire writes two `*.response` records under one correlation id.
+Each of the four carries a concrete handling decision below. None is reopened here: three are
+deferred to a live runbook check (`RB-03-01`, `RB-03-04`) because no amount of reading settles
+them, and the fourth is a design choice the planner made and stated in the plan text.
+
+1. **Does DashScope serve DeepSeek on the legacy Singapore domain?** Known: the compatibility page lists `dashscope-intl.aliyuncs.com` as legacy-but-functional; the DeepSeek page lists Singapore only in workspace-dedicated form. Unclear: whether the legacy host routes DeepSeek model ids. Handling: template the legacy host, ship the `KYPI_DASHSCOPE_BASE_URL` escape hatch, and make it the first troubleshooting line in RB-03-01. **Resolved — deferred to RB-03-01 (OUTSTANDING); no further action required.**
+2. **`thinkingFormat: "qwen"` vs `"deepseek"` for DeepSeek-on-DashScope.** Known: Alibaba documents `enable_thinking`, and upstream `pi#6998` closed in favour of `qwen`. Unclear: whether DashScope *also* accepts the `thinking:{type}` object. Handling: ship `"qwen"`, and make RB-03-01's expected output name the key explicitly so a mismatch is a one-key fix with the test already written. **Resolved — deferred to RB-03-01 (OUTSTANDING); no further action required.**
+3. **Does `deepseek-v4-flash` report `completion_tokens_details.reasoning_tokens` through Pi's adapter at all?** Known: the adapter reads it (`:1404`) and the turns row carries it. Unclear: whether the provider populates it. Handling: recorded as R1's fourth outcome — an absent `reasoning` key on both legs is a result, not a failed run. **Resolved — deferred to RB-03-04 (OUTSTANDING); no further action required.**
+4. **`wrapFauxWithStatus` double-firing `onResponse`.** Known: faux's own 200 always fires. Unclear: whether the test wants it suppressed. Handling: the planner picks one and states it in the task; a double fire writes two `*.response` records under one correlation id. **Resolved by plan 03-01 Task 1: substitute `onResponse` rather than pre-calling it, so faux's hard-coded 200 is rewritten and exactly one status fires. No further action required.**
 
 ---
 
