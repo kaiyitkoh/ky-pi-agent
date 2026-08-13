@@ -76,8 +76,41 @@ const COMMAND_REGISTRATION = "registerCommand";
  * EMPTY BY DESIGN, for the whole of Phase 1. To add an entry you must also add
  * the (a)/(b)/(c) justification from CONTRIBUTING.md next to it, in the same
  * commit. See the SCOPE note in this file's header.
+ *
+ * `.pi/extensions/safety/index.ts` (Phase 4, plan 08) is the first extension
+ * to earn an entry:
+ *
+ * (a) The model must call `approve_ky_command` MID-TURN, never the user.
+ *     It is the resumption step of a `tool_call` hook block: the hook returns
+ *     `{block:true, reason}` embedding a request id, and the model itself
+ *     invokes the approval tool with that id, the exact command and the exact
+ *     reason to move the pending request forward. There is no user-initiated
+ *     entry point for this action -- a user cannot "resume a blocked
+ *     `tool_call`" from a command palette, because the block already
+ *     happened inside the model's own turn and the retry has to come from
+ *     the same place the original call did.
+ * (b) MEASURED, not estimated: serialised as
+ *     `{type:"function",function:{name,description,parameters}}` -- the
+ *     shape `openai-completions.ts:1337-1372` actually sends -- the schema is
+ *     1099 bytes. `Math.ceil(1099 / 4) = 275` tokens by this project's own
+ *     estimator (`diagnostics/budget.ts:223-224`, Pi's own `chars/4`
+ *     formula, the only token-cost arithmetic this codebase has -- no
+ *     tokenizer dependency exists or may be added per that file's own
+ *     docstring). The four WRAPPED tools (`bash`/`read`/`write`/`edit`) add
+ *     ZERO net schema cost: they are registrations of tools Pi already ships
+ *     and would already be serialised into every request whether or not this
+ *     file wraps them, so `approve_ky_command`'s 275 tokens is the entire
+ *     per-turn cost this file adds.
+ * (c) A skill cannot carry this because a skill is text the MODEL reads and
+ *     interprets -- it has no mechanism to validate a presented command
+ *     byte-for-byte against server-side state (`approvals.ts#validate`), no
+ *     mechanism to consume a one-shot grant keyed on a content fingerprint
+ *     (`approvals.ts#approve`/`#consume`), and no mechanism to drive
+ *     `ctx.ui.select()` for a real human confirmation. This needs a
+ *     structured, validated round trip through code the model cannot see or
+ *     alter, not a procedure the model follows on its own word.
  */
-const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [];
+const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [".pi/extensions/safety/index.ts"];
 
 /** Tracked text sources under `.pi/extensions/`, read from the index's view. */
 function extensionSources(): { path: string; text: string }[] {
