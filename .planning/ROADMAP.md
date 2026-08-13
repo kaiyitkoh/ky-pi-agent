@@ -101,7 +101,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 02-05-PLAN.md — `wire.ts`: the three provider hooks, redaction at capture, and the on-disk redaction proof (DIAG-01, DIAG-07)
+- [x] 02-05-PLAN.md — `wire.ts`: the three provider hooks, redaction at capture, and the on-disk redaction proof (DIAG-01, DIAG-07)
 - [ ] 02-06-PLAN.md — `turns.ts`: pure row composition with the omitted-`reasoning` rule and defensive `calculateCost` (DIAG-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
