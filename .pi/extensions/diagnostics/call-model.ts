@@ -136,6 +136,42 @@ import { composeTurnRow } from "./turns.ts";
 import { nextCorrelationId, wireRecord } from "./wire.ts";
 
 /**
+ * The four keys this function owns, removed from the caller's option bag —
+ * DISTRIBUTIVELY, which is the whole point of the naked `T extends unknown`.
+ *
+ * `ApiStreamOptions<TApi>` is a distributive conditional over the `Api` union
+ * [pi-ai src/types.ts:179], so for the common case `Model<Api>` it resolves to a
+ * UNION of every per-API options type. A plain `Omit<union, …>` is
+ * `Pick<union, Exclude<keyof union, …>>`, and `keyof` a union is the
+ * INTERSECTION of its members' keys — so the plain form silently deletes
+ * `reasoningEffort`, `thinkingEnabled`, `toolChoice` and every other per-API
+ * option, leaving a bag that accepts almost nothing. Verified by trying it:
+ * `api: { reasoningEffort: "high" }` failed with TS2353 against the plain form.
+ *
+ * Distributing pushes the `Omit` inside each member, so the result is a union of
+ * per-API bags and a caller may pass any option any API declares.
+ *
+ * HOW MUCH PROTECTION THIS ACTUALLY BUYS — measured, not assumed. `Api` is
+ * `KnownApi | (string & {})` [pi-ai src/types.ts:16], so the union always
+ * includes the custom-API fallback arm `StreamOptions & Record<string, unknown>`
+ * [types.ts:179], which accepts ANY key. Consequences, both verified by
+ * compiling them:
+ *   - with a concretely-typed model (`Model<"bedrock-converse-stream">`) the bag
+ *     is that API's option type and a typo is a compile error;
+ *   - with `Model<Api>` — which is what `ctx.model` and `getModel()` hand back,
+ *     and therefore the normal case — neither `reasoningEfort` nor even
+ *     `onPayload` is rejected.
+ * So the `Omit` is a documentation and concrete-model aid, NOT the enforcement.
+ * The enforcement is the spread order at the call site: `opts.api` is spread
+ * FIRST and the three captures are written after it, so a caller-supplied
+ * capture callback is overwritten and cannot suppress the record. That is
+ * asserted in `tests/integration/call-model.test.ts`, not merely written here.
+ */
+type WithoutCaptures<T> = T extends unknown
+	? Omit<T, "onPayload" | "onResponse" | "transformHeaders" | "signal">
+	: never;
+
+/**
  * Everything a nested invocation needs. THIS IS A CROSS-PHASE CONTRACT.
  *
  * Phases 5 (ROUTE-04, GATE-09) and 8 import this interface. It carries payload,
@@ -159,15 +195,13 @@ export interface CallModelOptions<TApi extends Api> {
 	 * Per-API request options: `reasoningEffort`, `thinkingEnabled`,
 	 * `thinkingBudgetTokens`, `toolChoice`, `maxTokens`, `temperature`, …
 	 *
-	 * The four capture-and-lifecycle keys are `Omit`ted rather than merely
-	 * overwritten below, so a caller that tries to supply its own `onPayload`
-	 * gets a compile error instead of silently losing its callback to the spread
-	 * order. `signal` is omitted too because it has its own field.
+	 * The four capture-and-lifecycle keys are removed from the type, which
+	 * documents the boundary and enforces it for a concretely-typed model.
+	 * `signal` is removed too because it has its own field. For a `Model<Api>`
+	 * the removal is advisory only, and the spread order is what actually holds
+	 * the line — see {@link WithoutCaptures}, which states the measurement.
 	 */
-	api?: Omit<
-		ModelsApiStreamOptions<TApi>,
-		"onPayload" | "onResponse" | "transformHeaders" | "signal"
-	>;
+	api?: WithoutCaptures<ModelsApiStreamOptions<TApi>>;
 	/**
 	 * Defaults to `ctx.signal`, so pressing Esc cancels nested work too.
 	 *
@@ -197,16 +231,25 @@ function zeroUsage(): Usage {
 }
 
 /**
- * Synthesise the finalized message a thrown provider error never produced.
+ * Synthesise the finalized message a REJECTED completion never produced.
  *
- * `ModelRegistry.complete` resolves with a `stopReason: "error"` message for a
- * failure the ADAPTER surfaced — the event stream's final result is the error
- * message itself [VERIFIED: pi-ai src/utils/event-stream.ts:69-83]. But it
- * THROWS for a failure raised before the stream exists: an unknown provider or
- * unresolved auth both throw out of `prepareRequest`
- * [VERIFIED: pi src/core/model-runtime.ts:582, :588]. Those are exactly the
- * calls worth recording, and without this the measurement would be lost on
- * precisely the failures a reader goes looking for.
+ * HOW OFTEN THIS FIRES, STATED HONESTLY: on Pi 0.84.1, almost never — and that
+ * is a finding, not a reason to drop it. Both failure classes are converted to
+ * a `stopReason: "error"` MESSAGE rather than a rejection:
+ *   - an adapter-surfaced failure ends the event stream with an `error` event,
+ *     and `result()` resolves with that message
+ *     [VERIFIED: pi-ai src/utils/event-stream.ts:69-83];
+ *   - a SETUP failure — unknown provider, unresolved auth, both thrown out of
+ *     `prepareRequest` [VERIFIED: pi src/core/model-runtime.ts:582, :588] —
+ *     is caught by `lazyStream`, which pushes `createSetupErrorMessage(...)` and
+ *     ends the stream with it [VERIFIED: pi-ai src/api/lazy.ts, `lazyStream`].
+ * So the row DIAG-02 actually needs on a failed nested call comes from the
+ * normal path, where `composeTurnRow` maps `stopReason: "error"` to
+ * `outcome: "error"`. This function covers what is left: a rejection from the
+ * registry facade itself, and any future Pi release that stops swallowing.
+ * Losing the measurement on the calls most worth reading is not an acceptable
+ * default, and a branch that is cheap and occasionally right beats a branch that
+ * does not exist.
  *
  * The text is redacted here rather than only in `composeTurnRow`, so no
  * unredacted string is ever held on a row this function composes. `redactString`
@@ -278,6 +321,11 @@ export async function callModel<TApi extends Api>(
 	/** Set by `onResponse`. Stays `undefined` when no HTTP response was seen. */
 	let httpStatus: number | undefined;
 
+	// SPREAD ORDER IS THE ENFORCEMENT. `opts.api` goes in FIRST so the three
+	// captures below always win: for a `Model<Api>` the type system will happily
+	// accept a caller-supplied `onPayload` (see WithoutCaptures), and a caller
+	// that could suppress the capture could make its own calls invisible — which
+	// is exactly the property DIAG-02 exists to deny. [threat T-02-07-01]
 	const options = {
 		...(opts.api ?? {}),
 		signal: opts.signal ?? ctx.signal,
@@ -314,48 +362,60 @@ export async function callModel<TApi extends Api>(
 		// compile error at the call site, which is where a human can act on it.
 	} as unknown as ModelsApiStreamOptions<TApi>;
 
+	// ONLY the completion sits inside the `try`, and there is no `finally`. The
+	// success row is appended after it, deliberately: a `finally` would append on
+	// both paths and produce two rows for one call, and an append that itself
+	// throws inside the `try` would be caught below and attempted a second time.
+	let message: AssistantMessage;
 	try {
-		const message = await ctx.modelRegistry.complete(
+		message = await ctx.modelRegistry.complete(
 			opts.model,
 			{ systemPrompt: opts.systemPrompt, messages: opts.messages, tools: opts.tools },
 			options,
 		);
-
-		appendTurn(
-			cwd,
-			composeTurnRow({
-				kind: "nested",
-				role,
-				sessionId,
-				corr,
-				message,
-				model: opts.model,
-				latencyMs: Date.now() - started,
-				// Omitted when `onResponse` never fired. `composeTurnRow` leaves the
-				// key off rather than defaulting it to 200: a defaulted status would
-				// claim a success that was never observed.
-				httpStatus,
-			}),
-		);
-
-		return message;
 	} catch (error) {
-		appendTurn(
-			cwd,
-			composeTurnRow({
-				kind: "nested",
-				role,
-				sessionId,
-				corr,
-				message: errorMessageFor(opts.model, error),
-				model: opts.model,
-				latencyMs: Date.now() - started,
-				httpStatus,
-			}),
-		);
+		try {
+			appendTurn(
+				cwd,
+				composeTurnRow({
+					kind: "nested",
+					role,
+					sessionId,
+					corr,
+					message: errorMessageFor(opts.model, error),
+					model: opts.model,
+					latencyMs: Date.now() - started,
+					httpStatus,
+				}),
+			);
+		} catch {
+			// The instrument cannot instrument its own inability to write, and a
+			// logging failure here would REPLACE the provider error the caller is
+			// waiting for with a filesystem one. `index.ts`'s safeHandler makes the
+			// same trade at the same kind of boundary.
+		}
 		// Rethrown deliberately. Swallowing it would make the instrument change the
 		// behaviour of the thing it measures, and the caller — not this function —
 		// owns the fallback decision.
 		throw error;
 	}
+
+	appendTurn(
+		cwd,
+		composeTurnRow({
+			kind: "nested",
+			role,
+			sessionId,
+			corr,
+			message,
+			model: opts.model,
+			latencyMs: Date.now() - started,
+			// Omitted when `onResponse` never fired. `composeTurnRow` leaves the key
+			// off rather than defaulting it to 200: a defaulted status would claim a
+			// success that was never observed.
+			httpStatus,
+		}),
+	);
+
+	return message;
 }

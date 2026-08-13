@@ -131,11 +131,37 @@ export type SafeHandlerFactory = <E, R = undefined>(
  */
 const UNCORRELATED = "uncorrelated";
 
-/** Requests this process has correlated. Process-lifetime, monotonic. */
-let requestCounter = 0;
+/**
+ * Where the request counter lives, so it is PER PROCESS and not per module
+ * instance.
+ *
+ * A module-level `let` would be per instance, and this module has more than one
+ * instance whenever more than one extension reaches it: Pi loads each extension
+ * through jiti, which keeps its own module registry, so `.pi/extensions/foo`
+ * importing `call-model.ts` and the diagnostics entry point importing `wire.ts`
+ * can hold two separate copies of this file in one process. Two copies means two
+ * counters both starting at 1, both stamping `<sessionId>#1`, both appending to
+ * the same `wire-*.jsonl` — and the correlation id silently stops identifying a
+ * request. That is not hypothetical: it was OBSERVED between a test file's
+ * import graph and Pi's jiti graph while plan 02-07 was being written.
+ *
+ * The id is the join key between `wire-*` and `turns-*`. A duplicate one
+ * mis-joins a nested call's bytes onto a different call's row, which is worse
+ * than having no id at all, because the wrong answer looks like an answer.
+ */
+const COUNTER_KEY = "__kypiDiagnosticsRequestCounter";
 
 /** The most recently issued correlation id. See {@link currentCorrelationId}. */
 let lastCorrelationId: string | undefined;
+
+/** Increment and return the process-wide request counter. */
+function nextRequestNumber(): number {
+	const scope = globalThis as Record<string, unknown>;
+	const previous = scope[COUNTER_KEY];
+	const next = (typeof previous === "number" ? previous : 0) + 1;
+	scope[COUNTER_KEY] = next;
+	return next;
+}
 
 /**
  * Issue the next correlation id for `sessionId`, as `<sessionId>#<n>`.
@@ -152,14 +178,24 @@ let lastCorrelationId: string | undefined;
  * claimed. What this counter identifies is one logical request — one
  * headers/request/response triple — and an `attempt` field is deliberately
  * absent rather than fabricated.
+ *
+ * The counter itself is process-wide rather than module-level; see
+ * {@link COUNTER_KEY} for the failure that forces it.
  */
 export function nextCorrelationId(sessionId: string): string {
-	requestCounter += 1;
-	lastCorrelationId = `${sessionId}#${requestCounter}`;
+	lastCorrelationId = `${sessionId}#${nextRequestNumber()}`;
 	return lastCorrelationId;
 }
 
-/** The last id {@link nextCorrelationId} issued, or `undefined` before the first. */
+/**
+ * The last id THIS module instance issued, or `undefined` before its first.
+ *
+ * Deliberately per-instance, unlike the counter. It exists so {@link wireRecord}
+ * can stamp a record composed by the same code path that issued the id; a
+ * process-wide "last id" would let one extension's record inherit another
+ * extension's correlation. Callers who know their own id — the nested path,
+ * where the id is issued per call — pass it explicitly instead.
+ */
 export function currentCorrelationId(): string | undefined {
 	return lastCorrelationId;
 }
