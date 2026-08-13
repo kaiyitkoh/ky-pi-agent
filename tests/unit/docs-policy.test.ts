@@ -434,6 +434,76 @@ describe("Group B — the runbook is structurally complete", () => {
 		).toEqual([]);
 	});
 
+	it("RB-03-03 describes the installer this repository actually ships [WR-04]", () => {
+		// THE ONLY DOC/BEHAVIOUR PAIR IN THIS FILE, AND IT EARNS ITS PLACE. Every
+		// other assertion here pins a COMMAND or a STATUS; this one pins prose,
+		// because the prose in question is reachable from a running session.
+		// `PROFILE_PLACEHOLDER_HINT` is
+		// " — no AWS profile is configured; see RB-03-03 in docs/RUNBOOK.md" and it
+		// is appended on exactly the path where the user has NO profile. So the
+		// operator who meets an expired SSO session is routed to this page — and it
+		// used to tell them bootstrap had written an `amazon-bedrock` entry with a
+		// placeholder to edit. They open the file, find no such key, and are left
+		// reconciling the runbook against reality at the worst possible moment.
+		//
+		// The claim was true when it was written and was invalidated by the CR-01
+		// fix, which made `merge_auth_json` WITHHOLD any entry still carrying a
+		// `REPLACE_WITH_` value. Nothing noticed: the ENTRY_COMMANDS pins cover
+		// this entry's commands and its OUTSTANDING status, not its explanation.
+		//
+		// BOTH SIDES ARE ASSERTED, which is what makes this a guard rather than a
+		// second copy of the sentence. If a later change makes bootstrap install
+		// the entry after all, the behaviour half goes red and the doc half is then
+		// the thing to update — in the same commit, which is the whole point.
+		const section = runbook.slice(
+			runbook.indexOf("### RB-03-03"),
+			runbook.indexOf("### RB-03-04"),
+		);
+
+		expect(
+			section.length,
+			"the RB-03-03 detail section could not be sliced out of docs/RUNBOOK.md, so every " +
+				"assertion below is about an empty string. The headings this slice keys on are " +
+				"`### RB-03-03` and `### RB-03-04`",
+		).toBeGreaterThan(0);
+
+		// THE BEHAVIOUR HALF, read out of the script rather than trusted.
+		const bootstrap = readFileSync(join(ROOT, "bin", "bootstrap.sh"), "utf-8");
+		expect(
+			bootstrap,
+			"bin/bootstrap.sh no longer withholds template entries that still carry a " +
+				"REPLACE_WITH_ placeholder. That was the CR-01 fix: a stored env.AWS_PROFILE beats " +
+				"the ambient one in Pi's own chain, so installing the placeholder silently breaks a " +
+				"laptop where `export AWS_PROFILE=…` already worked. If this was reverted " +
+				"deliberately, RB-03-03's step 2 now describes the wrong installer and must be " +
+				"rewritten in the same commit [WR-04, CR-01]",
+		).toContain("if (carriesSentinel(tpl[key])) { skipped.push(key); continue; }");
+
+		// THE DOC HALF.
+		expect(
+			section,
+			"RB-03-03 step 2 must say that bootstrap does NOT install the amazon-bedrock entry. " +
+				"This is the page PROFILE_PLACEHOLDER_HINT sends the operator to on exactly the " +
+				"path where they have no profile, so a page describing a placeholder that was " +
+				"never written leaves them reconciling the runbook against an auth.json that holds " +
+				"only dashscope and deepseek [WR-04]",
+		).toContain("does **not** install this entry");
+
+		expect(
+			section,
+			"RB-03-03 must still name the literal the template ships, because that is the string " +
+				"the operator is looking for and the one the SSO classifier rejects before " +
+				"interpolating it into a copy-pasteable command [CR-01]",
+		).toContain("REPLACE_WITH_AWS_PROFILE_NAME");
+
+		expect(
+			section.includes("replacing the literal placeholder"),
+			"RB-03-03 has been restored to the pre-CR-01 wording: bootstrap never replaced the " +
+				"placeholder — installing it verbatim WAS CR-01 — and it now withholds the entry " +
+				"entirely [WR-04]",
+		).toBe(false);
+	});
+
 	it("records the two findings that would otherwise be re-litigated", () => {
 		expect(
 			runbook,

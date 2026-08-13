@@ -564,10 +564,22 @@ also prove that a real session authenticates.
    credential chain"** — that branch stores `{ "type": "api_key" }` with no
    `key` and no `env`. It is a no-op that looks like configuration, and it is
    the single most likely way this check is reported as done while nothing was
-   configured. `bin/bootstrap.sh` writes the same shape from
-   `.pi/templates/auth-template.json`, replacing the literal placeholder
-   `REPLACE_WITH_AWS_PROFILE_NAME`; an existing `amazon-bedrock` entry is left
-   untouched, so a hand-configured one is never clobbered.
+   configured.
+
+   `bin/bootstrap.sh` deliberately does **not** install this entry. The
+   template `.pi/templates/auth-template.json` carries
+   `"AWS_PROFILE": "REPLACE_WITH_AWS_PROFILE_NAME"` to document the shape, and
+   `merge_auth_json` withholds any template entry still holding a
+   `REPLACE_WITH_` value at any depth — a stored `env.AWS_PROFILE` beats the
+   ambient one in Pi's own chain (`pi-ai amazon-bedrock.ts:65`), so installing
+   the placeholder would not merely fail to help: it would silently break a
+   laptop where `export AWS_PROFILE=…` already worked, which is the very state
+   step 1 above tells you to check. The run prints which entries it withheld
+   and why. A fresh `PI_CODING_AGENT_DIR` therefore gets an `auth.json` holding
+   `dashscope` and `deepseek` and **no** `amazon-bedrock` key — that is
+   correct, not a failed bootstrap. `pi auth login` writes the real entry, and
+   an existing `amazon-bedrock` entry is never touched, so a hand-configured
+   one is never clobbered.
 3. Open a **new** shell, export nothing, select a Bedrock Claude model and run
    one ordinary turn.
 4. `cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"provider":"amazon-bedrock"' | tail -n 1`
