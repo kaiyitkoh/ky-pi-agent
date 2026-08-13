@@ -51,6 +51,30 @@ import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
+/**
+ * One argv-conditional response.
+ *
+ * Needed because a single static stdout cannot model a multi-subcommand tool.
+ * `bin/bootstrap.sh` asks npm four different questions in one run --
+ * `config get ignore-scripts` (must answer `true`), `view <pkg>@<ver> version
+ * --json` (must answer a version string), `ls -g --depth=0 --json` (must answer
+ * a tree) and `install -g` (must answer nothing) -- and answering `true` to all
+ * four would make the stub a caricature rather than a model: the version gate
+ * would be "passing" on a token that is not a version, so a regression in its
+ * parsing would go unseen.
+ */
+export interface StubResponse {
+	/**
+	 * Every token here must appear in the stub's argv (exact element match) for
+	 * this response to be selected. Entries are tried in order; the first match
+	 * wins, and no match falls back to the top-level `stdout`/`stderr`/`exitCode`.
+	 */
+	when: string[];
+	exitCode?: number;
+	stdout?: string;
+	stderr?: string;
+}
+
 export interface StubSpec {
 	/** Exit code the stub reports. Default 0. */
 	exitCode?: number;
@@ -72,8 +96,16 @@ export interface StubSpec {
 	 * This is how call ORDER is proven -- e.g. that the `.npmrc` assertion runs
 	 * before any `pi install`. The containing directory must already exist; the
 	 * file need not.
+	 *
+	 * The line is written BEFORE the response is chosen, so an invocation is
+	 * logged even when it falls through to the silent default -- an ordering
+	 * proof that dropped the calls it had no answer for would be worthless.
 	 */
 	logTo?: string;
+	/**
+	 * Argv-conditional responses, tried in order. See {@link StubResponse}.
+	 */
+	match?: StubResponse[];
 }
 
 /** Windows env keys are case-insensitive; find the real one before writing. */
@@ -103,18 +135,27 @@ function payloadSource(name: string, spec: StubSpec): string {
 		'import { appendFileSync, writeSync } from "node:fs";',
 		`const NAME = ${JSON.stringify(name)};`,
 		`const LOG_TO = ${JSON.stringify(spec.logTo ?? null)};`,
-		`const STDOUT = ${JSON.stringify(spec.stdout ?? "")};`,
-		`const STDERR = ${JSON.stringify(spec.stderr ?? "")};`,
-		`const EXIT_CODE = ${JSON.stringify(exitCode)};`,
+		`const MATCH = ${JSON.stringify(spec.match ?? [])};`,
+		"const argv = process.argv.slice(2);",
+		"let stdout = " + JSON.stringify(spec.stdout ?? "") + ";",
+		"let stderr = " + JSON.stringify(spec.stderr ?? "") + ";",
+		`let code = ${JSON.stringify(exitCode)};`,
 		"if (LOG_TO) {",
-		"\tconst argv = process.argv.slice(2);",
 		'\tappendFileSync(LOG_TO, [NAME, ...argv].join(" ") + "\\n");',
+		"}",
+		"for (const m of MATCH) {",
+		"\tif (m.when.every((t) => argv.includes(t))) {",
+		'\t\tstdout = m.stdout ?? "";',
+		'\t\tstderr = m.stderr ?? "";',
+		"\t\tcode = m.exitCode ?? 0;",
+		"\t\tbreak;",
+		"\t}",
 		"}",
 		// writeSync, not console.log + process.exit: process.exit can truncate a
 		// piped stdout mid-flush, which would make captured output flaky.
-		"if (STDOUT) writeSync(1, STDOUT);",
-		"if (STDERR) writeSync(2, STDERR);",
-		"process.exitCode = EXIT_CODE;",
+		"if (stdout) writeSync(1, stdout);",
+		"if (stderr) writeSync(2, stderr);",
+		"process.exitCode = code;",
 		"",
 	].join("\n");
 }
