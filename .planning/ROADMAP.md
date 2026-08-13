@@ -153,7 +153,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 03-09-PLAN.md — The loopback wire proof: every `compat` claim as an assertion, and `reasoning_content` on a replayed two-turn context (PROV-03, PROV-10)
-- [ ] 03-10-PLAN.md — `callWithFallback`: DeepSeek-direct → DashScope over quota/transient/unavailable, with the fatal control (PROV-08)
+- [x] 03-10-PLAN.md — `callWithFallback`: DeepSeek-direct → DashScope over quota/transient/unavailable, with the fatal control (PROV-08)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

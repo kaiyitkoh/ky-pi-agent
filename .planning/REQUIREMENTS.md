@@ -46,7 +46,7 @@
 - [x] **PROV-05**: Expired SSO credentials produce an actionable message naming the exact `aws sso login --profile <name>` command, and are classified **non-retryable** so they don't burn wall-clock in a retry loop **[FAUX]**
 - [ ] **PROV-06**: Every model carries accurate capability metadata — `input[]`, per-provider true `contextWindow`, `cost` — and never inherits a context window from a different provider's entry for the same model
 - [ ] **PROV-07**: The R1 experiment is run and recorded: does `api.deepseek.com` accept `reasoning_effort: "low"`, and does it produce materially fewer reasoning tokens than `"high"` **[RUNBOOK]**
-- [ ] **PROV-08**: A DeepSeek-direct → DashScope fallback chain handles quota, transient, and unavailable errors **[FAUX]**
+- [x] **PROV-08**: A DeepSeek-direct → DashScope fallback chain handles quota, transient, and unavailable errors **[FAUX]**
 - [ ] **PROV-09**: A first-run runbook documents every credential-dependent verification the user performs on the work laptop, with expected output for each
 - [ ] **PROV-10**: A two-turn tool-calling sequence against DashScope returns 200 — the first turn always works, so the second is the test **[RUNBOOK]**
 
@@ -253,7 +253,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | PROV-05 | Phase 3 | Complete |
 | PROV-06 | Phase 3 | Pending |
 | PROV-07 | Phase 3 | Pending |
-| PROV-08 | Phase 3 | Pending |
+| PROV-08 | Phase 3 | Complete |
 | PROV-09 | Phase 3 | Pending |
 | PROV-10 | Phase 3 | Pending |
 | SAFE-01 | Phase 4 | Pending |
