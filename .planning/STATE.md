@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 02-11-PLAN.md — the Phase 2 runbook section, the generalised status guard and docs/DIAGNOSTICS.md; Phase 2 execution complete
-last_updated: "2026-08-13T07:03:42.811Z"
+status: ready_to_plan
+stopped_at: Phase 02 complete (11/11) — ready to discuss Phase 3
+last_updated: 2026-08-13T12:25:30.394Z
 last_activity: 2026-08-13
 progress:
   total_phases: 11
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 02 — diagnostics-the-instrument
+**Current focus:** Phase 3 — providers & credentials
 
 ## Current Position
 
-Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 11 of 11
-Status: Phase complete — ready for verification
+Phase: 3
+Plan: Not started
+Status: Ready to plan
 Last activity: 2026-08-13
 
 Progress: [██████████] 100%
@@ -40,7 +40,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 
 **Velocity:**
 
-- Total plans completed: 10
+- Total plans completed: 21
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -49,6 +49,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase | Plans | Total | Avg/Plan |
 |-------|-------|-------|----------|
 | 01 | 10 | - | - |
+| 02 | 11 | - | - |
 
 **Recent Trend:**
 

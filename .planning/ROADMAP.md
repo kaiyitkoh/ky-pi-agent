@@ -301,7 +301,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
 | 1. Bootstrap, Packaging & Supply Chain | 10/10 | Complete   | 2026-08-13 |
-| 2. Diagnostics — The Instrument | 0/11 | Planned | - |
+| 2. Diagnostics — The Instrument | 11/11 | Complete   | 2026-08-13 |
 | 3. Providers & Credentials | 0/TBD | Not started | - |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
