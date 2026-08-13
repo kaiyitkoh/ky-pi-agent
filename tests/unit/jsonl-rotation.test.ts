@@ -170,7 +170,14 @@ describe("DIAG-08 — a record larger than the cap is written whole, not dropped
 	it("writes it whole, then rotates on the very next append", async () => {
 		await withTempLogCwd(async (cwd) => {
 			const now = new Date(2026, 7, 13, 9, 0, 0);
-			const live = logPath(cwd, TURNS_LOG_BASE);
+			// `now` PASSED, as every other case here passes it. Omitting it names
+			// the file after TODAY while the appends below write the file named
+			// after the fixture's date, so the two agreed only for as long as the
+			// two dates happened to be the same day — this case passed until
+			// 2026-08-13 turned into 2026-08-14 mid-run and then failed with an
+			// ENOENT that had nothing to do with rotation. A fixture that depends
+			// on the wall clock is a test that reports the calendar.
+			const live = logPath(cwd, TURNS_LOG_BASE, now);
 			// A cap far below one record, so the first append cannot possibly fit.
 			const tinyCap = 100;
 			const oversized = makeRecord(1, OLDEST_MARKER);
