@@ -174,8 +174,23 @@ Plans:
   5. At least 30 evasion attempts are each blocked or explicitly documented as out of scope, every allow and block appears in an audit JSONL, and a published table names the bypasses the guard does **not** catch.
 
 **Contains [RUNBOOK] requirements**: SAFE-01.
-**Plans**: TBD
-**Research**: `--research-phase` recommended — `unbash`'s handling of Git Bash path forms (`/c/Users/...` vs `C:\`) in argument position is UNVERIFIED and is a real cross-platform risk for path-scoped policy. Reading `@ramtinj95/pi-infra-command-guard`'s source (read, do not install) is a genuine research task.
+**Plans**: 12 plans across 9 waves
+
+Plans:
+- [ ] 04-01-PLAN.md — pin `unbash@4.0.10` as a runtime dependency, record the AST vocabulary by execution, spike the user-scope load mechanism
+- [ ] 04-02-PLAN.md — extract the JSONL writer to `.pi/lib/`, add `safety/audit.ts` with allow-and-block rows
+- [ ] 04-03-PLAN.md — `shell.ts`: the node-type fail-closed deny predicate and wrapper resolution
+- [ ] 04-04-PLAN.md — `paths.ts`: Windows/Git-Bash canonicalisation, sensitive reads, out-of-project writes, detonation targets
+- [ ] 04-05-PLAN.md — `git.ts`: per-subcommand write/read table, the `HEAD == main` oracle, `glab mr merge`
+- [ ] 04-06-PLAN.md — `infra.ts`: terraform / aws / kubectl mutating-vs-read classification
+- [ ] 04-07-PLAN.md — `policy.ts` deny-by-default composer and `approvals.ts` one-shot grants
+- [ ] 04-08-PLAN.md — `safety/index.ts`: hook + wrapped tools + `approve_ky_command`, and the mutated-input proof
+- [ ] 04-09-PLAN.md — bootstrap user-scope install and the real `pi --mode json` headless deny
+- [ ] 04-10-PLAN.md — blocked command inside a spawned headless child, and four-process audit concurrency
+- [ ] 04-11-PLAN.md — the 30-plus-case evasion corpus and `docs/SAFETY.md`'s published limits table
+- [ ] 04-12-PLAN.md — SAFE-01's offline proxy, `RB-04-01` (OUTSTANDING), and requirements traceability
+
+**Research**: DONE — `04-RESEARCH.md`. Settled by execution: `unbash` parses every Git-Bash and Windows path form cleanly in argument position, but an unquoted Windows path collapses its backslashes in `Word.value`, so path policy must normalise on `Word.text`. The larger finding is that `unbash` is a TOLERANT parser (`errors.length === 0` for command substitution, heredocs, `sh -c` and backgrounding), so SAFE-03's fail-closed mechanism is a node-type deny-list, not a parse-error check. `@ramtinj95/pi-infra-command-guard@0.9.1` was read via `npm pack` and not installed.
 
 ### Phase 5: Routing & Capability Guards
 
