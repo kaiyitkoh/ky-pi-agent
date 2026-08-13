@@ -154,26 +154,35 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 });
 
 describe("the extension entry point registers session_start and prunes there", () => {
-	it("registers exactly one hook, and running it writes the session_start row", async () => {
+	it("registers session_start plus the wire hooks, and running it writes the row", async () => {
 		await withTempLogCwd(async (cwd) => {
 			const registered: string[] = [];
-			let handler: ((event: unknown, ctx: ExtensionContext) => unknown) | undefined;
+			const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
 
 			const pi = {
 				on(event: string, fn: (e: unknown, c: ExtensionContext) => unknown) {
 					registered.push(event);
-					handler = fn;
+					handlers.set(event, fn);
 				},
 			} as unknown as ExtensionAPI;
 
 			diagnostics(pi);
 
+			const handler = handlers.get("session_start");
+
 			expect(
 				registered,
 				"retention runs at session start because it is cheap, deterministic and off the hot " +
-					"path (RESEARCH §10.5). If the registration list changes, the later plans in this " +
-					"phase are adding hooks and this assertion should grow with them — not be deleted",
-			).toEqual(["session_start"]);
+					"path (RESEARCH §10.5), and plan 02-05 added the three main-loop provider hooks " +
+					"(DIAG-01/DIAG-07) beside it. If this list changes, a later plan in this phase is " +
+					"adding hooks and this assertion should grow with them — not be deleted. The wire " +
+					"hooks' own contract is asserted in tests/unit/wire-nonmutating.test.ts",
+			).toEqual([
+				"session_start",
+				"before_provider_headers",
+				"before_provider_request",
+				"after_provider_response",
+			]);
 
 			expect(
 				handler,

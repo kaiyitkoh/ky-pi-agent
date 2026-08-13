@@ -7,9 +7,10 @@
  * disk every one of them is a guess. This file is where the hooks that produce
  * them are registered.
  *
- * LIFETIME. Permanent. It grows across this phase: plan 02-05 adds the wire
- * capture, 02-06 the turn rows, 02-07 the prose-tool-call detector and 02-08
- * the `/budget` command. Today it registers one hook.
+ * LIFETIME. Permanent. It grows across this phase: plan 02-05 added the wire
+ * capture, 02-06 adds the turn rows, 02-09 the prose-tool-call retry and 02-08
+ * the `/budget` command. Today it registers `session_start` plus the three
+ * main-loop provider hooks.
  *
  * BOUNDARY RULE (BOOT-10). This subsystem registers **commands and event hooks
  * only**. It must never register a tool. A tool's name, description and
@@ -29,6 +30,11 @@
  *   schema.ts   — row types and every literal a test asserts on. DIAG-04/08.
  *   jsonl.ts    — the append-only writer, rotation and retention.   DIAG-08.
  *   redact.ts   — credential redaction at capture time.             DIAG-07.
+ *   wire.ts     — the three main-loop provider hooks: capture,
+ *                 redact, append. Redaction happens INSIDE the hook,
+ *                 which is what makes DIAG-07's "at capture time"
+ *                 true rather than aspirational.               DIAG-01/07.
+ *   prose.ts    — the prose-tool-call predicate (effect is 02-09). DIAG-05.
  *
  * Only this file is an entry point: `.pi/extensions/<dir>/index.ts` is one of
  * the four auto-discovered shapes [CITED: pi 0.84.1 docs/extensions.md:115-120]
@@ -54,6 +60,7 @@ import type {
 import { appendJsonl, pruneLogs } from "./jsonl.ts";
 import { redactString } from "./redact.ts";
 import { DIAGNOSTICS_ERROR_EVENT, TURNS_LOG_BASE } from "./schema.ts";
+import { registerWireHooks } from "./wire.ts";
 
 /**
  * `event` value on the row written once per session start.
@@ -143,8 +150,8 @@ export function safeHandler<E, R = undefined>(
 
 export default function (pi: ExtensionAPI): void {
 	// Retention runs at session start: cheap, deterministic, off the hot path
-	// (RESEARCH §10.5). Later plans in this phase register the wire, turn,
-	// prose and budget handlers on this same function.
+	// (RESEARCH §10.5). Later plans in this phase register the turn, prose and
+	// budget handlers on this same function.
 	pi.on(
 		"session_start",
 		safeHandler<SessionStartEvent>("session_start", (_event, ctx) => {
@@ -156,4 +163,14 @@ export default function (pi: ExtensionAPI): void {
 			});
 		}),
 	);
+
+	// DIAG-01 / DIAG-07 — the three main-loop provider hooks.
+	//
+	// `safeHandler` and `noteRowWritten` are passed IN rather than imported by
+	// `wire.ts`: this file already imports that module, and an import back the
+	// other way would make the pair a cycle. Passing the counter explicitly is
+	// also what keeps there being exactly ONE counter, incremented by every
+	// append path — a counter only some paths increment reports a number that
+	// looks like a measurement and is not.
+	registerWireHooks(pi, safeHandler, noteRowWritten);
 }
