@@ -228,7 +228,27 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	// dropping the command fails here.
 	"RB-02-01": ["tail -n 1 .pi/logs/wire-"],
 	"RB-02-02": ["grep -rIEn", ".pi/logs/"],
-	"RB-02-03": [`grep -c '"event":"prose_tool_call"'`, `grep -c '"kind":"turn"'`],
+	// RB-02-03 pins the THREE COUNTING COMMANDS IN FULL, not fragments of them.
+	//
+	// Fragments were not enough here. Each of these commands carries a fix for a
+	// specific defect -- `grep -v '"kind":'` stops the numerator double-counting the
+	// turn row beside the standalone record (every detected prose turn leaves both),
+	// and the `cat ... |` prefix makes `grep -c` over a rotated glob yield one total
+	// instead of `file:count` per file -- and the runbook DESCRIBES those same
+	// fragments in the prose underneath the steps. A fragment pin therefore stayed
+	// green when the fragment was deleted from the command and left in the
+	// explanation, which is the whole failure this pin exists to catch. Pinning the
+	// complete line is safe because each command sits inside backticks on one line
+	// of a numbered list and is not subject to reflow.
+	//
+	// A 2-3x inflated prose rate read against a published ~11% baseline would look
+	// like loud confirmation of the leading root-cause hypothesis, which is why the
+	// numerator command is pinned rather than trusted.
+	"RB-02-03": [
+		`cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":' | wc -l`,
+		`cat .pi/logs/turns-*.jsonl | grep -cF '"kind":"turn"'`,
+		`cat .pi/logs/turns-*.jsonl | grep -cF '"event":"prose_tool_call_retry_exhausted"'`,
+	],
 };
 
 /** Matches a repo-relative test path mentioned anywhere in the runbook prose. */

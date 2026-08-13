@@ -411,8 +411,13 @@ carries the verdict, the kind-less record carries the action, and both use the
 same `event` value. Count the actions, not both:
 
 ```sh
-grep '"event":"prose_tool_call"' .pi/logs/turns-*.jsonl | grep -v '"kind":'
+cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":'
 ```
+
+Pipe that through `wc -l` for the numerator of the prose rate. `cat` first: `grep -c`
+over a glob prints `file:count` per file rather than one total, so with any
+rotation the un-piped counting form yields no single number. `RB-02-03` in
+`docs/RUNBOOK.md` carries the same three commands as a procedure.
 
 **Join a turns row to its wire records.** Take the row's `corr` and grep the
 other stream for it; you should get a headers/request/response triple, or a pair

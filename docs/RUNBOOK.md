@@ -317,24 +317,36 @@ DeepSeek V4 Flash traffic.
 
 **Procedure, on the work laptop,** after a working day of ordinary use:
 
-1. `grep -c '"event":"prose_tool_call"' .pi/logs/turns-*.jsonl`
-2. `grep -c '"kind":"turn"' .pi/logs/turns-*.jsonl`
-3. Open the log and find one turn carrying `prose_tool_call`, then read the
+1. `cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":' | wc -l`
+2. `cat .pi/logs/turns-*.jsonl | grep -cF '"kind":"turn"'`
+3. `cat .pi/logs/turns-*.jsonl | grep -cF '"event":"prose_tool_call_retry_exhausted"'`
+4. Open the log and find one turn carrying `prose_tool_call`, then read the
    turn immediately after it.
 
 **Expected output.** Steps 1 and 2 give a numerator and a denominator; their
 ratio is the measured prose rate, to be compared against the ~11% baseline
-reported in the open DeepSeek-V3 issue. Step 3 must find at least one instance
-where the following turn contains a real tool call — that is what distinguishes
-"the retry recovered the turn" from "the retry bought a second paragraph of
-prose". A day that produces a zero numerator is a result worth recording too,
-but it is not this check passing: it means the rate is low enough that the
-sample is too small, and the check stays open for a longer window.
+reported in the open DeepSeek-V3 issue. Step 3 is the turns where the nudge did
+not work, and is worth recording beside the rate rather than folded into it.
+Step 4 must find at least one instance where the following turn contains a real
+tool call — that is what distinguishes "the retry recovered the turn" from "the
+retry bought a second paragraph of prose". A day that produces a zero numerator
+is a result worth recording too, but it is not this check passing: it means the
+rate is low enough that the sample is too small, and the check stays open for a
+longer window.
 
-Note that both counts read the same files and the two are not interchangeable: a
-turn row and the standalone out-of-band record both carry
-`event: prose_tool_call`, and only the standalone record has no `kind`. Step 2's
-`"kind":"turn"` filter is what keeps the denominator honest.
+**Why each step is shaped the way it is.** Every detected prose turn leaves *two*
+records carrying `event: prose_tool_call` — the turn's own composed row and the
+standalone out-of-band record — and only the standalone one has no `kind`. So
+step 1 counts the ACTIONS by dropping the turn rows with `grep -v '"kind":'`.
+Without that filter the numerator is roughly doubled against a denominator that
+is correct, and since the comparison is against a published ~11% baseline, a
+2-3x inflated rate would read as loud confirmation of the leading root-cause
+hypothesis. The `cat` is not decoration either: `grep -c` over a glob prints
+`file:count` per file rather than one total, so with any rotation at all the
+un-piped form yields neither a numerator nor a denominator. `-F` pins the
+pattern as a fixed string; the trailing `"` is what already keeps
+`prose_tool_call_retry_exhausted` out of step 1's count, which is why step 3
+has to ask for it separately.
 
 **Offline proxies:** `tests/unit/prose-detector.test.ts` and
 `tests/integration/prose-retry.test.ts`. The first drives the predicate over a
