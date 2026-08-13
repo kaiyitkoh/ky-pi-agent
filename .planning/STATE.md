@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 02-07-PLAN.md — the callModel chokepoint, its build gate, and the bare-completion negative control
-last_updated: "2026-08-13T05:43:28.428Z"
+stopped_at: Completed 02-08-PLAN.md — the per-turn JSONL row wired into the main agent loop
+last_updated: "2026-08-13T06:02:32.706Z"
 last_activity: 2026-08-13
 progress:
   total_phases: 11
   completed_phases: 1
   total_plans: 21
-  completed_plans: 17
+  completed_plans: 18
   percent: 9
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 02 (diagnostics-the-instrument) — EXECUTING
-Plan: 8 of 11
+Plan: 9 of 11
 Status: Ready to execute
 Last activity: 2026-08-13
 
-Progress: [████████░░] 81%
+Progress: [█████████░] 86%
 
 **Read that 57% carefully.** The denominator is *plans written so far* — Phase 1's
 10 plus Phase 2's 11. Phases 3-11 are not yet planned, so it will grow and the
@@ -73,6 +73,7 @@ percentage will fall. The honest phase-level figure is **1 of 11 phases complete
 | Phase 2 P5 | 40m | 3 tasks | 5 files |
 | Phase 02 P06 | 35m | 2 tasks | 3 files |
 | Phase 02 P07 | ~45m | 3 tasks | 4 files |
+| Phase 02 P08 | 40m | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -138,6 +139,9 @@ Recent decisions affecting current work:
 - [Phase 2]: 02-07: the diagnostics correlation counter lives on globalThis — Two jiti module instances of wire.ts in one process both start at 1 and both stamp <sessionId>#1 into the same wire log, silently mis-joining nested wire records onto a different call's turns row. Observed, then falsified: six records shared one id.
 - [Phase 2]: 02-07: session_start does not fire in a headless createAgentSession — Measured with a five-event probe: nothing fires before the first prompt; then before_agent_start, turn_start, before_provider_headers, agent_end. Pi emits it from AgentSession's extension-binding step (agent-session.ts:1761), which the headless factory does not reach. Any in-session test needing ctx must prompt first.
 - [Phase 2]: 02-07: spread order, not the type system, stops a caller suppressing callModel's capture — Api is KnownApi | (string & {}), so the option-bag union always carries pi-ai's Record<string, unknown> fallback arm and accepts onPayload for a Model<Api>. Verified by compiling it. opts.api is spread first and the captures overwrite it; asserted at runtime by tests/integration/call-model.test.ts case 2c.
+- [Phase 2]: 02-08: DIAG-04 complete — the turn row spine is turn_start + message_end + turn_end, never after_provider_response — that hook never fires on a provider error
+- [Phase 2]: 02-08: the correlation id is captured at message_end, not turn_end: a nested callModel during tool execution issues its own id and would otherwise be stamped onto the turn row
+- [Phase 2]: 02-08: a degraded computation is MARKED (event: diagnostics.model_unavailable), so a zero cost is never indistinguishable from a computed one
 
 ### Pending Todos
 
@@ -183,8 +187,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T05:43:28.419Z
-Stopped at: Completed 02-07-PLAN.md — the callModel chokepoint, its build gate, and the bare-completion negative control
+Last session: 2026-08-13T06:02:23.753Z
+Stopped at: Completed 02-08-PLAN.md — the per-turn JSONL row wired into the main agent loop
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

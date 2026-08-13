@@ -107,7 +107,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [x] 02-07-PLAN.md — `callModel()`, the source-grep chokepoint gate, and the bare-`complete()` negative control (DIAG-02, DIAG-03)
-- [ ] 02-08-PLAN.md — Turn-hook wiring and the end-to-end turns-log proof, including the error turn (DIAG-04)
+- [x] 02-08-PLAN.md — Turn-hook wiring and the end-to-end turns-log proof, including the error turn (DIAG-04)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
