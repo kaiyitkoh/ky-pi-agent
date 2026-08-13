@@ -57,12 +57,19 @@ export function hasCarriageReturn(bytes: Buffer): boolean {
  *   `${v^^}`    bash-4 case modification; a syntax error on bash 3.2.
  *   `${v,,}`    same.
  *
+ * The `[[` pattern excludes a following `:`, because `[[:space:]]`, `[[:alpha:]]`
+ * and friends are POSIX bracket-expression character classes -- fully portable,
+ * and the correct way to write a whitespace class in a portable `grep` BRE. The
+ * naive `/\[\[/` flagged `grep -v '^[[:space:]]*ignore-scripts'` in
+ * `bin/bootstrap.sh` as a bashism, which is precisely the kind of false positive
+ * that gets a lint disabled rather than fixed.
+ *
  * A shell script legitimately needing any of these is a script that must
  * declare `#!/bin/bash` and be excluded from the POSIX guarantee -- at which
  * point the shebang assertion below goes red first, which is the desired order.
  */
 const BASHISMS: ReadonlyArray<{ readonly label: string; readonly pattern: RegExp }> = [
-	{ label: "[[ ... ]] double-bracket test", pattern: /\[\[/ },
+	{ label: "[[ ... ]] double-bracket test", pattern: /\[\[(?!:)/ },
 	{ label: "sort -V (GNU version sort, absent on BSD)", pattern: /\bsort\s+-V\b/ },
 	{ label: "declare -A (bash 4 associative array)", pattern: /\bdeclare\s+-A\b/ },
 	{ label: "${v^^} / ${v,,} bash 4 case modification", pattern: /\$\{[A-Za-z_][A-Za-z0-9_]*(\^\^|,,)/ },
@@ -144,10 +151,17 @@ describe("BOOT-06 -- every shipped script is POSIX sh, not bash", () => {
 			"${v^^} / ${v,,} bash 4 case modification",
 		);
 		// Near-misses that must NOT trip it, or the lint becomes noise someone
-		// disables: a bracket expression inside a case pattern, and a plain
-		// parameter expansion.
+		// disables: a bracket expression inside a case pattern, a plain parameter
+		// expansion, and POSIX bracket-expression character classes -- which open
+		// with a literal `[[` and are the portable way to write a whitespace class.
 		expect(findBashisms('case "$p" in [A-Za-z]:*) : ;; esac')).toEqual([]);
 		expect(findBashisms('echo "${out#*error}"')).toEqual([]);
+		expect(findBashisms("grep -v '^[[:space:]]*ignore-scripts[[:space:]]*='")).toEqual([]);
+		expect(findBashisms("sed 's/[[:alpha:]][[:digit:]]//'")).toEqual([]);
+		// …but the class exclusion must not blind it to the real keyword.
+		expect(findBashisms('if [[ "$a" == "$b" ]]; then :; fi')).toContain(
+			"[[ ... ]] double-bracket test",
+		);
 	});
 });
 
