@@ -19,10 +19,15 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
+import type { FauxProviderHandle, Provider } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, describe, expect, it } from "vitest";
 
+import { wrapFauxWithPayload, wrapFauxWithStatus } from "../helpers/faux.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { logFilesIn, readJsonl, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
+import { withModelsConfig } from "../helpers/models.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
 import { withFauxSession } from "../helpers/session.ts";
 import { commandFor, quoteForWindows } from "../helpers/win-quote.ts";
@@ -367,5 +372,371 @@ describe("faux helper -- before_provider_request actually fires", () => {
 					"would let a redactor pass here and fail on the wire",
 			).toEqual(expect.arrayContaining(["model", "messages", "stream"]));
 		});
+	});
+});
+
+// ===========================================================================
+// Phase 3, Wave 0 helpers. Same precedent as the Phase 2 block above: every
+// seam a later plan asserts THROUGH gets a live case here, so a seam that
+// silently stopped working fails in this file rather than turning some Wave 1
+// assertion vacuous. [threat T-03-01-05]
+// ===========================================================================
+
+/** What one wrapped provider call reported back to its caller. */
+interface StatusCapture {
+	/** Every `onResponse` invocation, in order. Its LENGTH is the assertion. */
+	statuses: number[];
+	/** Every `onPayload` invocation, in order. */
+	payloads: unknown[];
+	/** The assistant message's text, flattened. */
+	text: string;
+}
+
+/**
+ * Drive exactly one provider call through `wrap(faux)` and record what the
+ * caller's callbacks saw.
+ *
+ * The runtime is constructed the way `tests/helpers/session.ts` does it --
+ * `modelsPath: null` so the developer's own `models.json` is never read, and
+ * `refreshOnCreate: false` so nothing touches the network -- and the temp agent
+ * directory is removed in the `finally`.
+ */
+async function driveOneCall(wrap: (faux: FauxProviderHandle) => Provider): Promise<StatusCapture> {
+	const faux = fauxProvider({ models: [{ id: "faux-flash" }] });
+	faux.setResponses([fauxAssistantMessage("the stream survived the wrapper")]);
+
+	const agentDir = mkdtempSync(join(tmpdir(), "kypi-status-"));
+	try {
+		const runtime = await ModelRuntime.create({
+			authPath: join(agentDir, "auth.json"),
+			modelsPath: null,
+			refreshOnCreate: false,
+		});
+		runtime.registerNativeProvider(wrap(faux));
+
+		const model = runtime.getModel(faux.provider.id, "faux-flash");
+		if (!model) {
+			throw new Error(
+				"driveOneCall: the faux model did not resolve after registration. The wrapper " +
+					"returned something that is not a Provider, or dropped `id` / `getModels` from " +
+					"the spread of the inner provider.",
+			);
+		}
+
+		const statuses: number[] = [];
+		const payloads: unknown[] = [];
+		const message = await runtime.complete(
+			model,
+			{ messages: [{ role: "user", content: "hello", timestamp: Date.now() }] },
+			{
+				onResponse: (response) => {
+					statuses.push(response.status);
+				},
+				onPayload: (payload) => {
+					payloads.push(payload);
+					return undefined;
+				},
+			},
+		);
+
+		const text =
+			typeof message.content === "string"
+				? message.content
+				: message.content.map((block) => (block.type === "text" ? block.text : "")).join("");
+		return { statuses, payloads, text };
+	} finally {
+		try {
+			rmSync(agentDir, { recursive: true, force: true, maxRetries: 3 });
+		} catch {
+			// A leftover temp dir is noise, not a failure.
+		}
+	}
+}
+
+/**
+ * PROV-08's seam -- a faux provider that can report a status other than 200.
+ *
+ * `fauxProvider` runs `onResponse({ status: 200, headers: {} })` unconditionally
+ * (pi-ai 0.84.1 src/providers/faux.ts:510), so a fallback-chain test meaning to
+ * distinguish quota (429) from unavailable (503) would, without this wrapper, be
+ * asserting against a 200 in both cases and passing either way.
+ *
+ * The first case is the live-oracle control, in the shape
+ * `logs-gitignored.test.ts:74-83` uses: it proves the recorder answers 200 when
+ * nothing rewrites the status, so the 503 in the case below it came from the
+ * wrapper rather than from a recorder that says 503 to everything.
+ */
+describe("faux helper -- wrapFauxWithStatus rewrites the status exactly once", () => {
+	it("the oracle is live: an unwrapped faux call reports 200, once", async () => {
+		const capture = await driveOneCall((faux) => wrapFauxWithPayload(faux));
+
+		expect(
+			capture.statuses,
+			"a payload-wrapped faux provider must still report faux's own hard-coded 200 exactly " +
+				"once. If this is [] the recorder never ran and the 503 case below proves nothing; " +
+				"if it is [503] the recorder is not reading the status at all",
+		).toEqual([200]);
+	});
+
+	it("reports the wrapped status, and reports it exactly once", async () => {
+		const capture = await driveOneCall((faux) => wrapFauxWithStatus(faux, 503));
+
+		expect(
+			capture.statuses.length,
+			`onResponse fired ${capture.statuses.length} time(s) for ONE request. Exactly 1 is the ` +
+				"contract, and it is what distinguishes the substitution form from a pre-call: a " +
+				"pre-call leaves faux's own hard-coded 200 firing afterwards, so the caller sees " +
+				"[503, 200], Phase 2's wire log gets two main.response records under one " +
+				"correlation id, and /budget counts a row that never happened. A 2 here means " +
+				"someone converted the wrapper back to a pre-call. [threat T-03-01-04]",
+		).toBe(1);
+
+		expect(
+			capture.statuses[0],
+			"the recorded status must be the wrapped 503, not faux's hard-coded 200 -- PROV-08's " +
+				"three error classes ARE statuses, so a 200 here collapses quota, transient and " +
+				"unavailable into one indistinguishable case",
+		).toBe(503);
+	});
+
+	it("does not break the stream: the assistant message still arrives intact", async () => {
+		const capture = await driveOneCall((faux) => wrapFauxWithStatus(faux, 429));
+
+		expect(
+			capture.text,
+			"the wrapper substitutes one callback and must otherwise delegate untouched. Empty " +
+				"text means the copied options bag lost something the inner provider needed, and " +
+				"every fallback-chain assertion about a classified RESPONSE would then be testing " +
+				"a broken stream instead",
+		).toBe("the stream survived the wrapper");
+	});
+
+	it("composes over wrapFauxWithPayload: onPayload still fires and the status is still wrapped", async () => {
+		const capture = await driveOneCall((faux) =>
+			wrapFauxWithStatus(wrapFauxWithPayload(faux), 429),
+		);
+
+		// Non-emptiness FIRST -- the house rule. An empty capture list satisfies
+		// every assertion about its contents without executing one of them.
+		expect(
+			capture.payloads.length,
+			"ZERO payloads were captured through the composed wrappers. wrapFauxWithStatus has " +
+				"swallowed the payload emission, so any Wave 1 test that wraps for status AND " +
+				"asserts on the emitted body is vacuous: it iterates an empty list and passes",
+		).toBeGreaterThan(0);
+
+		expect(
+			capture.payloads[0],
+			"the composed payload must still carry the OpenAI-completions fixture shape, not an " +
+				"object the status wrapper substituted",
+		).toMatchObject({ model: "faux-flash", stream: true });
+
+		expect(
+			capture.statuses,
+			"composition must preserve BOTH effects -- a 200 here means the payload wrapper won " +
+				"and the status rewrite was lost",
+		).toEqual([429]);
+	});
+});
+
+/**
+ * The PROV-01 / PROV-03 / PROV-04 / PROV-06 / PROV-07 seam -- an offline model
+ * registry over an arbitrary models.json.
+ *
+ * Every structural claim this phase makes about the shipped templates has to be
+ * made against the model Pi COMPOSED, never against the template's bytes: Pi
+ * validates models.json with typebox and accepts an unknown `compat` key in
+ * silence, so a template carrying `supportsStoore: false` passes every
+ * byte-level assertion ever written about it while configuring nothing
+ * (Trap T6).
+ */
+describe("models helper -- a composed registry with no network and no credentials", () => {
+	/** A provider id, model id and env vars no real configuration uses. */
+	const PROVIDER = "kypi-fixture";
+	const MODEL = "fixture-flash";
+	const ABSENT_KEY = "KYPI_FIXTURE_KEY_THAT_DID_NOT_EXIST";
+	const PRESENT_KEY = "KYPI_FIXTURE_KEY_THAT_DID_EXIST";
+
+	const INLINE_MODELS = {
+		providers: {
+			[PROVIDER]: {
+				name: "Kypi Fixture",
+				// `.invalid` is reserved by RFC 2606 and resolves nowhere. Nothing in
+				// this block issues a request, and this makes that true by
+				// construction rather than by assertion.
+				baseUrl: "https://models.invalid/v1",
+				apiKey: `$${ABSENT_KEY}`,
+				api: "openai-completions",
+				models: [
+					{
+						id: MODEL,
+						contextWindow: 393216,
+						compat: { thinkingFormat: "qwen" },
+					},
+				],
+			},
+		},
+	};
+
+	it("composes the declared model, and composition really happened", async () => {
+		await withModelsConfig({ models: INLINE_MODELS }, (handle) => {
+			const model = handle.requireModel(PROVIDER, MODEL);
+
+			expect(
+				model.contextWindow,
+				"the composed model must carry the context window the config declared. A different " +
+					"number means the helper handed back something other than Pi's composition, and " +
+					"PROV-06 -- no model inherits another provider's context window -- would be " +
+					"asserted against the wrong object entirely",
+			).toBe(393216);
+
+			// `Model.compat` is a four-arm union keyed on the API family, and only
+			// the openai-completions arm declares `thinkingFormat`. Reading it
+			// through an index signature is the honest narrowing here: the
+			// assertion is about the value Pi composed, not about which arm the
+			// type checker picked.
+			const compat = model.compat as Record<string, unknown> | undefined;
+			expect(
+				compat?.thinkingFormat,
+				"the composed compat must carry the declared thinkingFormat. This is the field " +
+					"PROV-03 exists for: detectCompat has no DashScope branch, so an unset value " +
+					"here means thinking is silently never enabled on the wire",
+			).toBe("qwen");
+
+			// The positive control that the object is COMPOSED and not the config's
+			// own bytes: maxTokens was never declared, so only Pi can have supplied
+			// it. A test reading the template JSON would find `undefined` here.
+			expect(
+				model.maxTokens,
+				"maxTokens was not declared in the config, so a defined value can only have come " +
+					"from Pi's own defaulting. `undefined` means this helper is handing back the " +
+					"parsed template rather than the composed model, and every Trap T6 assertion " +
+					"built on it would be a byte-level assertion wearing a composed-model costume",
+			).toBeGreaterThan(0);
+		});
+	});
+
+	it("requireModel THROWS for an unknown model id, naming both ids", async () => {
+		await withModelsConfig({ models: INLINE_MODELS }, (handle) => {
+			let thrown: unknown;
+			try {
+				handle.requireModel(PROVIDER, "fixture-renamed-upstream");
+			} catch (error) {
+				thrown = error;
+			}
+
+			expect(
+				thrown,
+				"requireModel returned instead of throwing. An unresolved model that yields " +
+					"undefined is how Assumption A7's renamed-id hazard becomes a silent no-op: " +
+					"every assertion about that model's compat, cost and context window would then " +
+					"run against undefined and never execute",
+			).toBeInstanceOf(Error);
+
+			const message = (thrown as Error).message;
+			expect(
+				message,
+				"the failure must name the provider id, or the reader cannot tell which of the " +
+					"config's providers was misspelled",
+			).toContain(PROVIDER);
+			expect(
+				message,
+				"the failure must name the model id it asked for, or the remedy is a guess",
+			).toContain("fixture-renamed-upstream");
+		});
+	});
+
+	it("applies env for the callback, and DELETES a key that did not exist before", async () => {
+		expect(
+			Object.hasOwn(process.env, ABSENT_KEY),
+			`${ABSENT_KEY} is already set in this environment, so the deletion assertion below ` +
+				"would be testing nothing. Pick a name nothing else uses",
+		).toBe(false);
+
+		process.env[PRESENT_KEY] = "original-value";
+
+		try {
+			await withModelsConfig(
+				{
+					models: INLINE_MODELS,
+					env: { [ABSENT_KEY]: "resolved-at-runtime", [PRESENT_KEY]: "overridden-value" },
+				},
+				async (handle) => {
+					// The paired positive. "Absent afterwards" is satisfied by a helper
+					// that never set the key at all, so presence is asserted first.
+					expect(
+						process.env[ABSENT_KEY],
+						"the env option must be visible to code running inside the callback -- that " +
+							"is the whole seam",
+					).toBe("resolved-at-runtime");
+					expect(
+						process.env[PRESENT_KEY],
+						"an env entry must override a variable that already existed, not defer to it",
+					).toBe("overridden-value");
+
+					// The env must reach Pi's own config-value resolution, not just
+					// process.env -- that round trip IS PROV-01. (It says nothing about
+					// ordering relative to ModelRuntime.create: `$ENV_VAR` values are
+					// resolved lazily at getProviderAuth() time, verified by swapping
+					// the two statements and watching this stay green. The ordering
+					// rationale lives in tests/helpers/models.ts.)
+					const auth = await handle.registry.getProviderAuth(PROVIDER);
+					expect(
+						auth?.auth.apiKey,
+						"the provider's `$ENV_VAR` apiKey must resolve, through Pi, to the value the " +
+							"helper put in the environment. `undefined` means the seam never reaches " +
+							"config-value resolution at all, and PROV-01's " +
+							"`getProviderAuth('dashscope').auth.apiKey === $DASHSCOPE_API_KEY` " +
+							"assertion would be comparing two unset values and passing",
+					).toBe("resolved-at-runtime");
+				},
+			);
+
+			expect(
+				Object.hasOwn(process.env, ABSENT_KEY),
+				"a key that did not exist before the callback must be DELETED afterwards, never " +
+					'set to "". Bedrock\'s resolve() chain is `credential.env.AWS_PROFILE ?? ' +
+					"process.env.AWS_PROFILE`, and an empty string is a value that satisfies `??` " +
+					"while naming no profile -- so a blanked key leaks a wrong answer into every " +
+					"sibling test in this worker. [threat T-03-01-03]",
+			).toBe(false);
+
+			expect(
+				process.env[PRESENT_KEY],
+				"a key that DID exist must be restored to its original value, not deleted",
+			).toBe("original-value");
+		} finally {
+			delete process.env[PRESENT_KEY];
+		}
+	});
+
+	it("removes its temp agent directory afterwards", async () => {
+		let seenAgentDir = "";
+
+		await withModelsConfig({ models: INLINE_MODELS }, (handle) => {
+			seenAgentDir = handle.agentDir;
+
+			// Paired positive: the files must exist WHILE the callback runs, or the
+			// cleanup assertion below is satisfied by a helper that wrote nothing.
+			expect(existsSync(handle.agentDir)).toBe(true);
+			expect(
+				existsSync(handle.modelsPath),
+				"the models config must exist on disk inside the temp agent dir. If it does not, " +
+					"ModelRuntime composed from an absent file and every composed-model assertion " +
+					"in this phase is running against Pi's built-in catalogue instead",
+			).toBe(true);
+			expect(
+				handle.modelsPath.startsWith(handle.agentDir),
+				"models.json must live inside the temp agent dir. Pi defaults its models STORE to " +
+					"`dirname(modelsPath)/models-store.json`, so a modelsPath pointing straight at " +
+					".pi/templates/ would aim a writer at this repository. [threat T-03-01-02]",
+			).toBe(true);
+		});
+
+		expect(
+			existsSync(seenAgentDir),
+			"a leaked temp agent dir per test is how a long run fills a disk -- and a leaked " +
+				"auth.json is worse than untidy",
+		).toBe(false);
 	});
 });
