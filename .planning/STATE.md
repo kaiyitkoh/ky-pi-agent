@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
-last_updated: "2026-08-13T15:24:57.256Z"
-last_activity: 2026-08-13
+stopped_at: Completed 03-09-PLAN.md — the wire-level compat proof (tests/integration/dashscope-payload.test.ts), falsified twelve ways
+last_updated: "2026-08-13T15:52:03.455Z"
+last_activity: 2026-08-13 -- 03-09 complete (the wire-level compat proof)
 progress:
   total_phases: 11
   completed_phases: 2
   total_plans: 32
-  completed_plans: 29
+  completed_plans: 30
   percent: 18
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 03 (providers-credentials) — EXECUTING
-Plan: 9 of 11
+Plan: 10 of 11
 Status: Ready to execute
-Last activity: 2026-08-13
+Last activity: 2026-08-13 -- 03-09 complete (the wire-level compat proof)
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 94%
 
 **Read that 72% carefully.** The denominator is *plans written so far* — Phase 1's
 10, Phase 2's 11 and Phase 3's 11. Phases 4-11 are not yet planned, so it will
@@ -87,6 +87,7 @@ phases complete**.
 | Phase 03 P06 | ~30m | 2 tasks | 2 files |
 | Phase 03 P07 | ~35m | 2 tasks | 1 files |
 | Phase 03 P08 | ~50m | 3 tasks | 4 files |
+| Phase 03 P09 | ~40m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -186,6 +187,10 @@ Recent decisions affecting current work:
 - [Phase 03]: the SSO classifier is a message_end handler that REPLACES the finalized message — after_provider_response never fires on a provider error (Trap T2), and message_end runs before the retry gate reads the mutated object
 - [Phase 03]: the original SDK text is carried on the message's diagnostics[] and kept OUT of errorMessage — isRetryableAssistantError reads errorMessage and nothing else, so an `(original: ...)` suffix silently restores 3 retries at 2s/4s/8s against a dead credential (Trap T4)
 - [Phase 03]: a callCount === 1 assertion is only a measurement when paired with a retryable control in the SAME harness — all six SSO strings are ALREADY non-retryable under Pi 0.84.1, so the 1 would hold with the extension uninstalled
+- [Phase 03]: 03-09: an absence assertion on a wire body needs a CONTROL BODY, not just a paired presence -- the shipped block's missing store/developer/strict/prompt_cache_* is only evidence because the same request with those five compat fields deleted emits every one of them. Falsified twelve ways; F9 (requestCount forced to 0) turned seven cases red on the vacuity guard.
+- [Phase 03]: 03-09: cacheRetention:long + sessionId are set on EVERY capture -- prompt_cache_* is gated on the caller asking for long retention (openai-completions.ts:699-704), so a test that never asks would show the fields absent whatever the compat block said
+- [Phase 03]: 03-09: PROV-03 and PROV-10 stay incomplete -- this is the strongest offline evidence either will get (Pi's real adapter, real bytes) and it still proves only what Pi EMITS; RB-03-01 and RB-03-02 are what DashScope ACCEPTS and both stay OUTSTANDING
+- [Phase 03]: 03-09: Q7 recorded as a two-directional assertion -- Pi already sends strict:false on every function wherever supportsStrictMode is left to detection, so turning strict ON is a tool-authoring change (constrainedSampling) and not a compat switch; Phase 8/10 starts from an executed fact
 
 ### Pending Todos
 
@@ -231,8 +236,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T15:24:38.721Z
-Stopped at: Completed 03-04-PLAN.md — composed-compat deep equality, the detectCompat canary, the cross-provider contextWindow invariant and the COST_UNVERIFIED allowlist, falsified eleven ways
+Last session: 2026-08-13T15:52:00.000Z
+Stopped at: Completed 03-09-PLAN.md — the wire-level compat proof (tests/integration/dashscope-payload.test.ts), falsified twelve ways
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
