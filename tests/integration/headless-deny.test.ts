@@ -69,14 +69,20 @@
  *
  * NOT exercised here: the `confirm`-verdict / `approve_ky_command` path,
  * where `ctx.ui.select()` itself returns `undefined` headless. That specific
- * mechanism is unit-proven in `tests/unit/safety-entry.test.ts` and
- * `tests/integration/double-enforcement.test.ts` (Plan 08) against a faux
- * session, which can assert on the internal choice value directly. Scripting
- * a SECOND tool call (`approve_ky_command`) on top of the two-turn exchange
- * above was judged unnecessary for this plan and would not add anything the
- * faux-session proof does not already cover -- both paths go through the
- * identical `noOpUIContext` singleton this file's DENY case already proves
- * is bound.
+ * mechanism is unit-proven in `tests/unit/safety-entry.test.ts`'s WR-11
+ * describe block ("approve_ky_command.execute() denies by default on every
+ * non-affirmative branch"), which drives the REGISTERED tool's own
+ * `execute()` directly for all three deny-by-default branches T-04-03 names
+ * (`hasUI: false`, an explicit "Deny" selection, and `ctx.ui.select()`
+ * returning `undefined`), asserting both that it throws and that no grant is
+ * left behind. (This docstring previously named
+ * `tests/integration/double-enforcement.test.ts` too -- that file proves
+ * SAFE-09's mutation-after-allow property, not this one; it never invokes
+ * `approve_ky_command` at all. Corrected as WR-11.) Scripting a SECOND tool
+ * call (`approve_ky_command`) on top of the two-turn exchange above was
+ * judged unnecessary for this plan and would not add anything the unit-level
+ * proof does not already cover -- both paths go through the identical
+ * `noOpUIContext` singleton this file's DENY case already proves is bound.
  *
  * ---------------------------------------------------------------------------
  * Never `it.skip`

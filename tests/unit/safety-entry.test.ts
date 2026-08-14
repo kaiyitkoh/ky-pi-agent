@@ -32,6 +32,7 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 
 import { describe, expect, it } from "vitest";
 
+import { createPending, peek } from "../../.pi/extensions/safety/approvals.ts";
 import safety, { APPROVE_TOOL_NAME } from "../../.pi/extensions/safety/index.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
@@ -308,5 +309,89 @@ describe("CR-06 -- the entry point has no process-wide idempotency guard: it re-
 				"flag would make this array empty, which is the exact regression this test catches",
 		).toEqual(first.toolNames);
 		expect(second.hooks, "the second invocation's own hooks array must also fully register").toEqual(first.hooks);
+	});
+});
+
+/**
+ * WR-11 -- `approve_ky_command.execute()` had ZERO test coverage before this
+ * block: `tests/integration/headless-deny.test.ts`'s own docstring claimed
+ * this path "is unit-proven in tests/unit/safety-entry.test.ts and
+ * tests/integration/double-enforcement.test.ts", and neither file ever
+ * invoked `approve_ky_command`'s `execute()` -- grepping the whole suite
+ * before this block confirmed it. T-04-03's contract ("approve ONLY on an
+ * explicit affirmative from ctx.ui.select") has exactly three deny-by-default
+ * branches: `hasUI === false` (headless), `hasUI === true` with an explicit
+ * "Deny" selection, and `hasUI === true` with `ctx.ui.select()` returning
+ * `undefined` (`noOpUIContext`'s own headless value, reachable even under a
+ * `hasUI: true` stub if a caller's own UI implementation misbehaves). Each
+ * case below drives the REGISTERED tool's own `execute()` -- not `evaluate()`
+ * or `approve()` directly -- with a REAL pending approval seeded via
+ * `approvals.ts#createPending` (so `validate()` succeeds and execution
+ * reaches the UI-gating branch this block exists to prove, rather than
+ * refusing earlier for an unrelated reason), and asserts BOTH that it throws
+ * AND that `peek()` still reports no grant for that request key afterwards --
+ * the second assertion is what proves the refusal is a genuine deny, not a
+ * throw that happens to follow a grant already recorded.
+ */
+describe("WR-11 -- approve_ky_command.execute() denies by default on every non-affirmative branch (T-04-03)", () => {
+	/** Seed a real pending approval, then drive approve_ky_command's own execute() against it under the given UI shape. */
+	async function driveApproval(uiShape: {
+		hasUI: boolean;
+		select?: () => Promise<string | undefined>;
+	}): Promise<{ threw: boolean; grantExistsAfter: boolean }> {
+		const { pi, tools } = stubPi();
+		safety(pi);
+		const approveTool = tools.get(APPROVE_TOOL_NAME);
+		expect(approveTool, "approve_ky_command must have registered").toBeDefined();
+
+		const requestKey = `wr-11-test-request-key-${Math.random()}`;
+		const command = "terraform apply";
+		const reason = "cannot be trivially undone";
+		const requestId = createPending(requestKey, command, reason);
+
+		let threw = false;
+		await withTempLogCwd(async (cwd) => {
+			const fakeCtx = {
+				cwd,
+				hasUI: uiShape.hasUI,
+				ui: uiShape.select === undefined ? undefined : { select: uiShape.select },
+			} as unknown as ExtensionContext;
+
+			try {
+				await (approveTool as unknown as { execute: (...args: unknown[]) => Promise<unknown> }).execute(
+					"call-1",
+					{ request_id: requestId, command, reason, summary: "WR-11 test", blast_radius: "low" },
+					undefined,
+					undefined,
+					fakeCtx,
+				);
+			} catch {
+				threw = true;
+			}
+		});
+
+		return { threw, grantExistsAfter: peek(requestKey) };
+	}
+
+	it("hasUI: false (headless) -- refused, and no grant is created for the retry to find", async () => {
+		const { threw, grantExistsAfter } = await driveApproval({ hasUI: false });
+		expect(threw, "execute() must throw when no UI is bound -- headless can never approve").toBe(true);
+		expect(grantExistsAfter, "no grant must exist after a headless refusal").toBe(false);
+	});
+
+	it('hasUI: true, ctx.ui.select() -> "Deny" -- refused, and no grant is created', async () => {
+		const { threw, grantExistsAfter } = await driveApproval({ hasUI: true, select: async () => "Deny" });
+		expect(threw, "execute() must throw when the user explicitly selects Deny").toBe(true);
+		expect(grantExistsAfter, "no grant must exist after an explicit Deny").toBe(false);
+	});
+
+	it("hasUI: true, ctx.ui.select() -> undefined -- refused, and no grant is created", async () => {
+		const { threw, grantExistsAfter } = await driveApproval({ hasUI: true, select: async () => undefined });
+		expect(
+			threw,
+			"execute() must throw when ctx.ui.select() returns undefined -- the inversion T-04-03 rules " +
+				"out is 'approve unless the choice is exactly Deny', which would wrongly approve here",
+		).toBe(true);
+		expect(grantExistsAfter, "no grant must exist when select() returned undefined").toBe(false);
 	});
 });
