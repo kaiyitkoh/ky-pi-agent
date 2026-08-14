@@ -109,6 +109,16 @@ export interface QoderLoopbackOptions {
 	 * Omitted (or out of range) means the whole body is written in one call.
 	 */
 	splitStreamAt?: number;
+	/**
+	 * Milliseconds to wait between the two `res.write()` calls `splitStreamAt`
+	 * triggers. Defaults to 20 (long enough to force two genuinely separate
+	 * socket reads, per `splitStreamAt`'s own doc comment). WR-07's
+	 * inactivity-timeout test overrides this to something LONGER than the
+	 * `inactivityTimeoutMs` it injects into `delegateTask`, so the gap itself
+	 * is what proves the stall-detection fires. Ignored when `splitStreamAt`
+	 * is not set.
+	 */
+	splitDelayMs?: number;
 	/** Per-endpoint status overrides. */
 	statusOverrides?: QoderLoopbackStatusOverrides;
 }
@@ -217,10 +227,16 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
 
 /**
  * Write `frames` as the stream body, optionally split into two `res.write()`
- * calls with a short delay between them so a genuinely separate read occurs
- * on the client side rather than a single coalesced chunk.
+ * calls with a delay between them so a genuinely separate read occurs on the
+ * client side rather than a single coalesced chunk.
  */
-async function writeStreamBody(res: ServerResponse, status: number, frames: string, splitAt: number | undefined): Promise<void> {
+async function writeStreamBody(
+	res: ServerResponse,
+	status: number,
+	frames: string,
+	splitAt: number | undefined,
+	splitDelayMs = 20,
+): Promise<void> {
 	res.writeHead(status, {
 		"content-type": "text/event-stream",
 		"cache-control": "no-cache",
@@ -232,12 +248,12 @@ async function writeStreamBody(res: ServerResponse, status: number, frames: stri
 	}
 	if (splitAt !== undefined && splitAt > 0 && splitAt < frames.length) {
 		res.write(frames.slice(0, splitAt));
-		// A short delay, not a same-tick second write: two write() calls issued
+		// A real delay, not a same-tick second write: two write() calls issued
 		// back-to-back on loopback can still coalesce into one TCP read. The
 		// delay forces a genuinely separate arrival on the client's stream
 		// reader, which is the whole point of this option.
 		await new Promise<void>((resolve) => {
-			setTimeout(resolve, 20);
+			setTimeout(resolve, splitDelayMs);
 		});
 		res.write(frames.slice(splitAt));
 	} else {
@@ -336,7 +352,7 @@ export async function withQoderLoopback<T>(
 						res.end(JSON.stringify({ error: `qoder-loopback: stream open forced to HTTP ${status}` }));
 						return;
 					}
-					await writeStreamBody(res, status, frames, opts.splitStreamAt);
+					await writeStreamBody(res, status, frames, opts.splitStreamAt, opts.splitDelayMs);
 					return;
 				}
 

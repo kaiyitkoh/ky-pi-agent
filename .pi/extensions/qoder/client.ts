@@ -511,6 +511,20 @@ function writeQoderTranscript(cwd: string, record: Record<string, unknown>): voi
 // The impure HTTP sequence
 // -----------------------------------------------------------------------------
 
+/**
+ * WR-07: the SSE read loop's inactivity deadline. `while (!folded.done) {
+ * await reader.read() }` used to terminate only on `session.status_idle`, on
+ * stream close, or on `signal` abort -- a Qoder session that keeps the
+ * connection open with no bytes at all (a stalled agent, a dropped
+ * keepalive) pinned the tool call forever, with the only escape being the
+ * user pressing Esc. Five minutes is deliberately generous: long enough that
+ * a real delegation's thinking/message deltas (which reset the deadline on
+ * every chunk, never on a fixed wall-clock budget) are never cut short, short
+ * enough that a genuinely stalled connection is reported rather than hung on
+ * indefinitely.
+ */
+export const STREAM_INACTIVITY_TIMEOUT_MS = 5 * 60_000;
+
 /** What {@link delegateTask} needs. */
 export interface DelegateTaskOptions {
 	/** Already-validated config from {@link resolveQoderConfig}. */
@@ -525,11 +539,33 @@ export interface DelegateTaskOptions {
 	readonly title?: string;
 	/** Called with the accumulated thinking text each time it grows, for tool-call progress. */
 	readonly onThinking?: (thinkingText: string) => void;
+	/**
+	 * Test-only injection seam for {@link STREAM_INACTIVITY_TIMEOUT_MS}.
+	 * Production code NEVER passes this -- it defaults to the real five-minute
+	 * constant. Exists so a loopback test can prove the stall-detection
+	 * behaviour without actually waiting five minutes.
+	 */
+	readonly inactivityTimeoutMs?: number;
 }
 
 /** `Authorization`/`Content-Type` headers shared by every request in the sequence. */
 function requestHeaders(token: string): Record<string, string> {
 	return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
+}
+
+/**
+ * Cancel a stream reader, swallowing any error the cancellation itself
+ * raises. WR-07: called right before the inactivity-timeout error is thrown,
+ * so a pending `reader.read()` is unblocked and the `finally` block's
+ * `reader.releaseLock()` does not itself throw on a still-in-progress read.
+ * Never allowed to mask the real (timeout) error that follows it.
+ */
+async function cancelReaderQuietly(reader: ReadableStreamDefaultReader<Uint8Array>, reason: string): Promise<void> {
+	try {
+		await reader.cancel(reason);
+	} catch {
+		// Best-effort -- see this function's own doc comment.
+	}
 }
 
 /**
@@ -628,12 +664,60 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	let folded: FoldedResult = { text: "", thinkingText: "", done: false };
 	let lastReportedThinking = "";
 
+	// WR-07: the inactivity deadline. `lastProgressAt` resets on every chunk
+	// (see the loop body below), never on a fixed wall-clock budget from the
+	// stream's own start -- see STREAM_INACTIVITY_TIMEOUT_MS's own doc comment
+	// for why a genuinely long delegation must not be cut short by this.
+	const inactivityTimeoutMs = opts.inactivityTimeoutMs ?? STREAM_INACTIVITY_TIMEOUT_MS;
+	let lastProgressAt = Date.now();
+
 	try {
 		while (!folded.done) {
-			const { value, done: streamDone } = await reader.read();
+			const remaining = inactivityTimeoutMs - (Date.now() - lastProgressAt);
+			if (remaining <= 0) {
+				await cancelReaderQuietly(reader, "inactivity timeout");
+				throw new Error(
+					`Qoder delegate: the event stream produced no bytes for ${inactivityTimeoutMs}ms -- ` +
+						"treating the connection as stalled rather than hanging indefinitely.",
+				);
+			}
+
+			// Race the read against the REMAINING budget, not the full deadline --
+			// so a read that starts partway through the window cannot silently
+			// extend the deadline past what "no bytes for N ms" actually means.
+			const TIMED_OUT = Symbol("qoder-stream-read-timed-out");
+			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
+			const raced = await Promise.race([
+				reader.read(),
+				new Promise<typeof TIMED_OUT>((resolve) => {
+					timeoutHandle = setTimeout(() => resolve(TIMED_OUT), remaining);
+				}),
+			]);
+			if (timeoutHandle !== undefined) {
+				clearTimeout(timeoutHandle);
+			}
+
+			if (raced === TIMED_OUT) {
+				// Cancel the reader BEFORE throwing: a pending reader.read() call
+				// makes releaseLock() in the finally block below throw its own
+				// ("cannot release a reader lock when a read() call is in
+				// progress"), which would mask this actionable error behind a
+				// confusing second one. cancel() unblocks that pending read.
+				await cancelReaderQuietly(reader, "inactivity timeout");
+				throw new Error(
+					`Qoder delegate: the event stream produced no bytes for ${inactivityTimeoutMs}ms -- ` +
+						"treating the connection as stalled rather than hanging indefinitely.",
+				);
+			}
+
+			const { value, done: streamDone } = raced;
 			if (streamDone) {
 				break;
 			}
+			// Progress: reset the deadline. A genuinely long delegation that keeps
+			// producing bytes (even slowly) is never cut off by this timeout.
+			lastProgressAt = Date.now();
+
 			buffer += decoder.decode(value, { stream: true });
 			const parsed = parseSseFrames(buffer);
 			buffer = parsed.rest;

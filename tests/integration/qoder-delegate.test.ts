@@ -457,6 +457,88 @@ describe("qoder-delegate -- WR-06: the stream-open step writes its own request/r
 	});
 });
 
+describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reported, never hung on indefinitely", () => {
+	it("throws an actionable inactivity-timeout error when the server goes silent between two writes, using an injected short timeout", async () => {
+		// `delegateTask`'s own `inactivityTimeoutMs` is a TEST-ONLY injection
+		// seam (see client.ts's own doc comment on DelegateTaskOptions) --
+		// production never passes it, defaulting to the real five-minute
+		// STREAM_INACTIVITY_TIMEOUT_MS. Injecting a short one here is what makes
+		// this stall-detection behaviour provable without an actual five-minute
+		// wait. The loopback server is told to split the stream body into two
+		// writes with a real gap BETWEEN them (`splitDelayMs`) that is
+		// deliberately LONGER than the injected timeout -- the gap itself, not
+		// the connection closing, is what must trip the deadline.
+		const injectedTimeoutMs = 60;
+		const splitDelayMs = 400;
+
+		const splitAt = Math.floor(FRAMES.length / 2);
+
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback(
+				{ frames: FRAMES, splitStreamAt: splitAt, splitDelayMs },
+				async (loop) => {
+					const config = resolveFixtureConfig(loop.baseUrl);
+
+					const start = Date.now();
+					await expect(
+						delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd, inactivityTimeoutMs: injectedTimeoutMs }),
+					).rejects.toThrow(/no bytes for \d+ms/);
+					const elapsed = Date.now() - start;
+
+					// Non-vacuity: the stream endpoint really was reached (all
+					// three requests happened) before the timeout fired.
+					expect(loop.received.length).toBeGreaterThan(0);
+					expect(loop.received).toHaveLength(3);
+
+					// The timeout fired close to the INJECTED budget, not close to
+					// splitDelayMs (which would mean the real 5-minute default was
+					// used instead of the injected seam) and not near-instantly
+					// (which would mean it fired on the FIRST read, before the
+					// server's first chunk had any chance to arrive at all).
+					expect(
+						elapsed,
+						`the call took ${elapsed}ms, expected roughly the injected ${injectedTimeoutMs}ms budget -- ` +
+							"either the injection seam is not wired to the actual deadline, or the timeout fired " +
+							"on the wrong read",
+					).toBeGreaterThanOrEqual(injectedTimeoutMs);
+					expect(
+						elapsed,
+						`the call took ${elapsed}ms -- too close to splitDelayMs (${splitDelayMs}ms) for the ` +
+							"injected timeout to plausibly be what fired",
+					).toBeLessThan(splitDelayMs);
+				},
+			);
+		});
+	});
+
+	it("does NOT time out when bytes keep arriving, even across a real inter-chunk delay shorter than the injected budget", async () => {
+		// The paired positive: an injected timeout LONGER than the gap between
+		// chunks must let a genuinely (if slowly) progressing stream complete
+		// normally -- proving the deadline resets on progress rather than being
+		// a fixed budget from the stream's own start.
+		const injectedTimeoutMs = 2000;
+		const splitDelayMs = 50;
+		const splitAt = Math.floor(FRAMES.length / 2);
+
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES, splitStreamAt: splitAt, splitDelayMs }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+
+				const folded = await delegateTask({
+					config,
+					task: DELEGATED_TASK_TEXT,
+					cwd,
+					inactivityTimeoutMs: injectedTimeoutMs,
+				});
+
+				expect(loop.received.length).toBeGreaterThan(0);
+				expect(folded.done).toBe(true);
+				expect(folded.text).toBe("Hello world");
+			});
+		});
+	});
+});
+
 describe("qoder-delegate -- this file never dials the real host", () => {
 	it("resolveQoderConfig's own documented default base URL is never used by any case in this file", () => {
 		// Every fixture config in this file supplies QODER_BASE_URL_ENV pointed
