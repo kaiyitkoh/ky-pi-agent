@@ -141,3 +141,14 @@ Phase 7 is closed: every `docs/RUNBOOK.md` entry for Phases 1 through 7 is machi
 ---
 *Phase: 07-composed-extensions-pinned-reviewed*
 *Completed: 2026-08-15*
+
+## Self-Check: PASSED
+
+- FOUND: docs/RUNBOOK.md
+- FOUND: tests/unit/docs-policy.test.ts
+- FOUND: .planning/REQUIREMENTS.md
+- FOUND commit: 534f0e0
+- FOUND commit: bd02b9e
+- FOUND commit: ebf7e5d
+- FOUND commit: 82ff70d
+- FOUND commit: d85883f
