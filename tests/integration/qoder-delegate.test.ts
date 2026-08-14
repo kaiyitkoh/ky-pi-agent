@@ -342,6 +342,68 @@ describe("qoder-delegate -- the transcript never carries the token or an Authori
 	});
 });
 
+describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a complete answer", () => {
+	it("a final frame with no terminating blank line is still folded in (the trailing-buffer flush), and the call still completes", async () => {
+		// Deliberately NOT `+ "\n"` after the join -- FRAMES (the module-level
+		// fixture) appends that trailing newline, which is what gives the LAST
+		// frame (STATUS_IDLE) a full blank-line terminator. Without it, the
+		// server closes the body right after STATUS_IDLE's own single trailing
+		// "\n" -- exactly the "SSE server ends the body with the last frame not
+		// followed by a blank line" shape this file's own module docstring and
+		// client.ts's CR-03 fix both name. Before the fix, this frame (often
+		// the one carrying session.status_idle) would sit unparsed in the
+		// reader's buffer forever and delegateTask would either hang or return
+		// with `done: false`; the fix flushes it after the read loop exits.
+		const framesWithNoTrailingBlankLine = [
+			THINKING_START,
+			THINKING_DELTA,
+			MESSAGE_START,
+			MESSAGE_DELTA_1,
+			MESSAGE_DELTA_2,
+			STATUS_IDLE,
+		].join("\n");
+		expect(
+			framesWithNoTrailingBlankLine.endsWith("\n\n"),
+			"fixture precondition is wrong -- this frame text must NOT end with a full blank-line terminator",
+		).toBe(false);
+
+		const { loop, folded } = await runDelegate({ frames: framesWithNoTrailingBlankLine });
+		expect(loop.received.length).toBeGreaterThan(0);
+
+		expect(folded.done, "the flushed trailing frame did not register as session.status_idle").toBe(true);
+		expect(folded.stopReason).toBe("end_turn");
+		expect(folded.text).toBe("Hello world");
+	});
+
+	it("a stream closed before session.status_idle throws, naming the accumulated character count, rather than returning a truncated result", async () => {
+		// No STATUS_IDLE frame at all -- the server closes the connection after
+		// the message deltas, simulating a dropped connection, a server-side
+		// 5xx after headers, or an early close. Before the fix, delegateTask
+		// returned `folded` regardless of `done`, and index.ts's tool handler
+		// handed `folded.text` ("Hello world") back to the model as a complete
+		// answer with no error and no marker.
+		const framesWithNoIdle = [THINKING_START, THINKING_DELTA, MESSAGE_START, MESSAGE_DELTA_1, MESSAGE_DELTA_2].join(
+			"\n",
+		) + "\n\n";
+		expect(framesWithNoIdle).not.toContain("session.status_idle");
+
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: framesWithNoIdle }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+
+				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(
+					/event stream ended without a session\.status_idle frame/,
+				);
+
+				// Non-vacuity: the stream endpoint really was reached, and the two
+				// prior requests (session create, event send) both completed.
+				expect(loop.received.length).toBeGreaterThan(0);
+				expect(loop.received).toHaveLength(3);
+			});
+		});
+	});
+});
+
 describe("qoder-delegate -- this file never dials the real host", () => {
 	it("resolveQoderConfig's own documented default base URL is never used by any case in this file", () => {
 		// Every fixture config in this file supplies QODER_BASE_URL_ENV pointed

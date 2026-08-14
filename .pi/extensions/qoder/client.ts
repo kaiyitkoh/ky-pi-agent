@@ -634,12 +634,43 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		reader.releaseLock();
 	}
 
+	// CR-03: flush what the transport left unterminated. A server that closes
+	// the body without a final blank line after the last frame -- a common SSE
+	// server behaviour this file's own module docstring already says the
+	// envelope is UNVERIFIED about -- must not cost the last frame (often
+	// session.status_idle itself, or the final content_delta). `decoder.decode()`
+	// with no argument flushes any pending multi-byte sequence the streaming
+	// decode above left buffered.
+	buffer += decoder.decode();
+	if (buffer.trim().length > 0) {
+		const flushed = parseSseFrames(`${buffer}\n\n`);
+		allFrames.push(...flushed.frames);
+		folded = foldDelegatedResult(allFrames);
+		if (opts.onThinking && folded.thinkingText !== lastReportedThinking) {
+			lastReportedThinking = folded.thinkingText;
+			opts.onThinking(folded.thinkingText);
+		}
+	}
+
 	writeQoderTranscript(cwd, {
 		event: "qoder.delegate.result",
 		done: folded.done,
 		stopReason: folded.stopReason,
 		textChars: folded.text.length,
 	});
+
+	// CR-03: `done` must be CHECKED, not merely recorded. A connection dropped
+	// mid-stream, a server-side 5xx after headers, or an early close (without a
+	// session.status_idle frame ever arriving) must never be handed back to the
+	// model as a complete, trustworthy answer -- the transcript would show
+	// done:false, but nothing upstream of this function ever reads that field.
+	if (!folded.done) {
+		throw new Error(
+			"Qoder delegate: the event stream ended without a session.status_idle frame after " +
+				`${folded.text.length} characters -- the delegated result is incomplete and must not be ` +
+				"treated as an answer.",
+		);
+	}
 
 	return folded;
 }
