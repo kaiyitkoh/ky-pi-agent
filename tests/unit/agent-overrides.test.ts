@@ -43,9 +43,9 @@
  * expected; the mutation was then reverted. See 05-05-SUMMARY.md for the
  * exact failure message.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -273,6 +273,44 @@ describe("writeAgentOverrides -- sibling-key preservation", () => {
 		expect(written.kyPiAgent).toEqual(initial.kyPiAgent);
 		expect(written.subagents.defaultModel).toBe("dashscope/deepseek-v4-pro");
 		expect(written.subagents.agentOverrides).toEqual(overrides);
+	});
+});
+
+describe("writeAgentOverrides -- WR-02: a filesystem error refuses, it never throws", () => {
+	it("a settingsPath whose parent directory does not exist -> ok:false, never throws", () => {
+		// A fresh temp dir owned by this test (removed in afterEach via
+		// tempDirs), but the settings.json target sits under a NESTED
+		// subdirectory that is never created -- writeFileSync's temp-file write
+		// hits ENOENT for want of a parent directory, exactly the "missing
+		// ~/.pi/agent parent directory on a fresh machine" case WR-02 names.
+		const dir = mkdtempSync(join(tmpdir(), "kypi-agent-overrides-missing-parent-"));
+		tempDirs.push(dir);
+		const settingsPath = join(dir, "does-not-exist", "settings.json");
+		expect(existsSync(settingsPath)).toBe(false);
+
+		let result: ReturnType<typeof writeAgentOverrides> | undefined;
+		expect(() => {
+			result = writeAgentOverrides({ planner: { model: "dashscope/deepseek-v4-flash" } }, { settingsPath });
+		}, "writeAgentOverrides threw instead of returning a refusal -- the module docstring's own " + '"returns a refusal rather than throwing" contract is exactly what WR-02 found broken').not.toThrow();
+
+		expect(result?.ok, `expected ok:false, got ${JSON.stringify(result)}`).toBe(false);
+		if (result?.ok !== false) {
+			return;
+		}
+		expect(result.reason).toContain(settingsPath);
+		expect(existsSync(settingsPath), "a refusal must never leave a partial file behind").toBe(false);
+	});
+});
+
+describe("writeAgentOverrides -- WR-02: the write is atomic, no temp file is left behind on success", () => {
+	it("a successful write leaves no stray `<path>.<pid>.tmp` file beside the target", () => {
+		const settingsPath = freshSettingsPath();
+		const result = writeAgentOverrides({ planner: { model: "dashscope/deepseek-v4-flash" } }, { settingsPath });
+		expect(result.ok).toBe(true);
+
+		const dir = dirname(settingsPath);
+		const leftover = readdirSync(dir).filter((name) => name.includes(".tmp"));
+		expect(leftover, `stray temp file(s) left behind: ${JSON.stringify(leftover)}`).toHaveLength(0);
 	});
 });
 

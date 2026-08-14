@@ -156,7 +156,7 @@
  */
 import type { Model } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { guardRoute } from "./guard.ts";
@@ -366,62 +366,88 @@ export function writeAgentOverrides(
 ): WriteAgentOverridesResult {
 	const path = resolveSettingsPath(opts);
 
-	let raw = "{}";
-	if (existsSync(path)) {
-		const fileText = readFileSync(path, "utf-8").trim();
-		raw = fileText === "" ? "{}" : fileText;
-	}
-
-	let obj: unknown;
+	// WR-02: the WHOLE body runs inside one try/catch. The module docstring
+	// promises "returns a refusal rather than throwing" for this function, but
+	// only the JSON.parse call was ever guarded -- readFileSync (both calls),
+	// writeFileSync and renameSync all throw natively on EACCES/EPERM/EISDIR, a
+	// missing parent directory on a fresh machine, or a Windows file lock. A
+	// caller (applyMode) that reaches this function AFTER pi.setModel already
+	// succeeded and the ky:mode entry already got written must never see this
+	// throw straight past it -- the switch really happened, and the step-6
+	// notification the user is owed must still be reported, not skipped by an
+	// unhandled rejection Pi's own extension host silently swallows.
 	try {
-		obj = JSON.parse(raw);
-	} catch (err) {
-		const message = err instanceof Error ? err.message : String(err);
-		return {
-			ok: false,
-			reason: `${path} is not valid JSON (${message}). Refusing to touch it.`,
-			path,
-		};
-	}
-
-	if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-		return {
-			ok: false,
-			reason: `${path} is not a JSON object. Refusing to touch it.`,
-			path,
-		};
-	}
-
-	const root = obj as Record<string, unknown>;
-	const existingSubagents = root.subagents;
-	if (
-		existingSubagents !== undefined &&
-		(existingSubagents === null || typeof existingSubagents !== "object" || Array.isArray(existingSubagents))
-	) {
-		return {
-			ok: false,
-			reason: `${path}'s "subagents" key is not a JSON object. Refusing to touch it.`,
-			path,
-		};
-	}
-
-	const subagents: Record<string, unknown> = { ...(existingSubagents as Record<string, unknown> | undefined) };
-	subagents.agentOverrides = overrides;
-	root.subagents = subagents;
-
-	const nextText = `${JSON.stringify(root, null, 2)}\n`;
-
-	if (existsSync(path)) {
-		const currentText = readFileSync(path, "utf-8");
-		if (currentText === nextText) {
-			return { ok: true, written: false, path };
+		let raw = "{}";
+		if (existsSync(path)) {
+			const fileText = readFileSync(path, "utf-8").trim();
+			raw = fileText === "" ? "{}" : fileText;
 		}
+
+		let obj: unknown;
+		try {
+			obj = JSON.parse(raw);
+		} catch (err) {
+			const message = err instanceof Error ? err.message : String(err);
+			return {
+				ok: false,
+				reason: `${path} is not valid JSON (${message}). Refusing to touch it.`,
+				path,
+			};
+		}
+
+		if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+			return {
+				ok: false,
+				reason: `${path} is not a JSON object. Refusing to touch it.`,
+				path,
+			};
+		}
+
+		const root = obj as Record<string, unknown>;
+		const existingSubagents = root.subagents;
+		if (
+			existingSubagents !== undefined &&
+			(existingSubagents === null || typeof existingSubagents !== "object" || Array.isArray(existingSubagents))
+		) {
+			return {
+				ok: false,
+				reason: `${path}'s "subagents" key is not a JSON object. Refusing to touch it.`,
+				path,
+			};
+		}
+
+		const subagents: Record<string, unknown> = { ...(existingSubagents as Record<string, unknown> | undefined) };
+		subagents.agentOverrides = overrides;
+		root.subagents = subagents;
+
+		const nextText = `${JSON.stringify(root, null, 2)}\n`;
+
+		if (existsSync(path)) {
+			const currentText = readFileSync(path, "utf-8");
+			if (currentText === nextText) {
+				return { ok: true, written: false, path };
+			}
+		}
+
+		// WR-02: temp-file + renameSync, never a direct writeFileSync onto the
+		// user's GLOBAL settings file. `writeFileSync` alone is not atomic -- a
+		// crash or a concurrent Pi session mid-write truncates the file,
+		// destroying `kyPiAgent`, `subagents.defaultModel` and any hand-written
+		// keys the read-modify-write above exists to preserve. `renameSync` is
+		// atomic on the same filesystem, and the temp file lives beside the
+		// target (same directory, so same filesystem/volume) rather than in a
+		// system temp dir, which could straddle a volume boundary and turn the
+		// rename into a copy.
+		const tmpPath = `${path}.${process.pid}.tmp`;
+		writeFileSync(tmpPath, nextText, "utf-8");
+		renameSync(tmpPath, path);
+
+		return { ok: true, written: true, path };
+	} catch (err) {
+		return {
+			ok: false,
+			reason: `${path} could not be written (${err instanceof Error ? err.message : String(err)}).`,
+			path,
+		};
 	}
-
-	writeFileSync(path, nextText, "utf-8");
-	// Confirm the write did not race the mtime clock into a false idempotence
-	// read on a later call — statSync here is diagnostic only, not gating.
-	void statSync(path);
-
-	return { ok: true, written: true, path };
 }
