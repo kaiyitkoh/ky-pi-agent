@@ -157,6 +157,38 @@ export function currentBranch(cwd: string): string {
 	return DETACHED_HEAD;
 }
 
+/**
+ * The HEAD commit SHA of the repository at `cwd`, right now.
+ *
+ * WHY NO SENTINEL (unlike {@link currentBranch}'s {@link DETACHED_HEAD}): a
+ * detached HEAD is unconditionally NOT-protected, so a safe default exists
+ * for it. No safe default exists for "the current SHA is unknown" — GATE-07
+ * (`workflows/evidence.ts`) compares a recorded SHA against this value, and
+ * an unknown SHA can never legitimately match a piece of evidence. Returning
+ * a sentinel here would let a broken repository (no `.git`, or a repository
+ * with no commits yet) read compare-equal to itself under a naive `===`.
+ * This function THROWS instead, on both a launch failure and a non-zero
+ * exit; callers must wrap it and refuse (fail closed).
+ */
+export function currentSha(cwd: string): string {
+	const result = spawnSync("git", ["rev-parse", "HEAD"], {
+		cwd,
+		encoding: "utf-8",
+		shell: false,
+		windowsHide: true,
+	});
+	if (result.error) {
+		throw new Error(`git rev-parse HEAD failed to launch in "${cwd}": ${result.error.message}`);
+	}
+	if (result.status !== 0) {
+		throw new Error(
+			`git rev-parse HEAD failed in "${cwd}" (exit ${result.status}) -- no sentinel exists for an ` +
+				"unknown SHA, because an unknown SHA can never legitimately match a piece of evidence",
+		);
+	}
+	return (result.stdout ?? "").trim();
+}
+
 // ---------------------------------------------------------------------------
 // The pure classifier half
 // ---------------------------------------------------------------------------

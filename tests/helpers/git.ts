@@ -36,6 +36,9 @@
  * a different control's problem.
  */
 import { spawnSync } from "node:child_process";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 let cachedRoot: string | undefined;
 
@@ -103,4 +106,69 @@ export function trackedFiles(pattern = "."): string[] {
 		.split("\n")
 		.map((line) => line.trim())
 		.filter((line) => line !== "");
+}
+
+/**
+ * Create a fresh, empty git repository in a new temp directory (under
+ * `os.tmpdir()`, never inside this repository), checked out on a branch
+ * named `work` — never `main`/`master` — so no fixture built on top of it
+ * depends on this machine's `init.defaultBranch` setting.
+ *
+ * Every one of the four setup calls (`init`, two `config` calls,
+ * `checkout -b`) is asserted to succeed; a failure throws naming the exact
+ * argv that failed rather than returning a half-initialised path silently.
+ */
+export function makeTempRepo(prefix: string): string {
+	const repo = mkdtempSync(join(tmpdir(), prefix));
+	const setup: string[][] = [
+		["init"],
+		["config", "user.email", "quick@test.invalid"],
+		["config", "user.name", "quick test"],
+		["checkout", "-b", "work"],
+	];
+	for (const args of setup) {
+		const { status } = run(args, repo);
+		if (status !== 0) {
+			throw new Error(`git ${args.join(" ")} failed (exit ${status}) while making temp repo ${repo}`);
+		}
+	}
+	return repo;
+}
+
+/**
+ * Write `body` to `<repo>/<name>`, stage it and commit it with `message`,
+ * returning the new HEAD SHA read back via {@link headSha} — never trusted
+ * from `git commit`'s own stdout, which this module's header rule says is
+ * never parsed.
+ */
+export function commitFile(repo: string, name: string, body: string, message: string): string {
+	writeFileSync(join(repo, name), body, "utf-8");
+	const steps: string[][] = [
+		["add", "--", name],
+		["commit", "-m", message],
+	];
+	for (const args of steps) {
+		const { status } = run(args, repo);
+		if (status !== 0) {
+			throw new Error(`git ${args.join(" ")} failed (exit ${status}) committing ${name} in ${repo}`);
+		}
+	}
+	return headSha(repo);
+}
+
+/**
+ * The current HEAD SHA of `repo`, read directly via `git rev-parse HEAD`.
+ * Throws naming the failing argv on a non-zero status or an empty result —
+ * never returns an empty string silently.
+ */
+export function headSha(repo: string): string {
+	const { stdout, status } = run(["rev-parse", "HEAD"], repo);
+	if (status !== 0) {
+		throw new Error(`git rev-parse HEAD failed (exit ${status}) in ${repo}`);
+	}
+	const sha = stdout.trim();
+	if (sha === "") {
+		throw new Error(`git rev-parse HEAD returned an empty SHA in ${repo}`);
+	}
+	return sha;
 }
