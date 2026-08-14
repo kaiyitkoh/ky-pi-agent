@@ -22,10 +22,22 @@
  * This file is loaded once per test FILE via `vitest.config.ts`'s
  * `setupFiles` (distinct from `globalSetup`, which runs once for the whole
  * run in the main process and cannot set `process.env` for the worker that
- * actually executes a test file). Its `beforeAll`/`afterAll` are registered
- * at the OUTER level of that file's suite, so they run before/after every
- * `describe`/`it` the test file itself declares — no test file can opt out of
- * this by omission.
+ * actually executes a test file). A setup file's own MODULE BODY is
+ * evaluated BEFORE the test file's own module body
+ * [VERIFIED: vitest 4.1.9 executes `setupFiles` during worker
+ * initialisation, strictly before the test file is imported], so the
+ * assignment below (WR-02) closes the one window `beforeAll` alone cannot
+ * reach: a test file — or a helper it imports — that resolves
+ * `getAgentDir()` or calls `writeAgentOverrides()` at IMPORT TIME, before any
+ * `beforeAll` in that file has had a chance to run. MEASURED (WR-02): a probe
+ * test that read `process.env.PI_CODING_AGENT_DIR` at module scope observed
+ * `undefined` there and the suite temp dir only once inside a test body, when
+ * the guard set the variable in `beforeAll` alone. `beforeAll` below now only
+ * RE-ASSERTS the same value, as a defence against an individual test case
+ * that reassigns `process.env.PI_CODING_AGENT_DIR` mid-file and forgets to
+ * restore it before the file's own `afterAll`. No currently-committed test
+ * file resolves `getAgentDir()` at import time — this guard exists so that if
+ * one ever does, it still cannot reach this machine's real `~/.pi/agent`.
  *
  * ---------------------------------------------------------------------------
  * WHY A FRESH TEMP DIR PER FILE, NOT ONE FOR THE WHOLE RUN
@@ -47,13 +59,19 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll } from "vitest";
 
-let dir: string;
+// WR-02: set at MODULE SCOPE, not only inside beforeAll -- setupFiles are
+// evaluated before the test file's own module body, so this closes the
+// import-time window beforeAll cannot reach. See this file's own module
+// docstring for the measured evidence.
+const dir = mkdtempSync(join(tmpdir(), "kypi-agent-dir-suite-"));
+process.env.PI_CODING_AGENT_DIR = dir;
 
 beforeAll(() => {
-	// A test must never resolve getAgentDir() to this machine's real
-	// ~/.pi/agent. This runs before any test in the file, closing the CR-01
-	// hole structurally rather than relying on every case to remember.
-	dir = mkdtempSync(join(tmpdir(), "kypi-agent-dir-suite-"));
+	// Re-assert (not re-create) the same value: a test must never resolve
+	// getAgentDir() to this machine's real ~/.pi/agent. This is now a defence
+	// against an individual case mutating the env var mid-file and forgetting
+	// to restore it before this file's own remaining cases run -- the
+	// module-scope assignment above is what actually closes the CR-01 hole.
 	process.env.PI_CODING_AGENT_DIR = dir;
 });
 
