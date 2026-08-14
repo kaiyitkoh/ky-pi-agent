@@ -46,6 +46,8 @@
  * candidate-resolution loop is asserted to have actually visited more than
  * one `{provider,id}` pair before its own negative assertion is trusted.
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -68,6 +70,9 @@ import { withModelsConfig } from "../helpers/models.ts";
 
 /** The template plan 03-02 shipped. Composed through Pi for every assertion. */
 const TEMPLATE = `${repoRoot()}/.pi/templates/models-template.json`;
+
+/** `docs/ROUTING.md` — the user-facing document the table below is checked against. */
+const ROUTING_DOC_PATH = join(repoRoot(), "docs", "ROUTING.md");
 
 /** The six ROADMAP names, in the exact order ROADMAP criterion 1 states them. */
 const EXPECTED_ROLES = ["executor", "planner", "reviewer", "advisor", "vision", "summariser"] as const;
@@ -336,5 +341,143 @@ describe("ROUTE-01 — mode/escalation vocabulary the rest of the phase depends 
 		expect(AGENT_NAME_BY_ROLE.planner, "planner is the one role this phase assigns to a subagent").toBe(
 			"planner",
 		);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// ROUTE-01/05-12 — docs/ROUTING.md's published table cannot drift from
+// ROLE_MAP, in EITHER direction. Following docs/SAFETY.md's own
+// corpus-derived-limits discipline (the "Known bypasses" table is asserted
+// against tests/fixtures/evasion-corpus.ts in both directions, never
+// hand-typed): the CONVERSE direction is the one that matters. Without it,
+// docs/ROUTING.md could grow a row ROLE_MAP does not have, which is exactly
+// how a doc becomes a second source of truth.
+// ---------------------------------------------------------------------------
+
+/**
+ * Matches a `provider/id`-shaped token using only the three provider
+ * namespaces this project's schema.ts actually names (`deepseek`,
+ * `dashscope`, `amazon-bedrock`). Deliberately narrow rather than a bare
+ * `\S+\/\S+`: the deny-listed Bedrock R1 ids in §4 of the document are
+ * written WITHOUT a provider prefix precisely so they do not collide with
+ * this extraction — see docs/ROUTING.md §4's own wording.
+ */
+const PROVIDER_MODEL_RE = /\b(?:deepseek|dashscope|amazon-bedrock)\/[A-Za-z0-9._:-]+/g;
+
+/** `${provider}/${id}` for a {@link ModelRef}, matching {@link PROVIDER_MODEL_RE}'s own shape. */
+function refKey(ref: ModelRef): string {
+	return `${ref.provider}/${ref.id}`;
+}
+
+/** Every distinct candidate `{provider,id}` named anywhere in `ROLE_MAP`, as `provider/id` strings. */
+function everyRoleMapCandidateKey(): Set<string> {
+	const keys = new Set<string>();
+	for (const mode of MODES) {
+		for (const role of ROLES) {
+			for (const candidate of ROLE_MAP[mode][role].candidates) {
+				keys.add(refKey(candidate));
+			}
+		}
+	}
+	return keys;
+}
+
+/**
+ * Slice out `docs/ROUTING.md`'s "## 2. The role→model table" section, the
+ * same extraction discipline `tests/unit/docs-policy.test.ts`'s Group D uses
+ * for `docs/DIAGNOSTICS.md`'s Redaction section — scoped to the table so a
+ * refusal-section mention of a Bedrock id (§4) cannot accidentally satisfy or
+ * break this check.
+ */
+function roleModelTableSection(doc: string): string {
+	const start = doc.indexOf("\n## 2. The role→model table");
+	expect(
+		start,
+		"docs/ROUTING.md has no `## 2. The role→model table` heading -- every assertion below scans " +
+			"that section, so an absent or renamed heading would make this whole group vacuous",
+	).toBeGreaterThan(-1);
+	const rest = doc.slice(start + 1);
+	const end = rest.indexOf("\n## ");
+	return end === -1 ? rest : rest.slice(0, end);
+}
+
+describe("ROUTE-01 — docs/ROUTING.md exists and publishes the role→model table", () => {
+	it("exists", () => {
+		expect(
+			existsSync(ROUTING_DOC_PATH),
+			"docs/ROUTING.md is the user-facing document the role→model table, the mechanisms, the " +
+				"refusals and the foreign-agent caveat are published in",
+		).toBe(true);
+	});
+
+	const doc = readFileSync(ROUTING_DOC_PATH, "utf-8");
+	const tableSection = roleModelTableSection(doc);
+	const expectedKeys = everyRoleMapCandidateKey();
+
+	it("collected more than one distinct ROLE_MAP candidate (non-vacuity)", () => {
+		expect(
+			expectedKeys.size,
+			"no distinct {provider,id} pairs were collected from ROLE_MAP -- the checks below would " +
+				"iterate nothing and pass without checking a single row",
+		).toBeGreaterThan(1);
+	});
+
+	it("every ROLE_MAP candidate appears in the document's role→model table", () => {
+		const missing = Array.from(expectedKeys).filter((key) => !tableSection.includes(key));
+		expect(
+			missing,
+			"docs/ROUTING.md's role->model table does not name these ROLE_MAP candidates -- a reader of " +
+				"the document would not know these routes exist",
+		).toEqual([]);
+	});
+
+	it("every provider/id token the table names is a real ROLE_MAP candidate (the converse)", () => {
+		const found = tableSection.match(PROVIDER_MODEL_RE) ?? [];
+		expect(
+			found.length,
+			"no provider/id-shaped token found in docs/ROUTING.md's table section -- this assertion " +
+				"scans that set, so an empty one would pass while verifying nothing",
+		).toBeGreaterThan(0);
+
+		const invented = Array.from(new Set(found)).filter((key) => !expectedKeys.has(key));
+		expect(
+			invented,
+			"docs/ROUTING.md's table names these provider/id pairs and ROLE_MAP has no candidate " +
+				"matching any of them -- the document has grown a row the code does not have, which is " +
+				"exactly how a doc becomes a second, driftable source of truth",
+		).toEqual([]);
+	});
+
+	it("names all six ROADMAP roles", () => {
+		for (const role of ROLES) {
+			expect(doc, `docs/ROUTING.md does not name the "${role}" role`).toContain(role);
+		}
+	});
+
+	it("names the three mode-switch commands", () => {
+		for (const mode of MODES) {
+			expect(doc, `docs/ROUTING.md does not name the "/${mode}" command`).toContain(`/${mode}`);
+		}
+	});
+
+	it("names /escalate and /mode", () => {
+		expect(doc, "docs/ROUTING.md does not name /escalate").toContain("/escalate");
+		expect(doc, "docs/ROUTING.md does not name /mode").toContain("/mode");
+	});
+
+	it("states the foreign-agent bypass names all four controls it bypasses", () => {
+		for (const cue of ["Pi's own tools", "AGENTS.md", "safety guard", "wire inspector"]) {
+			expect(
+				doc,
+				`docs/ROUTING.md's foreign-agent section must name ${JSON.stringify(cue)} as bypassed`,
+			).toContain(cue);
+		}
+	});
+
+	it("states plainly that Qoder is never a routable model, models.json entry, fallback hop, or guard entry", () => {
+		expect(doc).toContain("no `models.json`");
+		expect(doc).toContain("no role→model map");
+		expect(doc).toContain("no fallback chain");
+		expect(doc).toContain("no capability guard");
 	});
 });
