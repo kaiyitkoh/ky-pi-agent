@@ -109,8 +109,40 @@ const COMMAND_REGISTRATION = "registerCommand";
  *     `ctx.ui.select()` for a real human confirmation. This needs a
  *     structured, validated round trip through code the model cannot see or
  *     alter, not a procedure the model follows on its own word.
+ *
+ * `.pi/extensions/qoder/index.ts` (Phase 5, plan 03, ROUTE-11) is the second
+ * entry:
+ *
+ * (a) The model must invoke `qoder_delegate` MID-TURN -- delegation is a
+ *     decision the model makes inside its own turn, about work it is
+ *     currently doing, and there is no user-initiated entry point that could
+ *     hand a delegated result back into the SAME turn. A command cannot do
+ *     this: `ctx.waitForIdle()` and the rest of the command-only surface
+ *     exist precisely because a command runs BETWEEN turns, not inside one.
+ * (b) MEASURED, not estimated: serialised as the exact
+ *     `{type:"function",function:{name,description,parameters}}` shape
+ *     `openai-completions.ts:1337-1372` sends, this tool's schema is 1315
+ *     bytes. `Math.ceil(1315 / 4) = 329` tokens by this project's own
+ *     estimator (`diagnostics/budget.ts:223-224`), under the ~400-token
+ *     budget the plan set for this description. Computed by running the
+ *     tool's real `typebox` schema and description text through
+ *     `Buffer.byteLength(JSON.stringify(payload), "utf8")` against a
+ *     `require("typebox")` loaded via the repo's own `package.json` --
+ *     the exact node one-liner is recorded in `05-03-SUMMARY.md`.
+ * (c) A skill cannot carry this because a skill is text the model reads and
+ *     interprets -- it has no mechanism to make an authenticated HTTP round
+ *     trip with a bearer credential (`Authorization: Bearer <PAT>`), no
+ *     mechanism to stream and incrementally parse an SSE response
+ *     (`client.ts#parseSseFrames`/`#foldDelegatedResult`), and no mechanism
+ *     to refuse actionably, in a way the model can read and act on, when the
+ *     credential is absent (`client.ts#resolveQoderConfig`). This needs a
+ *     structured network round trip through code the model cannot see or
+ *     alter, not a procedure the model follows on its own word.
  */
-const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [".pi/extensions/safety/index.ts"];
+const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [
+	".pi/extensions/safety/index.ts",
+	".pi/extensions/qoder/index.ts",
+];
 
 /** Tracked text sources under `.pi/extensions/`, read from the index's view. */
 function extensionSources(): { path: string; text: string }[] {
