@@ -104,6 +104,15 @@ None — no external service configuration required.
 - Full repo suite verified green after this plan: 1225 tests / 68 files, `tsc --noEmit` clean.
 - No blockers for the next plan in wave 1/2.
 
+## Self-Check: PASSED
+
+- FOUND: `.pi/extensions/routing/schema.ts`
+- FOUND: `tests/unit/routing-map.test.ts`
+- FOUND: `.planning/phases/05-routing-capability-guards/05-01-SUMMARY.md`
+- FOUND commit: `b1e80a5` (Task 1)
+- FOUND commit: `bed265b` (Task 2)
+- FOUND commit: `d098ada` (plan metadata)
+
 ---
 *Phase: 05-routing-capability-guards*
 *Completed: 2026-08-14*

@@ -238,7 +238,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 05-01-PLAN.md — `routing/schema.ts`: the role→model map for six roles × three modes, and its resolvability proof (ROUTE-01)
+- [x] 05-01-PLAN.md — `routing/schema.ts`: the role→model map for six roles × three modes, and its resolvability proof (ROUTE-01)
 - [ ] 05-02-PLAN.md — `routing/guard.ts`: the four hard blocks as pure predicates, each with a paired negative (ROUTE-06, ROUTE-07, ROUTE-08)
 - [ ] 05-03-PLAN.md — `qoder/`: the Cloud Agents client, the tolerant SSE parser and the allowlisted delegate tool with a measured schema cost (ROUTE-11)
 

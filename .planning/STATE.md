@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 04-12-PLAN.md
-last_updated: "2026-08-14T04:59:59.187Z"
-last_activity: 2026-08-14 -- Phase 05 planning complete
+stopped_at: Completed 05-01-PLAN.md
+last_updated: "2026-08-14T05:15:38.119Z"
+last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 44
+  completed_plans: 45
   percent: 36
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 5 — routing & capability guards
+**Current focus:** Phase 05 — routing-capability-guards
 
 ## Current Position
 
-Phase: 5
-Plan: Not started
+Phase: 05 (routing-capability-guards) — EXECUTING
+Plan: 2 of 12
 Status: Ready to execute
-Last activity: 2026-08-14 -- Phase 05 planning complete
+Last activity: 2026-08-14
 
-Progress: [██████████] 100%
+Progress: [████████░░] 80%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -107,6 +107,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 04 P11 | 65min | 2 tasks | 5 files |
 | Phase 04 P10 | 35min | 2 tasks | 2 files |
 | Phase 04 P12 | 25m | 3 tasks | 5 files |
+| Phase 05 P01 | 35m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -251,6 +252,8 @@ Recent decisions affecting current work:
 - [Phase 04-12]: The non-fast-forward negative control for classifyPushFailure() is a genuinely diverged real git rejection, not a fabricated string, so the classifier's negative direction is measured against real git output
 - [Phase 04-12]: RB-04-01 names the work repo as <work-repo> rather than a real URL, following the RB-03-01/RB-03-03 precedent for account-identifying information in a public repo
 - [Phase 04-12]: Phase 4 is complete -- all seventeen SAFE requirements accounted for: sixteen [x] (SAFE-02..15, SAFE-17), SAFE-01 [~] partial with RB-04-01 OUTSTANDING, SAFE-16 untouched (Phase 1's). Full suite (1083 tests, 64 files) and tsc --noEmit green
+- [Phase 05]: 05-01: withModelsConfig's composed registry resolves Pi's built-in Bedrock and DeepSeek-direct catalogue entries through the same registry.find() call as the DashScope template entries -- verified live (1220 total models, Bedrock Claude resolved with input:[text,image]) -- so no second hand-rolled catalogue reader was built for the vision role
+- [Phase 05]: 05-01: reasoningEffort is a per-role constant (reviewer/advisor: high; others: none), identical across cheap/balanced/max in every case, and KyModeData carries only mode name + escalation bookkeeping since Pi's native model_change session entry already persists the executor model
 
 ### Pending Todos
 
@@ -298,8 +301,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-13T23:27:08.817Z
-Stopped at: Completed 04-12-PLAN.md
+Last session: 2026-08-14T05:15:38.110Z
+Stopped at: Completed 05-01-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

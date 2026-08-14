@@ -72,7 +72,7 @@
 
 ### Routing
 
-- [ ] **ROUTE-01**: An explicit role→model map covers executor, planner, reviewer, advisor, vision, and summariser — no auto-classification
+- [x] **ROUTE-01**: An explicit role→model map covers executor, planner, reviewer, advisor, vision, and summariser — no auto-classification
 - [ ] **ROUTE-02**: `/cheap`, `/balanced`, `/max` swap the whole role→model map via `pi.setModel()` from a command after `await ctx.waitForIdle()`, which removes the race **[FAUX]**
 - [ ] **ROUTE-03**: `/escalate` pulls a stronger model for one invocation, and the elevated state is visible and sticky until cleared **[FAUX]**
 - [ ] **ROUTE-04**: Single-shot roles (review, advisor, vision, summarise) run through `callModel()` → `ctx.modelRegistry.complete()` with per-call reasoning effort, not by mutating session state **[FAUX]**
@@ -273,7 +273,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-15 | Phase 4 | Complete — plan 04-11 |
 | SAFE-16 | Phase 1 | Pending — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING — `gh auth logout` has not been run on the work laptop. Not completable from this machine |
 | SAFE-17 | Phase 4 | Complete — plan 04-11 |
-| ROUTE-01 | Phase 5 | Pending |
+| ROUTE-01 | Phase 5 | Complete |
 | ROUTE-02 | Phase 5 | Pending |
 | ROUTE-03 | Phase 5 | Pending |
 | ROUTE-04 | Phase 5 | Pending |
