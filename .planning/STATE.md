@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-10-PLAN.md
-last_updated: "2026-08-14T10:47:03.277Z"
+stopped_at: Completed 05-11-PLAN.md
+last_updated: "2026-08-14T11:06:33.201Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 54
+  completed_plans: 55
   percent: 36
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 4 of 12
+Plan: 5 of 12
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [██████████] 96%
+Progress: [██████████] 98%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -117,6 +117,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 05 P08 | 35m | 2 tasks | 1 files |
 | Phase 05 P09 | 20min | 2 tasks | 2 files |
 | Phase 05 P10 | 25m | 2 tasks | 2 files |
+| Phase 05 P11 | 35m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -287,6 +288,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-10: restoreModeFromBranch is a plain function of the branch entry array, exported so it can be tested directly without waiting for session_start, which is measured not to fire in a headless createAgentSession
 - [Phase 05]: 05-10: the zero-context-token proof plants MODE_ENTRY_TYPE (ky:mode) as the marker and pairs the absence assertion with a positive control -- the same marker sent as ordinary user-message content must be found by the same captured-payload instrument
 - [Phase 05]: 05-10: ROUTE-09 is now complete in both halves (write via 05-07, restore via this plan) -- Pi's own session_start event dispatch itself remains unexercised by this repository's headless test harness, stated plainly rather than implied as covered
+- [Phase 05]: 05-11: ROLE_MAP.balanced.executor/max.executor/max.reviewer candidates are read from the real exported table in the wire-proof fixture, never hardcoded as literals — keeps the proof tracking routing/schema.ts's actual role->model map rather than a copy that could silently drift
+- [Phase 05]: 05-11: the reviewer single-shot call is driven while the session executor is still max's model, so the nested row naming a different provider (amazon-bedrock vs deepseek) is a genuine cross-provider routing proof — a nested row naming the right model would prove nothing about routing if the single-shot model could never differ from the session executor
 
 ### Pending Todos
 
@@ -334,8 +337,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T10:47:03.268Z
-Stopped at: Completed 05-10-PLAN.md
+Last session: 2026-08-14T11:06:33.190Z
+Stopped at: Completed 05-11-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

@@ -263,7 +263,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 05-11-PLAN.md — the wire proof: two switches, two models, read from the log and never from a `setModel` spy (ROUTE-10)
+- [x] 05-11-PLAN.md — the wire proof: two switches, two models, read from the log and never from a `setModel` spy (ROUTE-10)
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
