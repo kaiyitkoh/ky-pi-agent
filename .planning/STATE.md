@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-04-PLAN.md
-last_updated: "2026-08-14T05:56:35.919Z"
+stopped_at: Completed 05-05-PLAN.md
+last_updated: "2026-08-14T06:07:57.671Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 48
+  completed_plans: 49
   percent: 36
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 5 of 12
+Plan: 6 of 12
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 88%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -111,6 +111,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 05 P02 | ~20min | 2 tasks | 2 files |
 | Phase 05 P03 | ~30m | 3 tasks | 4 files |
 | Phase 05 P04 | ~15min | 2 tasks | 2 files |
+| Phase 05 P05 | ~25min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -264,6 +265,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-04: usesToolLoop(role) is derived inside planRoleCall and RoleNeed omits usesToolLoop entirely from the caller-facing type -- ROUTE-08's scope is a compile-time guarantee, not just a documented convention
 - [Phase 05]: 05-04: pickConfiguredCandidate's refusal names each candidate as (did not resolve) or (no configured auth) distinctly, proven by a mixed-failure candidate list in the same test
 - [Phase 05]: 05-04: the guard-precedence falsification had to mutate the success branch (build the ok:true value before the guard ran, discard its verdict), not merely reorder when mechanism is computed relative to the guard call -- the latter mutation changes nothing observable since the ok:false path never carries mechanism regardless of ordering
+- [Phase 05]: 05-05: the write target is the GLOBAL getAgentDir()/settings.json, never the project-scoped git-tracked .pi/settings.json -- resolves 05-RESEARCH.md Assumption A1 per the standing policy
+- [Phase 05]: 05-05: agentOverridesFor builds a structural Model<Api> fixture from a candidate's {provider,id} rather than a registry lookup -- sound because the only need field ever set is usesToolLoop:true, so only guardRoute's ROUTE-08 deny-list block can fire through this call path
+- [Phase 05]: 05-05: agentOverridesFor gained an injectable AgentOverridesForOptions seam (production never passes it) so the guard-blocked fixture test could avoid mutating the shared ROLE_MAP module singleton other routing tests also import
 
 ### Pending Todos
 
@@ -311,8 +315,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T05:56:35.908Z
-Stopped at: Completed 05-04-PLAN.md
+Last session: 2026-08-14T06:07:57.660Z
+Stopped at: Completed 05-05-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
