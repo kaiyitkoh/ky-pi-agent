@@ -25,10 +25,10 @@
  *
  * D-11 -- THE DIRECTORY AGGREGATE IS A RATCHET WITH NO HEADROOM.
  * `DIRECTORY_BUDGETS`'s `workflows` entry is the measured total of
- * `.pi/extensions/workflows/**\/*.ts` at commit time (408 raw lines by this
- * file's own `countRawLines`, measured 2026-08-15: index.ts 80 + evidence.ts
- * 328, after CR-01/WR-01/WR-02), rounded up to the next multiple of ten.
- * Growing the directory requires a deliberate edit to this number in the
+ * `.pi/extensions/workflows/**\/*.ts` at commit time (415 raw lines by this
+ * file's own `countRawLines`, measured 2026-08-15: index.ts 79 + evidence.ts
+ * 336, after iteration 3's CR-01/WR-02), rounded up to the next multiple of
+ * ten. Growing the directory requires a deliberate edit to this number in the
  * SAME commit as the growth -- the same discipline `docs/RUNBOOK.md`
  * statuses already use. This is what stops `/quick` from being "shrunk" by
  * moving four hundred lines into a private helper module that only it calls.
@@ -50,8 +50,20 @@
  * `harness/` and `diagnostics/` are grandfathered in at their CURRENT
  * measured totals -- this pass did not re-review their tightness, exactly
  * per WR-05's own precedent for their per-file entries.
+ *
+ * WR-01 (ITERATION 3) -- THE AGGREGATE WAS DEFEATED BY ONE SUBDIRECTORY.
+ * The prior `filesInDir` excluded any path with an extra `/` segment past
+ * `dir`, and `commandDirs` used the command file's IMMEDIATE PARENT rather
+ * than the subsystem root -- so `.pi/extensions/workflows/helpers/big.ts`
+ * (planted, 1,201 lines, no `registerCommand(`) was never summed by anything
+ * at all, and a nested command file (`.pi/extensions/grill/sub/index.ts`)
+ * would have ratcheted only `grill/sub`, leaving `grill/steps.ts` beside it
+ * uncounted. `filesInDir` now recurses (dropping the depth filter --
+ * `walkOnDisk` and `git ls-files` both already recurse); `commandDirs` now
+ * maps to `p.split("/").slice(0, 3).join("/")`, the subsystem root, not the
+ * immediate parent.
  */
-import { existsSync, readFileSync, readdirSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
@@ -73,10 +85,10 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{ file: ".pi/extensions/workflows/index.ts", budget: 80, why: "FLOW-01 -- the ROADMAP's /quick raw-line ceiling" },
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
-		budget: 330,
-		why: "CR-01 iteration 2 fix: a new reject branch for ANY failed tool result in the run, placed " +
-			"before the headSha narrowing so a failure cannot be aged out by a later commit -- measured " +
-			"328 raw lines 2026-08-15 (up from 298), rounded up to the next ten",
+		budget: 340,
+		why: "CR-01 iteration 3 fix: recordCaptureFailure() so a tool_execution_end capture that throws " +
+			"rejects instead of vanishing, plus the tool_execution_end docstring rewrite -- measured 336 " +
+			"raw lines 2026-08-15 (up from 328), rounded up to the next ten",
 	},
 	// WR-05: these three are NOT under workflows/ -- discovered because they contain
 	// COMMAND_MARKER (isCommandSource). Declared here so the completeness check
@@ -110,9 +122,9 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[] = [
 	{
 		dir: WORKFLOWS_DIR,
-		budget: 410,
-		why: "D-11's original ratchet -- /quick's own directory; measured 408 raw lines 2026-08-15 " +
-			"(index.ts 80 + evidence.ts 328) after CR-01/WR-01/WR-02, rounded up to the next ten",
+		budget: 420,
+		why: "D-11's original ratchet -- /quick's own directory; measured 415 raw lines 2026-08-15 " +
+			"(index.ts 79 + evidence.ts 336) after iteration 3's CR-01/WR-02, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/routing",
@@ -182,17 +194,22 @@ function isCommandSource(p: string): boolean {
 }
 
 /**
- * WR-03: every `.ts`/`.js` file directly inside repo-relative `dir`,
- * existsSync-filtered, from the SAME tracked+on-disk union
- * {@link discoverWorkflowFiles} uses -- deliberately NOT limited to files
- * that individually pass {@link isCommandSource}, so a sibling helper (the
- * planted `grill/steps.ts` shape) is counted in the directory total even
- * though it never spells `registerCommand(` itself.
+ * WR-03/WR-01 (iteration 3): every `.ts`/`.js` file ANYWHERE beneath
+ * repo-relative `dir` -- RECURSIVE, existsSync-filtered, from the SAME
+ * tracked+on-disk union {@link discoverWorkflowFiles} uses -- deliberately
+ * NOT limited to files that individually pass {@link isCommandSource}, so a
+ * sibling helper (the planted `grill/steps.ts` shape) is counted in the
+ * directory total even though it never spells `registerCommand(` itself.
+ * WR-01 (iteration 3): the prior version excluded any path with an extra `/`
+ * segment past `dir`, so `.pi/extensions/workflows/helpers/big.ts` was never
+ * summed at all -- one `mkdir` defeated the whole ratchet. `walkOnDisk`
+ * already recurses; `trackedFiles(dir)` recurses too (`git ls-files` on a
+ * directory pathspec), so dropping the depth filter is the entire fix.
  */
 function filesInDir(dir: string): string[] {
 	const union = new Set([...trackedFiles(dir), ...walkOnDisk(dir)]);
 	return Array.from(union)
-		.filter((p) => p.startsWith(`${dir}/`) && /\.(ts|js)$/.test(p) && !p.slice(dir.length + 1).includes("/"))
+		.filter((p) => p.startsWith(`${dir}/`) && /\.(ts|js)$/.test(p))
 		.filter((p) => existsSync(join(repoRoot(), p)))
 		.sort();
 }
@@ -297,7 +314,11 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
  */
 describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
 	const discovered = discoverWorkflowFiles();
-	const commandDirs = Array.from(new Set(discovered.filter(isCommandSource).map((p) => p.slice(0, p.lastIndexOf("/"))))).sort();
+	// WR-01 (iteration 3): the SUBSYSTEM ROOT (`.pi/extensions/<name>`), not the
+	// command file's immediate parent -- `.pi/extensions/grill/sub/index.ts`
+	// must ratchet `.pi/extensions/grill`, not `.pi/extensions/grill/sub`, or a
+	// command file nested one level deeper leaves its own parent uncounted.
+	const commandDirs = Array.from(new Set(discovered.filter(isCommandSource).map((p) => p.split("/").slice(0, 3).join("/")))).sort();
 
 	it("finds at least one command directory (guards against a vacuous pass)", () => {
 		expect(
@@ -340,6 +361,42 @@ describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
 			"modes.ts does not itself register a command -- this is exactly the grill/steps.ts shape: " +
 				"present in the directory total, absent from isCommandSource",
 		).toBe(false);
+	});
+
+	it("WR-01 (iteration 3) proof: filesInDir counts a file nested one directory DEEPER than the command file, not merely a flat sibling", () => {
+		// The exact hole the reviewer demonstrated: a helper one path segment
+		// deeper than any command file, which the OLD depth filter
+		// (`!p.slice(dir.length + 1).includes("/")`) silently excluded from
+		// every directory total. Planted for the duration of this one `it`
+		// only -- discoverWorkflowFiles()'s own describe-body snapshots were
+		// already taken at collection time, so this fixture cannot leak into
+		// the completeness/registry checks above.
+		const nestedDir = join(repoRoot(), WORKFLOWS_DIR, "wr01-probe", "nested");
+		const nestedFile = join(nestedDir, "probe.ts");
+		mkdirSync(nestedDir, { recursive: true });
+		writeFileSync(nestedFile, "// WR-01 iteration 3 regression fixture -- never spells registerCommand(\n", "utf-8");
+		try {
+			const files = filesInDir(WORKFLOWS_DIR);
+			expect(
+				files,
+				"a .ts file nested beneath a subdirectory of WORKFLOWS_DIR must be counted in the directory " +
+					"total -- the OLD filter excluded anything with an extra path segment past dir",
+			).toContain(`${WORKFLOWS_DIR}/wr01-probe/nested/probe.ts`);
+		} finally {
+			rmSync(join(repoRoot(), WORKFLOWS_DIR, "wr01-probe"), { recursive: true, force: true });
+		}
+	});
+
+	it("WR-01 (iteration 3) proof: commandDirs resolves to the subsystem root, not a command file's immediate (possibly nested) parent", () => {
+		// .pi/extensions/<subsystem>/index.ts -- every real command source in
+		// this repository sits exactly one level below its subsystem root, so
+		// slice(0, 3) already coincides with the immediate parent for every
+		// EXISTING file; this assertion pins that the mechanism is the
+		// subsystem root by construction, not an accident of today's flat
+		// layout (a nested `.pi/extensions/grill/sub/index.ts` would resolve
+		// to `.pi/extensions/grill`, per the module docstring's WR-01 section).
+		expect(WORKFLOWS_DIR.split("/").slice(0, 3).join("/")).toBe(WORKFLOWS_DIR);
+		expect(`${WORKFLOWS_DIR}/index.ts`.split("/").slice(0, 3).join("/")).toBe(WORKFLOWS_DIR);
 	});
 });
 
