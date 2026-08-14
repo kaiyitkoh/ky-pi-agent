@@ -115,6 +115,56 @@
  * file reads from.
  *
  * ---------------------------------------------------------------------------
+ * RESTORE ON `session_start` (ROUTE-09, THE RESTART HALF)
+ * ---------------------------------------------------------------------------
+ * `applyMode`/`applyEscalate` write the state going FORWARD; {@link
+ * restoreModeFromBranch} is the read going BACKWARD, on the next session that
+ * resumes this one. It is a thin, exported, directly-testable function that
+ * takes the branch entry array (never `ctx` itself), wrapped by a `session_
+ * start` handler that follows `safety/index.ts`'s own best-effort pruning
+ * hook shape (`safety/index.ts:832-838`): `try`/`catch`, swallowed
+ * deliberately, because a corrupt or hand-edited `ky:mode` payload must never
+ * be able to stop a session from starting (T-05-39).
+ *
+ * The recipe is RESEARCH §B.5's, run against `ctx.sessionManager.getBranch()`
+ * (root-to-leaf path order): filter for `entry.type === "custom" &&
+ * entry.customType === MODE_ENTRY_TYPE`, take the LAST match (last write
+ * wins, same rule `pickConfiguredCandidate` and every other "walk in order,
+ * take the latest/first that qualifies" helper in this subsystem follows),
+ * and validate the payload's shape before trusting it: a `mode` that is not a
+ * member of `MODES` is ignored in favour of `DEFAULT_MODE` rather than
+ * propagated (T-05-36 — a hand-edited or corrupted session file must not be
+ * able to smuggle an unresolvable mode name into module state).
+ *
+ * **This function does NOT call `pi.setModel`, and never will.** By the time
+ * `session_start` fires, Pi has already restored the executor model itself:
+ * every successful `pi.setModel()` call wrote a native `model_change` entry
+ * [VERIFIED: `dist/core/agent-session.js:1204`], and session resume already
+ * derives the effective model from the last such entry on the branch
+ * [VERIFIED: `dist/core/session-manager.js:146-161`, `getSessionContextSettings`].
+ * Calling `setModel` here would be a SECOND source of truth for the same
+ * fact, one that can disagree with Pi's own — exactly the Spoofing threat
+ * this plan's register calls T-05-38. What this function restores is
+ * strictly narrower: the mode NAME (a raw model id alone cannot say whether
+ * it came from `cheap` or `balanced`, if two modes ever share an executor
+ * model) and the `/escalate` sticky bookkeeping — see `schema.ts`'s
+ * `MODE_ENTRY_TYPE` docstring for the identical point made about the entry
+ * shape itself.
+ *
+ * **`session_start` does NOT fire in a headless `createAgentSession`**
+ * [MEASURED: `tests/integration/call-model.test.ts`'s own header — a
+ * five-event probe logged nothing before the first prompt, then
+ * `before_agent_start`, `turn_start`, `before_provider_headers`, `agent_end`;
+ * Pi emits `session_start` from `AgentSession`'s extension-binding step,
+ * `agent-session.ts:1761`, which the headless factory this repository's own
+ * test helpers use does not reach]. The hook body above is therefore real for
+ * interactive/`pi --mode json` use but UNEXERCISED by this repository's own
+ * test suite; `tests/integration/mode-persistence.test.ts` proves {@link
+ * restoreModeFromBranch} itself directly, against a real branch, rather than
+ * waiting for an event this harness has no way to trigger — see that file's
+ * own header for the same point stated from the test side.
+ *
+ * ---------------------------------------------------------------------------
  * THE EVENT IS EMITTED, NEVER AN IMPORT
  * ---------------------------------------------------------------------------
  * `pi.events.emit(ROUTING_EVENT, …)` fires after a successful switch,
@@ -155,13 +205,18 @@
  *     read-only `/mode` status command. ROUTE-02/03/09, and the ROUTE-05
  *     write's call site.
  */
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type {
+	CustomEntry,
+	ExtensionAPI,
+	ExtensionCommandContext,
+	SessionEntry,
+} from "@earendil-works/pi-coding-agent";
 
 import { appendJsonl } from "../../lib/jsonl.ts";
 import { agentOverridesFor, writeAgentOverrides } from "./agent-overrides.ts";
 import { guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
-import { MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
+import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
 /**
  * The one code path all three commands share, so `/cheap`, `/balanced` and
@@ -450,6 +505,59 @@ async function reportMode(ctx: ExtensionCommandContext): Promise<void> {
 	ctx.ui.notify(lines.join("\n"), "info");
 }
 
+/** Whether `value` is a member of {@link MODES} -- narrows an `unknown` string before it is trusted as a {@link ModeName}. */
+function isModeName(value: unknown): value is ModeName {
+	return typeof value === "string" && (MODES as readonly string[]).includes(value);
+}
+
+/**
+ * Restore the mode name and `/escalate` bookkeeping from a session's branch
+ * (ROUTE-09's restart half). See the module docstring's "RESTORE ON
+ * `session_start`" section for the full recipe, the citation trail, and why
+ * this deliberately never touches the executor model.
+ *
+ * `branch` is `ctx.sessionManager.getBranch()`'s own return type, root-to-leaf
+ * path order -- `getBranch` is not itself type-narrowed by Pi, so every
+ * caller (this function, and every test that exercises it directly) filters
+ * for `type === "custom" && customType === MODE_ENTRY_TYPE` before trusting
+ * an entry's shape at all.
+ *
+ * Exported as a plain function of `branch`, never of `ctx`, so {@link
+ * mode-persistence.test.ts} can call it directly against a real branch
+ * without waiting for `session_start` to fire -- an event this repository's
+ * own headless test harness cannot trigger (module docstring, same section).
+ *
+ * NEVER THROWS on a malformed payload -- an invalid `mode` falls back to
+ * {@link DEFAULT_MODE} (T-05-36) rather than propagating, and an invalid or
+ * missing `escalatedFrom` is dropped (the escalation flag itself is still
+ * honoured, but nothing to restore it FROM is trusted). The caller (the
+ * `session_start` hook below) ALSO wraps this in its own `try`/`catch`, so a
+ * defect in this function's own logic is still contained -- defense in depth
+ * for T-05-39, not a substitute for it.
+ */
+export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
+	const modeEntries = branch.filter(
+		(entry): entry is CustomEntry<KyModeData> => entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE,
+	);
+	const latest = modeEntries.at(-1);
+	if (latest?.data === undefined) {
+		// Nothing persisted yet on this branch -- the module's own
+		// getModeState() default (DEFAULT_MODE, not escalated) already covers
+		// this case; there is nothing to restore.
+		return;
+	}
+
+	const data = latest.data;
+	// T-05-36 -- validate before trusting. A mode that is not a member of
+	// MODES is ignored in favour of DEFAULT_MODE rather than propagated.
+	const mode: ModeName = isModeName(data.mode) ? data.mode : DEFAULT_MODE;
+	const escalated = data.escalated === true;
+	const escalatedFrom = escalated && isModeName(data.escalatedFrom) ? data.escalatedFrom : undefined;
+
+	setMode(mode);
+	setEscalated(escalated, escalatedFrom);
+}
+
 export default function (pi: ExtensionAPI): void {
 	for (const mode of MODES) {
 		pi.registerCommand(mode, {
@@ -484,5 +592,18 @@ export default function (pi: ExtensionAPI): void {
 		handler: async (_args, ctx) => {
 			await reportMode(ctx);
 		},
+	});
+
+	// ROUTE-09's restart half. Best-effort, mirroring safety/index.ts's own
+	// session_start pruning hook (safety/index.ts:832-838): a restore failure
+	// must never stop the session from starting (T-05-39). See the module
+	// docstring's "RESTORE ON session_start" section and
+	// restoreModeFromBranch's own doc comment for the full recipe.
+	pi.on("session_start", (_event, ctx) => {
+		try {
+			restoreModeFromBranch(ctx.sessionManager.getBranch());
+		} catch {
+			// Swallowed deliberately -- see the comment above.
+		}
 	});
 }
