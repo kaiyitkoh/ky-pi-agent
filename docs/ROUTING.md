@@ -244,9 +244,31 @@ repository.
 **Configuration.** `QODER_PERSONAL_ACCESS_TOKEN` (a PAT, generated once at
 `qoder.com/account/integrations`, shown only once),
 `QODER_AGENT_ID` and `QODER_ENVIRONMENT_ID` (a pre-configured agent and
-environment — one-time console/API setup, never created per task). The tool
-refuses actionably, naming exactly what is missing, when any of the three is
-unset — which is this machine's state today and will be CI's state always.
+environment — one-time console/API setup, never created per task).
+
+**Two gates, not one.** WR-11 added a human-in-the-loop confirmation on top
+of the configuration check above; the two compose as follows:
+
+1. **Unconfigured (any of the three variables unset)** — which is this
+   machine's state today and will be CI's state always — the tool is **not
+   offered to the model at all**. `qoder_delegate` is registered at load time
+   (so this file's own description above still applies once configured) but
+   immediately deactivated via `pi.setActiveTools(...)` on `session_start`, so
+   it costs no per-request schema tokens and the model cannot call it. There
+   is no way to observe the old "refuses actionably, naming what is missing"
+   message from a *tool call* on an unconfigured machine — the call is never
+   offered in the first place. That refusal text still exists (in
+   `resolveQoderConfig`) as a defence-in-depth path, reachable only if the
+   deactivation hook itself somehow fails to run.
+2. **Configured** — every invocation requires an explicit human selection via
+   `ctx.ui.select` ("Delegate to Qoder" / "Cancel") before `delegateTask` is
+   ever called, naming the same bypassed-controls statement as this section.
+   **Headless and `-p`/`--mode json` refuse by design**: `ctx.hasUI === false`
+   is treated identically to an explicit decline — there is no allow-path for
+   an unattended run, on purpose (05-CONTEXT.md's security posture). Every
+   decision on this branch — approved or declined — is written as a
+   `qoder.delegate.confirm` audit record to the same redacted transcript
+   `docs/RUNBOOK.md` RB-05-01 describes, never the task text itself.
 
 ---
 

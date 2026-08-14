@@ -959,7 +959,11 @@ and completes a delegation is a fact about Qoder's own service.
    `export QODER_AGENT_ID=<agent-id> QODER_ENVIRONMENT_ID=<environment-id>`
 3. Start `pi` in this repository and ask the model to delegate a small,
    low-risk task through `qoder_delegate` — for example, "Use qoder_delegate
-   to ask Qoder to reply with the single word OK."
+   to ask Qoder to reply with the single word OK." **An approval dialog will
+   appear; select "Delegate to Qoder."** This is WR-11's human-in-the-loop
+   confirmation gate (`docs/ROUTING.md` §6, "Two gates") — it requires an
+   interactive UI and **this check cannot be run headlessly** (`-p` or
+   `--mode json` refuse by design, with no allow-path).
 4. Read the redacted transcript this repository wrote for the run:
    `cat .pi/logs/qoder-$(date +%F).jsonl | tail -n 5`
 
