@@ -270,16 +270,59 @@ function isProtected(facts: GitPolicyFacts): boolean {
 }
 
 /**
- * The whole SAFE-04 decision: deny only when `HEAD` is protected AND the
- * subcommand classifies as a write for these exact args. See the module
- * docstring for the four-step resolution order and the fail-closed default.
+ * CR-05: does this `push`'s own argv name a protected branch as its
+ * DESTINATION, regardless of what `HEAD` currently is? The write table's own
+ * `push` rule already says "the refspec target cannot be trusted from argv
+ * alone" -- but that reasoning was previously only ever APPLIED on the
+ * protected-`HEAD` branch of {@link classifyGitInvocation}, so
+ * `git push --force origin main` from a feature branch reached `allow`: HEAD
+ * was not protected, so the write table was never even consulted, even
+ * though the command names `main` literally in argv.
+ *
+ * A positional (non-flag) token is read as `src:dst` when it contains a `:`,
+ * else as a bare ref (source and destination are the same name); a leading
+ * `refs/heads/` prefix is stripped before comparison. Case-insensitive,
+ * matching {@link isProtected}'s own comparison. `git push origin
+ * feature/x:main` and `git push --force origin main` both match; a plain
+ * `git push origin feature/x` (destination `feature/x`, not a protected name)
+ * does not -- the paired negative that proves this cannot degenerate into
+ * "any push is blocked".
+ */
+function pushTargetsProtected(args: readonly string[], protectedBranches: readonly string[]): boolean {
+	return args.some((a) => {
+		if (a.startsWith("-")) {
+			return false;
+		}
+		const dst = a.includes(":") ? a.slice(a.indexOf(":") + 1) : a;
+		const leaf = dst.replace(/^refs\/heads\//, "");
+		return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
+	});
+}
+
+/**
+ * The whole SAFE-04 decision: deny when either (a) this `push`'s own argv
+ * names a protected branch as its destination refspec, REGARDLESS of the
+ * checked-out branch (CR-05), or (b) `HEAD` is protected AND the subcommand
+ * classifies as a write for these exact args. See the module docstring for
+ * the four-step resolution order and the fail-closed default that governs
+ * every OTHER subcommand.
  */
 export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolicyFacts): GitVerdict {
+	const display = `git ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
+
+	if (invocation.subcommand === "push" && pushTargetsProtected(invocation.args, facts.protectedBranches)) {
+		return {
+			kind: "block",
+			reason:
+				`"${display}" pushes to a protected ref by refspec -- the destination side of the argv names ` +
+				`a protected branch regardless of the checked-out branch ("${facts.currentBranch}"); the refspec ` +
+				"target cannot be trusted from argv alone, so this is checked independently of HEAD",
+		};
+	}
+
 	if (!isProtected(facts)) {
 		return { kind: "allow" };
 	}
-
-	const display = `git ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
 
 	const writeRule = GIT_WRITE_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
 	if (writeRule !== undefined && writeRule.matches(invocation.args)) {

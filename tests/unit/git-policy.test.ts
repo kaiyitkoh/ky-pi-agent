@@ -104,6 +104,42 @@ const ROWS: readonly Row[] = [
 	{ command: "git reset --hard", rest: "reset --hard", kind: "git", currentBranch: "feature/x", expected: "allow", why: "same write, non-protected branch" },
 
 	// -------------------------------------------------------------------------
+	// CR-05 -- push targets a protected branch BY REFSPEC, independent of HEAD
+	// -------------------------------------------------------------------------
+	{
+		command: "git push --force origin main",
+		rest: "push --force origin main",
+		kind: "git",
+		currentBranch: "feature/x",
+		expected: "block",
+		why: "confirmed by execution: names main literally as the push destination while HEAD is a feature branch -- previously allowed outright because the write table was only ever consulted when HEAD itself was protected",
+	},
+	{
+		command: "git push origin HEAD:main",
+		rest: "push origin HEAD:main",
+		kind: "git",
+		currentBranch: "feature/x",
+		expected: "block",
+		why: "the refspec's destination side (after the colon) names a protected branch -- must block regardless of HEAD",
+	},
+	{
+		command: "git push origin feature/x:main",
+		rest: "push origin feature/x:main",
+		kind: "git",
+		currentBranch: "feature/x",
+		expected: "block",
+		why: "same as above -- the SOURCE side names the current feature branch, but the DESTINATION is main",
+	},
+	{
+		command: "git push origin feature/x",
+		rest: "push origin feature/x",
+		kind: "git",
+		currentBranch: "feature/x",
+		expected: "allow",
+		why: "the paired negative -- a push whose destination is NOT a protected branch, from a non-protected HEAD, must still be allowed. Without this row, CR-05's fix could degenerate into \"any push is blocked\"",
+	},
+
+	// -------------------------------------------------------------------------
 	// glab -- blocked unconditionally on every branch (the deploy trigger)
 	// -------------------------------------------------------------------------
 	{ command: "glab mr merge", rest: "mr merge", kind: "glab", currentBranch: "main", expected: "block", why: "the MR merge IS the deploy trigger (decision 13)" },
