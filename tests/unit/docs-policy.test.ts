@@ -107,6 +107,32 @@ const PHASE_FOUR_IDS = ["RB-04-01"] as const;
  */
 const PHASE_FIVE_IDS = ["RB-05-01"] as const;
 
+/**
+ * The Phase 7 entries this file governs.
+ *
+ * No `PHASE_SIX_IDS` exists between this array and {@link PHASE_FIVE_IDS} —
+ * Phase 6 (Quality Gates walking skeleton) added no runbook entries, so this
+ * is simply the next append, per "append, never renumber." An empty
+ * placeholder array would add nothing but a stale-looking gap; its absence is
+ * intentional and this comment is the record of why.
+ *
+ * EXT-09 needs the work laptop specifically, and for more of its four legs
+ * than any prior single Phase 7 requirement: a real turn per provider
+ * (`RB-02-01`/`RB-03-0x`, composed rather than restated), a real subagent
+ * spawn against a real installed `pi-subagents` package, and a real wire
+ * dump — only the blocked-command leg is fully provable offline
+ * (`tests/integration/subagent-block.test.ts`,
+ * `tests/unit/evasion-corpus.test.ts`). `RB-07-02` is a second, distinct
+ * entry Phase 7 could not avoid: plan 07-10's blocking package-legitimacy
+ * install gate was found NOT SATISFIED on this machine (its own
+ * pre-authorisation ground — "no credentials on this machine" — is FALSE,
+ * live AWS SSO / static admin keys are present), so no package has ever
+ * been installed and `pi list` has never been reconciled against
+ * `.pi/settings.json`. `RB-07-01`'s second and third legs presuppose
+ * `RB-07-02` has already run.
+ */
+const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02"] as const;
+
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
 	...PHASE_ONE_IDS,
@@ -114,6 +140,7 @@ const ALL_IDS = [
 	...PHASE_THREE_IDS,
 	...PHASE_FOUR_IDS,
 	...PHASE_FIVE_IDS,
+	...PHASE_SEVEN_IDS,
 ] as const;
 
 /**
@@ -402,6 +429,29 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		"export QODER_AGENT_ID=<agent-id> QODER_ENVIRONMENT_ID=<environment-id>",
 		`cat .pi/logs/qoder-$(date +%F).jsonl | tail -n 5`,
 	],
+
+	// PHASE 7 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phases 3-5.
+	// RB-07-01's second leg deliberately does NOT pin `pi list` -- that command
+	// belongs to RB-07-02 alone, and RB-07-01's own procedure text points at
+	// RB-07-02's reconciliation step by id instead of restating the command.
+	// Verified by grep before commit: `git status --porcelain` and the audit
+	// tail command below each occur exactly once in docs/RUNBOOK.md, and every
+	// `pi install -l npm:...` line plus `pi list` occur only inside RB-07-02's
+	// own section -- so an entry that drops its own copy cannot stay green on
+	// a neighbouring entry's.
+	"RB-07-01": [
+		"git status --porcelain",
+		`tail -n 1 .pi/logs/audit-$(date +%F).jsonl`,
+	],
+	"RB-07-02": [
+		"pi install -l npm:pi-subagents@0.49.0",
+		"pi install -l npm:pi-background-tasks@2.4.2",
+		"pi install -l npm:@narumitw/pi-lsp@0.49.4",
+		"pi install -l npm:pi-web-access@0.22.0",
+		"pi install -l npm:pi-session-finder@0.5.6",
+		"pi list",
+		"npx vitest run tests/unit/extension-pins.test.ts",
+	],
 };
 
 /** Matches a repo-relative test path mentioned anywhere in the runbook prose. */
@@ -677,6 +727,38 @@ const FIXTURE_PHASE_THREE_HALF_FLIPPED = [
 ].join("\n");
 
 /**
+ * The same two-source shape carrying a PHASE 7 id.
+ *
+ * Written for the reason {@link FIXTURE_PHASE_TWO} states and which has not
+ * expired: Phase 6 added no ids at all, so {@link PHASE_SEVEN_IDS} is the
+ * first array appended since Phase 5 and the first proof that a phase gap in
+ * {@link ALL_IDS}'s composition does not itself break the generalised parser.
+ * Without this fixture, `RB-07-01`/`RB-07-02` would be proven only by the
+ * real runbook — the file this guard exists to police.
+ */
+const FIXTURE_PHASE_SEVEN = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-07-01 | example phase 7 check | OUTSTANDING |",
+	"",
+	"### RB-07-01 — example phase 7 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+const FIXTURE_PHASE_SEVEN_HALF_FLIPPED = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-07-01 | example phase 7 check | PASSED — 2026-08-15 |",
+	"",
+	"### RB-07-01 — example phase 7 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+/**
  * A malformed id in the same two-source shape.
  *
  * Widening the pattern is one edit away from widening it too far — `RB-[\d-]+`
@@ -744,6 +826,22 @@ describe("Group C — the parser catches a status flip", () => {
 	it("reports a Phase 3 half-flip as INCONSISTENT", () => {
 		expect(runbookEntryStatuses(FIXTURE_PHASE_THREE_HALF_FLIPPED)).toEqual({
 			"RB-03-01": "INCONSISTENT",
+		});
+	});
+
+	it("reads a Phase 7 id, so the parser survives a phase gap (Phase 6 added no ids)", () => {
+		expect(
+			runbookEntryStatuses(FIXTURE_PHASE_SEVEN),
+			"PHASE_SEVEN_IDS was appended straight after PHASE_FIVE_IDS, with no PHASE_SIX_IDS in " +
+				"between. If the parser or either loop below silently assumed phase arrays are " +
+				"numbered contiguously, this fixture — the first one exercised after that gap — is " +
+				"where it would show up as RB-07-01 recorded as undefined",
+		).toEqual({ "RB-07-01": "OUTSTANDING" });
+	});
+
+	it("reports a Phase 7 half-flip as INCONSISTENT", () => {
+		expect(runbookEntryStatuses(FIXTURE_PHASE_SEVEN_HALF_FLIPPED)).toEqual({
+			"RB-07-01": "INCONSISTENT",
 		});
 	});
 
