@@ -21,7 +21,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 2: Diagnostics — The Instrument** - Wire inspector, the `callModel()` chokepoint, per-turn JSONL, and the prose-tool-call detector (completed 2026-08-13)
 - [x] **Phase 3: Providers & Credentials** - Structurally complete providers with zero secrets, verified by Phase 2's instrument and a first-run runbook (all 11 plans executed 2026-08-14; **five live checks `RB-03-01..05` are OUTSTANDING** and five of its ten requirements are partial until they run — see `docs/RUNBOOK.md`)
 - [x] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents (all 12 plans executed 2026-08-14; **one live check `RB-04-01` is OUTSTANDING** and SAFE-01 is partial until it runs — see `docs/RUNBOOK.md`)
-- [ ] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes
+- [x] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes (all 12 plans executed 2026-08-14; **one live check `RB-05-01` is OUTSTANDING** and ROUTE-11 is partial until it runs — see `docs/RUNBOOK.md`)
 - [ ] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size
 - [ ] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified
 - [ ] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects
@@ -267,7 +267,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 05-12-PLAN.md — `docs/ROUTING.md`, `RB-05-01` (OUTSTANDING) and requirements traceability (all ROUTE ids)
+- [x] 05-12-PLAN.md — `docs/ROUTING.md`, `RB-05-01` (OUTSTANDING) and requirements traceability (all ROUTE ids)
 
 **Research**: DONE — `05-RESEARCH.md`. Two findings changed the plan: Pi already persists and restores the executor model natively via `model_change` session entries, so the `ky:mode` custom entry carries only the mode name and the escalation flag; and `Model<TApi>` carries **no** tool-calling-support field at all, so ROUTE-08 must be an explicit model-id deny-list rather than a catalogue predicate. `isAnthropicClaudeModel` is not exported from pi-ai and is re-implemented locally, with the same borrowed-not-imported risk Phase 3 already accepted for `QUOTA_PATTERN`.
 

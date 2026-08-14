@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 05-11-PLAN.md
-last_updated: "2026-08-14T11:06:33.201Z"
+status: verifying
+stopped_at: Completed 05-12-PLAN.md -- Phase 5 complete
+last_updated: "2026-08-14T11:25:07.059Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
-  completed_phases: 4
+  completed_phases: 5
   total_plans: 56
-  completed_plans: 55
-  percent: 36
+  completed_plans: 56
+  percent: 100
 ---
 
 # Project State
@@ -25,20 +25,22 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 ## Current Position
 
-Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 5 of 12
-Status: Ready to execute
+Phase: 05 (routing-capability-guards) — COMPLETE (12/12 plans)
+Plan: 12 of 12
+Status: Phase complete — ready for verification
 Last activity: 2026-08-14
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
-The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
-Phase 3's 11. Phases 4-11 are not yet planned, so it will grow and the
-percentage will fall. The honest phase-level figure is **3 of 11 phases with
-their plans executed**, and Phase 3 additionally carries **five OUTSTANDING
-live checks** (`RB-03-01..05`) and **five partial requirements**, so "complete"
-means "everything a machine without credentials can do has been done".
+The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
+Phase 3's 11, Phase 4's 12 and Phase 5's 12 (56 total). Phases 6-11 are not
+yet planned, so it will grow and the percentage will fall. The honest
+phase-level figure is **5 of 11 phases with their plans executed**, and
+Phases 3, 4 and 5 each carry OUTSTANDING live checks (`RB-03-01..05`,
+`RB-04-01`, `RB-05-01`) and partial requirements until a human runs them on
+the work laptop, so "complete" means "everything a machine without
+credentials can do has been done".
 
 ## Performance Metrics
 
@@ -118,6 +120,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 05 P09 | 20min | 2 tasks | 2 files |
 | Phase 05 P10 | 25m | 2 tasks | 2 files |
 | Phase 05 P11 | 35m | 2 tasks | 1 files |
+| Phase 05 P12 | 20m | 3 tasks | 6 files |
 
 ## Accumulated Context
 
@@ -290,6 +293,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-10: ROUTE-09 is now complete in both halves (write via 05-07, restore via this plan) -- Pi's own session_start event dispatch itself remains unexercised by this repository's headless test harness, stated plainly rather than implied as covered
 - [Phase 05]: 05-11: ROLE_MAP.balanced.executor/max.executor/max.reviewer candidates are read from the real exported table in the wire-proof fixture, never hardcoded as literals — keeps the proof tracking routing/schema.ts's actual role->model map rather than a copy that could silently drift
 - [Phase 05]: 05-11: the reviewer single-shot call is driven while the session executor is still max's model, so the nested row naming a different provider (amazon-bedrock vs deepseek) is a genuine cross-provider routing proof — a nested row naming the right model would prove nothing about routing if the single-shot model could never differ from the session executor
+- [Phase 05]: 05-12: docs/ROUTING.md's role->model table is asserted against ROLE_MAP in BOTH directions -- the converse (every provider/id the doc names is a real ROLE_MAP candidate) is what stops the doc from growing a row the code does not have; verified by falsification (added a fake row, confirmed red, reverted)
+- [Phase 05]: 05-12: Bedrock R1 deny-list ids are written WITHOUT a provider/ prefix in docs/ROUTING.md so the doc<->ROLE_MAP extraction regex (scoped to deepseek|dashscope|amazon-bedrock) never mistakes a refusal-section id for a claimed routing candidate
+- [Phase 05]: 05-12: Phase 5 is complete -- eleven ROUTE requirements accounted for: ten [x] (ROUTE-01..10) and ROUTE-11 [~] partial with RB-05-01 named inline and appended to docs/RUNBOOK.md, OUTSTANDING and machine-governed by tests/unit/docs-policy.test.ts. Full suite 1346 tests / 78 files green, tsc --noEmit clean
 
 ### Pending Todos
 
@@ -337,8 +343,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T11:06:33.190Z
-Stopped at: Completed 05-11-PLAN.md
+Last session: 2026-08-14T11:25:07.049Z
+Stopped at: Completed 05-12-PLAN.md -- Phase 5 complete
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
