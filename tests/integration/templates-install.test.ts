@@ -52,17 +52,14 @@ import {
 	BEDROCK_PROVIDER_ID,
 	TEMPLATE_SENTINEL_PREFIX,
 } from "../../.pi/extensions/providers/schema.ts";
+import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
-/** Forward slashes: Git Bash `sh` will not accept a backslash path argument. */
-const BOOTSTRAP = join(repoRoot(), "bin", "bootstrap.sh").replace(/\\/g, "/");
-
 /** npm is stubbed, so no registry round-trip; node startup still dominates. */
 const TIMEOUT_MS = 120_000;
 
-const ENV_EXAMPLE = join(repoRoot(), ".env.example");
 const MODELS_TEMPLATE = join(repoRoot(), ".pi", "templates", "models-template.json");
 const AUTH_TEMPLATE = join(repoRoot(), ".pi", "templates", "auth-template.json");
 
@@ -84,6 +81,18 @@ function tempDir(prefix: string): string {
 	const dir = mkdtempSync(join(tmpdir(), prefix));
 	scratch.push(dir);
 	return dir;
+}
+
+/**
+ * A throwaway `REPO_ROOT` for one bootstrap run, registered for cleanup the
+ * same way every other scratch directory in this suite is. See
+ * `tests/helpers/bootstrap-repo.ts` for why this exists and why it is nested
+ * under this repo's own `tmp/` rather than `os.tmpdir()`.
+ */
+function bootstrapRepoCopy(): BootstrapRepoCopy {
+	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
+	scratch.push(copy.root);
+	return copy;
 }
 
 /**
@@ -111,14 +120,25 @@ function npmStub(logTo: string): StubSpec {
  * `sh` is spawned with an args array and `shell: false`: it resolves through
  * PATH as a genuine executable on both platforms, unlike the `.cmd` shims that
  * force `shell: true` for `npm` and `pi` (see `tests/helpers/stub-bin.ts`).
+ *
+ * `repoCopy` defaults to a fresh throwaway `REPO_ROOT` per call (see
+ * `bootstrapRepoCopy` / `tests/helpers/bootstrap-repo.ts`), so `SCRIPT_DIR/..`
+ * inside the script resolves to that copy and the run's `.env.example` write
+ * never reaches the real, tracked file. A caller that needs to pre-seed the
+ * copy's `.env.example` before running (case 5c) creates its own copy and
+ * passes it in.
  */
-function runFullBootstrap(agentDir: string, extraEnv: Record<string, string> = {}): Run {
+function runFullBootstrap(
+	agentDir: string,
+	extraEnv: Record<string, string> = {},
+	repoCopy: BootstrapRepoCopy = bootstrapRepoCopy(),
+): Run {
 	const logDir = tempDir("kypi-log-");
 	const log = join(logDir, "npm.log").replace(/\\/g, "/");
 
 	return withStubBin({ npm: npmStub(log) }, (env) => {
-		const result = spawnSync("sh", [BOOTSTRAP], {
-			cwd: repoRoot(),
+		const result = spawnSync("sh", [repoCopy.bootstrapSh], {
+			cwd: repoCopy.root,
 			env: {
 				...env,
 				PI_CODING_AGENT_DIR: agentDir,
@@ -136,7 +156,7 @@ function runFullBootstrap(agentDir: string, extraEnv: Record<string, string> = {
 		});
 
 		if (result.error) {
-			throw new Error(`failed to run \`sh ${BOOTSTRAP}\`: ${result.error.message}`);
+			throw new Error(`failed to run \`sh ${repoCopy.bootstrapSh}\`: ${result.error.message}`);
 		}
 		return {
 			stdout: result.stdout ?? "",
@@ -262,19 +282,11 @@ function scopedAwsEnv(overrides: Record<string, string> = {}): Record<string, st
 }
 
 describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
-	// `.env.example` is a TRACKED file the full run legitimately owns. Snapshot
-	// its bytes so the working tree is restored no matter what any case does.
-	const envBefore = existsSync(ENV_EXAMPLE) ? readFileSync(ENV_EXAMPLE) : null;
-
+	// No real, tracked file is snapshotted here any more: every case below runs
+	// against a throwaway `REPO_ROOT` copy (`bootstrapRepoCopy`), so a full
+	// run's `.env.example` write lands in that copy, not in the committed file.
+	// `scratch` (which every copy's root is also pushed onto) is enough.
 	afterEach(() => {
-		if (envBefore !== null) {
-			if (!existsSync(ENV_EXAMPLE) || !readFileSync(ENV_EXAMPLE).equals(envBefore)) {
-				writeFileSync(ENV_EXAMPLE, envBefore);
-			}
-		} else if (existsSync(ENV_EXAMPLE)) {
-			rmSync(ENV_EXAMPLE);
-		}
-
 		for (const dir of scratch) {
 			try {
 				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
@@ -715,8 +727,10 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		// START the two slices OVERLAP -- cur.slice(0, ds) still contains END, and
 		// cur.slice(de + END.length) still contains START and everything after it
 		// -- so the file gained duplicated content AND duplicated markers, and grew
-		// further on every later run. .env.example is tracked and this repo is
-		// public. The afterEach hook restores the file whatever happens here.
+		// further on every later run. Written into this case's own throwaway
+		// `REPO_ROOT` copy (`bootstrapRepoCopy`), never into the real, tracked
+		// `.env.example` -- the copy is torn down by the suite's normal
+		// `scratch` cleanup, no restore needed.
 		const START = "# ky-pi-agent managed:start";
 		const END = "# ky-pi-agent managed:end";
 		const scrambled = [
@@ -727,10 +741,11 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 			"# hand-edited footer",
 			"",
 		].join("\n");
-		writeFileSync(ENV_EXAMPLE, scrambled, "utf-8");
+		const repoCopy = bootstrapRepoCopy();
+		writeFileSync(repoCopy.envExample, scrambled, "utf-8");
 
 		const agentDir = tempDir("kypi-agentdir-");
-		const run = runFullBootstrap(agentDir);
+		const run = runFullBootstrap(agentDir, {}, repoCopy);
 		expectReachedTheScript(run);
 
 		expect(run.status, `stdout:\n${run.stdout}`).not.toBe(0);
@@ -740,7 +755,7 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 				"through every file the script writes",
 		).toContain("managed markers");
 
-		const after = readFileSync(ENV_EXAMPLE, "utf-8");
+		const after = readFileSync(repoCopy.envExample, "utf-8");
 		expect(
 			after,
 			"the installer refused and rewrote the file anyway. A refusal that still writes is " +

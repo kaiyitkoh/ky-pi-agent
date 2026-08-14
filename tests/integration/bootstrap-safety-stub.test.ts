@@ -22,15 +22,7 @@
  * developer's real global npm prefix.
  */
 import { spawnSync } from "node:child_process";
-import {
-	existsSync,
-	mkdirSync,
-	mkdtempSync,
-	readFileSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,10 +30,19 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
-/** Forward slashes: Git Bash `sh` will not accept a backslash path argument. */
+/**
+ * Forward slashes: Git Bash `sh` will not accept a backslash path argument.
+ *
+ * Only ever used for a `--check-only` run below (cases 4/5): `run_check_only`
+ * (bin/bootstrap.sh's own dispatcher) never calls `write_env_template`, so it
+ * never writes `$REPO_ROOT/.env.example` and is safe to run against the real
+ * repo directly. Every FULL run (empty `args`, cases 1/2/6/7) uses its own
+ * throwaway `REPO_ROOT` copy instead -- see `bootstrapRepoCopy` below.
+ */
 const BOOTSTRAP = join(repoRoot(), "bin", "bootstrap.sh").replace(/\\/g, "/");
 
 /** The real registry round-trip in a full/`--check-only` run dominates; npm is slow to start. */
@@ -62,10 +63,35 @@ function tempDir(prefix: string): string {
 	return dir;
 }
 
-/** Run the real script as a subprocess, exactly as `bootstrap-check-only.test.ts` does. */
+/**
+ * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
+ * the same way every other scratch directory in this suite is. See
+ * `tests/helpers/bootstrap-repo.ts` for why this exists (a full run's
+ * `write_env_template` would otherwise write the real, tracked
+ * `.env.example`) and why it is nested under this repo's own `tmp/` rather
+ * than `os.tmpdir()` (so the CR-06 cases' dynamic import of the real safety
+ * extension can still resolve `node_modules`).
+ */
+function bootstrapRepoCopy(): BootstrapRepoCopy {
+	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
+	scratch.push(copy.root);
+	return copy;
+}
+
+/**
+ * Run the real script as a subprocess, exactly as `bootstrap-check-only.test.ts`
+ * does. `repoCopy`, when given, redirects `SCRIPT_DIR/..` (and the subprocess
+ * `cwd`) at a throwaway copy instead of the real repo -- see
+ * `bootstrapRepoCopy`.
+ */
 function runBootstrap(
 	args: string[],
-	opts: { agentDir: string; env?: Record<string, string>; extraEnv?: Record<string, string> },
+	opts: {
+		agentDir: string;
+		env?: Record<string, string>;
+		extraEnv?: Record<string, string>;
+		repoCopy?: BootstrapRepoCopy;
+	},
 ): Run {
 	const env: Record<string, string> = {
 		...(opts.env ?? (process.env as Record<string, string>)),
@@ -73,8 +99,11 @@ function runBootstrap(
 		...(opts.extraEnv ?? {}),
 	};
 
-	const result = spawnSync("sh", [BOOTSTRAP, ...args], {
-		cwd: repoRoot(),
+	const script = opts.repoCopy?.bootstrapSh ?? BOOTSTRAP;
+	const cwd = opts.repoCopy?.root ?? repoRoot();
+
+	const result = spawnSync("sh", [script, ...args], {
+		cwd,
 		env,
 		encoding: "utf-8",
 		timeout: TIMEOUT_MS,
@@ -82,7 +111,7 @@ function runBootstrap(
 	});
 
 	if (result.error) {
-		throw new Error(`failed to run \`sh ${BOOTSTRAP} ${args.join(" ")}\`: ${result.error.message}`);
+		throw new Error(`failed to run \`sh ${script} ${args.join(" ")}\`: ${result.error.message}`);
 	}
 	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
 }
@@ -105,8 +134,6 @@ function npmStub(logTo: string): StubSpec {
 	};
 }
 
-const ENV_EXAMPLE = join(repoRoot(), ".env.example");
-
 function stubPath(agentDir: string): string {
 	return join(agentDir, "extensions", "ky-safety", "index.ts");
 }
@@ -126,22 +153,6 @@ function extractSpecifier(content: string): string {
 	return m[1] as string;
 }
 
-/** Snapshot `.env.example`'s bytes (a full run legitimately writes it) and restore them. */
-function withEnvExampleRestored<T>(fn: () => T): T {
-	const before = existsSync(ENV_EXAMPLE) ? readFileSync(ENV_EXAMPLE) : null;
-	try {
-		return fn();
-	} finally {
-		if (before !== null) {
-			if (!existsSync(ENV_EXAMPLE) || !readFileSync(ENV_EXAMPLE).equals(before)) {
-				writeFileSync(ENV_EXAMPLE, before);
-			}
-		} else if (existsSync(ENV_EXAMPLE)) {
-			rmSync(ENV_EXAMPLE);
-		}
-	}
-}
-
 describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scope", () => {
 	afterEach(() => {
 		for (const dir of scratch) {
@@ -155,75 +166,73 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 	});
 
 	it("case 1 -- a full run writes the stub with a backslash-free specifier resolving to an existing file", () => {
-		withEnvExampleRestored(() => {
-			const agentDir = tempDir("kypi-agentdir-");
-			const logDir = tempDir("kypi-log-");
-			const log = join(logDir, "npm.log").replace(/\\/g, "/");
+		const agentDir = tempDir("kypi-agentdir-");
+		const logDir = tempDir("kypi-log-");
+		const log = join(logDir, "npm.log").replace(/\\/g, "/");
+		const repoCopy = bootstrapRepoCopy();
 
-			const run = withStubBin({ npm: npmStub(log) }, (env) =>
-				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" } }),
-			);
-			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		const run = withStubBin({ npm: npmStub(log) }, (env) =>
+			runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
+		);
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
-			const stub = stubPath(agentDir);
-			expect(
-				existsSync(stub),
-				"the stub must exist at <agentDir>/extensions/ky-safety/index.ts after a full run",
-			).toBe(true);
+		const stub = stubPath(agentDir);
+		expect(
+			existsSync(stub),
+			"the stub must exist at <agentDir>/extensions/ky-safety/index.ts after a full run",
+		).toBe(true);
 
-			const content = readFileSync(stub, "utf-8");
-			const specifier = extractSpecifier(content);
-			expect(
-				specifier,
-				"the module specifier must contain no backslash -- inside a TS string literal a " +
-					"backslash is an escape sequence, not a path separator",
-			).not.toContain("\\");
+		const content = readFileSync(stub, "utf-8");
+		const specifier = extractSpecifier(content);
+		expect(
+			specifier,
+			"the module specifier must contain no backslash -- inside a TS string literal a " +
+				"backslash is an escape sequence, not a path separator",
+		).not.toContain("\\");
 
-			// The specifier resolves to a real file on disk (folds acceptance
-			// criterion 3 into this case, since it needs the same stub content).
-			expect(
-				existsSync(specifier),
-				`the specifier ${specifier} must resolve to an existing file on disk`,
-			).toBe(true);
-		});
+		// The specifier resolves to a real file on disk (folds acceptance
+		// criterion 3 into this case, since it needs the same stub content).
+		expect(
+			existsSync(specifier),
+			`the specifier ${specifier} must resolve to an existing file on disk`,
+		).toBe(true);
 	}, TIMEOUT_MS);
 
 	it("case 2 -- a second run is a no-op: byte-identical content and an unchanged mtime", () => {
-		withEnvExampleRestored(() => {
-			const agentDir = tempDir("kypi-agentdir-");
-			const logDir = tempDir("kypi-log-");
-			const log = join(logDir, "npm.log").replace(/\\/g, "/");
-			const stub = stubPath(agentDir);
+		const agentDir = tempDir("kypi-agentdir-");
+		const logDir = tempDir("kypi-log-");
+		const log = join(logDir, "npm.log").replace(/\\/g, "/");
+		const stub = stubPath(agentDir);
+		const repoCopy = bootstrapRepoCopy();
 
-			withStubBin({ npm: npmStub(log) }, (env) => {
-				const opts = { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" } };
+		withStubBin({ npm: npmStub(log) }, (env) => {
+			const opts = { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy };
 
-				const first = runBootstrap([], opts);
-				expect(first.status, `first run stderr:\n${first.stderr}`).toBe(0);
-				const contentAfterFirst = readFileSync(stub, "utf-8");
-				const mtimeAfterFirst = statSync(stub).mtimeMs;
+			const first = runBootstrap([], opts);
+			expect(first.status, `first run stderr:\n${first.stderr}`).toBe(0);
+			const contentAfterFirst = readFileSync(stub, "utf-8");
+			const mtimeAfterFirst = statSync(stub).mtimeMs;
 
-				const second = runBootstrap([], opts);
-				expect(second.status, `second run stderr:\n${second.stderr}`).toBe(0);
-				expect(
-					second.stdout,
-					"a second run must report the stub unchanged rather than rewriting it",
-				).toMatch(/already current - unchanged/);
+			const second = runBootstrap([], opts);
+			expect(second.status, `second run stderr:\n${second.stderr}`).toBe(0);
+			expect(
+				second.stdout,
+				"a second run must report the stub unchanged rather than rewriting it",
+			).toMatch(/already current - unchanged/);
 
-				const contentAfterSecond = readFileSync(stub, "utf-8");
-				expect(
-					contentAfterSecond,
-					"the stub's content must be byte-identical across two consecutive runs",
-				).toBe(contentAfterFirst);
+			const contentAfterSecond = readFileSync(stub, "utf-8");
+			expect(
+				contentAfterSecond,
+				"the stub's content must be byte-identical across two consecutive runs",
+			).toBe(contentAfterFirst);
 
-				const mtimeAfterSecond = statSync(stub).mtimeMs;
-				expect(
-					mtimeAfterSecond,
-					"a genuinely no-op run must not touch the file at all, so its mtime must not change",
-				).toBe(mtimeAfterFirst);
+			const mtimeAfterSecond = statSync(stub).mtimeMs;
+			expect(
+				mtimeAfterSecond,
+				"a genuinely no-op run must not touch the file at all, so its mtime must not change",
+			).toBe(mtimeAfterFirst);
 
-				return undefined;
-			});
+			return undefined;
 		});
 	}, TIMEOUT_MS);
 
@@ -385,9 +394,10 @@ describe("CR-06 -- the generated stub skips registering only when a project-scop
 			const logDir = tempDir("kypi-log-");
 			const log = join(logDir, "npm.log").replace(/\\/g, "/");
 			const cwdWithoutCopy = tempDir("kypi-cwd-no-copy-");
+			const repoCopy = bootstrapRepoCopy();
 
 			const run = withStubBin({ npm: npmStub(log) }, (env) =>
-				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" } }),
+				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
 			);
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
@@ -414,9 +424,10 @@ describe("CR-06 -- the generated stub skips registering only when a project-scop
 			// Content is irrelevant -- the stub only checks existsSync, it never
 			// imports this file.
 			writeFileSync(join(cwdWithCopy, ".pi", "extensions", "safety", "index.ts"), "export default function () {}\n", "utf-8");
+			const repoCopy = bootstrapRepoCopy();
 
 			const run = withStubBin({ npm: npmStub(log) }, (env) =>
-				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" } }),
+				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
 			);
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 

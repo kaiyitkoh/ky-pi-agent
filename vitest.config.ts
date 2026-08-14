@@ -10,5 +10,12 @@ export default defineConfig({
 		hookTimeout: 120_000,
 		// A vacuously-empty suite must never report success.
 		passWithNoTests: false,
+		// Suite-wide tripwire: fails the run if any tracked file ends up
+		// modified that was clean before the run started. See
+		// tests/global-teardown.ts's own docstring for why this exists (the
+		// `.env.example`-corruption bug it was added to catch) and why it diffs
+		// against a setup-time snapshot rather than demanding an empty
+		// `git status --porcelain` outright.
+		globalSetup: ["./tests/global-teardown.ts"],
 	},
 });

@@ -27,24 +27,25 @@
  * timestamp, a duration or a run counter from ever creeping into it.
  */
 import { spawnSync } from "node:child_process";
-import {
-	existsSync,
-	mkdtempSync,
-	readFileSync,
-	readdirSync,
-	rmSync,
-	statSync,
-	writeFileSync,
-} from "node:fs";
+import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
-/** Forward slashes: Git Bash `sh` will not accept a backslash path argument. */
+/**
+ * Forward slashes: Git Bash `sh` will not accept a backslash path argument.
+ *
+ * Only ever used for a `--check-only` run below (cases 1/2/3): `run_check_only`
+ * (bin/bootstrap.sh's own dispatcher) never calls `write_env_template`, so it
+ * never writes `$REPO_ROOT/.env.example` and is safe to run against the real
+ * repo directly. Case 4's full run uses its own throwaway `REPO_ROOT` copy
+ * instead -- see `bootstrapRepoCopy` below.
+ */
 const BOOTSTRAP = join(repoRoot(), "bin", "bootstrap.sh").replace(/\\/g, "/");
 
 /** The real registry round-trip in `--check-only` dominates; npm is slow to start. */
@@ -66,16 +67,37 @@ function tempDir(prefix: string): string {
 }
 
 /**
+ * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
+ * the same way every other scratch directory in this suite is. See
+ * `tests/helpers/bootstrap-repo.ts`: a full run's `write_env_template` would
+ * otherwise write the real, tracked `.env.example`.
+ */
+function bootstrapRepoCopy(): BootstrapRepoCopy {
+	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
+	scratch.push(copy.root);
+	return copy;
+}
+
+/**
  * Run the real script as a subprocess, exactly as a user or CI would.
  *
  * `sh` is spawned with an args array and `shell: false`: it resolves through
  * PATH as a genuine executable on both platforms (Git Bash ships `sh.exe`),
  * unlike the `.cmd` shims that force `shell: true` for `npm` and `pi` -- see
  * the CVE-2024-27980 note in `tests/helpers/stub-bin.ts`.
+ *
+ * `repoCopy`, when given, redirects `SCRIPT_DIR/..` (and the subprocess
+ * `cwd`) at a throwaway copy instead of the real repo -- see
+ * `bootstrapRepoCopy`.
  */
 function runBootstrap(
 	args: string[],
-	opts: { agentDir: string; env?: Record<string, string>; extraEnv?: Record<string, string> },
+	opts: {
+		agentDir: string;
+		env?: Record<string, string>;
+		extraEnv?: Record<string, string>;
+		repoCopy?: BootstrapRepoCopy;
+	},
 ): Run {
 	const env: Record<string, string> = {
 		...(opts.env ?? (process.env as Record<string, string>)),
@@ -83,8 +105,11 @@ function runBootstrap(
 		...(opts.extraEnv ?? {}),
 	};
 
-	const result = spawnSync("sh", [BOOTSTRAP, ...args], {
-		cwd: repoRoot(),
+	const script = opts.repoCopy?.bootstrapSh ?? BOOTSTRAP;
+	const cwd = opts.repoCopy?.root ?? repoRoot();
+
+	const result = spawnSync("sh", [script, ...args], {
+		cwd,
 		env,
 		encoding: "utf-8",
 		timeout: TIMEOUT_MS,
@@ -93,7 +118,7 @@ function runBootstrap(
 
 	if (result.error) {
 		throw new Error(
-			`failed to run \`sh ${BOOTSTRAP} ${args.join(" ")}\`: ${result.error.message}`,
+			`failed to run \`sh ${script} ${args.join(" ")}\`: ${result.error.message}`,
 		);
 	}
 	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
@@ -149,8 +174,6 @@ function npmStub(logTo: string): StubSpec {
 		],
 	};
 }
-
-const ENV_EXAMPLE = join(repoRoot(), ".env.example");
 
 describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 	afterEach(() => {
@@ -245,75 +268,64 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		const agentDir = tempDir("kypi-agentdir-");
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "npm.log").replace(/\\/g, "/");
+		// A throwaway `REPO_ROOT` -- this is a FULL run, and `write_env_template`
+		// would otherwise write the real, tracked `.env.example`. Its own
+		// `.env.example` (`repoCopy.envExample`) is what the assertions below
+		// read; the copy is torn down by this suite's normal `scratch` cleanup.
+		const repoCopy = bootstrapRepoCopy();
 
-		// `.env.example` is a TRACKED file that the full run legitimately owns.
-		// Snapshot its bytes so the working tree is restored no matter what the
-		// script decides to do with it.
-		const envBefore = existsSync(ENV_EXAMPLE) ? readFileSync(ENV_EXAMPLE) : null;
+		const { first, second, envAfterFirst, envAfterSecond } = withStubBin(
+			{ npm: npmStub(log) },
+			(env) => {
+				const opts = {
+					agentDir,
+					env,
+					extraEnv: { KYPI_SKIP_INSTALL: "1" },
+					repoCopy,
+				};
+				const a = runBootstrap([], opts);
+				const envA = readFileSync(repoCopy.envExample, "utf-8");
+				const settingsA = readFileSync(join(agentDir, "settings.json"), "utf-8");
+				const b = runBootstrap([], opts);
+				const envB = readFileSync(repoCopy.envExample, "utf-8");
+				const settingsB = readFileSync(join(agentDir, "settings.json"), "utf-8");
+				return {
+					first: { ...a, settings: settingsA },
+					second: { ...b, settings: settingsB },
+					envAfterFirst: envA,
+					envAfterSecond: envB,
+				};
+			},
+		);
 
-		try {
-			const { first, second, envAfterFirst, envAfterSecond } = withStubBin(
-				{ npm: npmStub(log) },
-				(env) => {
-					const opts = {
-						agentDir,
-						env,
-						extraEnv: { KYPI_SKIP_INSTALL: "1" },
-					};
-					const a = runBootstrap([], opts);
-					const envA = readFileSync(ENV_EXAMPLE, "utf-8");
-					const settingsA = readFileSync(join(agentDir, "settings.json"), "utf-8");
-					const b = runBootstrap([], opts);
-					const envB = readFileSync(ENV_EXAMPLE, "utf-8");
-					const settingsB = readFileSync(join(agentDir, "settings.json"), "utf-8");
-					return {
-						first: { ...a, settings: settingsA },
-						second: { ...b, settings: settingsB },
-						envAfterFirst: envA,
-						envAfterSecond: envB,
-					};
-				},
-			);
+		expect(first.status, `first run stderr:\n${first.stderr}`).toBe(0);
+		expect(second.status, `second run stderr:\n${second.stderr}`).toBe(0);
 
-			expect(first.status, `first run stderr:\n${first.stderr}`).toBe(0);
-			expect(second.status, `second run stderr:\n${second.stderr}`).toBe(0);
+		// The stub's own call log. Without this the whole case could be an
+		// assertion about the developer's REAL npm: a PATH-ordering mistake
+		// would look identical from the outside, right up to the point where
+		// it installed something globally.
+		const logged = readFileSync(log, "utf-8");
+		expect(logged, "the stubbed npm must be the npm the script consulted").toContain(
+			"npm config get ignore-scripts",
+		);
+		expect(logged, "KYPI_SKIP_INSTALL=1 must keep the install step unreached").not.toMatch(
+			/^npm install/m,
+		);
 
-			// The stub's own call log. Without this the whole case could be an
-			// assertion about the developer's REAL npm: a PATH-ordering mistake
-			// would look identical from the outside, right up to the point where
-			// it installed something globally.
-			const logged = readFileSync(log, "utf-8");
-			expect(logged, "the stubbed npm must be the npm the script consulted").toContain(
-				"npm config get ignore-scripts",
-			);
-			expect(logged, "KYPI_SKIP_INSTALL=1 must keep the install step unreached").not.toMatch(
-				/^npm install/m,
-			);
+		expect(
+			second.settings,
+			"a key-namespaced merge must produce a byte-identical file when the key " +
+				"is already current -- anything else corrupts user config over time",
+		).toBe(first.settings);
 
-			expect(
-				second.settings,
-				"a key-namespaced merge must produce a byte-identical file when the key " +
-					"is already current -- anything else corrupts user config over time",
-			).toBe(first.settings);
+		const parsed = JSON.parse(first.settings) as Record<string, unknown>;
+		expect(parsed, "the merge must own a namespaced key, never the file").toHaveProperty(
+			"kyPiAgent",
+		);
 
-			const parsed = JSON.parse(first.settings) as Record<string, unknown>;
-			expect(parsed, "the merge must own a namespaced key, never the file").toHaveProperty(
-				"kyPiAgent",
-			);
-
-			expect(envAfterSecond, ".env.example must be byte-identical across two runs").toBe(
-				envAfterFirst,
-			);
-		} finally {
-			// Restore the tracked file regardless of outcome; a failing assertion
-			// must not leave the working tree dirty for the next test or commit.
-			if (envBefore !== null) {
-				if (!existsSync(ENV_EXAMPLE) || !readFileSync(ENV_EXAMPLE).equals(envBefore)) {
-					writeFileSync(ENV_EXAMPLE, envBefore);
-				}
-			} else if (existsSync(ENV_EXAMPLE)) {
-				rmSync(ENV_EXAMPLE);
-			}
-		}
+		expect(envAfterSecond, ".env.example must be byte-identical across two runs").toBe(
+			envAfterFirst,
+		);
 	}, TIMEOUT_MS);
 });

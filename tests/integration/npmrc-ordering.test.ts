@@ -35,21 +35,27 @@
  * and the one case that reaches `install_pi` reaches a stub. [threat T-01-07]
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
-/** Forward slashes: Git Bash `sh` will not accept a backslash path argument. */
+/**
+ * Forward slashes: Git Bash `sh` will not accept a backslash path argument.
+ *
+ * Only ever used for `--assert-hardening` below (cases 1/2): that mode never
+ * calls `write_env_template`, so it never writes `$REPO_ROOT/.env.example`
+ * and is safe to run against the real repo directly. Case 3's full run uses
+ * its own throwaway `REPO_ROOT` copy instead -- see `bootstrapRepoCopy`.
+ */
 const BOOTSTRAP = join(repoRoot(), "bin", "bootstrap.sh").replace(/\\/g, "/");
 
 const TIMEOUT_MS = 120_000;
-
-const ENV_EXAMPLE = join(repoRoot(), ".env.example");
 
 interface Run {
 	stdout: string;
@@ -66,23 +72,42 @@ function tempDir(prefix: string): string {
 }
 
 /**
+ * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
+ * the same way every other scratch directory in this suite is. See
+ * `tests/helpers/bootstrap-repo.ts`: a full run's `write_env_template` would
+ * otherwise write the real, tracked `.env.example`.
+ */
+function bootstrapRepoCopy(): BootstrapRepoCopy {
+	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
+	scratch.push(copy.root);
+	return copy;
+}
+
+/**
  * Run the real script as a subprocess.
  *
  * `sh` takes an args array with `shell: false` -- it is a genuine executable on
  * both platforms (Git Bash ships `sh.exe`), unlike the `.cmd` shims that force
  * `shell: true` for `npm`/`pi` (CVE-2024-27980 note in stub-bin.ts).
+ *
+ * `repoCopy`, when given, redirects `SCRIPT_DIR/..` (and the subprocess
+ * `cwd`) at a throwaway copy instead of the real repo -- see
+ * `bootstrapRepoCopy`.
  */
 function runBootstrap(
 	args: string[],
-	opts: { agentDir: string; env?: Record<string, string> },
+	opts: { agentDir: string; env?: Record<string, string>; repoCopy?: BootstrapRepoCopy },
 ): Run {
 	const env: Record<string, string> = {
 		...(opts.env ?? (process.env as Record<string, string>)),
 		PI_CODING_AGENT_DIR: opts.agentDir,
 	};
 
-	const result = spawnSync("sh", [BOOTSTRAP, ...args], {
-		cwd: repoRoot(),
+	const script = opts.repoCopy?.bootstrapSh ?? BOOTSTRAP;
+	const cwd = opts.repoCopy?.root ?? repoRoot();
+
+	const result = spawnSync("sh", [script, ...args], {
+		cwd,
 		env,
 		encoding: "utf-8",
 		timeout: TIMEOUT_MS,
@@ -91,7 +116,7 @@ function runBootstrap(
 
 	if (result.error) {
 		throw new Error(
-			`failed to run \`sh ${BOOTSTRAP} ${args.join(" ")}\`: ${result.error.message}`,
+			`failed to run \`sh ${script} ${args.join(" ")}\`: ${result.error.message}`,
 		);
 	}
 	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
@@ -356,85 +381,77 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 		const agentDir = tempDir("kypi-agentdir-");
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "invocations.log").replace(/\\/g, "/");
+		// A throwaway `REPO_ROOT` -- this is the only case that lets the script
+		// reach a full run, and `write_env_template` would otherwise write the
+		// real, tracked `.env.example`. Torn down by this suite's normal
+		// `scratch` cleanup, no restore needed.
+		const repoCopy = bootstrapRepoCopy();
 
-		// `.env.example` is tracked and the full run owns it; snapshot and restore.
-		const envBefore = existsSync(ENV_EXAMPLE) ? readFileSync(ENV_EXAMPLE) : null;
-
-		try {
-			const run = withStubBin({ npm: npmStub(log), pi: piStub(log) }, (env) => {
-				// PRE-FLIGHT GUARD, not decoration. This case is the only one that
-				// lets the script reach `install_pi` for real, so if the stub were
-				// not the `npm` on PATH the script would run
-				// `npm install -g @earendil-works/pi-coding-agent@0.84.1` against
-				// the developer's real global prefix. Fail before that can happen.
-				const which = spawnSync("sh", ["-c", "command -v npm"], {
-					env,
-					encoding: "utf-8",
-					timeout: 30_000,
-					windowsHide: true,
-				});
-				const resolved = (which.stdout ?? "").trim();
-				if (!resolved.includes("kypi-stub-")) {
-					throw new Error(
-						`refusing to run: \`npm\` resolves to ${resolved || "<nothing>"}, not the stub. ` +
-							"Running the full bootstrap here would install into the real global npm prefix.",
-					);
-				}
-
-				return runBootstrap([], { agentDir, env });
+		const run = withStubBin({ npm: npmStub(log), pi: piStub(log) }, (env) => {
+			// PRE-FLIGHT GUARD, not decoration. This case is the only one that
+			// lets the script reach `install_pi` for real, so if the stub were
+			// not the `npm` on PATH the script would run
+			// `npm install -g @earendil-works/pi-coding-agent@0.84.1` against
+			// the developer's real global prefix. Fail before that can happen.
+			const which = spawnSync("sh", ["-c", "command -v npm"], {
+				env,
+				encoding: "utf-8",
+				timeout: 30_000,
+				windowsHide: true,
 			});
-
-			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
-
-			const lines = readFileSync(log, "utf-8")
-				.split("\n")
-				.map((l) => l.trim())
-				.filter((l) => l.length > 0);
-
-			const assertions: number[] = [];
-			const installs: number[] = [];
-			lines.forEach((line, index) => {
-				if (/^npm config get ignore-scripts\b/.test(line)) {
-					assertions.push(index);
-				}
-				if (/^(npm|pi) install\b/.test(line)) {
-					installs.push(index);
-				}
-			});
-
-			// Non-emptiness FIRST. Math.max of an empty array is -Infinity and
-			// Math.min of an empty array is Infinity, so the comparison below
-			// passes trivially on a log that recorded nothing. [threat T-01-19]
-			expect(
-				assertions.length,
-				`no \`npm config get ignore-scripts\` was recorded; log was:\n${lines.join("\n")}`,
-			).toBeGreaterThan(0);
-			expect(
-				installs.length,
-				`no install was recorded, so there is nothing to be "before"; log was:\n${lines.join("\n")}`,
-			).toBeGreaterThan(0);
-
-			expect(
-				Math.max(...assertions),
-				"every ignore-scripts assertion must complete before the first install: " +
-					"a postinstall that has already executed cannot be un-executed by a " +
-					`control written a second later. Log was:\n${lines.join("\n")}`,
-			).toBeLessThan(Math.min(...installs));
-
-			// The user-scope assertion is the one no committed file can cover, and
-			// the one most easily lost in a refactor. Name it explicitly.
-			expect(
-				lines.some((l) => l.startsWith("npm config get ignore-scripts --prefix")),
-				`a --prefix-scoped assertion must be among them; log was:\n${lines.join("\n")}`,
-			).toBe(true);
-		} finally {
-			if (envBefore !== null) {
-				if (!existsSync(ENV_EXAMPLE) || !readFileSync(ENV_EXAMPLE).equals(envBefore)) {
-					writeFileSync(ENV_EXAMPLE, envBefore);
-				}
-			} else if (existsSync(ENV_EXAMPLE)) {
-				rmSync(ENV_EXAMPLE);
+			const resolved = (which.stdout ?? "").trim();
+			if (!resolved.includes("kypi-stub-")) {
+				throw new Error(
+					`refusing to run: \`npm\` resolves to ${resolved || "<nothing>"}, not the stub. ` +
+						"Running the full bootstrap here would install into the real global npm prefix.",
+				);
 			}
-		}
+
+			return runBootstrap([], { agentDir, env, repoCopy });
+		});
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+		const lines = readFileSync(log, "utf-8")
+			.split("\n")
+			.map((l) => l.trim())
+			.filter((l) => l.length > 0);
+
+		const assertions: number[] = [];
+		const installs: number[] = [];
+		lines.forEach((line, index) => {
+			if (/^npm config get ignore-scripts\b/.test(line)) {
+				assertions.push(index);
+			}
+			if (/^(npm|pi) install\b/.test(line)) {
+				installs.push(index);
+			}
+		});
+
+		// Non-emptiness FIRST. Math.max of an empty array is -Infinity and
+		// Math.min of an empty array is Infinity, so the comparison below
+		// passes trivially on a log that recorded nothing. [threat T-01-19]
+		expect(
+			assertions.length,
+			`no \`npm config get ignore-scripts\` was recorded; log was:\n${lines.join("\n")}`,
+		).toBeGreaterThan(0);
+		expect(
+			installs.length,
+			`no install was recorded, so there is nothing to be "before"; log was:\n${lines.join("\n")}`,
+		).toBeGreaterThan(0);
+
+		expect(
+			Math.max(...assertions),
+			"every ignore-scripts assertion must complete before the first install: " +
+				"a postinstall that has already executed cannot be un-executed by a " +
+				`control written a second later. Log was:\n${lines.join("\n")}`,
+		).toBeLessThan(Math.min(...installs));
+
+		// The user-scope assertion is the one no committed file can cover, and
+		// the one most easily lost in a refactor. Name it explicitly.
+		expect(
+			lines.some((l) => l.startsWith("npm config get ignore-scripts --prefix")),
+			`a --prefix-scoped assertion must be among them; log was:\n${lines.join("\n")}`,
+		).toBe(true);
 	}, TIMEOUT_MS);
 });
