@@ -86,16 +86,16 @@
 
 ### Composed Extensions
 
-- [x] **EXT-01**: Subagents support per-agent model, system prompt, tool restriction, and thinking level
-- [x] **EXT-02**: Parallel subagents run in isolated git worktrees, verified to **build**, not merely check out — untracked files like `.env` and `node_modules` do not travel to a new worktree
-- [ ] **EXT-03**: Subagents can run in the background without blocking the session
-- [ ] **EXT-04**: A running subagent can be steered mid-run without killing it
-- [x] **EXT-05**: Plan mode, todo tracking, background bash, LSP diagnostics, structured user questions, web lookup, session search, and loop detection are available
-- [x] **EXT-06**: Pi's own bundled examples are preferred over third-party packages wherever they cover the need
-- [x] **EXT-07**: File checkpointing restores the working tree, with Pi's bundled `git-checkpoint.ts` as the fallback if no third-party option proves sound
-- [x] **EXT-08**: Every pin is re-verified at planning time rather than inherited from research — the ecosystem ships 13–16 releases/month
-- [ ] **EXT-09**: A documented smoke-test ritual runs on every version bump: one turn per provider, one subagent spawn, one blocked command, one wire dump
-- [x] **EXT-10**: Any extension without a license file is vendored rather than depended on
+- [~] **EXT-01**: Subagents support per-agent model, system prompt, tool restriction, and thinking level — *the structural proof is complete offline: `.pi/agents/planner.md` ships no `model:`/`fallbackModels:` key so Phase 5's `agentOverrides` is not silently defeated (`07-04-SUMMARY.md`), and ten `file:line` citations against the real pinned `pi-subagents@0.49.0` tarball back the model/system-prompt/tool-restriction/thinking-level claims (`docs/EXTENSIONS.md`'s Subagent capability evidence table, `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed and no subagent has ever actually spawned on this machine — that live proof is `RB-07-01`, **OUTSTANDING***
+- [x] **EXT-02**: Parallel subagents run in isolated git worktrees, verified to **build**, not merely check out — untracked files like `.env` and `node_modules` do not travel to a new worktree — *this is this repository's own worktree-setup hook, proven directly by `tests/integration/worktree-build.test.ts` without needing `pi-subagents` installed*
+- [~] **EXT-03**: Subagents can run in the background without blocking the session — *the concrete mechanism is cited end to end against the real pinned tarball — the `async` parameter, the unconditional `subagent_wait` registration, and the detached-child-process dispatch through to a real `pi --mode json -p` process (`docs/EXTENSIONS.md`'s Subagent capability evidence table, findings 1–3; `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed, so no background run has ever actually executed — `RB-07-01`, **OUTSTANDING***
+- [~] **EXT-04**: A running subagent can be steered mid-run without killing it — *the `steer` action, the file-based control-inbox shape distinct from `interrupt`/`stop`/`timeout`, and `deliverSteerRequest`'s running-step gate are cited against the real pinned tarball (`docs/EXTENSIONS.md`'s Subagent capability evidence table, findings 4–6; `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed, so no subagent has ever actually been steered — `RB-07-01`, **OUTSTANDING***
+- [~] **EXT-05**: Plan mode, todo tracking, background bash, LSP diagnostics, structured user questions, web lookup, session search, and loop detection are available — *four capabilities (plan mode, todo tracking, structured user questions, loop detection) are vendored, live in this session right now, and mechanically bound to their tracked source (`tests/unit/extension-composition.test.ts`). The other four (background bash, LSP diagnostics, web lookup, session search) are pinned npm specs in `.pi/settings.json` that have **never been installed** — plan 07-10's install gate was found NOT SATISFIED (its own pre-authorisation ground that this machine holds no credentials is false), so none of the four has ever ridden on a real request or been "available" in an actual session. Installing and reconciling them is `RB-07-02`, **OUTSTANDING***
+- [x] **EXT-06**: Pi's own bundled examples are preferred over third-party packages wherever they cover the need — *a decision fact, not an install-dependent one; enforced by `tests/unit/extension-composition.test.ts`'s EXT-06 regression guard (no vendored capability's npm alternative may appear in `packages[]`)*
+- [x] **EXT-07**: File checkpointing restores the working tree, with Pi's bundled `git-checkpoint.ts` as the fallback if no third-party option proves sound — *vendored, not install-dependent*
+- [x] **EXT-08**: Every pin is re-verified at planning time rather than inherited from research — the ecosystem ships 13–16 releases/month — *re-verified independently in plans 07-01, 07-10 and 07-11, not install-dependent*
+- [~] **EXT-09**: A documented smoke-test ritual runs on every version bump: one turn per provider, one subagent spawn, one blocked command, one wire dump — *the ritual is documented as a composed sequence in `docs/RUNBOOK.md`'s `RB-07-01`, citing the existing Phase 2/3 entries for legs 1 and 4 and naming the exact steps for legs 2 and 3. Three of its four legs need the work laptop and a real installed extension tree; only the blocked-command leg has a complete offline proxy. Running it is `RB-07-01`, **OUTSTANDING***
+- [x] **EXT-10**: Any extension without a license file is vendored rather than depended on — *not install-dependent; `pi-loop-police`'s missing LICENSE was re-verified three times independently (`07-06-SUMMARY.md`)*
 
 ### Quality Gates
 
@@ -284,16 +284,16 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | ROUTE-09 | Phase 5 | Complete |
 | ROUTE-10 | Phase 5 | Complete |
 | ROUTE-11 | Phase 5 | Partial — the delegate tool is built, registered and proven offline (config refusal, SSE parser, `tests/unit/qoder-client.test.ts`, plan 05-03; the three-request sequence and folded result against a real loopback fixture, `tests/integration/qoder-delegate.test.ts`, plan 05-06), and documented as a foreign agent in `docs/ROUTING.md` §6 (plan 05-12). The live check against a real PAT is `RB-05-01`, appended to `docs/RUNBOOK.md` (plan 05-12), **OUTSTANDING**. Not complete |
-| EXT-01 | Phase 7 | Complete |
-| EXT-02 | Phase 7 | Complete |
-| EXT-03 | Phase 7 | Pending |
-| EXT-04 | Phase 7 | Pending |
-| EXT-05 | Phase 7 | Complete |
-| EXT-06 | Phase 7 | Complete |
-| EXT-07 | Phase 7 | Complete |
-| EXT-08 | Phase 7 | Complete |
-| EXT-09 | Phase 7 | Pending |
-| EXT-10 | Phase 7 | Complete |
+| EXT-01 | Phase 7 | Partial — the frontmatter proof (`.pi/agents/planner.md` ships no `model:` key) and ten `file:line` citations against the pinned `pi-subagents@0.49.0` tarball are complete offline (`docs/EXTENSIONS.md`, `tests/unit/subagent-capabilities.test.ts`, plans 07-04/07-09/07-12); no subagent has ever actually spawned, which is `RB-07-01`, **OUTSTANDING**. Not complete |
+| EXT-02 | Phase 7 | Complete — this repository's own worktree-setup hook, proven directly by `tests/integration/worktree-build.test.ts` (plans 07-02/07-05), no install needed |
+| EXT-03 | Phase 7 | Partial — the concrete background-execution mechanism (the `async` parameter, unconditional `subagent_wait`, detached-child dispatch to a real `pi --mode json -p` process) is cited against the pinned tarball (`docs/EXTENSIONS.md`, `tests/unit/subagent-capabilities.test.ts`, plan 07-12); no background run has ever actually executed, which is `RB-07-01`, **OUTSTANDING**. Not complete |
+| EXT-04 | Phase 7 | Partial — the mid-run-steering mechanism (`steer`'s file-based control inbox, `deliverSteerRequest`'s running-step gate) is cited against the pinned tarball (`docs/EXTENSIONS.md`, `tests/unit/subagent-capabilities.test.ts`, plan 07-12); no subagent has ever actually been steered, which is `RB-07-01`, **OUTSTANDING**. Not complete |
+| EXT-05 | Phase 7 | Partial — four vendored capabilities (plan mode, todo tracking, structured user questions, loop detection) are live and mechanically bound to tracked source (`tests/unit/extension-composition.test.ts`, plan 07-11); the four npm-backed capabilities (background bash, LSP diagnostics, web lookup, session search) are pinned but have **never been installed** — plan 07-10's install gate was found NOT SATISFIED, so none has ever been "available" in a real session. Installing and reconciling is `RB-07-02`, **OUTSTANDING**. Not complete |
+| EXT-06 | Phase 7 | Complete — a decision fact enforced by `tests/unit/extension-composition.test.ts`'s regression guard, not install-dependent |
+| EXT-07 | Phase 7 | Complete — vendored, not install-dependent |
+| EXT-08 | Phase 7 | Complete — re-verified independently in plans 07-01, 07-10 and 07-11, not install-dependent |
+| EXT-09 | Phase 7 | Partial — the composed ritual is documented as a single sequence in `docs/RUNBOOK.md`'s `RB-07-01` (plan 07-13), citing existing Phase 2/3 entries for two of its four legs and naming the exact steps for the other two; running it is `RB-07-01`, **OUTSTANDING**. Not complete |
+| EXT-10 | Phase 7 | Complete — not install-dependent; `pi-loop-police`'s missing LICENSE re-verified three times independently (plan 07-06) |
 | GATE-01 | Phase 8 | Pending |
 | GATE-02 | Phase 8 | Pending |
 | GATE-03 | Phase 8 | Pending |
