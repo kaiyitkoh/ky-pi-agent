@@ -20,6 +20,26 @@
  * NEVER `it.skip`. If `git` is missing from PATH every case below throws with
  * the git error text as its own remedy, per this suite's standing rule
  * (`tests/integration/git-head-main.test.ts`'s own docstring).
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THE PHASE 7 CODE REVIEW FOUND HERE, AND WHAT CHANGED (CR-02, CR-04)
+ * ---------------------------------------------------------------------------
+ * Every original restore case removed the post-checkpoint state BY HAND before
+ * calling `restoreCheckpoint` -- case 1 `rmSync`d the untracked file, case 3
+ * `rmSync`d the ignored directory, case 5 used `git checkout --`. So not one
+ * of them ever asked restore to REMOVE anything, and the fact that
+ * `git restore --source=... --worktree` never deletes was invisible: a restore
+ * produced the union of the checkpoint and everything created after it. Cases
+ * 1 and 3 now each carry a file created AFTER the checkpoint, in opposite
+ * directions -- case 1's must be removed, case 3's is gitignored and must be
+ * spared. Both were falsified against the old implementation.
+ *
+ * Case 5's "the shipped wiring reaches restoreCheckpoint" assertion could not
+ * fail: `[\s\S]*` spanned the rest of the file and was satisfied by a second,
+ * unrelated call in `session_before_fork`. It is now bounded to the
+ * registration block ({@link REGISTRATION_BLOCK_RE}) and carries its own
+ * in-line mutation guard, and case 6 replaces grepping with actually driving
+ * the shipped command handler against a real repository.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -71,6 +91,76 @@ function git(args: string[], cwd: string): { stdout: string; stderr: string; sta
 	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
 }
 
+/**
+ * The `pi.registerCommand("checkpoint-restore", { ... });` call, and nothing
+ * after it (CR-04).
+ *
+ * Lazy (`*?`) up to the first line that closes the call at ONE tab of
+ * indentation, which is where the registration ends in `index.ts`'s own
+ * formatting. The point is the bound: a `restoreCheckpoint(` call in a
+ * different handler further down the file must be outside the match. The old
+ * greedy form had no bound and was satisfied by exactly such a call. Declared
+ * once here and used twice below -- against the real source and against a
+ * mutated copy -- so the two can never drift apart.
+ *
+ * `g`-less on purpose: `exec` on a global regex carries `lastIndex` between
+ * calls, which would make the second `exec` below start mid-file and silently
+ * miss.
+ */
+const REGISTRATION_BLOCK_RE = /registerCommand\("checkpoint-restore",\s*\{[\s\S]*?\n\t\}\);/;
+
+/** Notifications a stub context collected, in order, as plain strings. */
+type NotifySink = string[];
+
+/**
+ * The minimum `ExtensionContext` shape `.pi/extensions/checkpoint/index.ts`
+ * actually reads: `ctx.cwd`, `ctx.ui.notify`, `ctx.hasUI` and
+ * `ctx.sessionManager.getLeafEntry()`.
+ *
+ * `hasUI: false` deliberately -- case 6 drives the headless path, which is the
+ * one defect 1 is about.
+ */
+function stubCtx(cwd: string, sink: NotifySink): unknown {
+	return {
+		cwd,
+		hasUI: false,
+		ui: {
+			notify: (message: string) => {
+				sink.push(message);
+			},
+			select: () => {
+				throw new Error("ctx.ui.select must not be reached on the headless path");
+			},
+		},
+		sessionManager: { getLeafEntry: () => undefined },
+	};
+}
+
+/**
+ * A stub `ExtensionAPI` that records what the shipped module registers.
+ *
+ * Nothing about the checkpoint extension needs a real Pi session: it registers
+ * one command and three event handlers and then does plain filesystem and git
+ * work. Driving those recorded functions directly is a genuine behavioural
+ * test of the SHIPPED wiring -- which is precisely what CR-04 found the old
+ * source-grep assertion was not.
+ */
+class StubExtensionApi {
+	readonly commands = new Map<string, (args: string, ctx: unknown) => Promise<void> | void>();
+	readonly handlers = new Map<string, (event: unknown, ctx: unknown) => Promise<unknown> | unknown>();
+
+	on(event: string, handler: (event: unknown, ctx: unknown) => Promise<unknown> | unknown): void {
+		this.handlers.set(event, handler);
+	}
+
+	registerCommand(
+		name: string,
+		spec: { handler: (args: string, ctx: unknown) => Promise<void> | void },
+	): void {
+		this.commands.set(name, spec.handler);
+	}
+}
+
 describe("EXT-07 -- checkpoint capture and restore, proven against real temp git repositories", () => {
 	it("case 1 -- captures BOTH a tracked modification and an untracked non-ignored file, byte-exact", () => {
 		const repo = trackedRepo("kypi-checkpoint-");
@@ -98,6 +188,15 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 			"fixture sanity: untracked.txt must genuinely be gone before restore is asked to bring it back",
 		).toBe(false);
 
+		// CR-02. Every original restore case removed the post-checkpoint state BY
+		// HAND before calling restore, so none of them ever asked restore to
+		// remove anything -- which is exactly why restore never removing anything
+		// was invisible. This file is the counterpart to the two lines above: it
+		// exists at restore time and must NOT survive, because it did not exist
+		// when the checkpoint was taken.
+		mkdirSync(join(repo, "afterdir"), { recursive: true });
+		writeFileSync(join(repo, "afterdir", "created-after.txt"), "made after the checkpoint\n", "utf-8");
+
 		restoreCheckpoint(repo, sha);
 
 		expect(
@@ -109,6 +208,17 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 			readFileSync(join(repo, "untracked.txt"), "utf-8"),
 			"the restored untracked file's content must come back byte-exact",
 		).toBe("secretish\n");
+		expect(
+			existsSync(join(repo, "afterdir", "created-after.txt")),
+			"CR-02: restore claims to put the working tree BACK to the checkpoint. A file created AFTER " +
+				"the checkpoint must not survive it -- otherwise the result is the UNION of the checkpoint " +
+				"and everything made since, a tree that never existed at any point in history",
+		).toBe(false);
+		expect(
+			existsSync(join(repo, "afterdir")),
+			"a directory that exists only because of a removed post-checkpoint file must be pruned too -- " +
+				"git tracks no directories, so an empty one left behind is a visible artifact of the restore",
+		).toBe(false);
 	});
 
 	it("case 2 -- negative control: the bundled example's own mechanism does NOT restore the untracked file, on the SAME fixture shape", () => {
@@ -170,17 +280,39 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		).toBe(0);
 
 		const sha = createCheckpoint(repo, "case3");
-		rmSync(join(repo, "ignoredir"), { recursive: true, force: true });
-		expect(existsSync(join(repo, "ignoredir")), "fixture sanity: ignoredir must genuinely be gone before restore").toBe(
-			false,
-		);
+
+		// CR-02 turned this case around. It used to `rmSync` the ignored directory
+		// by hand and then assert restore had not brought it back -- which passes
+		// whether or not restore deletes anything, and says nothing about the
+		// direction that now matters. Restore acquired a REMOVAL half; the sharp
+		// question is therefore whether that half can reach a gitignored path.
+		// So the directory is left in place, and a SECOND ignored file is created
+		// after the checkpoint (the exact shape the removal half looks for --
+		// present now, absent then). Both must survive untouched. This is what
+		// makes `git clean -fdx` a failing implementation of this function.
+		writeFileSync(join(repo, "ignoredir", "created-after.txt"), "ignored, made after the checkpoint\n", "utf-8");
+		const afterIgnore = git(["check-ignore", "-q", "--", "ignoredir/created-after.txt"], repo);
+		expect(
+			afterIgnore.status,
+			"fixture sanity: the post-checkpoint file must also be classified ignored, or it proves nothing",
+		).toBe(0);
 
 		restoreCheckpoint(repo, sha);
 
 		expect(
-			existsSync(join(repo, "ignoredir")),
-			"a gitignored path must never be restored -- it was never captured, per git add -A's own .gitignore respect",
-		).toBe(false);
+			existsSync(join(repo, "ignoredir", "secret.txt")),
+			"a gitignored path was never captured, so restore must never DELETE it either -- the removal " +
+				"half is scoped by the same `git add -A` .gitignore respect as the capture half",
+		).toBe(true);
+		expect(
+			readFileSync(join(repo, "ignoredir", "secret.txt"), "utf-8"),
+			"and its content must be left exactly alone -- neither captured nor overwritten",
+		).toBe("should-never-be-checkpointed\n");
+		expect(
+			existsSync(join(repo, "ignoredir", "created-after.txt")),
+			"an ignored file created AFTER the checkpoint is the removal half's own shape (present now, " +
+				"absent then) and must still be spared -- this is the assertion `git clean -fdx` fails",
+		).toBe(true);
 	});
 
 	it("case 4 -- checkpoints persist across a fresh OS process, not just an in-process variable (defect 3)", () => {
@@ -240,10 +372,97 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		expect(indexSource, "index.ts must register the headless-reachable command").toContain(
 			'registerCommand("checkpoint-restore"',
 		);
+
+		// CR-04. This assertion used to be
+		//   toMatch(/registerCommand\("checkpoint-restore"[\s\S]*restoreCheckpoint\(/)
+		// and could not fail. `[\s\S]*` is greedy and unbounded, so it spanned the
+		// whole rest of the file and was satisfied by the SECOND restoreCheckpoint(
+		// call in the session_before_fork handler further down -- whatever the
+		// command handler itself did. Proven by mutation: gutting the command
+		// handler's call left the old assertion green.
+		//
+		// Bounded to the registration block's own body, and then FALSIFIED IN
+		// LINE: the same extraction over a copy with the call removed must not
+		// contain it. That second assertion is what makes the first one evidence.
+		const block = REGISTRATION_BLOCK_RE.exec(indexSource);
+		expect(block, "checkpoint-restore registration block not found -- the extraction, not the code, is wrong").not
+			.toBeNull();
 		expect(
-			indexSource,
-			"the checkpoint-restore command's own handler must call restoreCheckpoint -- otherwise the " +
+			block?.[0],
+			"the checkpoint-restore command's OWN handler must call restoreCheckpoint -- otherwise the " +
 				"headless-reachability claim covers only the library function, not the wiring a real session uses",
-		).toMatch(/registerCommand\("checkpoint-restore"[\s\S]*restoreCheckpoint\(/);
+		).toContain("restoreCheckpoint(");
+
+		const gutted = indexSource.replace(/restoreCheckpoint\(ctx\.cwd, match\.sha\);/, "/* gutted */");
+		expect(gutted, "the mutation itself must apply, or the guard below proves nothing").not.toBe(indexSource);
+		expect(
+			REGISTRATION_BLOCK_RE.exec(gutted)?.[0],
+			"MUTATION GUARD: with the command handler's own restore call removed, this extraction must " +
+				"NOT still report a call -- if it does, the assertion above is satisfied by a different " +
+				"handler and is back to being vacuous",
+		).not.toContain("restoreCheckpoint(");
+	});
+
+	it("case 6 -- the SHIPPED /checkpoint-restore handler restores the working tree for real, driven headless (defects 1 and CR-04)", async () => {
+		const repo = trackedRepo("kypi-checkpoint-");
+		commitFile(repo, "tracked.txt", "line1\n", "init");
+		writeFileSync(join(repo, "tracked.txt"), "line1\nline2\n", "utf-8");
+		writeFileSync(join(repo, "untracked.txt"), "captured\n", "utf-8");
+
+		// Load the SHIPPED extension module and let it register against a stub
+		// `pi`. This is the claim CR-04 says a source grep cannot make: the wiring
+		// a real session uses is exercised, not read.
+		const mod = (await import("../../.pi/extensions/checkpoint/index.ts")) as {
+			default: (pi: unknown) => void;
+		};
+		const pi = new StubExtensionApi();
+		mod.default(pi);
+
+		const handler = pi.commands.get("checkpoint-restore");
+		expect(handler, "the shipped module must register a checkpoint-restore command").toBeDefined();
+
+		// Take the checkpoint through the shipped `turn_start` handler too, so both
+		// ends of the round trip are the shipped wiring rather than a direct
+		// library call.
+		const turnStart = pi.handlers.get("turn_start");
+		expect(turnStart, "the shipped module must register a turn_start handler").toBeDefined();
+		await turnStart?.({}, stubCtx(repo, []));
+
+		// Now diverge from the checkpoint in all three directions at once.
+		expect(git(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
+		rmSync(join(repo, "untracked.txt"));
+		writeFileSync(join(repo, "created-after.txt"), "must not survive\n", "utf-8");
+
+		// Drive the command with NO argument first: it must list, not throw.
+		const listed: string[] = [];
+		await handler?.("", stubCtx(repo, listed));
+		expect(listed.join("\n"), "the no-argument listing must report the checkpoint just recorded").toContain(
+			"recorded",
+		);
+
+		// The sha the shipped store recorded -- read out of the shipped listing, not
+		// out of a variable this test set, so the store round trip is part of the proof.
+		const sha = /\b([0-9a-f]{12})\b/.exec(listed.join("\n"))?.[1];
+		expect(sha, `the listing must name a checkpoint sha; got: ${listed.join("\n")}`).toBeDefined();
+
+		const notified: string[] = [];
+		await handler?.(sha ?? "", stubCtx(repo, notified));
+
+		expect(
+			notified.join("\n"),
+			`the handler must report a restore, not an error. Got: ${notified.join("\n")}`,
+		).toContain("working tree restored to");
+		expect(
+			readFileSync(join(repo, "tracked.txt"), "utf-8"),
+			"driven through the SHIPPED command, the tracked modification must come back",
+		).toBe("line1\nline2\n");
+		expect(
+			existsSync(join(repo, "untracked.txt")),
+			"driven through the SHIPPED command, the untracked capture must come back",
+		).toBe(true);
+		expect(
+			existsSync(join(repo, "created-after.txt")),
+			"driven through the SHIPPED command, a post-checkpoint file must NOT survive (CR-02)",
+		).toBe(false);
 	});
 });

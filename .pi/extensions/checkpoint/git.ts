@@ -55,11 +55,10 @@
  *                                             index at all, only the tree
  *                                             object and the parent)
  *
- * Restoring: `git restore --source=<sha> --worktree -- .` puts the checkpoint
- * tree's content back onto the working tree without touching the real index.
- * `git checkout <sha> -- .` was measured to do the same content-restore but
- * ADDITIONALLY stage the restored paths into the real index — a side effect
- * this module deliberately avoids (T-07-12).
+ * Restoring is TWO steps, not one — see {@link restoreCheckpoint}'s own
+ * docstring for why (CR-02). `git checkout <sha> -- .` was measured to do the
+ * same content-restore as `git restore` but ADDITIONALLY stage the restored
+ * paths into the real index — a side effect this module avoids (T-07-12).
  *
  * ---------------------------------------------------------------------------
  * SCOPE BOUNDARY, STATED RATHER THAN ASSUMED (T-07-10, T-07-11)
@@ -87,8 +86,8 @@
  * substring across every tracked source under `.pi/extensions/`.
  */
 import { spawnSync } from "node:child_process";
-import { unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { rmSync, rmdirSync, unlinkSync } from "node:fs";
+import { dirname, join, relative, resolve } from "node:path";
 
 import { currentSha } from "../safety/git.ts";
 
@@ -127,6 +126,79 @@ function scratchIndexPath(repoRoot: string): string {
 }
 
 /**
+ * The repository's real top level, resolved by git rather than assumed.
+ *
+ * Every exported function here names its first parameter `repoRoot`, but the
+ * only caller (`index.ts`) has `ctx.cwd` to hand, and Pi does not guarantee
+ * that is the repository root — a session started in a subdirectory points
+ * there (WR-13). That asymmetry is not cosmetic for
+ * {@link restoreCheckpoint}: `git add -A` and `git write-tree` capture the
+ * WHOLE repository whatever the cwd is, so every path this module compares or
+ * deletes is repo-root-relative. Resolving the top level here, once, at the
+ * module boundary, is what makes "join(root, treePath)" a true statement
+ * instead of a silent off-by-a-subdirectory that deletes the wrong file.
+ */
+function topLevel(cwd: string): string {
+	return resolve(run(cwd, ["rev-parse", "--show-toplevel"]).trim());
+}
+
+/**
+ * Repo-root-relative paths that exist in the working tree NOW but did not
+ * exist in the checkpoint `sha` — i.e. exactly the files a restore has to
+ * remove for the resulting tree to be the checkpoint rather than a union of
+ * the checkpoint and everything created after it.
+ *
+ * The "now" side is computed with the SAME scratch-index + `add -A` +
+ * `write-tree` sequence {@link createCheckpoint} uses, deliberately: both
+ * sides of the comparison then respect `.gitignore` identically, so a
+ * gitignored path can never appear in this set and can never be deleted. That
+ * symmetry is the whole safety argument — see the SCOPE BOUNDARY section.
+ */
+function pathsAddedSince(root: string, sha: string): string[] {
+	const scratch = scratchIndexPath(root);
+	const env = { GIT_INDEX_FILE: scratch };
+	try {
+		run(root, ["add", "-A"], env);
+		const nowTree = run(root, ["write-tree"], env).trim();
+		// --diff-filter=A: present in nowTree, absent in the checkpoint tree.
+		// -z + NUL split so a path containing a space, a quote or a non-ASCII
+		// byte is not mangled by git's default path quoting.
+		const out = run(root, ["diff-tree", "-r", "-z", "--name-only", "--diff-filter=A", sha, nowTree]);
+		return out.split("\0").filter((p) => p !== "");
+	} finally {
+		try {
+			unlinkSync(scratch);
+		} catch {
+			// Nothing to clean up, or another process already removed it -- both fine.
+		}
+	}
+}
+
+/**
+ * Remove directories left empty by a deletion, walking up from `startDir` and
+ * stopping at (never removing) `root`. Best-effort: `rmdirSync` fails on a
+ * non-empty directory, which is precisely the stop condition wanted, so every
+ * error is swallowed. Git does not track directories, so an empty directory is
+ * not itself part of any checkpoint — leaving one behind would be a visible
+ * artifact of a restore that claims to reproduce a past state.
+ */
+function pruneEmptyDirsUpTo(root: string, startDir: string): void {
+	let dir = startDir;
+	// Bounded by construction: each iteration moves strictly closer to `root`,
+	// and the relative-path guard stops the moment `dir` is `root` or outside it.
+	while (dir !== root) {
+		const rel = relative(root, dir);
+		if (rel === "" || rel.startsWith("..")) return;
+		try {
+			rmdirSync(dir);
+		} catch {
+			return; // Non-empty, or already gone. Either way, stop climbing.
+		}
+		dir = dirname(dir);
+	}
+}
+
+/**
  * Capture the current working tree — every tracked modification AND every
  * untracked-but-not-ignored file — as a commit object that is never made
  * reachable from any ref (it has no ref pointing at it; `git write-tree` and
@@ -140,17 +212,18 @@ function scratchIndexPath(repoRoot: string): string {
  * means for it (see `index.ts`'s never-throw wrapping on `turn_start`).
  */
 export function createCheckpoint(repoRoot: string, label: string): string {
-	const scratch = scratchIndexPath(repoRoot);
+	const root = topLevel(repoRoot);
+	const scratch = scratchIndexPath(root);
 	const env = { GIT_INDEX_FILE: scratch };
 	try {
 		// `git add -A` against the SCRATCH index: never touches the caller's real
 		// staged changes. Respects .gitignore -- see the SCOPE BOUNDARY section above.
-		run(repoRoot, ["add", "-A"], env);
-		const tree = run(repoRoot, ["write-tree"], env).trim();
-		const parent = currentSha(repoRoot);
+		run(root, ["add", "-A"], env);
+		const tree = run(root, ["write-tree"], env).trim();
+		const parent = currentSha(root);
 		// commit-tree reads no index at all -- run WITHOUT the scratch-index env,
 		// against the real HEAD.
-		return run(repoRoot, ["commit-tree", tree, "-p", parent, "-m", label]).trim();
+		return run(root, ["commit-tree", tree, "-p", parent, "-m", label]).trim();
 	} finally {
 		// Best-effort cleanup; a leftover scratch index under .git/ is inert (it is
 		// never referenced by anything once this function returns) and MUST NOT
@@ -165,18 +238,47 @@ export function createCheckpoint(repoRoot: string, label: string): string {
 
 /**
  * Restore the working tree at `repoRoot` to the content captured by the
- * checkpoint commit `sha`.
+ * checkpoint commit `sha` — the whole content, including the ABSENCE of files
+ * the checkpoint does not hold.
  *
- * Uses `git restore --source=<sha> --worktree -- .`, NOT `git checkout <sha>
- * -- .` (T-07-12): both restore working-tree CONTENT identically, but
- * `checkout` additionally stages the restored paths into the real index,
- * silently rewriting state the caller did not ask this function to touch.
- * `restore --worktree` leaves the index alone.
+ * WHY TWO STEPS AND NOT ONE (CR-02). `git restore --source=<sha> --worktree`
+ * overwrites paths that exist in the checkpoint tree and does NOTHING to paths
+ * that do not: it never deletes. Verified by execution — checkpoint, then
+ * create `after.txt`, then restore, and `after.txt` is still there. On its own
+ * that command yields the UNION of the checkpoint and everything created
+ * since, a state that never existed at any point in history. Concretely: the
+ * model writes `src/new-module.ts` and rewrites `src/app.ts` to import it; the
+ * user rewinds; `app.ts` comes back without the import while `new-module.ts`
+ * stays, and the user proceeds believing the rewind happened.
+ *
+ * So the removal half is explicit, and SURGICAL rather than a `git clean`:
+ * {@link pathsAddedSince} yields exactly the paths present now and absent in
+ * the checkpoint; those and only those are removed; directories left empty are
+ * pruned; then `git restore` puts the checkpoint's content back over what
+ * remains. `git clean -fdx` would additionally destroy `node_modules/`,
+ * `.env`, `.pi/logs/` and `.pi/state/` — including this extension's own
+ * checkpoint store. A set difference deletes what the contract says and can be
+ * enumerated and asserted; a `clean` is a blunt instrument whose blast radius
+ * depends on `.gitignore` being right at that moment.
+ *
+ * GITIGNORED PATHS ARE STILL NEVER TOUCHED. Both sides of the diff come from
+ * `git add -A`, which respects `.gitignore`, so an ignored path cannot enter
+ * the added set and cannot be deleted — the exact mirror of
+ * {@link createCheckpoint}'s SCOPE BOUNDARY. `git-checkpoint.test.ts` Case 3
+ * asserts it by leaving an ignored file in place across a restore, including
+ * one created AFTER the checkpoint, instead of deleting it by hand first
+ * (which is what made the original defect invisible).
  *
  * Deliberately takes no `ExtensionContext` and needs no UI — this is defect
  * 1's fix at the mechanism layer: nothing here can distinguish an interactive
  * caller from a headless one, so nothing here can silently do less for one.
  */
 export function restoreCheckpoint(repoRoot: string, sha: string): void {
-	run(repoRoot, ["restore", `--source=${sha}`, "--worktree", "--", "."]);
+	const root = topLevel(repoRoot);
+	for (const rel of pathsAddedSince(root, sha)) {
+		const abs = join(root, rel);
+		rmSync(abs, { force: true });
+		pruneEmptyDirsUpTo(root, dirname(abs));
+	}
+	run(root, ["restore", `--source=${sha}`, "--worktree", "--", "."]);
 }

@@ -178,10 +178,18 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
-		budget: 530,
+		budget: 630,
 		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
 			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
-			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten",
+			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten. " +
+			"RAISED 530 -> 630 by the Phase 7 code-review fix pass: CR-02 found restoreCheckpoint never " +
+			"deleted anything, so a restore produced the union of the checkpoint and everything made after " +
+			"it. The fix adds a set-difference removal half (pathsAddedSince + an empty-directory prune) and " +
+			"a topLevel() resolution closing WR-13, plus the argument for why a set difference is used " +
+			"instead of git clean -- which is the part a future reader most needs and the part a budget " +
+			"would otherwise pressure out. Re-measured 620 raw lines across 3 files 2026-08-15 " +
+			"(index.ts 160 + git.ts 284 + store.ts 176), rounded up to the next ten. This is a ratchet " +
+			"raise, recorded rather than quietly widened; the previous figure and the reason are both above",
 	},
 	{
 		dir: ".pi/extensions/loop-police",
