@@ -286,6 +286,39 @@ worktree subagent spawns. The alternative — opting in per repository — needs
 a project-scope config surface `pi-subagents@0.49.0` does not expose. Named
 as a **Phase 8 follow-up** alongside `T-07-07`, not silently carried.
 
+### Third accepted residual: checkpoint capture writes untracked file content into `.git/objects` (WR-19)
+
+Also added by the Phase 7 code review, and it is the *converse* of the
+`.gitignore` scope boundary `.pi/extensions/checkpoint/git.ts` already states.
+
+`createCheckpoint` captures every untracked-but-not-ignored file on **every
+turn** — that is defect 2's fix and it is the point of the module. The
+consequence is that their content is written into `.git/objects`, where it
+**survives deleting the file, survives `git checkout`, and is recoverable by
+anyone holding the repository directory**. In a repository where a secrets
+file is untracked and **not** matched by `.gitignore` — a `config.local.yaml`,
+a downloaded `.pem` under a name the patterns miss, a `terraform.tfstate`
+variant — a secret is persisted there on every turn.
+
+Note also that `index.ts`'s provenance header frames the *opposite* as the
+defect being fixed ("`.env`-class untracked work is silently never captured").
+Both cannot be right. `git.ts`'s SCOPE BOUNDARY is the accurate one, and it now
+says so.
+
+**Decision taken: mitigated, not solved.** `git add -A` is now run with
+`SECRET_EXCLUDE_PATHSPECS` — `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`,
+`id_ed25519*`, `credentials`, `*.tfstate`, `*.tfstate.*` — applied to **both**
+`add -A` call sites (the capture, and the "what exists now" side of the
+restore's set difference), so an excluded path is absent from both trees and
+can therefore never be captured *nor deleted by a restore*. That symmetry is
+why the exclusions live in one exported constant rather than two literal
+lists.
+
+**What is still true:** a secret under an unremarkable name is still captured.
+This repository's own `.gitignore` is thorough, which is why the review rated
+this a warning rather than a blocker; the extension is written to be
+repo-agnostic and cannot assume the next repository's is.
+
 ---
 
 ## Download counts are not evidence

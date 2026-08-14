@@ -393,7 +393,16 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 				"headless-reachability claim covers only the library function, not the wiring a real session uses",
 		).toContain("restoreCheckpoint(");
 
-		const gutted = indexSource.replace(/restoreCheckpoint\(ctx\.cwd, match\.sha\);/, "/* gutted */");
+		// The mutation is derived FROM the extracted block, not from a literal
+		// argument list, so renaming the handler's variables cannot silently turn
+		// this guard into a no-op. (It nearly did: the first version pinned
+		// `restoreCheckpoint(ctx.cwd, match.sha)` and the WR-13 fix renamed the
+		// first argument to `root` -- the "mutation must apply" assertion below is
+		// what caught it, which is the whole reason it is there.)
+		const gutted = indexSource.replace(
+			block![0],
+			block![0].replace(/restoreCheckpoint\([^;]*\);/, "/* gutted */"),
+		);
 		expect(gutted, "the mutation itself must apply, or the guard below proves nothing").not.toBe(indexSource);
 		expect(
 			REGISTRATION_BLOCK_RE.exec(gutted)?.[0],

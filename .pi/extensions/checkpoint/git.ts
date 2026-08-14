@@ -71,6 +71,22 @@
  * Case 1 (positive) and Case 3 (the gitignored negative control) prove both
  * halves of this boundary rather than asserting it in prose alone.
  *
+ * THE RESIDUAL THAT FOLLOWS FROM THAT, STATED (WR-19). `index.ts`'s own
+ * provenance header frames the OPPOSITE as the defect being fixed —
+ * "`.env`-class untracked work is silently never captured" — and both cannot
+ * be right. What is true: capturing untracked non-ignored files means every
+ * turn writes their CONTENT into `.git/objects`, where it survives deleting
+ * the file, survives `git checkout`, and is recoverable by anyone holding the
+ * repository directory. In a repository where a secrets file is untracked and
+ * NOT matched by `.gitignore`, that is a secret persisted on every turn. This
+ * repository's `.gitignore` is thorough, which is why the review called it a
+ * warning; this module is written to be repo-agnostic and cannot rely on the
+ * next repository's being. {@link SECRET_EXCLUDE_PATHSPECS} fails safe on the
+ * obvious high-risk names that `.gitignore` may have missed. It is a
+ * mitigation, not a guarantee: a secret under an unremarkable name
+ * (`config.local.yaml`) is still captured. Also recorded in
+ * `docs/EXTENSIONS.md`'s residuals list.
+ *
  * ---------------------------------------------------------------------------
  * SPAWN DISCIPLINE
  * ---------------------------------------------------------------------------
@@ -138,8 +154,61 @@ function scratchIndexPath(repoRoot: string): string {
  * module boundary, is what makes "join(root, treePath)" a true statement
  * instead of a silent off-by-a-subdirectory that deletes the wrong file.
  */
-function topLevel(cwd: string): string {
+export function repoTopLevel(cwd: string): string {
 	return resolve(run(cwd, ["rev-parse", "--show-toplevel"]).trim());
+}
+
+/**
+ * Ref namespace anchoring checkpoint commits (WR-10).
+ *
+ * `commit-tree` produces an object with NO ref pointing at it, which this
+ * module used to state proudly. Unreachable objects are exactly what `git gc`
+ * prunes: `git gc --prune=now`, a `--aggressive` run, or simply the default
+ * two-week grace period elapsing removes them. The store's row survives; the
+ * object does not, and `restoreCheckpoint` then fails with a raw git error
+ * while `index.ts` claims "a checkpoint recorded this turn is still findable
+ * and restorable next process".
+ *
+ * `refs/kypi-checkpoints/` sits outside `refs/heads` and `refs/tags`, so it
+ * never appears as a branch or a tag, is never pushed by a default
+ * `git push`, and is not shown by `git branch`/`git tag`. It only makes the
+ * object reachable so gc leaves it alone.
+ */
+export const CHECKPOINT_REF_PREFIX = "refs/kypi-checkpoints";
+
+/**
+ * Pathspecs excluded from every checkpoint capture (WR-19).
+ *
+ * `git add -A` respects `.gitignore` and nothing else, so in a repository
+ * where a secrets file is untracked AND not matched by `.gitignore` — a
+ * `config.local.yaml`, a downloaded `.pem` under a name the patterns miss, a
+ * `terraform.tfstate` variant — every turn writes its content into
+ * `.git/objects`, where it survives deleting the file, survives
+ * `git checkout`, and is recoverable by anyone with the repository directory.
+ * This repository's own `.gitignore` is thorough; this extension is written to
+ * be repo-agnostic and cannot assume the next one's is.
+ *
+ * These exclusions are applied to BOTH `add -A` call sites — the capture and
+ * the "what exists now" side of {@link pathsAddedSince} — so an excluded path
+ * is absent from both trees and can therefore never be captured NOR deleted by
+ * a restore. Breaking that symmetry would make restore delete files it never
+ * saved, which is why the constant exists instead of two literal lists.
+ */
+export const SECRET_EXCLUDE_PATHSPECS = [
+	":(exclude)*.pem",
+	":(exclude)*.key",
+	":(exclude)*.p12",
+	":(exclude)*.pfx",
+	":(exclude)id_rsa*",
+	":(exclude)id_ed25519*",
+	":(exclude)credentials",
+	":(exclude)*.tfstate",
+	":(exclude)*.tfstate.*",
+] as const;
+
+/** `git add -A` over the whole repo, minus {@link SECRET_EXCLUDE_PATHSPECS}. */
+function addAllExceptSecrets(root: string, env: NodeJS.ProcessEnv): void {
+	run(root, ["add", "-A", "--", ".", ...SECRET_EXCLUDE_PATHSPECS], env);
 }
 
 /**
@@ -158,7 +227,7 @@ function pathsAddedSince(root: string, sha: string): string[] {
 	const scratch = scratchIndexPath(root);
 	const env = { GIT_INDEX_FILE: scratch };
 	try {
-		run(root, ["add", "-A"], env);
+		addAllExceptSecrets(root, env);
 		const nowTree = run(root, ["write-tree"], env).trim();
 		// --diff-filter=A: present in nowTree, absent in the checkpoint tree.
 		// -z + NUL split so a path containing a space, a quote or a non-ASCII
@@ -212,18 +281,22 @@ function pruneEmptyDirsUpTo(root: string, startDir: string): void {
  * means for it (see `index.ts`'s never-throw wrapping on `turn_start`).
  */
 export function createCheckpoint(repoRoot: string, label: string): string {
-	const root = topLevel(repoRoot);
+	const root = repoTopLevel(repoRoot);
 	const scratch = scratchIndexPath(root);
 	const env = { GIT_INDEX_FILE: scratch };
 	try {
 		// `git add -A` against the SCRATCH index: never touches the caller's real
 		// staged changes. Respects .gitignore -- see the SCOPE BOUNDARY section above.
-		run(root, ["add", "-A"], env);
+		addAllExceptSecrets(root, env);
 		const tree = run(root, ["write-tree"], env).trim();
 		const parent = currentSha(root);
 		// commit-tree reads no index at all -- run WITHOUT the scratch-index env,
 		// against the real HEAD.
-		return run(root, ["commit-tree", tree, "-p", parent, "-m", label]).trim();
+		const sha = run(root, ["commit-tree", tree, "-p", parent, "-m", label]).trim();
+		// WR-10: anchor the object so `git gc` cannot prune it out from under the
+		// store row that names it. See CHECKPOINT_REF_PREFIX.
+		run(root, ["update-ref", `${CHECKPOINT_REF_PREFIX}/${sha}`, sha]);
+		return sha;
 	} finally {
 		// Best-effort cleanup; a leftover scratch index under .git/ is inert (it is
 		// never referenced by anything once this function returns) and MUST NOT
@@ -273,8 +346,25 @@ export function createCheckpoint(repoRoot: string, label: string): string {
  * 1's fix at the mechanism layer: nothing here can distinguish an interactive
  * caller from a headless one, so nothing here can silently do less for one.
  */
+/**
+ * Drop the anchoring ref for `sha` (WR-10's retention half).
+ *
+ * Called when the store evicts a row, so the ref namespace does not grow
+ * without bound alongside the index. Best-effort and NEVER THROWS: a ref that
+ * is already gone, or a repository that has moved, must not turn a successful
+ * checkpoint into a broken turn. Once the ref is gone the object becomes
+ * unreachable again and ordinary `git gc` reclaims it, which is the intent.
+ */
+export function dropCheckpointRef(repoRoot: string, sha: string): void {
+	try {
+		run(repoTopLevel(repoRoot), ["update-ref", "-d", `${CHECKPOINT_REF_PREFIX}/${sha}`]);
+	} catch {
+		// Already deleted, or the repository is unreachable. Both are fine.
+	}
+}
+
 export function restoreCheckpoint(repoRoot: string, sha: string): void {
-	const root = topLevel(repoRoot);
+	const root = repoTopLevel(repoRoot);
 	for (const rel of pathsAddedSince(root, sha)) {
 		const abs = join(root, rel);
 		rmSync(abs, { force: true });

@@ -111,9 +111,18 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/checkpoint/index.ts",
-		budget: 170,
+		budget: 240,
 		why: "Phase 7 plan 03 (EXT-07)'s /checkpoint-restore command -- WR-05 widened discovery to catch " +
-			"command surfaces outside workflows/; measured 161 raw lines 2026-08-15, rounded up to the next ten",
+			"command surfaces outside workflows/; measured 161 raw lines 2026-08-15, rounded up to the next ten. " +
+			"RAISED 170 -> 240 by the Phase 7 code-review fix pass, for four findings that all land in this " +
+			"one file: WR-12 (the fork handler took the NEWEST checkpoint sharing an entry id, which for " +
+			"consecutive tool-less turns is a LATER snapshot than the fork point), WR-13 (every call site " +
+			"passed ctx.cwd where the callee documented a repository root), WR-14 (the stored label was a " +
+			"duplicate of entryId), and WR-16 (the headless branch called ctx.ui.notify, which is Pi's " +
+			"noOpUIContext `notify: () => { }` at dist/core/extensions/runner.js:92 -- it emitted nothing, " +
+			"so the branch was identical to the upstream return it was presented as fixing). Each carries " +
+			"the citation or the worked example that makes it checkable, which is the point. " +
+			"Re-measured 229 raw lines 2026-08-15, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/loop-police/loop-police.ts",
@@ -183,7 +192,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
-		budget: 630,
+		budget: 940,
 		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
 			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
 			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten. " +
@@ -192,9 +201,16 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"it. The fix adds a set-difference removal half (pathsAddedSince + an empty-directory prune) and " +
 			"a topLevel() resolution closing WR-13, plus the argument for why a set difference is used " +
 			"instead of git clean -- which is the part a future reader most needs and the part a budget " +
-			"would otherwise pressure out. Re-measured 620 raw lines across 3 files 2026-08-15 " +
-			"(index.ts 160 + git.ts 284 + store.ts 176), rounded up to the next ten. This is a ratchet " +
-			"raise, recorded rather than quietly widened; the previous figure and the reason are both above",
+			"would otherwise pressure out. Then RAISED 630 -> 940 in the same pass for the remaining " +
+			"checkpoint findings: WR-09 (recordCheckpoint was an unlocked read-modify-write over one shared " +
+			"file, and git.ts explicitly designs for two concurrent checkpointers -- measured, four " +
+			"overlapping processes recording 600 entries kept 55), WR-10 (an unbounded index naming commit " +
+			"objects that `git gc` prunes, because commit-tree leaves them unreachable), WR-11 (readCheckpoints " +
+			"cast blind, so [1,2,3] reached an `e.sha.slice()` in an event handler), WR-19 (a secret-name " +
+			"exclusion pathspec applied symmetrically to both add -A call sites), and the four index.ts " +
+			"findings itemised above. Re-measured 933 raw lines across 3 files 2026-08-15 (index.ts 229 + " +
+			"git.ts 374 + store.ts 330), rounded up to the next ten. Two ratchet raises, both recorded with " +
+			"the previous figure and the reason rather than quietly widened",
 	},
 	{
 		dir: ".pi/extensions/loop-police",
