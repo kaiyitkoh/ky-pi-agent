@@ -16,6 +16,7 @@ import { describe, expect, it } from "vitest";
 import {
 	canonicalise,
 	GUARDED_VERB_PATTERN,
+	normaliseExecutable,
 	SHELL_RUNNERS,
 	type ShellRefusalCause,
 } from "../../.pi/extensions/safety/shell.ts";
@@ -116,6 +117,19 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 		expectedWrappers: [],
 		expectedCwdOverride: "/c/other/.git",
 		why: "the --git-dir=value packed form must resolve identically to -C's split form",
+	},
+	{
+		label: "git.exe -C to another repo (CR-08 regression)",
+		cmd: "git.exe -C /c/other/repo push",
+		expectedExecutable: "git.exe",
+		expectedWrappers: [],
+		expectedCwdOverride: "/c/other/repo",
+		why:
+			"CR-08: extractGitCwdOverride compared invocation.executable against a bare lower-cased 'git' " +
+			"literal, so 'git.exe -C ...' silently lost its cwdOverride and a later HEAD==main oracle would " +
+			"be asked about the WRONG repository. Fixed by routing through normaliseExecutable, the same " +
+			"fix CR-03 already applied to policy.ts/infra.ts -- CanonicalInvocation.executable itself stays " +
+			"the raw 'git.exe' word, only the internal gate is normalised.",
 	},
 	{
 		label: "npm run deploy (task-runner indirection)",
@@ -237,6 +251,36 @@ const SHELL_RUNNER_TABLE: readonly ShellRunnerRow[] = [
 		cause: "shell-runner",
 		why: "Plan 11's evasion corpus found this came back allow before eval was added to SHELL_RUNNERS -- eval executes its argument as shell code in the current shell, the same shape as sh -c, just without a fork",
 	},
+	{
+		label: "bash.exe -c with a guarded verb (CR-08 regression)",
+		cmd: 'bash.exe -c "git push"',
+		expected: "refused",
+		cause: "shell-runner",
+		why:
+			"CR-08: findShellRunnerDenial compared inv.executable via a bare .toLowerCase(), so 'bash.exe' " +
+			"never matched the SHELL_RUNNERS membership check even though it is the ordinary Git-Bash-on-" +
+			"Windows spelling, not an adversarial one -- came back allow before this fix.",
+	},
+	{
+		label: "/bin/sh -c with a guarded verb, path-qualified (CR-08 regression)",
+		cmd: '/bin/sh -c "git push"',
+		expected: "refused",
+		cause: "shell-runner",
+		why: "CR-08: same class as bash.exe -c above, for a path-qualified /bin/sh spelling -- normaliseExecutable reduces both to their basename before the SHELL_RUNNERS check.",
+	},
+	{
+		label: "/usr/bin/xargs, path-qualified (CR-08 regression)",
+		cmd: "/usr/bin/xargs git push",
+		expected: "refused",
+		cause: "shell-runner",
+		why: "CR-08: a path-qualified xargs invocation must classify identically to the bare 'xargs' spelling already covered above.",
+	},
+	{
+		label: "sh.exe -c with NO guarded verb, path-qualified (CR-08 paired negative)",
+		cmd: 'sh.exe -c "ls"',
+		expected: "ok",
+		why: "CR-08: the normalisation fix must not degenerate into 'any .exe-suffixed runner is denied' -- a shell-runner spelling with no guarded verb in its raw segment still classifies ok.",
+	},
 ];
 
 describe("SAFE-02/SAFE-03 -- shell-runner table is non-empty (vacuous-pass guard)", () => {
@@ -262,16 +306,24 @@ describe("SAFE-02/SAFE-03 -- shell-runner denial: resolved executable in SHELL_R
 });
 
 describe("SAFE-02 -- SHELL_RUNNERS / GUARDED_VERB_PATTERN are exported and consistent with the tables above", () => {
-	it("every resolved executable in the refused shell-runner rows is a member of SHELL_RUNNERS", () => {
+	it("every resolved executable in the refused shell-runner rows is a member of SHELL_RUNNERS once normalised (CR-08)", () => {
 		for (const row of SHELL_RUNNER_TABLE.filter((r) => r.expected === "refused")) {
 			const verdict = canonicalise(row.cmd);
 			// A refused verdict carries no invocations, so re-derive the resolved
-			// executable independently: the FIRST word of the command, lower-cased,
-			// must itself be a SHELL_RUNNERS member for this fixture to mean anything.
-			const firstWord = row.cmd.trim().split(/\s+/)[0]?.toLowerCase();
-			expect(firstWord !== undefined && SHELL_RUNNERS.has(firstWord), `${row.cmd} must start with a SHELL_RUNNERS member`).toBe(
-				true,
-			);
+			// executable independently: the FIRST word of the command, run through
+			// normaliseExecutable (CR-08 -- basename, lower-cased, PATHEXT suffix
+			// stripped, not a bare .toLowerCase()), must itself be a SHELL_RUNNERS
+			// member for this fixture to mean anything. A raw .toLowerCase() here
+			// would fail this test's OWN new "bash.exe"/"/bin/sh"/"/usr/bin/xargs"
+			// rows even though findShellRunnerDenial (shell.ts) correctly refuses
+			// them post-fix -- this assertion must model the SAME normalisation the
+			// code under test now applies, or it would not catch a regression back
+			// to the bare-string comparison CR-08 fixes.
+			const firstWord = row.cmd.trim().split(/\s+/)[0];
+			expect(
+				firstWord !== undefined && SHELL_RUNNERS.has(normaliseExecutable(firstWord)),
+				`${row.cmd} must start with a (possibly path-qualified/.exe-suffixed) SHELL_RUNNERS member`,
+			).toBe(true);
 			expect(verdict.kind).toBe("refused");
 		}
 	});

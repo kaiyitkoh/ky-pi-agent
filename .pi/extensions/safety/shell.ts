@@ -638,9 +638,19 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 	return { wrappers, cwdOverride, index: i };
 }
 
-/** `git -C <dir>` / `git --git-dir <dir>` / `git --git-dir=<dir>` — the ONLY cwd override a later `HEAD == main` oracle can trust. */
+/**
+ * `git -C <dir>` / `git --git-dir <dir>` / `git --git-dir=<dir>` — the ONLY cwd override a later `HEAD == main` oracle can trust.
+ *
+ * CR-08: routed through {@link normaliseExecutable}, not a bare
+ * `.toLowerCase()` comparison -- this function's own module docstring already
+ * says every bare-verb gate MUST do this, and this was the one caller inside
+ * `shell.ts` itself that did not. Executed before this fix: `git.exe -C
+ * /other/repo push` compared `"git.exe" !== "git"` and silently dropped its
+ * `cwdOverride`, so the later `currentBranchFor` oracle was asked about the
+ * WRONG repository (the invoking cwd, not the `-C` target).
+ */
 function extractGitCwdOverride(executable: string, args: readonly string[]): string | undefined {
-	if (executable.toLowerCase() !== "git") {
+	if (normaliseExecutable(executable) !== "git") {
 		return undefined;
 	}
 	for (let i = 0; i < args.length; i += 1) {
@@ -699,10 +709,19 @@ function extractInvocations(
  * runner as a script argument — see the module docstring's "shell runner"
  * section for why this is a substring check over raw text, not a recursive
  * re-parse.
+ *
+ * CR-08: `inv.executable` is routed through {@link normaliseExecutable}
+ * before the `SHELL_RUNNERS` membership check, not a bare `.toLowerCase()`.
+ * Executed before this fix: `bash.exe -c "git push"`, `/bin/sh -c "git
+ * push"` and `/usr/bin/xargs git push` all came back `allow` -- `bash.exe`
+ * and `/bin/sh` are ordinary Git-Bash-on-Windows/POSIX spellings, not
+ * adversarial ones, and this module's own docstring already names `sh -c
+ * "git push"` and `xargs git push` as the exact shapes this rule exists to
+ * catch.
  */
 function findShellRunnerDenial(invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined {
 	return invocations.find(
-		(inv) => SHELL_RUNNERS.has(inv.executable.toLowerCase()) && GUARDED_VERB_PATTERN.test(inv.rawSegment),
+		(inv) => SHELL_RUNNERS.has(normaliseExecutable(inv.executable)) && GUARDED_VERB_PATTERN.test(inv.rawSegment),
 	);
 }
 

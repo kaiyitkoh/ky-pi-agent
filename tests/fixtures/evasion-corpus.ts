@@ -346,6 +346,40 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 	},
 
 	// -------------------------------------------------------------------------
+	// CR-08: shell.ts's OWN two bare-verb gates (findShellRunnerDenial,
+	// extractGitCwdOverride) were not routed through normaliseExecutable --
+	// only policy.ts/infra.ts were fixed by CR-03. Ordinary Git-Bash-on-Windows
+	// spellings of the shell-runner rule's own worked examples.
+	// -------------------------------------------------------------------------
+	{
+		id: "EV-58",
+		class: "executable-normalisation",
+		tool: "bash",
+		input: { command: 'bash.exe -c "git push"' },
+		expect: "BLOCKED",
+		why: "confirmed by execution: findShellRunnerDenial compared inv.executable via a bare .toLowerCase(), so 'bash.exe' never matched SHELL_RUNNERS even though it is the ordinary Git-Bash-on-Windows spelling of the exact shape this rule exists to catch.",
+		reference: "CR-08; shell.ts#findShellRunnerDenial",
+	},
+	{
+		id: "EV-59",
+		class: "executable-normalisation",
+		tool: "bash",
+		input: { command: '/bin/sh -c "git push"' },
+		expect: "BLOCKED",
+		why: "same class as EV-58, for a path-qualified /bin/sh spelling -- normaliseExecutable reduces both to their basename before the SHELL_RUNNERS membership check.",
+		reference: "CR-08; shell.ts#findShellRunnerDenial",
+	},
+	{
+		id: "EV-60",
+		class: "executable-normalisation",
+		tool: "bash",
+		input: { command: "/usr/bin/xargs git push" },
+		expect: "BLOCKED",
+		why: "a path-qualified xargs invocation must classify identically to the bare 'xargs' spelling shell.ts's own module docstring already names as the shell-runner rule's canonical example.",
+		reference: "CR-08; shell.ts#findShellRunnerDenial",
+	},
+
+	// -------------------------------------------------------------------------
 	// 7. Task-runner indirection — PITFALLS.md:461 -- OUT OF SCOPE
 	// -------------------------------------------------------------------------
 	{
