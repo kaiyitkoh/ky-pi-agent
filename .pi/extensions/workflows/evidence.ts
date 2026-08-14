@@ -8,14 +8,16 @@
  * that predicate, the run-state buffer `/quick` (plan 06-02) arms and
  * drains, and the JSONL record of every verdict.
  *
- * WHY `isError` IS TRUSTED AND MESSAGE TEXT IS NOT. `ToolResultEventBase`
- * [CITED: pi 0.84.1 dist/core/extensions/types.d.ts:691-699] carries a
- * structural `isError: boolean` set by Pi's own tool-execution machinery
- * from the real process exit code — never written by the model. Reading
- * `dist/core/tools/bash.js:320-348` directly: on a non-zero exit the bash
- * tool THROWS, which Pi converts to `isError: true`; on success it returns
- * `{content, details}` with no exit code anywhere. The model's `content`
- * blocks are a separate field entirely and are never consulted here — this
+ * WHY `isError` IS TRUSTED AND MESSAGE TEXT IS NOT. `ToolExecutionEndEvent`
+ * [CITED: pi 0.84.1 dist/core/extensions/types.d.ts:593-599] carries a
+ * structural `isError: boolean` set by Pi's own tool-execution machinery from
+ * the real process exit code — never written by the model, and emitted for
+ * EVERY finalized call, including a blocked/invalid/unknown/aborted
+ * "immediate" one -- why `index.ts` captures here, not at `tool_result`
+ * (CR-01, iteration 3). Reading `dist/core/tools/bash.js:320-348` directly:
+ * on a non-zero exit the bash tool THROWS, converted to `isError: true`; on
+ * success it returns `{content, details}` with no exit code anywhere. The
+ * model's `content` blocks are a separate field, never consulted here — this
  * is GATE-07's whole answer to a fabricated transcript.
  *
  * THIS MODULE OWNS THE LOG BASE NAME `"evidence"`. `wire-*`, `turns-*` and
@@ -220,6 +222,12 @@ export function recordToolResult(record: EvidenceRecord): void {
 		return;
 	}
 	state.records.push(record);
+}
+
+/** CR-01 (iteration 3): push a SYNTHETIC FAILING record so a capture that throws (e.g. `currentSha` on an unreadable repo) rejects at {@link gateCompletion}'s branch (3) instead of vanishing. No-op when no run is armed. */
+export function recordCaptureFailure(toolName: string): void {
+	const state = runSlot();
+	if (state !== undefined) state.records.push({ ts: Date.now(), toolName: `${toolName} (capture failed)`, command: "", isError: true, sha: "" });
 }
 
 /** True when a run is currently armed. */

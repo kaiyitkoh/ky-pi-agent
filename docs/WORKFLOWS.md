@@ -83,9 +83,16 @@ the whole claim being tested:
    still produce a REJECT verdict and disarm the run, never leave `/quick`
    silently and permanently armed.
 
-Two Pi event handlers do the remaining work: one records every `tool_result`
-seen while a run is armed, and one calls `endRun` when `agent_end` fires,
-reporting whatever verdict comes back and disarming the run either way.
+Three Pi event handlers do the remaining work: one records every
+`tool_execution_end` seen while a run is armed (CR-01, iteration 3 -- not
+`tool_result`, which is never emitted for a call `prepareToolCall` resolves
+as `kind: "immediate"`: a call this repository's own safety layer blocked, a
+schema-validation failure, an unknown tool, or an abort. `tool_execution_end`
+fires for every finalized call, including all four of those); one calls
+`endRun` when `agent_end` fires, reporting whatever verdict comes back and
+disarming the run either way; and one, on `session_start`, disarms any run
+left orphaned by a prior session that never reached `agent_end` (WR-02,
+iteration 3) before pruning aged evidence logs.
 
 These two facts — that a nested single-shot call cannot serve the executor,
 and that `waitForIdle` is a no-op in the shape every headless session in this
@@ -148,9 +155,17 @@ from the real process exit code — and never trusts the model's transcript
 text, which is exactly the failure shape `.pi/extensions/diagnostics/prose.ts`'s
 detector exists to catch on the other end of a turn: a model that can
 describe having made a tool call can equally describe having finished
-successfully. `/quick` records only structured `tool_result` events while a
-run is armed, and the completion verdict at `agent_end` is computed from
-those records and two SHAs — never from anything the model said.
+successfully. `/quick` records `tool_execution_end` — not `tool_result` — for
+every finalized tool call while a run is armed (CR-01, iteration 3): a call
+this repository's own safety layer BLOCKED, a schema-validation failure, an
+unknown tool, and an abort are all reported by Pi through `tool_execution_end`
+but never through `tool_result`, so a run in which one of those four occurred
+is no longer structurally invisible to the gate. A capture that itself throws
+(the SHA read cannot find a readable repository) is recorded as its own
+synthetic FAILING entry rather than silently dropped — dropping it would
+read, incorrectly, as "no failure happened." The completion verdict at
+`agent_end` is computed from those records and two SHAs — never from
+anything the model said.
 
 **The `baseSha`/`headSha` rule.** `startRun` captures `HEAD` at arm time
 (`baseSha`); `agent_end` reads `HEAD` again once the triggered turn is over
@@ -171,8 +186,9 @@ still a fact about that task after the commit lands.
 **What an ACCEPT verdict actually guarantees, stated plainly because
 overclaiming here is worse than underclaiming it:** a commit landed during
 the run, made through a tool call Pi's own machinery executed and that
-exited 0, and no tool result recorded anywhere in the run carried a
-structured failure. **What it does NOT guarantee:** that the commit's diff
+exited 0, and no tool call finalized during the run — including a blocked,
+schema-invalid, unknown-tool or aborted one, and including a dropped capture
+— carried a structural failure. **What it does NOT guarantee:** that the commit's diff
 contains the claimed work, or that anything was meaningfully verified at
 all. An empty commit (`git commit --allow-empty`) and a commit of wholly
 unrelated content both still ACCEPT, because distinguishing "the commit

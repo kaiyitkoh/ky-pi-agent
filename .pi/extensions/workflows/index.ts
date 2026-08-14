@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
+import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
 
 export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("quick", {
@@ -45,19 +45,19 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	pi.on("tool_result", (event, ctx) => {
+	pi.on("tool_execution_end", (event, ctx) => {
 		try {
 			if (!isRunArmed()) return;
 			recordToolResult(
 				recordFromToolResult({
 					toolName: event.toolName,
-					toolInput: event.input,
+					toolInput: {}, // tool_execution_end carries no args; `command` has no consumer (IN-04)
 					isError: event.isError,
 					sha: currentSha(armedCwd() ?? ctx.cwd),
 				}),
 			);
 		} catch {
-			// Swallowed -- a capture failure must never break a tool result.
+			recordCaptureFailure(event.toolName); // CR-01 iter3: fail closed -- a dropped record must never read as "no failure"
 		}
 	});
 
@@ -69,11 +69,10 @@ export default function (pi: ExtensionAPI): void {
 			// CR-01: accept wording states what was checked, not an endorsement.
 			if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: a commit landed at ${verdict.sha} with no failed tool result -- the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
 		} catch {
-			// Swallowed -- same rule as the tool_result handler above.
+			// Swallowed -- same rule as the tool_execution_end handler above.
 		}
 	});
 
-	pi.on("session_start", (_event, ctx) => {
-		pruneEvidenceLogs(ctx.cwd);
-	});
+	// WR-02 iter3: endRun("") disarms an orphaned run (no agent_end ever arrived) before pruning; a no-op when nothing is armed.
+	pi.on("session_start", (_event, ctx) => { endRun(""); pruneEvidenceLogs(ctx.cwd); });
 }
