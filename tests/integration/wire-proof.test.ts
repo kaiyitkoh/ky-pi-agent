@@ -1,10 +1,8 @@
 /**
  * ROUTE-10 — the wire dump proves the model a mode intended is the model that
- * actually served the next turn. This file starts with the executor half:
- * `/balanced` and `/max`, driven twice, read back from `turns-*.jsonl` and
- * `wire-*.jsonl`. The single-shot half (`runSingleShotRole`) is added by a
- * later commit in this same plan, which extends this file rather than
- * duplicating its fixture.
+ * actually served the next turn, for both routed mechanisms this repository
+ * has: the executor (`/balanced`, `/max`) and a single-shot role
+ * (`runSingleShotRole`).
  *
  * ---------------------------------------------------------------------------
  * THE FILE'S CONTRACT, IN ONE LINE
@@ -40,6 +38,40 @@
  * on anything else.
  *
  * ---------------------------------------------------------------------------
+ * THE SINGLE-SHOT HALF — JOINED BY `corr`, WITH A NEGATIVE CONTROL
+ * ---------------------------------------------------------------------------
+ * The single-shot role's model (`reviewer`, resolved to Bedrock Claude in
+ * `max` mode) is deliberately DIFFERENT from the session's executor model at
+ * that point (`deepseek/deepseek-v4-pro`) — if they were the same, a nested
+ * row naming the right model would prove nothing about routing having
+ * happened at all. Nested and main-loop records are joined by `corr`
+ * explicitly, never by array position: `wire.ts`'s own module docstring
+ * states the serial-loop assumption behind correlation ids, and a
+ * position-based join would quietly depend on that assumption in a way a
+ * future concurrent path would break without this file ever noticing.
+ *
+ * A third, registered-but-never-routed model is asserted absent from BOTH
+ * logs. Phase 2 and Phase 3 both recorded that a presence assertion with no
+ * paired absence, or an absence with no paired presence, can be satisfied by
+ * an instrument that reads nothing — this is that pairing for the reader
+ * itself, not just for one fixture's data.
+ *
+ * ---------------------------------------------------------------------------
+ * WHAT THIS FILE DOES NOT PROVE
+ * ---------------------------------------------------------------------------
+ * Subagent-role routing (the `planner` role) is NOT provable from this
+ * process's own wire log — a subagent is a SEPARATE `pi` process
+ * (05-RESEARCH.md §A.2), so nothing this process writes to `turns-*`/`wire-*`
+ * can say what model a subagent actually ran on. ROUTE-05's evidence is the
+ * `settings.subagents.agentOverrides` write proven in
+ * `tests/integration/mode-switch.test.ts` case 2 (plan 05-07) — a pin being
+ * written correctly, not a subagent process having honoured it. Nor does this
+ * file say anything about a real DeepSeek or Bedrock request: every model
+ * here is `fauxProvider`, wrapped so it emits the request-shaped payload a
+ * real adapter assembles (`tests/helpers/faux.ts`), which is realistic and is
+ * not the real thing.
+ *
+ * ---------------------------------------------------------------------------
  * WHY `PI_CODING_AGENT_DIR` IS SET FOR EVERY CASE HERE
  * ---------------------------------------------------------------------------
  * A successful executor switch also writes `settings.subagents.agentOverrides`
@@ -60,7 +92,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SESSION_TURN_ROLE } from "../../.pi/extensions/diagnostics/index.ts";
 import { logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { TURNS_LOG_BASE, WIRE_LOG_BASE, type RowKind, type WireKind } from "../../.pi/extensions/diagnostics/schema.ts";
-import { setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
+import { runSingleShotRole, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { buildOpenAiFixturePayload, wrapFauxWithPayload } from "../helpers/faux.ts";
 import { repoRoot } from "../helpers/git.ts";
@@ -147,10 +179,14 @@ async function waitForConfiguredAuth(
 	}
 }
 
+/** A model registered on this fixture's `deepseek` faux provider that no route ever selects. */
+const NEVER_ROUTED_MODEL_ID = "kypi-wire-proof-never-routed-negative-control";
+
 /** What the whole fixture produced, read once and asserted on by every case below. */
 interface Run {
 	balancedExecutor: { provider: string; id: string };
 	maxExecutor: { provider: string; id: string };
+	reviewerModel: { provider: string; id: string };
 
 	turnsCountBeforeSwitch1: number;
 	newTurnRowsAfterSwitch1: TurnsRow[];
@@ -164,6 +200,13 @@ interface Run {
 
 	mainRequestForSwitch1: WireRow | undefined;
 	mainRequestForSwitch2: WireRow | undefined;
+	mainLoopWireRecords: WireRow[];
+
+	nestedTurnRow: TurnsRow | undefined;
+	nestedWireRecords: WireRow[];
+
+	fullTurnsRaw: string;
+	fullWireRaw: string;
 }
 
 async function runFixture(): Promise<Run> {
@@ -175,10 +218,11 @@ async function runFixture(): Promise<Run> {
 
 	const balancedExecutor = ROLE_MAP.balanced.executor.candidates[0];
 	const maxExecutor = ROLE_MAP.max.executor.candidates[0];
-	if (balancedExecutor === undefined || maxExecutor === undefined) {
+	const reviewerModel = ROLE_MAP.max.reviewer.candidates[0];
+	if (balancedExecutor === undefined || maxExecutor === undefined || reviewerModel === undefined) {
 		throw new Error(
-			"routing/schema.ts's ROLE_MAP no longer has a first candidate for balanced.executor or " +
-				"max.executor -- this fixture's own model choices depend on those entries",
+			"routing/schema.ts's ROLE_MAP no longer has a first candidate for balanced.executor, " +
+				"max.executor or max.reviewer -- this fixture's own model choices depend on those entries",
 		);
 	}
 	if (balancedExecutor.id === maxExecutor.id) {
@@ -186,6 +230,13 @@ async function runFixture(): Promise<Run> {
 			"balanced and max resolve the SAME executor model id in ROLE_MAP -- the two-switches proof " +
 				"below needs two different observed models, or it would hold even for a router that does " +
 				"nothing",
+		);
+	}
+	if (reviewerModel.provider === maxExecutor.provider && reviewerModel.id === maxExecutor.id) {
+		throw new Error(
+			"max's reviewer route resolves the SAME model as max's executor route -- the single-shot " +
+				"proof below needs the nested call to name a DIFFERENT model than the session's executor, " +
+				"or a nested row naming the right model would prove nothing about routing",
 		);
 	}
 
@@ -198,6 +249,9 @@ async function runFixture(): Promise<Run> {
 			models: [
 				{ id: balancedExecutor.id, reasoning: true, input: ["text"], cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
 				{ id: maxExecutor.id, reasoning: true, input: ["text"], cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
+				// The negative control: registered, resolvable, and never a member of
+				// any candidate list any route in this fixture resolves.
+				{ id: NEVER_ROUTED_MODEL_ID, reasoning: true, input: ["text"], cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
 			],
 		});
 		executorFaux.setResponses([
@@ -208,9 +262,24 @@ async function runFixture(): Promise<Run> {
 		await handle.modelRuntime.setRuntimeApiKey(balancedExecutor.provider, "kypi-fixture-not-a-real-key");
 		await waitForConfiguredAuth(handle.modelRuntime, balancedExecutor.provider);
 
+		// ---- the single-shot faux provider: a model different from every ----
+		// ---- executor candidate above, so the nested proof is not vacuous ----
+		const reviewerFaux = fauxProvider({
+			provider: reviewerModel.provider,
+			models: [{ id: reviewerModel.id, reasoning: true, input: ["text", "image"], cost: { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 4.5 } }],
+		});
+		reviewerFaux.setResponses([fauxAssistantMessage("reviewer-nested-reply", { stopReason: "stop" })]);
+		handle.modelRuntime.registerNativeProvider(wrapFauxWithPayload(reviewerFaux, buildOpenAiFixturePayload));
+		await handle.modelRuntime.setRuntimeApiKey(reviewerModel.provider, "kypi-fixture-not-a-real-key");
+		await waitForConfiguredAuth(handle.modelRuntime, reviewerModel.provider);
+
 		const ctx = handle.session.extensionRunner.createCommandContext();
 		const turnsFile = logPath(handle.cwd, TURNS_LOG_BASE);
 		const wireFile = logPath(handle.cwd, WIRE_LOG_BASE);
+
+		// =====================================================================
+		// TASK 1 — the executor path: two switches, two models, position-sliced
+		// =====================================================================
 
 		// ---- switch 1: balanced --------------------------------------------
 		const balancedCommand = handle.session.extensionRunner.getCommand("balanced");
@@ -251,10 +320,31 @@ async function runFixture(): Promise<Run> {
 		);
 
 		const allMainLoopTurnRows = turnRowsAfterSwitch2;
+		const mainLoopWireRecords = wireAfterSwitch2.filter((record) => (record.kind ?? "").startsWith("main."));
+
+		// =====================================================================
+		// TASK 2 — the single-shot path: reviewer, joined by corr, negative control
+		// =====================================================================
+
+		const turnsCountBeforeNested = readRows<TurnsRow>(turnsFile).length;
+
+		await runSingleShotRole(ctx, {
+			role: "reviewer",
+			messages: [{ role: "user", content: "please review this change", timestamp: Date.now() }],
+			need: {},
+		});
+
+		const turnsAfterNested = readRows<TurnsRow>(turnsFile);
+		const wireAfterNested = readRows<WireRow>(wireFile);
+		const nestedTurnRow = turnsAfterNested
+			.slice(turnsCountBeforeNested)
+			.find((row) => row.kind === "nested" && row.role === "reviewer");
+		const nestedWireRecords = nestedTurnRow === undefined ? [] : wireAfterNested.filter((record) => record.corr === nestedTurnRow.corr);
 
 		return {
 			balancedExecutor,
 			maxExecutor,
+			reviewerModel,
 			turnsCountBeforeSwitch1,
 			newTurnRowsAfterSwitch1,
 			firstTurnRowAfterSwitch1,
@@ -264,6 +354,11 @@ async function runFixture(): Promise<Run> {
 			allMainLoopTurnRows,
 			mainRequestForSwitch1,
 			mainRequestForSwitch2,
+			mainLoopWireRecords,
+			nestedTurnRow,
+			nestedWireRecords,
+			fullTurnsRaw: JSON.stringify(turnsAfterNested),
+			fullWireRaw: JSON.stringify(wireAfterNested),
 		};
 	} finally {
 		await handle.dispose();
@@ -288,6 +383,10 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 		delete process.env.PI_CODING_AGENT_DIR;
 		rmSync(settingsDir, { recursive: true, force: true, maxRetries: 3 });
 	});
+
+	// -------------------------------------------------------------------------
+	// Task 1 -- the executor path
+	// -------------------------------------------------------------------------
 
 	it("case 1 -- switching to balanced and running a turn leaves the FIRST new kind:\"turn\" row naming balanced's executor model", () => {
 		expect(
@@ -382,5 +481,119 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 					"which finds zero rows and passes vacuously",
 			).toBe(SESSION_TURN_ROLE);
 		}
+	});
+
+	// -------------------------------------------------------------------------
+	// Task 2 -- the single-shot path
+	// -------------------------------------------------------------------------
+
+	it("case 5 -- runSingleShotRole(reviewer) leaves exactly one nested turn row naming a model DIFFERENT from the session's executor", () => {
+		expect(
+			run.nestedTurnRow,
+			"no kind:\"nested\" row with role \"reviewer\" appeared after runSingleShotRole -- either the " +
+				"call never dispatched or the row never reached disk",
+		).toBeDefined();
+		expect(run.nestedTurnRow?.provider, "the nested row's provider does not name the reviewer route's model").toBe(
+			run.reviewerModel.provider,
+		);
+		expect(run.nestedTurnRow?.model, "the nested row's model does not name the reviewer route's model").toBe(
+			run.reviewerModel.id,
+		);
+
+		// The proof that this is routing and not coincidence: the session's own
+		// executor at this point is max's model, a DIFFERENT one.
+		expect(
+			run.nestedTurnRow?.model,
+			"the nested row's model is the SAME as the session's own executor model -- a nested row " +
+				"naming the right model would prove nothing about routing if the two were never distinct",
+		).not.toBe(run.maxExecutor.id);
+	});
+
+	it("case 6 -- the nested wire records, joined by corr (never by position), share the reviewer row's model on the wire", () => {
+		expect(
+			run.nestedWireRecords.length,
+			"no wire records share the nested turn row's correlation id -- the join by corr found nothing",
+		).toBeGreaterThan(0);
+
+		const nestedRequest = run.nestedWireRecords.find((record) => record.kind === "nested.request");
+		expect(nestedRequest, "no nested.request record was found among the corr-joined wire records").toBeDefined();
+		expect(
+			nestedRequest?.payload?.model,
+			"the nested.request payload does not name the reviewer route's model",
+		).toBe(run.reviewerModel.id);
+
+		for (const record of run.nestedWireRecords) {
+			expect(
+				record.role,
+				`a nested wire record joined by corr carried role ${JSON.stringify(record.role)} instead of ` +
+					'"reviewer"',
+			).toBe("reviewer");
+		}
+	});
+
+	it("case 7 -- the main-loop wire records in this session carry NO role field at all, unlike the nested ones", () => {
+		expect(
+			run.mainLoopWireRecords.length,
+			"no main-loop wire records were collected, so the loop below iterates nothing",
+		).toBeGreaterThan(0);
+
+		for (const record of run.mainLoopWireRecords) {
+			expect(
+				Object.keys(record),
+				"a main.* wire record carries a role key -- only the nested path stamps role, so a " +
+					"reader who finds one on a main.* record would misread which mechanism produced it",
+			).not.toContain("role");
+		}
+
+		expect(
+			run.nestedWireRecords.some((record) => record.role === "reviewer"),
+			"none of the nested wire records carried role:\"reviewer\" -- the contrast this case makes " +
+				"would be comparing nothing against nothing",
+		).toBe(true);
+	});
+
+	it("case 8 -- the nested call's correlation id differs from the surrounding main-loop turns' correlation ids", () => {
+		const mainLoopCorrs = new Set(run.allMainLoopTurnRows.map((row) => row.corr));
+		expect(mainLoopCorrs.size, "no main-loop correlation ids were collected to compare against").toBeGreaterThan(0);
+
+		expect(
+			run.nestedTurnRow?.corr,
+			"the nested row carries no correlation id at all",
+		).toBeTruthy();
+		expect(
+			mainLoopCorrs.has(run.nestedTurnRow?.corr ?? ""),
+			"the nested call's correlation id collides with a main-loop turn's -- the two mechanisms " +
+				"would be indistinguishable in the log",
+		).toBe(false);
+	});
+
+	it("case 9 -- the negative control: a registered-but-never-routed model appears in NEITHER log, proving the reader reads", () => {
+		expect(
+			run.fullTurnsRaw.length,
+			"the turns log capture is empty, so the absence check below would be vacuous",
+		).toBeGreaterThan(0);
+		expect(
+			run.fullWireRaw.length,
+			"the wire log capture is empty, so the absence check below would be vacuous",
+		).toBeGreaterThan(0);
+
+		expect(
+			run.fullTurnsRaw.includes(NEVER_ROUTED_MODEL_ID),
+			"the never-routed model id appears in the turns log even though no route in this fixture " +
+				"ever selected it",
+		).toBe(false);
+		expect(
+			run.fullWireRaw.includes(NEVER_ROUTED_MODEL_ID),
+			"the never-routed model id appears in the wire log even though no route in this fixture " +
+				"ever selected it",
+		).toBe(false);
+
+		// THE PAIRED POSITIVE. Without it, an instrument that captured nothing at
+		// all would satisfy the two absences above just as well as a working one.
+		expect(
+			run.fullTurnsRaw.includes(run.maxExecutor.id) && run.fullWireRaw.includes(run.maxExecutor.id),
+			"a model that WAS routed in this fixture (max's executor) is absent from one of the logs -- " +
+				"the negative control above would be passing over a reader that finds nothing at all",
+		).toBe(true);
 	});
 });
