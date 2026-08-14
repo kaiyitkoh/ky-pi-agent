@@ -104,11 +104,11 @@ export function recordFromToolResult(input: {
  *
  *   (1) no record at all -> reject, naming that a completion claim needs a
  *       structured tool result and that transcript text is not evidence.
- *   (2) HEAD never moved (`headSha === baseSha`) -> reject: no commit landed
- *       during this run, so every record captured is trivially "at HEAD" by
- *       construction and cannot support a completion claim (CR-01a: this is
- *       what stops `bash echo hi` -- or a bare `read`, which is not even a
- *       command -- from satisfying a claim when nothing was ever committed).
+ *   (2) HEAD never moved (`headSha === baseSha`) -> reject: HEAD is still
+ *       what it was when the run was armed, so every record captured is
+ *       trivially "at HEAD" by construction and cannot support a completion
+ *       claim (CR-01a: this is what stops `bash echo hi` -- or a bare
+ *       `read`, which is not even a command -- from satisfying a claim).
  *   (3) ANY record in the run has `isError === true` -> reject, naming every
  *       failing tool. This branch sits BEFORE the `headSha` narrowing on
  *       purpose (CR-01b): a failed tool result is a fact about this run's
@@ -252,10 +252,10 @@ export function endRun(headSha: string): EvidenceVerdict | undefined {
 	const verdict = gateCompletion(state.records, headSha, state.baseSha);
 	writeEvidenceRow(state.cwd, {
 		verdict: verdict.ok ? "accept" : "reject",
-		// CR-01 item 2: state what was actually checked, not an endorsement --
-		// a commit landed with no captured failure, NOT "the work is verified".
+		// CR-01 iter4: state what was actually checked, not an endorsement --
+		// HEAD moved with no captured failure, NOT that a commit landed or is verified.
 		reason: verdict.ok
-			? `a commit landed at ${headSha} with no failed tool result recorded during this run -- the work itself is not verified`
+			? `HEAD moved to ${headSha} with no failed tool result recorded during this run -- whether a commit was created, and whether it contains the work, are both unverified`
 			: verdict.reason,
 		baseSha: state.baseSha,
 		headSha,

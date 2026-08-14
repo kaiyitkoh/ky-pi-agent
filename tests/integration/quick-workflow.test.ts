@@ -1053,6 +1053,106 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
+	it("case 9 (CR-01 iteration 4 regression, PROBE W1) -- a checkout that moves HEAD without committing anything is worded as HEAD moving, never as a commit landing", async () => {
+		const candidate = flashExecutorCandidate();
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					// (1) a real, successful tool call that moves HEAD -- CREATES
+					// NO COMMIT, landing on a SHA that already existed before this
+					// run was even armed.
+					fauxAssistantMessage([fauxToolCall("bash", { command: "git checkout --detach HEAD~1" })], {
+						stopReason: "toolUse",
+					}),
+					// (2) a false completion claim -- no commit was ever made here.
+					fauxAssistantMessage([fauxText("done, I implemented and committed the fix and all tests pass")], {
+						stopReason: "stop",
+					}),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+				// A second commit so HEAD~1 is a real, pre-existing commit for the
+				// checkout below to land on.
+				writeFileSync(join(cwd, "second.txt"), "second\n", "utf-8");
+				runGit(["add", "--", "second.txt"], cwd);
+				runGit(["commit", "-m", "second"], cwd);
+				const totalCommitsBefore = Number(runGit(["rev-list", "--count", "--all"], cwd).trim());
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- case 9 needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("implement and commit the fix", ctx);
+
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					await waitFor(
+						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
+						5000,
+						"case 9's evidence row",
+					);
+
+					const rows = readEvidence(cwd);
+					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
+					const row = rows[0] as EvidenceRowShape;
+
+					// PROBE W1's own shape: HEAD moved (a real, successful tool
+					// call), so the gate still accepts -- CR-01 (iteration 4) is
+					// about what the ACCEPT is worded as, never about tightening
+					// the predicate itself (that is Phase 8's job).
+					expect(row.verdict, `expected accept, got: ${JSON.stringify(row)}`).toBe("accept");
+					expect(row.baseSha, "HEAD moved during this run").not.toBe(row.headSha);
+
+					// No NEW commit object was created anywhere in the
+					// repository -- checkout --detach only moves a ref.
+					const totalCommitsAfter = Number(runGit(["rev-list", "--count", "--all"], cwd).trim());
+					expect(totalCommitsAfter, "PROBE W1: a checkout must never create a new commit object").toBe(
+						totalCommitsBefore,
+					);
+
+					// CR-01 (iteration 4): the row's own reason, and the
+					// notification shown to the user, must say what was actually
+					// checked -- never assert that a commit landed.
+					expect(
+						row.reason ?? "",
+						'PROBE W1: the evidence row must not claim "a commit landed" when checkout only moved HEAD',
+					).not.toContain("a commit landed");
+					expect(row.reason ?? "", "the row's own reason must say HEAD moved instead").toContain("HEAD moved");
+
+					expect(notifications.length, "an acceptance must still report an outcome").toBeGreaterThan(0);
+					const last = notifications.at(-1);
+					expect(
+						last?.text ?? "",
+						'PROBE W1: /quick\'s own notification must not claim "a commit landed"',
+					).not.toContain("a commit landed");
+					expect(last?.text ?? "", "the notification must say HEAD moved instead").toContain("HEAD moved");
+					expect(last?.level, "an acceptance is informational, not an error").toBe("info");
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
 	it("WR-01 regression -- a second /quick while a run is in flight is refused, and does not steal the first run's buffer", async () => {
 		const candidate = flashExecutorCandidate();
 

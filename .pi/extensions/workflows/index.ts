@@ -66,8 +66,8 @@ export default function (pi: ExtensionAPI): void {
 		try { sha = currentSha(armedCwd() ?? ctx.cwd); } catch { /* gate rejects on unknown SHA below */ }
 		try {
 			const verdict = endRun(sha);
-			// CR-01: accept wording states what was checked, not an endorsement.
-			if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: a commit landed at ${verdict.sha} with no failed tool result -- the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
+			// CR-01 iter4: accept wording states what was checked (HEAD moved), never that a commit landed.
+			if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: HEAD moved to ${verdict.sha} with no failed tool result -- no commit was verified and the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
 		} catch {
 			// Swallowed -- same rule as the tool_execution_end handler above.
 		}

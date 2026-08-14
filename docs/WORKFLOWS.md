@@ -184,17 +184,22 @@ belongs to the same task, and a failure recorded at the pre-commit SHA is
 still a fact about that task after the commit lands.
 
 **What an ACCEPT verdict actually guarantees, stated plainly because
-overclaiming here is worse than underclaiming it:** a commit landed during
-the run, made through a tool call Pi's own machinery executed and that
-exited 0, and no tool call finalized during the run — including a blocked,
-schema-invalid, unknown-tool or aborted one, and including a dropped capture
-— carried a structural failure. **What it does NOT guarantee:** that the commit's diff
-contains the claimed work, or that anything was meaningfully verified at
-all. An empty commit (`git commit --allow-empty`) and a commit of wholly
-unrelated content both still ACCEPT, because distinguishing "the commit
-contains the work" from "the commit is empty" needs a diff or a tree hash,
-which this phase does not have — that is Phase 8's job. `/quick`'s own
-notification text says this directly on acceptance
-(`quick: a commit landed at <sha> with no failed tool result -- the work
-itself is NOT verified`) rather than the stronger, and false, "evidence
-accepted."
+overclaiming here is worse than underclaiming it:** HEAD is a different
+commit than when the run was armed, and no tool call finalized during the
+run — including a blocked, schema-invalid, unknown-tool or aborted one, and
+including a dropped capture — carried a structural failure. **What it does
+NOT guarantee:** that a commit landed at all. `checkout`, `reset` and
+`revert` all move HEAD without committing anything — and `reset --hard` can
+DELETE a commit outright — so "HEAD moved" is not "a commit landed" (CR-01,
+iteration 4: the reviewer obtained an ACCEPT from `git checkout --detach
+HEAD~1`, which made zero commits, and from `git reset --hard HEAD~1`, which
+destroyed one). Even when a commit genuinely landed, this predicate does not
+guarantee its diff contains the claimed work, or that anything was
+meaningfully verified: an empty commit (`git commit --allow-empty`) and a
+commit of wholly unrelated content both still ACCEPT, because distinguishing
+any of this needs a diff or a tree hash, which this phase does not have —
+that is Phase 8's job. `/quick`'s own notification text says only what was
+checked
+(`quick: HEAD moved to <sha> with no failed tool result -- no commit was
+verified and the work itself is NOT verified`), never the stronger, and
+sometimes false, "a commit landed" or "evidence accepted."
