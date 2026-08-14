@@ -152,7 +152,7 @@
 import type { CanonicalInvocation } from "./shell.ts";
 import { canonicalise, normaliseExecutable } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
-import { canonicalisePathArg, classifyPathRead, classifyPathWrite, isSensitiveSearchRoot } from "./paths.ts";
+import { canonicalisePathArg, classifyPathRead, classifyPathWrite, isSensitiveSearchRoot, sameCanonicalPath } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
 import { classifyGitInvocation, classifyGlabInvocation } from "./git.ts";
 import type { InfraVerdict } from "./infra.ts";
@@ -491,6 +491,21 @@ function extractOptionalStringField(input: Readonly<Record<string, unknown>>, fi
  * would go through -- rather than skipped outright as an unconditional
  * allow. `facts.projectRoot` is already canonical (see `PolicyFacts`'s own
  * docstring), so it is used as-is, with no second `canonicalisePathArg` pass.
+ *
+ * WR-14: the ABSENT-path case is exempt from {@link isSensitiveSearchRoot}'s
+ * own `isWithinRoot(facts.home, canonicalPath)` half specifically when
+ * `facts.projectRoot === facts.home` (a session opened directly IN `$HOME`,
+ * so the project root and the home directory canonicalise identically). An
+ * earlier version of this function did not carve that out: a bare
+ * `grep { pattern: "x" }` / `find {}` / `ls {}` with no `path` at all
+ * defaulted to `facts.projectRoot`, and `isSensitiveSearchRoot` then found
+ * `facts.home` at-or-below that exact same root and blocked -- an
+ * unconditional block on the tool's own documented default (search the
+ * project root) purely because of WHERE the session happened to be opened,
+ * never a defensible reading of SAFE-06. A CALLER-SUPPLIED `path` that
+ * happens to equal the project root (`path: "."`, or the literal project
+ * root string) is NOT exempted here -- only the true absent-field default
+ * is, so an explicit `path` argument is still evaluated the normal way.
  */
 function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: PolicyFacts, fieldLabel: string): Verdict {
 	if (extraction.kind === "malformed") {
@@ -504,6 +519,11 @@ function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: Pol
 	const fileVerdict = classifyPathRead(canonicalPath, pathFacts);
 	if (fileVerdict.kind === "block") {
 		return { kind: "block", reason: fileVerdict.reason };
+	}
+	const pathWasAbsent = extraction.kind === "absent";
+	const sessionRootIsHome = sameCanonicalPath(facts.projectRoot, facts.home);
+	if (pathWasAbsent && sessionRootIsHome) {
+		return { kind: "allow" };
 	}
 	if (isSensitiveSearchRoot(canonicalPath, pathFacts)) {
 		return {

@@ -311,8 +311,16 @@ function basenameOf(canonicalPath: string): string {
 	return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
-/** Case-insensitive whole-path equality once both sides are reduced to root + segments (never a raw string compare). */
-function sameCanonicalPath(a: string, b: string): boolean {
+/**
+ * Case-insensitive whole-path equality once both sides are reduced to root +
+ * segments (never a raw string compare). Exported for WR-14:
+ * `policy.ts#evaluateSearchRootField` needs the SAME "are these the same
+ * canonical path" test this module's own detonation-target rules use, to
+ * decide whether the session's project root and home directory canonicalise
+ * identically -- reusing this rather than a second, hand-rolled comparison
+ * is what keeps the two notions of path equality from drifting apart.
+ */
+export function sameCanonicalPath(a: string, b: string): boolean {
 	const left = rootedSegmentsOf(a);
 	const right = rootedSegmentsOf(b);
 	if (left.root.toLowerCase() !== right.root.toLowerCase()) {
@@ -516,16 +524,26 @@ const SENSITIVE_SEARCH_ROOT_SEGMENTS = new Set([".aws", ".kube", ".ssh", ".gnupg
  * `allow`.
  *
  * Two independent ways a search root reaches a sensitive location:
- *   1. the root itself IS one of {@link SENSITIVE_SEARCH_ROOT_SEGMENTS}, or a
- *      descendant of one (searching a subdirectory OF `.aws` still walks
- *      credential files) — checked by segment membership, not a substring
- *      test, matching every other rule in this module.
- *   2. the root is `facts.home` itself, or an ANCESTOR of it. Every one of
- *      this project's conventional per-user secret directories lives
- *      directly under `$HOME`, so a search root that reaches `$HOME` reaches
- *      all of them without this module having to enumerate every possible
- *      sensitive subdirectory individually (`isWithinRoot(facts.home,
- *      canonicalPath)`: is `$HOME` at or below the search root).
+ *   1. the root is `facts.home` ITSELF, or reaches BELOW it (searching a
+ *      subdirectory OF `~/.aws` still walks credential files), AND one of
+ *      its segments is one of {@link SENSITIVE_SEARCH_ROOT_SEGMENTS} — the
+ *      HOME-anchoring is WR-14's own fix: an earlier version of this
+ *      predicate matched a `.aws`/`.kube`/`.ssh`/`.gnupg` segment ANYWHERE in
+ *      the path, unanchored, so a legitimate in-project path that merely
+ *      contains one of those segment names (`C:/repo/tests/fixtures/.ssh/
+ *      known_hosts_fixture`, `node_modules/<pkg>/.aws/`) blocked a genuine,
+ *      benign search. Every one of this project's conventional per-user
+ *      secret directories lives directly under `$HOME` — that is the only
+ *      place this segment check has a security reason to fire at all —
+ *      checked by segment membership, not a substring test, matching every
+ *      other rule in this module.
+ *   2. the root is `facts.home` itself, or an ANCESTOR of it
+ *      (`isWithinRoot(facts.home, canonicalPath)`: is `$HOME` at or below the
+ *      search root). This is what makes `path: "~"` / `path: "C:/Users/me"`
+ *      itself block even though `$HOME`'s own basename is never one of
+ *      {@link SENSITIVE_SEARCH_ROOT_SEGMENTS} — a search rooted AT or ABOVE
+ *      home reaches every conventional secret directory without this module
+ *      enumerating them individually.
  *
  * NOT covered: a caller-supplied `kubeconfigEnv` pointing OUTSIDE `$HOME`
  * entirely, and any glob WILDCARD shape (`.env*`) — both are residual,
@@ -534,7 +552,7 @@ const SENSITIVE_SEARCH_ROOT_SEGMENTS = new Set([".aws", ".kube", ".ssh", ".gnupg
  */
 export function isSensitiveSearchRoot(canonicalPath: string, facts: PathPolicyFacts): boolean {
 	const { parts } = rootedSegmentsOf(canonicalPath);
-	if (parts.some((part) => SENSITIVE_SEARCH_ROOT_SEGMENTS.has(part.toLowerCase()))) {
+	if (isWithinRoot(canonicalPath, facts.home) && parts.some((part) => SENSITIVE_SEARCH_ROOT_SEGMENTS.has(part.toLowerCase()))) {
 		return true;
 	}
 	return isWithinRoot(facts.home, canonicalPath);
