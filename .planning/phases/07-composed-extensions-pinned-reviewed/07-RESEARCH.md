@@ -437,7 +437,26 @@ No separate lockfile format exists; `.pi/settings.json`'s own `packages[]` is wh
 
 **If this table is empty:** N/A — five items recorded above, all genuinely worth a second look rather than pro forma.
 
-## Open Questions
+## Open Questions (RESOLVED at planning time, 2026-08-15)
+
+**Closure record — how each question below was settled during planning:**
+
+- **Q1 (`worktreeSetupHook` settings key path)** — **RESOLVED by plan 07-09, Task 1**, which makes
+  "read `src/shared/settings.ts` in full and confirm the exact configuration surface" an explicit
+  executable task rather than an assumption, exactly as the recommendation below asks.
+- **Q2 (programmatic disable flag for `pi-background-tasks`' fusion/delegate tools)** —
+  **DELIBERATELY NOT PURSUED.** Decision **D-07-B** accepts all 11 tools regardless of the answer,
+  because the file-glob approach was proven impossible (the tools register unconditionally at
+  `src/extension.ts:232,241` and force-re-append via `setActiveTools` on session start). Even a
+  working config flag would not change this phase's deliverable; it would change Phase 10's, where
+  this package is recorded as the strongest cut target. Carried forward to Phase 10, not closed by
+  investigation.
+- **Q3 (real `tsc --noEmit` worktree build vs. the synthetic proxy)** — **RESOLVED by plan 07-05**,
+  which adopts the synthetic-proxy recommendation below as the required Wave-0 proof, with the
+  decisive property that the test **fails before the setup hook runs and passes after** — so it
+  discharges "builds, not merely checks out" rather than asserting it.
+
+---
 
 1. **What exact settings key path does `pi-subagents` read `worktreeSetupHook` from?**
    - What we know: the config type carries the key (`ExtensionConfig["worktreeSetupHook"]`) and two call sites thread it into `createWorktrees()`.

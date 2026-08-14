@@ -46,8 +46,8 @@ created: 2026-08-15
 |---|---|---|---|---|---|
 | EXT-01 | Shipped `.pi/agents/*.md` carry `thinking`/`tools`/`systemPromptMode` and **no `model:` key**; per-agent config is expressible | unit | `npx vitest run tests/unit/subagent-agents-config.test.ts` | ❌ W0 | ⬜ pending |
 | EXT-02 | A real `git worktree add` lacks untracked `.env`/`node_modules`, and the configured setup hook remedies it so the worktree **builds** | integration | `npx vitest run tests/integration/worktree-build.test.ts` | ❌ W0 | ⬜ pending |
-| EXT-03 | Background/async subagent path is configured and does not block | session-level (`fauxProvider`) | `npx vitest run tests/integration/subagent-background.test.ts` | ❌ W0 | ⬜ pending |
-| EXT-04 | Mid-run steering delivers without killing the run | session-level | `npx vitest run tests/integration/subagent-steering.test.ts` | ❌ W0 | ⬜ pending |
+| EXT-03 | Background/async subagent mechanism exists in the pinned package, evidence bound to the pin | unit (source-evidence binding) | `npx vitest run tests/unit/subagent-capabilities.test.ts` | ❌ W0 | ⬜ pending |
+| EXT-04 | Mid-run steering mechanism exists in the pinned package, evidence bound to the pin | unit (source-evidence binding) | `npx vitest run tests/unit/subagent-capabilities.test.ts` | ❌ W0 | ⬜ pending |
 | EXT-05 | All 8 capabilities resolve to an installed or vendored source | unit | `npx vitest run tests/unit/extension-composition.test.ts` | ❌ W0 | ⬜ pending |
 | EXT-06 | Every capability covered by a bundled Pi example is sourced from it, not from npm | unit | `npx vitest run tests/unit/extension-composition.test.ts` | ❌ W0 | ⬜ pending |
 | EXT-07 | Hardened checkpoint restores the working tree **headlessly** and captures untracked files | integration | `npx vitest run tests/integration/git-checkpoint.test.ts` | ❌ W0 | ⬜ pending |
@@ -70,7 +70,18 @@ created: 2026-08-15
 - [ ] `tests/unit/subagent-agents-config.test.ts` — EXT-01, including the **no `model:` key** assertion (Addendum A2: settings `agentOverrides` cannot beat frontmatter, so a stray `model:` makes Phase 5 inert).
 - [ ] `tests/integration/worktree-build.test.ts` — EXT-02, the decisive new proof.
 - [ ] `tests/integration/git-checkpoint.test.ts` — EXT-07.
-- [ ] `tests/integration/subagent-background.test.ts`, `tests/integration/subagent-steering.test.ts` — EXT-03 / EXT-04, **scoped to this repo's composition** (that the config is present and wired), not to re-proving `pi-subagents`' own internals. Research recommends citing the package's own passing suite for third-party internals; the plan should state which side of that line each assertion sits on.
+- [ ] `tests/unit/subagent-capabilities.test.ts` — EXT-03 / EXT-04.
+
+  **Substitution note (planning, 2026-08-15).** This file replaces the originally-drafted
+  `tests/integration/subagent-background.test.ts` and `tests/integration/subagent-steering.test.ts`.
+  Reason: `pi-subagents` implements background execution and steering by spawning a **real child
+  `pi` process** (`src/runs/background/subagent-runner.ts:1340`, `["--mode","json","-p"]`), which
+  `fauxProvider` + `SessionManager.inMemory()` cannot exercise — a session-level test would have
+  proved nothing about the mechanism while appearing to. Plan 07-12 therefore binds the evidence to
+  the pin instead: the test reads the mechanism's source at the exact pinned version and **fails if
+  the version in `packages[]` moves without the evidence being re-read**. This keeps the standing
+  rule intact — nothing claims third-party runtime behaviour was observed, because it was not.
+  Real end-to-end subagent behaviour remains `RB-07-01` material, marked OUTSTANDING.
 
 ---
 
