@@ -228,6 +228,27 @@ inside a junctioned `node_modules` mutates the **parent repo's real tree**,
 not a private copy. That gap is named here as a **Phase 8 follow-up**,
 not solved in Phase 7.
 
+**Link mechanism, re-measured by `tests/integration/worktree-build.test.ts`
+(07-05, not merely assumed from 07-02's own measurement):**
+
+| Form | Result on this machine, 2026-08-15 |
+|---|---|
+| `fs.symlinkSync(target, link, "junction")` — the form the shipped hook uses | **Succeeds unconditionally**, no Developer Mode / elevation needed. Asserted every run; this is the mechanism the positive proof (build succeeds in the worktree after the hook runs) depends on. |
+| `fs.symlinkSync(target, link)` — the unqualified two-argument form `pi-subagents`' own `linkNodeModulesIfPresent` uses | **Measured, not asserted**: `EPERM: operation not permitted` on this machine, same as 07-02's manual probe. This outcome is environment-dependent (Developer Mode / elevation / POSIX) — the test reports whichever outcome occurs rather than asserting `EPERM` universally, so the suite does not fail on a correctly-configured machine. |
+
+A source-level regression guard in the same test file rejects an unqualified
+two-argument `symlinkSync(` call site in
+`.pi/scripts/worktree-setup-hook.mjs`. Falsified before this plan's commit:
+reverting the hook's third `"junction"` argument turned both the regression
+guard **and** the step-8/step-9 positive build proof red (the hook itself now
+fails closed with `EPERM` and exits non-zero, so the worktree build was never
+reached) — see `07-05-SUMMARY.md` for the exact failing test names.
+
+**Reminder, restated from the paragraph above:** the junction points at the
+**parent's real `node_modules`**, not a private copy — a subagent running a
+package-manager install inside its worktree mutates the parent tree. Still a
+**Phase 8 follow-up**, not solved here.
+
 ---
 
 ## Download counts are not evidence
