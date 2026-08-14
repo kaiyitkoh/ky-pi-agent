@@ -77,9 +77,9 @@
 - [ ] **ROUTE-03**: `/escalate` pulls a stronger model for one invocation, and the elevated state is visible and sticky until cleared **[FAUX]**
 - [ ] **ROUTE-04**: Single-shot roles (review, advisor, vision, summarise) run through `callModel()` → `ctx.modelRegistry.complete()` with per-call reasoning effort, not by mutating session state **[FAUX]**
 - [ ] **ROUTE-05**: Roles needing a tool loop run as subagents **[FAUX]**
-- [ ] **ROUTE-06**: Capability guards hard-block impossible routes: image → text-only model; oversized context → small-window model **[FAUX]**
-- [ ] **ROUTE-07**: A capability guard hard-blocks Bedrock non-Claude models with thinking enabled — `buildAdditionalModelRequestFields` silently drops it while the UI still offers the setting **[FAUX]**
-- [ ] **ROUTE-08**: A capability guard hard-blocks Bedrock DeepSeek R1 as an executor — it supports no tool calling at all **[FAUX]**
+- [x] **ROUTE-06**: Capability guards hard-block impossible routes: image → text-only model; oversized context → small-window model **[FAUX]**
+- [x] **ROUTE-07**: A capability guard hard-blocks Bedrock non-Claude models with thinking enabled — `buildAdditionalModelRequestFields` silently drops it while the UI still offers the setting **[FAUX]**
+- [x] **ROUTE-08**: A capability guard hard-blocks Bedrock DeepSeek R1 as an executor — it supports no tool calling at all **[FAUX]**
 - [ ] **ROUTE-09**: Mode selection persists across restarts via `pi.appendEntry`, costing zero context tokens **[FAUX]**
 - [ ] **ROUTE-10**: Every mode switch produces a wire dump proving the intended model was actually used **[FAUX]**
 - [ ] **ROUTE-11**: Qoder is available as a delegate tool that hands off a whole task and folds the result back — explicitly a foreign agent that bypasses the harness's tools, safety hooks, and wire inspector, and documented as such **[RUNBOOK]**
@@ -278,9 +278,9 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | ROUTE-03 | Phase 5 | Pending |
 | ROUTE-04 | Phase 5 | Pending |
 | ROUTE-05 | Phase 5 | Pending |
-| ROUTE-06 | Phase 5 | Pending |
-| ROUTE-07 | Phase 5 | Pending |
-| ROUTE-08 | Phase 5 | Pending |
+| ROUTE-06 | Phase 5 | Complete |
+| ROUTE-07 | Phase 5 | Complete |
+| ROUTE-08 | Phase 5 | Complete |
 | ROUTE-09 | Phase 5 | Pending |
 | ROUTE-10 | Phase 5 | Pending |
 | ROUTE-11 | Phase 5 | Pending |
