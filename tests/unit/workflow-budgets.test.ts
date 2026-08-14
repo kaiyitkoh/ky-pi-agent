@@ -45,6 +45,10 @@ import { repoRoot, trackedFiles } from "../helpers/git.ts";
 const WORKFLOWS_DIR = ".pi/extensions/workflows";
 const PROMPTS_DIR = ".pi/prompts";
 const SKILLS_DIR = ".pi/skills";
+/** WR-05: every command surface can hide outside `workflows/` too -- see {@link isCommandSource}. */
+const EXTENSIONS_DIR = ".pi/extensions";
+/** A file containing this text registers a `/command` directly -- WR-05's "what a file IS, not where it sits". */
+const COMMAND_MARKER = "registerCommand(";
 
 /**
  * The single authoritative registry (D-8). Raising a number here is a
@@ -58,6 +62,25 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 		budget: 300,
 		why: "CR-01 fix (baseSha param + no-commit branch) plus WR-03's armedCwd() export -- measured 298 " +
 			"raw lines 2026-08-14 (up from 279), rounded up to the next ten",
+	},
+	// WR-05: these three are NOT under workflows/ -- discovered because they contain
+	// COMMAND_MARKER (isCommandSource). Declared here so the completeness check
+	// below stays green; each keeps its OWN prior phase's size as its budget, not
+	// a number this phase re-reviewed for tightness.
+	{
+		file: ".pi/extensions/routing/index.ts",
+		budget: 690,
+		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 681 raw lines 2026-08-14, rounded up to the next ten",
+	},
+	{
+		file: ".pi/extensions/harness/index.ts",
+		budget: 100,
+		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 99 raw lines 2026-08-14, rounded up to the next ten",
+	},
+	{
+		file: ".pi/extensions/diagnostics/budget.ts",
+		budget: 710,
+		why: "Phase 2's /budget command -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 703 raw lines 2026-08-14, rounded up to the next ten",
 	},
 ];
 
@@ -91,25 +114,50 @@ function walkOnDisk(rel: string): string[] {
 	return out;
 }
 
+/** WR-05: a `.ts`/`.js` file that spells `registerCommand(` is a command surface, wherever it sits. */
+function isCommandSource(p: string): boolean {
+	return /\.(ts|js)$/.test(p) && readFileSync(join(repoRoot(), p), "utf-8").includes(COMMAND_MARKER);
+}
+
 /**
  * Union of the git index and the working tree (decision D-9): a 1,169-line
  * workflow file that is on disk but not yet committed must fail NOW, not at
- * the moment someone runs `git commit`. Filtered to exactly `.ts` under
- * `workflows/` and exactly `.md` under `prompts/`/`skills/` (decision D-10 --
+ * the moment someone runs `git commit`. Filtered to `.ts`/`.js` under
+ * `workflows/`, exactly `.md` under `prompts/`/`skills/` (decision D-10 --
  * Pi has exactly three ways a workflow can be authored: extension, prompt
- * template, skill).
+ * template, skill), and -- WR-05 -- any OTHER `.ts`/`.js` under
+ * `.pi/extensions/` that spells `registerCommand(` directly: discovery by
+ * WHAT a file is, not by WHERE it sits, so a command surface added as a
+ * sibling subsystem directory (Phase 9's `/grill`, `/plan`, `/execute`,
+ * `/review` as `.pi/extensions/grill/index.ts` and friends) cannot land
+ * unbudgeted just because it never touched `workflows/`.
  */
 function discoverWorkflowFiles(): string[] {
-	const tracked = [...trackedFiles(WORKFLOWS_DIR), ...trackedFiles(PROMPTS_DIR), ...trackedFiles(SKILLS_DIR)];
-	const onDisk = [...walkOnDisk(WORKFLOWS_DIR), ...walkOnDisk(PROMPTS_DIR), ...walkOnDisk(SKILLS_DIR)];
+	const tracked = [
+		...trackedFiles(WORKFLOWS_DIR),
+		...trackedFiles(PROMPTS_DIR),
+		...trackedFiles(SKILLS_DIR),
+		...trackedFiles(EXTENSIONS_DIR),
+	];
+	const onDisk = [
+		...walkOnDisk(WORKFLOWS_DIR),
+		...walkOnDisk(PROMPTS_DIR),
+		...walkOnDisk(SKILLS_DIR),
+		...walkOnDisk(EXTENSIONS_DIR),
+	];
 	const union = new Set([...tracked, ...onDisk]);
 	return Array.from(union)
 		.filter(
 			(p) =>
-				(p.startsWith(`${WORKFLOWS_DIR}/`) && p.endsWith(".ts")) ||
+				(p.startsWith(`${WORKFLOWS_DIR}/`) && /\.(ts|js)$/.test(p)) ||
 				(p.startsWith(`${PROMPTS_DIR}/`) && p.endsWith(".md")) ||
-				(p.startsWith(`${SKILLS_DIR}/`) && p.endsWith(".md")),
+				(p.startsWith(`${SKILLS_DIR}/`) && p.endsWith(".md")) ||
+				(!p.startsWith(`${WORKFLOWS_DIR}/`) && p.startsWith(`${EXTENSIONS_DIR}/`) && isCommandSource(p)),
 		)
+		// IN-02: a file still in the git index but deleted on disk (`git rm
+		// --cached`, or a delete not yet staged) must not crash the aggregate
+		// below with a raw ENOENT -- drop it here instead.
+		.filter((p) => existsSync(join(repoRoot(), p)))
 		.sort();
 }
 
@@ -153,7 +201,7 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 	});
 
 	it("the workflows/ directory total never exceeds its ratchet aggregate", () => {
-		const workflowTsFiles = discovered.filter((p) => p.startsWith(`${WORKFLOWS_DIR}/`) && p.endsWith(".ts"));
+		const workflowTsFiles = discovered.filter((p) => p.startsWith(`${WORKFLOWS_DIR}/`) && /\.(ts|js)$/.test(p));
 		const total = workflowTsFiles.reduce((sum, f) => sum + countRawLines(f), 0);
 		expect(
 			total,
@@ -162,6 +210,32 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 				"shrinking one file by moving its lines into a private helper under the same directory " +
 				"does not pass here",
 		).toBeLessThanOrEqual(WORKFLOWS_DIR_TOTAL_BUDGET);
+	});
+});
+
+/**
+ * WR-05 -- `isCommandSource` is the predicate that lets discovery see a
+ * command surface OUTSIDE `workflows/`. Tested directly against two real
+ * files already in this repository, rather than only indirectly through
+ * `discoverWorkflowFiles()`'s completeness check -- which cannot itself
+ * distinguish "the predicate works" from "every file it would have caught is
+ * already declared", since this commit declares all three it finds.
+ */
+describe("WR-05 -- isCommandSource discovers a command surface by content, not by location", () => {
+	it("is true for a real file outside workflows/ that spells registerCommand( (routing/index.ts)", () => {
+		expect(
+			isCommandSource(".pi/extensions/routing/index.ts"),
+			"routing/index.ts registers /mode and /escalate -- WR-05's whole point is that this must be " +
+				"discoverable even though it is not under workflows/",
+		).toBe(true);
+	});
+
+	it("is false for a real .ts file that does NOT spell registerCommand( (evidence.ts, by its own boundary rule)", () => {
+		expect(
+			isCommandSource(".pi/extensions/workflows/evidence.ts"),
+			"evidence.ts's own module docstring says it registers nothing and does not spell the " +
+				"registration call even in prose -- isCommandSource must not false-positive on it",
+		).toBe(false);
 	});
 });
 
