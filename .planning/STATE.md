@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-01-PLAN.md -- hardening assertion and live pin re-verification, docs/EXTENSIONS.md created
-last_updated: "2026-08-14T19:18:24.753Z"
+stopped_at: Completed 07-02-PLAN.md -- worktree fixture helper and Windows-safe setup hook (EXT-02)
+last_updated: "2026-08-14T19:28:56.374Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 61
+  completed_plans: 62
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 2 of 13
+Plan: 3 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 85%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -128,6 +128,7 @@ credentials can do has been done".
 | Phase 06 P03 | 35m | 2 tasks | 1 files |
 | Phase 06 P04 | ~50min | 2 tasks | 1 files |
 | Phase 07 P01 | 20m | 3 tasks | 1 files |
+| Phase 07 P02 | 10m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -320,6 +321,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-01: all six re-checked package versions are UNCHANGED against 07-CONTEXT.md's 2026-08-15 table; pi-loop-police's license=NONE re-confirmed via gh api and tarball listing, EXT-10 vendoring stands
 - [Phase 07]: 07-01: vendored items sit FLAT under .pi/extensions/ per decision D-07-D, never under a vendor/ parent -- tests/unit/extension-layout.test.ts:58's NESTED_INDEX regex only matches one directory level, superseding 07-RESEARCH.md's suggested vendor/ subdirectory layout
 - [Phase 07]: 07-01: pi-web-access is the only installed package with genuine transitive caret-range residuals (8 deps, including a third uncontrolled typebox instance); pi-subagents/pi-background-tasks own dependencies are exact pins, recorded as a second-module-instance risk marked UNVERIFIED
+- [Phase 07]: 07-02: worktree.ts's local run() is copied verbatim from git.ts:45-56 rather than sharing an exported wrapper -- keeps the new module's error semantics independent while avoiding a second regex/logic drift
+- [Phase 07]: 07-02: commitFile requires its parent directory to exist first -- every prior git.ts caller only ever wrote flat filenames, so mkdirSync(join(repo,"src"),{recursive:true}) precedes commitFile(repo,"src/index.js",...)
+- [Phase 07]: 07-02: the worktree setup hook fails closed on a not-yet-existing worktreePath rather than crashing on symlinkSync's own ENOENT -- matches the real invocation order where git worktree add always runs before the hook is spawned
+- [Phase 07]: 07-02: fs.symlinkSync(src,dst,"junction") verified live on this machine to succeed without Developer Mode/elevation and resolve through to the real node_modules tree -- confirms 07-RESEARCH.md's finding was not machine-specific luck
 
 ### Pending Todos
 
@@ -367,8 +372,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T19:18:24.743Z
-Stopped at: Completed 07-01-PLAN.md -- hardening assertion and live pin re-verification, docs/EXTENSIONS.md created
+Last session: 2026-08-14T19:28:56.363Z
+Stopped at: Completed 07-02-PLAN.md -- worktree fixture helper and Windows-safe setup hook (EXT-02)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
