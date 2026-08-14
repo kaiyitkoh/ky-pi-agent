@@ -1,10 +1,10 @@
 ---
 phase: 04-safety-deployment-guardrails
-reviewed: 2026-08-14T00:00:00Z
+reviewed: 2026-08-14T09:20:00Z
 depth: standard
-files_reviewed: 39
+iteration: 2
+files_reviewed: 24
 files_reviewed_list:
-  - .pi/extensions/diagnostics/jsonl.ts
   - .pi/extensions/safety/approvals.ts
   - .pi/extensions/safety/audit.ts
   - .pi/extensions/safety/git.ts
@@ -15,437 +15,503 @@ files_reviewed_list:
   - .pi/extensions/safety/schema.ts
   - .pi/extensions/safety/shell.ts
   - .pi/lib/jsonl.ts
-  - bin/bootstrap.sh
   - docs/RUNBOOK.md
   - docs/SAFETY.md
   - tests/fixtures/evasion-corpus.ts
   - tests/integration/audit-concurrency.test.ts
-  - tests/integration/bootstrap-safety-stub.test.ts
+  - tests/integration/confirm-approve-reissue.test.ts
   - tests/integration/double-enforcement.test.ts
-  - tests/integration/git-head-main.test.ts
-  - tests/integration/gitlab-push-protection.test.ts
   - tests/integration/headless-deny.test.ts
-  - tests/integration/subagent-block.test.ts
-  - tests/integration/user-scope-load.test.ts
+  - tests/integration/path-canonicalisation.test.ts
   - tests/unit/approvals.test.ts
-  - tests/unit/audit-jsonl.test.ts
   - tests/unit/contributing-boundary.test.ts
-  - tests/unit/docs-policy.test.ts
   - tests/unit/evasion-corpus.test.ts
   - tests/unit/git-policy.test.ts
   - tests/unit/infra-policy.test.ts
-  - tests/unit/jsonl-append-only.test.ts
-  - tests/unit/logs-gitignored.test.ts
   - tests/unit/path-policy.test.ts
-  - tests/unit/pinning.test.ts
   - tests/unit/policy-compose.test.ts
   - tests/unit/safety-entry.test.ts
-  - tests/unit/shell-deny-list.test.ts
   - tests/unit/shell-parse.test.ts
-  - tests/unit/unbash-ast.test.ts
 findings:
-  critical: 5
-  warning: 8
-  info: 0
-  total: 13
+  critical: 3
+  warning: 4
+  info: 5
+  total: 12
 status: issues_found
 ---
 
-# Phase 4: Code Review Report
+# Phase 4: Code Review Report (iteration 2 — re-review after `--fix`)
 
 **Reviewed:** 2026-08-14
 **Depth:** standard
-**Files Reviewed:** 39
+**Files Reviewed:** 24
 **Status:** issues_found
 
 ## Summary
 
-The parsing layer (`shell.ts`), the classifier tables (`git.ts`, `infra.ts`, `paths.ts`) and
-the audit writer (`.pi/lib/jsonl.ts`, `safety/audit.ts`) are genuinely well built, and the
-runbook/status machinery in `docs-policy.test.ts` is one of the few doc guards in this repo
-that cannot be disarmed by deleting an id. `RB-04-01` is correctly OUTSTANDING in both the
-summary table and the detail section.
+The suite is green (212/212 across the nine safety files I re-ran) and the fix
+report claims 13/13. By execution, **7 of 13 are genuinely fixed, 2 are
+partially fixed and still exploitable, 1 is honestly accepted-and-published,
+and 3 are fixed in code but whose claimed test coverage does not exist.** The
+fix pass also introduced one new fail-open that is strictly worse than the
+finding it closed.
 
-But the suite is green because it never exercises the shapes the harness actually produces at
-runtime. **Every** fixture in `path-policy.test.ts`, `policy-compose.test.ts` and
-`evasion-corpus.test.ts` supplies a forward-slash `cwd`/`home`/`projectRoot` (`"C:/repo"`),
-while `index.ts#buildFacts` feeds the real `ctx.cwd` and `os.homedir()`, which on the target
-platform are backslash strings. Every fixture spells executables as bare lower-case words,
-while Windows/Git Bash routinely produces `git.exe` and absolute-path invocations. I ran the
-real modules against the real shapes; the results are in CR-02 and CR-03 and both are
-reproducible in ten lines of Node.
+Verified fixed by re-running the original executed evidence: **CR-01** (the
+confirm→approve→re-issue protocol now completes, is one-shot at the wrapper, and
+a mutated command after approval still blocks — all four steps executed below),
+**CR-02** (both halves: a write inside a native-backslash project root is now
+allowed, and `~/.bashrc` now blocks via the *bashrc* rule rather than
+accidentally via containment), **CR-05** (refspec checked independently of
+`HEAD`, with the paired negative holding), **WR-03**, **WR-04**, **WR-05**,
+**WR-06**. `RB-04-01` is still `OUTSTANDING` in both `docs/RUNBOOK.md:862` and
+`:866` — not flipped.
 
-Three of the five criticals are outright fail-OPEN (CR-03, CR-04, CR-05: a protected-branch
-push, a mutating infra call and a secrets read all reach execution). One is fail-CLOSED but
-harness-breaking (CR-02: `write`/`edit` are unusable on Windows). One kills the whole
-approval protocol (CR-01: `approve_ky_command` cannot ever unblock anything — the hook never
-consumes the grant it told the model to obtain).
+The three blockers below are all things I executed against the real modules:
 
-Notably, `headless-deny.test.ts:70-79` claims the confirm/approve path "is unit-proven in
-`tests/unit/safety-entry.test.ts` and `tests/integration/double-enforcement.test.ts`". Neither
-file touches it. That unverified claim is what let CR-01 ship.
+1. **CR-06 (new, introduced by the WR-07 fix):** the `globalThis` "already
+   installed" flag makes the safety extension a permanent process-wide no-op
+   after its first load. Pi's `/reload` calls the factory again with a fresh
+   `api` in the same process, so **after any `/reload` the session runs with
+   Pi's unwrapped built-in `bash`/`read`/`write`/`edit` and no `tool_call`
+   hook at all.** Executed: second install registers `[]` tools and `[]` hooks.
+2. **CR-07 (CR-04 partially fixed):** `evaluateGrep` catches exactly the two
+   literal examples I wrote in the last review and nothing else. Proven end to
+   end against the real Pi `grep` tool: `grep { pattern:
+   "aws_secret_access_key", path: "~/.aws" }` → verdict `allow`, and the tool
+   returns `aws_secret_access_key = SUPERSECRET123` into model context.
+   `docs/SAFETY.md:59-63` now claims this surface is "governed by the same
+   table `read` uses", which it is not.
+3. **CR-08 (CR-03 partially fixed):** `normaliseExecutable` was added and wired
+   into `policy.ts`/`infra.ts` — but `shell.ts`'s own two bare-verb gates
+   (`findShellRunnerDenial`, `extractGitCwdOverride`) still compare raw
+   `.toLowerCase()`. Executed: `bash.exe -c "git push"`, `/bin/sh -c "git
+   push"`, `sh.exe -c "git push"` and `/usr/bin/xargs git push` all return
+   `allow`, while their bare-name spellings block.
+
+Separately, the CR-04 fix has a cost the phase never accounted for: Pi's
+default active tool set is `["read","bash","edit","write"]`
+[`dist/core/sdk.js:132,136`] — `grep`/`find`/`ls` are registered but **not
+active**. Registering them as extension tools *activates* them
+(`_refreshToolRegistry`'s `includeAllExtensionTools: true`,
+`agent-session.js:158-161`, `:1993-2003`), adding a measured **532 tokens per
+turn** while `contributing-boundary.test.ts:100-104` still records the BOOT-10
+justification "the four WRAPPED tools … add ZERO net schema cost". See WR-09.
+
+Finally, the fix pass repeated the exact defect that let CR-01 ship in the
+first place: an untrue coverage claim in a test docstring.
+`headless-deny.test.ts:70-79` is **byte-for-byte unchanged** and still points
+at two files that do not cover the confirm path, and the new
+`path-canonicalisation.test.ts:42-48` asserts that CR-02's fail-open half "is
+proven at the `paths.ts`/`policy.ts` unit level" in two files that contain no
+backslash-rooted fixture at all. See WR-10 and WR-11.
+
+## Verification of the 13 prior findings
+
+| ID | Verdict | Executed evidence |
+|----|---------|-------------------|
+| CR-01 | **FIXED** | Drove the real hook + real wrapper: issue → `BLOCK` with request id; `approve()`; retry → hook returns `undefined` (defer); wrapper → real bash ran (`terraform: command not found`, i.e. the *tool's* error, not the guard's); 2nd retry → hook `BLOCK` again and wrapper throws the confirm reason; a **mutated** command presented after approval → wrapper blocks. One-shot holds, not a permanent allowlist. |
+| CR-02 | **FIXED** (both halves) | With real `ctx.cwd`/`homedir()`: pre-fix shape blocks `write src/index.ts` as "resolves outside the project root" and blocks `~/.bashrc` for the *wrong* reason; post-fix `write src/index.ts` → `allow`, `~/.bashrc` → block *"is the user's shell rc file"*, `~/.gitconfig`/`~/.bash_profile` likewise. Test coverage of the fail-open half is missing — see WR-10. |
+| CR-03 | **PARTIALLY FIXED** | `git.exe push`, `/usr/bin/git push`, `./git push`, `terraform.exe apply`, `kubectl.exe delete`, `aws.exe secretsmanager get-secret-value`, `glab.exe mr merge`, `env git.exe push` all now non-allow. But `bash.exe -c "git push"`, `/bin/sh -c "git push"`, `/usr/bin/xargs git push` still `allow`. See **CR-08**. |
+| CR-04 | **PARTIALLY FIXED** | The four corpus rows (EV-52..EV-55) block. `grep { path: "~/.aws" }`, `grep { glob: ".env*" }`, `grep { pattern }` with no path, `ls { path: "~/.aws" }` all `allow`; the first proven to return real credential text. See **CR-07**. |
+| CR-05 | **FIXED** | On `feature/x`: `git push origin HEAD:main`, `git push --force origin main`, `git push origin feature/x:main`, `git push origin refs/heads/main` → `block`; `git push origin feature/x` → `allow` (paired negative holds). |
+| WR-01 | **ACCEPTED-AND-DOCUMENTED** | EV-56 (`.env::$DATA`) / EV-57 (`ENV~1`) added as `OUT-OF-SCOPE`; published at `docs/SAFETY.md:104-105`; Group A' now asserts both genuinely return `allow`, so the limit cannot go stale silently. Legitimate outcome. |
+| WR-02 | **FIXED** | Every delegate is now built per call from `ctx.cwd`; the registration-time instance is metadata only. Verified `createLocalBashOperations` holds no per-instance state (`core/tools/bash.js:43-68`), so per-call construction is genuinely free and loses no shell state. |
+| WR-03 | **FIXED** | Group A' drives every `OUT-OF-SCOPE` row through the real `evaluate()` and asserts `allow`. Corpus diff since `e30e44e` shows **no** row re-bucketed BLOCKED→OUT-OF-SCOPE; the 11 doc rows and 11 corpus rows match in both directions. |
+| WR-04 | **FIXED** | Both children now `import { writeAuditRow }` from the real `audit.ts` via `pathToFileURL`. Residual oracle weakness noted as IN-02. |
+| WR-05 | **FIXED** | `sweepExpired()` at the top of `createPending()`; `approvals.test.ts` inspects the raw `globalThis` store so it distinguishes "swept" from "expired but present". |
+| WR-06 | **FIXED** | On protected `main`: `git -C /repo status`, `git --no-pager log`, `git -c user.name=x diff` → `allow`; `git -C /repo push` → still `block`. |
+| WR-07 | **REGRESSED** | The cure disables the whole guard after `/reload`. See **CR-06**. |
+| WR-08 | **PARTIALLY FIXED** | Three of four bullets are now true. The sensitive-read bullet (`docs/SAFETY.md:59-63`) became a **new** over-claim about `grep` — see CR-07. |
 
 ## Critical Issues
 
-### CR-01: The confirm → approve → re-issue protocol can never complete; `approve_ky_command` is dead code
+### CR-06: the WR-07 idempotency guard silently disables the entire safety extension after `/reload`
 
-**File:** `.pi/extensions/safety/index.ts:543-559` (and `:246-256`)
-**Issue:** The `tool_call` hook handles a `confirm` verdict by *unconditionally* calling
-`createPending()` and returning `{ block: true }`. It never calls `consume()`. `consume()` is
-only reached from `wrapperOutcome()` (`index.ts:246`), which only runs inside the wrapped
-tool's `execute()` — and `execute()` is never reached, because the hook already blocked the
-call.
+**File:** `.pi/extensions/safety/index.ts:720`, `:739-751`
+**Issue:** The default export sets `globalThis.__kyPiSafetyExtensionInstalled = true`
+on first run and returns immediately on every subsequent run **for the lifetime
+of the process**. Pi's `/reload` is a second run in the same process:
+`AgentSession#reload` (`dist/core/agent-session.js:2052`) builds a brand-new
+`ExtensionRunner` and a brand-new tool registry, then `loadExtension` calls
+`await factory(api)` again with a fresh `api`
+(`dist/core/extensions/loader.js:409`). The module itself may come from
+`extensionCache`, but the *factory is still invoked* — and it now no-ops.
 
-Concrete failure: the model runs `terraform apply` → hook blocks with `request_id=A` → model
-calls `approve_ky_command` → the human selects **Approve** → `approve()` stores a grant keyed
-on `requestKey` → the model re-issues the identical `terraform apply` → the hook re-evaluates,
-gets `confirm` again, mints a *fresh* pending `request_id=B`, and blocks again. Forever. Every
-`confirm` verdict is a permanent block: `terraform apply|destroy|import|state rm|state mv|
-taint|untaint|force-unlock|workspace delete`, every mutating `aws` call, `kubectl delete|apply|
-replace|patch|scale|drain|cordon|exec`, and every unclassified terraform/kubectl verb
-(`infra.ts:350-353`, `:391-394`). The 275-token schema cost justified in
-`contributing-boundary.test.ts:92-103` buys nothing, and `granted`/`pending` grow one entry per
-attempt with no sweep (see WR-05).
+Executed, against the real entry point:
 
-No test covers this: `safety-entry.test.ts` asserts registration shape only;
-`double-enforcement.test.ts` uses `cat terraform.tfstate`, a hard `block`, never a `confirm`;
-`headless-deny.test.ts:70-79` explicitly states the confirm path is out of scope while
-asserting — incorrectly — that those two files prove it.
+```
+load #1 tools : ["bash","read","write","edit","grep","find","ls","approve_ky_command"]
+load #1 events: ["tool_call","session_start"]
+load #2 tools : []          <-- this is what /reload gets
+load #2 events: []
+```
 
-**Fix:** consume the grant in the hook, before minting a new pending, and keep the wrapper's
-consume as the second layer:
+After a `/reload` the session therefore runs with Pi's **unwrapped** built-in
+`bash`/`read`/`write`/`edit` (`_refreshToolRegistry` repopulates them from
+`_baseToolDefinitions`) and **no `tool_call` hook**. Both enforcement layers are
+gone, silently, with no error anywhere. That is strictly worse than the
+duplicate audit rows WR-07 asked to fix. `/reload` is not a corner case here —
+CLAUDE.md's stack table names it explicitly ("a build step … breaks `/reload`")
+and Phase 1 shipped a dedicated `/reload` structural-precondition test.
+
+Two further consequences of putting the flag on `globalThis`:
+
+- Any other extension loaded earlier that happens to write
+  `globalThis.__kyPiSafetyExtensionInstalled = true` disables this guard
+  entirely. A security control should not expose a global kill switch.
+- `resetSafetyInstalledForTests()` is exported production code whose only
+  purpose is to defeat the guard, and three test files now have to call it
+  (`safety-entry.test.ts:71,238,276`, `double-enforcement.test.ts:187,229,293`,
+  `confirm-approve-reissue.test.ts:159`, `path-canonicalisation.test.ts:103`).
+  That churn is the design telling you the flag is at the wrong scope.
+
+**Fix:** do not dedupe at process scope. The duplicate-load hazard is
+specifically *two paths registering in one runner build*; `/reload` is *one path
+registering in a new runner build*, and a process-wide flag cannot tell them
+apart. Two workable options:
+
+1. Move the guard into the user-scope stub, where it belongs. Have
+   `bin/bootstrap.sh#install_safety_extension` emit a stub that no-ops when the
+   project copy is present:
 
 ```ts
-if (verdict.kind === "confirm") {
-    if (consume(verdict.requestKey)) {
-        writeAuditRow(ctx.cwd, {
-            event: HOOK_AUDIT_EVENT, tool: toolName, command, cwd: ctx.cwd,
-            verdict: "allow",
-            reason: `hook: one-shot approval grant consumed -- ${verdict.reason}`,
-        });
-        return undefined; // let it reach the wrapper, which re-evaluates independently
-    }
-    const requestId = createPending(verdict.requestKey, command, verdict.reason);
-    // ... existing block path
+// ~/.pi/agent/extensions/ky-safety/index.ts (generated)
+import { existsSync } from "node:fs";
+import { join } from "node:path";
+export default async function (pi) {
+    // The project-scoped copy is auto-discovered and registers first; loading
+    // this stub as well would register a SECOND tool_call handler.
+    if (existsSync(join(process.cwd(), ".pi", "extensions", "safety", "index.ts"))) return;
+    (await import("<repo>/.pi/extensions/safety/index.ts")).default(pi);
 }
 ```
 
-Note this makes the grant single-use across BOTH layers, so the wrapper must re-derive its
-own authorisation rather than calling `consume()` a second time on the same key — e.g. have
-the hook stamp a short-lived, single-use "hook already consumed" marker keyed on the same
-`requestKey`, or move the consume to the wrapper only and have the hook return `undefined`
-when a grant exists (`peek`) without removing it. Whichever is chosen, add an integration
-test that drives block → `approve_ky_command` → re-issue → **execution**, because nothing in
-the suite does today.
+2. Or, if the guard must stay in `index.ts`, key it on something Pi recreates
+   per runner build rather than on `globalThis` — and add a test that models
+   `/reload` (two invocations that MUST both register) alongside the existing
+   test that models the double load (two invocations where the second must not).
+   The current `safety-entry.test.ts:274-308` only asserts the second case, so
+   it locks in the bug.
+
+Either way this needs an integration test that runs `pi` and issues `/reload`,
+then asserts an audit row still appears for a subsequent blocked command.
 
 ---
 
-### CR-02: `buildFacts` hands un-canonicalised Windows paths to the path policy — all writes blocked, all home detonation targets dead
+### CR-07: `grep` is still a working credential-exfiltration path — the CR-04 fix covers only the two literal examples from the last review
 
-**File:** `.pi/extensions/safety/index.ts:160-172` (consumed at `paths.ts:328-338`, `:442-458`)
-**Issue:** `buildFacts` sets `projectRoot: ctx.cwd` and `home: homedir()` verbatim. On Windows
-both are backslash strings (`C:\Users\Admin\Documents\ky-pi-agent`). `paths.ts` canonicalises
-the *target* path to forward slashes but never re-normalises `facts.projectRoot` or
-`facts.home` — `rootedSegmentsOf()` (`paths.ts:212-233`) only recognises `X:/`, so a `C:\...`
-root parses as root `"/"` with one giant segment.
+**File:** `.pi/extensions/safety/policy.ts:454-526`; `docs/SAFETY.md:59-63`
+**Issue:** `evaluateGrep` canonicalises `path`/`glob` and runs them through
+`classifyPathRead`, whose patterns match on **basename + parent segment**
+(`paths.ts:370-403`). `grep`'s `path` is documented as *"Directory or file to
+search (default: current directory)"* (`dist/core/tools/grep.js`, `grepSchema`),
+so a directory never matches any pattern while grep happily recurses into it and
+returns file **contents**.
 
-Executed against the real modules (Node 24.16.0, win32):
+Executed end to end against the real `createGrepTool`, with a fixture home
+containing `.aws/credentials`:
 
 ```
-projectRoot = C:\Users\Admin\Documents\ky-pi-agent
-write "src/index.ts"
-  -> canonical "C:/Users/Admin/Documents/ky-pi-agent/src/index.ts"
-  -> block: "... resolves outside the project root "C:\Users\Admin\Documents\ky-pi-agent""
+safety verdict for grep over the .aws DIRECTORY: allow
+grep output contains the secret: true
+--- output ---
+credentials:2: aws_secret_access_key = SUPERSECRET123
 ```
 
-Two consequences:
+The same probe run against `evaluate()` shows how narrow the coverage is:
 
-1. **Fail-closed, harness-breaking:** every `write` and `edit`, including files inside the
-   project, is blocked on the one platform this phase targets. The harness cannot edit its own
-   source.
-2. **Fail-open, latent:** the four home-anchored `DETONATION_TARGETS` (`bashrc`,
-   `bash-profile`, `profile`, `gitconfig`, `paths.ts:441-459`) build their comparand as
-   `` `${facts.home}/.bashrc` `` — `C:\Users\Admin/.bashrc` — which `sameCanonicalPath` can never
-   match against `C:/Users/Admin/.bashrc`. Proven: with the real `homedir()` the verdict reason
-   is *"resolves outside the project root"*; with the fixture-shaped forward-slash home it is
-   *"is the user's shell rc file"*. The moment (1) is fixed by normalising only `projectRoot`,
-   writes to `~/.bashrc` become allowed whenever the session cwd is at or above the home
-   directory. SAFE-13 is currently passing by coincidence.
+```
+grep {"pattern":".","path":"~/.aws/credentials"}                 block   <- the review's example
+grep {"pattern":"=","glob":".env"}                               block   <- the review's example
+grep {"pattern":"aws_secret_access_key","path":"~/.aws"}         allow
+grep {"pattern":"...","path":"C:/Users/tester/.aws/"}            allow
+grep {"pattern":"SECRET","glob":".env*"}                         allow
+grep {"pattern":"SECRET"}                                        allow   (no path = whole tree)
+grep {"pattern":"password","path":"C:/Users/tester"}             allow
+ls   {"path":"~/.aws"}                                           allow
+grep {"pattern":"x","path":["~/.aws/credentials"]}               allow   (non-string path silently ignored)
+```
 
-`path-policy.test.ts:41-43` and `policy-compose.test.ts:33-38` both hardcode `C:/...` fixtures,
-so neither shape is covered.
+For contrast, `read { path: "~/.aws/credentials" }` and `bash { command: "cat
+~/.aws/credentials" }` both block. So the guard is materially weaker on the
+surface the fix claims to have closed than on the ones it already covered.
 
-**Fix:** normalise in `buildFacts` and add a backslash-rooted fixture to both unit tables.
+The honesty failure compounds it. `docs/SAFETY.md:59-63` now reads *"block
+through the `read` tool directly, quoted bash arguments, and `grep`'s own
+`path`/`glob` parameters (`grep`/`find`/`ls` … are governed by the same table
+`read` uses)"*, and `tests/fixtures/evasion-corpus.ts` has **no**
+`OUT-OF-SCOPE` row for any of the shapes above. SAFE-15's contract is that an
+unpublished limit is the vulnerability; this is an unpublished limit created by
+a fix.
+
+**Fix (both halves, as before):**
+1. Make `evaluateGrep`/`evaluateFindOrLs` containment-aware rather than
+   basename-aware — a `path` that is *at or above* any sensitive location must
+   be denied, not just a path that *is* one:
 
 ```ts
-import { homedir } from "node:os";
-const toCanonicalRoot = (p: string) =>
-    canonicalisePathArg({ text: p, value: p }, { cwd: p, home: p });
+/** Deny when the search root would reach a sensitive location, not only when it IS one. */
+const SENSITIVE_DIR_SEGMENTS = [".aws", ".kube", ".ssh", ".gnupg"] as const;
 
-function buildFacts(ctx: ExtensionContext): PolicyFacts {
-    const cwd = toCanonicalRoot(ctx.cwd);
-    return { cwd, projectRoot: cwd, home: toCanonicalRoot(homedir()), /* ... */ };
+function searchRootIsSensitive(canonicalPath: string, facts: PolicyFacts): boolean {
+    const { parts } = rootedSegmentsOf(canonicalPath);          // export this from paths.ts
+    if (parts.some((p) => SENSITIVE_DIR_SEGMENTS.includes(p.toLowerCase() as never))) return true;
+    // A search root at or above $HOME reaches every one of them.
+    return isWithinRoot(facts.home, canonicalPath);              // note the argument order
 }
 ```
-
-Then add to `path-policy.test.ts`'s tables a `PROJECT_ROOT`/`HOME` pair built with `BS`
-(the file already has the helper) so the regression cannot come back.
+   and treat a *missing* `path` as "the project root" rather than as `allow`, so
+   `grep { pattern }` is evaluated against the same rule as `grep { path: "." }`.
+   A non-string `path`/`glob` should block as malformed, matching
+   `read`/`write`'s own `extractStringField` posture, not be silently skipped.
+2. Whatever remains uncovered after (1) — glob wildcards in particular — gets an
+   explicit `OUT-OF-SCOPE` corpus row and a `docs/SAFETY.md` table row **in the
+   same commit**, and the `:59-63` bullet must be narrowed to exactly what the
+   code does.
 
 ---
 
-### CR-03: Executable matching is exact-string — `git.exe push`, `/usr/bin/git push`, `terraform.exe apply` all ALLOW
+### CR-08: the CR-03 normalisation was not applied to `shell.ts`'s own two bare-verb gates — `bash.exe -c "git push"` and `/bin/sh -c "git push"` are ALLOWED
 
-**File:** `.pi/extensions/safety/policy.ts:318-330`; `.pi/extensions/safety/infra.ts:414-425`
-**Issue:** `evaluateInvocation` gates on `executable.toLowerCase() === "git"` / `=== "glab"`, and
-`classifyInfraInvocation` on `=== "aws"` / `"terraform"` / `"kubectl"`. `CanonicalInvocation.executable`
-is the literal argv[0] word after wrapper resolution — never basename-reduced, never
-extension-stripped. `SHELL_RUNNERS` does not catch it either (`git.exe` is not a runner).
+**File:** `.pi/extensions/safety/shell.ts:642-645`, `:703-707` (contract stated
+at `:330-333`)
+**Issue:** `normaliseExecutable` (`shell.ts:335-338`) says in its own docstring:
+*"Every caller that gates on a bare verb name … MUST route through this function
+rather than reading `invocation.executable` directly."* Two callers inside
+`shell.ts` itself do not:
+
+- `findShellRunnerDenial` (`:705`) — `SHELL_RUNNERS.has(inv.executable.toLowerCase())`
+- `extractGitCwdOverride` (`:643`) — `executable.toLowerCase() !== "git"`
 
 Executed against the real `evaluate()` with `currentBranchFor: () => "main"`,
 `protectedBranches: ["main"]`:
 
 ```
-"git push"                                              block
-"git.exe push"                                          allow
-"/usr/bin/git push"                                     allow
-"./git push"                                            allow
-"terraform.exe apply"                                   allow
-"kubectl.exe delete pod x"                              allow
-"aws.exe secretsmanager get-secret-value --secret-id x" allow
-"glab.exe mr merge"                                     allow
-"env git.exe push"                                      allow
+bash -c "git push"            block   (shell-runner)
+bash.exe -c "git push"        allow
+/bin/sh -c "git push"         allow
+sh.exe -c "git push"          allow
+/usr/bin/xargs git push       allow
 ```
 
-`git.exe` is not an adversarial spelling on this platform — it is what Git for Windows installs
-and what a model that has seen `where git` output will type. This defeats SAFE-04, SAFE-05,
-SAFE-06 (the aws sensitive-read arm) and SAFE-07 simultaneously, is absent from
-`tests/fixtures/evasion-corpus.ts`, and is not listed in `docs/SAFETY.md`'s "Known bypasses"
-table — so the published limits table currently overstates coverage.
+`/bin/sh -c` and `bash.exe` are not adversarial spellings — they are ordinary
+Git-Bash-on-Windows spellings, the same argument CR-03 made for `git.exe`.
+`shell.ts`'s own module docstring names `sh -c "git push"` and `xargs git push`
+as the exact shapes the shell-runner rule exists to catch, and
+`docs/SAFETY.md:36-39` publishes that claim without qualification. The
+`extractGitCwdOverride` miss is quieter but real: `git.exe -C /other/repo push`
+loses its `cwdOverride`, so the `HEAD` oracle is asked about the *wrong*
+repository.
 
-**Fix:** reduce to a basename and strip a Windows executable extension before every comparison,
-in one shared helper used by `policy.ts` and `infra.ts`:
+**Fix:** route both through the shared helper, in the same commit as corpus rows.
 
 ```ts
-/** argv[0] -> the comparable verb: basename, lower-cased, PATHEXT suffix removed. */
-export function normaliseExecutable(executable: string): string {
-    const base = executable.replace(/\\/g, "/").split("/").pop() ?? executable;
-    return base.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
+// shell.ts
+function extractGitCwdOverride(executable: string, args: readonly string[]): string | undefined {
+    if (normaliseExecutable(executable) !== "git") return undefined;
+    // ...
+}
+
+function findShellRunnerDenial(invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined {
+    return invocations.find(
+        (inv) => SHELL_RUNNERS.has(normaliseExecutable(inv.executable)) && GUARDED_VERB_PATTERN.test(inv.rawSegment),
+    );
 }
 ```
 
-Add `git.exe push`, `/usr/bin/git push`, `terraform.exe apply` and `glab.exe mr merge` as
-`BLOCKED` rows to the evasion corpus in the same commit.
-
----
-
-### CR-04: Pi's built-in `grep` / `find` / `ls` tools are unguarded and unaudited — SAFE-06 is bypassed by a default tool
-
-**File:** `.pi/extensions/safety/policy.ts:421-436`; `.pi/extensions/safety/index.ts:517-526`;
-`docs/SAFETY.md:83-93`
-**Issue:** `evaluate()` governs four tool names and the hook returns `undefined` for everything
-else. Pi 0.84.1 ships **seven** built-in tools — verified in
-`node_modules/@earendil-works/pi-coding-agent/dist/core/tools/index.js`:
-`allToolNames = new Set(["read","bash","edit","write","grep","find","ls"])`. `grep`'s schema
-(same file, `grep.js`) is `{ pattern, path?, glob?, ignoreCase?, literal?, context?, limit? }`
-and it returns matching **lines of file content**.
-
-So `grep { pattern: ".", path: "C:/Users/Admin/.aws/credentials" }` — or
-`grep { pattern: "=", glob: ".env" }` — returns the secret straight into the model's context,
-with no verdict, no block, and **no audit row at all**. This is the exact class SAFE-06 exists
-to prevent, reachable by a default-active tool with no shell involved, and it is markedly
-*easier* for a confused model to reach than the bash and `read` routes the guard does cover.
-
-`docs/SAFETY.md:51-53` states sensitive reads "block through both the `read` tool directly and
-quoted bash arguments" and the "Known bypasses" table names only `EV-42` ("any
-extension-registered tool that shells out internally"). Pi's own built-in `grep`/`find`/`ls`
-are neither extension-registered nor named anywhere. SAFE-15's deliverable is the honest limits
-table; this omission makes it dishonest.
-
-**Fix (both halves required):**
-1. Wrap and evaluate `grep`/`find`/`ls` — at minimum apply `classifyPathRead` to `grep.path`
-   and refuse a `glob` that matches a sensitive-read pattern; `find`/`ls` leak names rather
-   than contents and can be audit-only. Extend `evaluate()`'s switch and the hook's tool-name
-   filter together (they must stay in sync), and add the tool names to `safety-entry.test.ts`'s
-   expected registration list.
-2. Until (1) lands, add explicit `OUT-OF-SCOPE` corpus rows and `docs/SAFETY.md` table rows for
-   `grep`, `find` and `ls` by name.
-
----
-
-### CR-05: `git push --force origin main` from a feature branch is ALLOWED — the refspec target is never inspected
-
-**File:** `.pi/extensions/safety/git.ts:277-281` (with `:206-211`)
-**Issue:** `classifyGitInvocation` returns `{ kind: "allow" }` immediately when `HEAD` is not
-protected, before the write table is consulted at all. The push rule's own `why` string says
-*"a write regardless of refspec — the refspec target cannot be trusted from argv alone"*, but
-that reasoning is only applied on the protected-`HEAD` branch of the function.
-
-Executed with `currentBranchFor: () => "feature/x"`, `protectedBranches: ["main"]`:
-
-```
-"git push origin HEAD:main"        allow
-"git push origin feature/x:main"   allow
-"git push --force origin main"     allow
-```
-
-The last one names `main` literally in argv and is allowed. This is the single headline
-behaviour of the phase (do not let the model push to `main`) failing on a plain, non-obfuscated
-command, and the compensating control named for it — `RB-04-01`, GitLab server-side protection
-— is OUTSTANDING and unverified. It appears in neither the evasion corpus nor
-`docs/SAFETY.md`'s bypass table, while `docs/SAFETY.md:43-50` presents the git rules as the
-protected-branch control.
-
-**Fix:** evaluate the refspec independently of `HEAD`. Block a `push` whose argv contains any
-positional token whose destination side (`src:dst`, or a bare ref) case-insensitively matches a
-protected branch, regardless of the checked-out branch:
-
-```ts
-function pushTargetsProtected(args: readonly string[], protectedBranches: readonly string[]): boolean {
-    return args.some((a) => {
-        if (a.startsWith("-")) return false;
-        const dst = a.includes(":") ? a.slice(a.indexOf(":") + 1) : a;
-        const leaf = dst.replace(/^refs\/heads\//, "");
-        return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
-    });
-}
-```
-
-Then add `git push origin HEAD:main` and `git push --force origin main` (on `feature/x`) as
-`BLOCKED` corpus rows, and add a `git push origin feature/x` on `feature/x` → allow row as the
-paired negative so the new rule cannot degenerate into "any push is blocked".
+Add `bash.exe -c "git push"`, `/bin/sh -c "git push"` and `/usr/bin/xargs git
+push` as `BLOCKED` corpus rows next to EV-44..EV-51, and a `sh.exe -c "ls"` →
+allow paired negative so the rule cannot degenerate.
 
 ## Warnings
 
-### WR-01: Windows path aliasing (NTFS ADS, 8.3 short names) defeats every path rule and is unpublished
+### WR-09: wrapping `grep`/`find`/`ls` ACTIVATES three tools Pi does not activate by default, at a measured 532 tokens/turn, against a stale BOOT-10 justification
 
-**File:** `.pi/extensions/safety/paths.ts:274-281`, `:309-312`
-**Issue:** `canonicalisePathArg` is pure text manipulation — no `realpath`, no filesystem
-canonicalisation (deliberately, per the module docstring). On NTFS two aliases survive that:
+**File:** `.pi/extensions/safety/index.ts:400-427`;
+`tests/unit/contributing-boundary.test.ts:83-112`
+**Issue:** My own CR-04 called `grep`/`find`/`ls` "default-active". Checked at
+source, that was wrong: Pi 0.84.1's default active set is
+`["read","bash","edit","write"]` (`dist/core/sdk.js:132,136`), and this
+repository's `.pi/settings.json` is `{}`, so nothing overrides it.
+`grep`/`find`/`ls` are *registered* but not *active* — the model cannot call
+them. Registering them as **extension** tools flips that: `_refreshToolRegistry`
+is invoked with `includeAllExtensionTools: true` at boot and on reload
+(`agent-session.js:158-161`, `:2061-2064`) and pushes every extension tool into
+the active set (`:1993-2003`).
+
+So the fix handed the model three new callable tools in order to guard them —
+and the guard is the incomplete one in CR-07. Measured cost, using this
+project's own estimator (`chars/4`) over the exact
+`{type:"function",function:{name,description,parameters}}` shape Pi sends:
 
 ```
-read { path: ".env::$DATA" }  -> evaluate() = allow ; fs.readFileSync succeeds, returns SECRET=abc123
-read { path: "ENV~1"      }  -> evaluate() = allow ; fs.readFileSync succeeds, returns SECRET=abc123
+grep  bytes=1039  ~tokens=260
+find  bytes= 616  ~tokens=154
+ls    bytes= 472  ~tokens=118            total 532 tokens/turn
 ```
 
-Both verified by execution on this machine (8.3 name generation is enabled on `C:`; `dir /x`
-reports `.env` as `ENV~1`). The same aliases apply to `~/.aws/credentials`, `*.tfstate` and
-every `DETONATION_TARGETS` entry. A trailing-space alias (`.env `) was tested and does **not**
-work through Node, so it is not a gap.
+That is ~2.9x the 275-token cost the phase measured and justified, on a project
+whose stated core value is that the harness must not become the bottleneck.
+Meanwhile `contributing-boundary.test.ts:100-104` still records, as the BOOT-10
+(b) justification, *"The four WRAPPED tools (`bash`/`read`/`write`/`edit`) add
+ZERO net schema cost: they are registrations of tools Pi already ships and would
+already be serialised into every request whether or not this file wraps them"* —
+now false in both the count and the claim. (One thing that is fine:
+`createGrepTool`/`createFindTool`/`createLsTool` carry no `promptSnippet` or
+`promptGuidelines`, verified at runtime, so no system-prompt rebuild.)
 
-These are adversarial rather than confused-model shapes, which is consistent with the
-"mistake-catcher" ceiling — but SAFE-15's contract is that unpublished limits are the
-vulnerability. **Fix:** either strip an `::$DATA`/`:<stream>` suffix and reject a basename
-matching `/~\d$/` in `basenameOf()`, or add both to the corpus as `OUT-OF-SCOPE` rows with
-matching `docs/SAFETY.md` table entries.
+**Fix:** decide deliberately and record it. Either (a) keep the wrappers and
+update the (b) justification with the seven tool names and the measured 532
+tokens, accepting the cost explicitly; or (b) do not register `grep`/`find`/`ls`
+as tools at all — leave them inactive, keep only the `tool_call` hook's
+tool-name filter covering them (which costs nothing and still audits/denies if
+a future session activates them), and say so in `docs/SAFETY.md`. Option (b) is
+cheaper and strictly safer given CR-07.
 
-### WR-02: The wrapped tools execute against `process.cwd()` while policy evaluates against `ctx.cwd`
+### WR-10: CR-02's fail-open half has no test, and the new test's docstring claims otherwise
 
-**File:** `.pi/extensions/safety/index.ts:300-340`
-**Issue:** `registerWrappedTools` captures `const cwd = process.cwd()` once at extension-load
-time and passes it to `createBashTool`/`createReadTool`/`createWriteTool`/`createEditTool`. The
-built-in path tools resolve every relative path against that closed-over `cwd`
-(`dist/core/tools/read.js:134,158`, cited in this file's own docstring), while
-`classifyAtWrapper` evaluates containment against `ctx.cwd`. When the two differ the guard
-checks one root and the write lands under another — a genuine check-here/act-there split.
-`double-enforcement.test.ts` runs with exactly that divergence (session cwd is a temp dir,
-`process.cwd()` is the repo root) and passes only because its fixtures are `echo`.
-**Fix:** derive the tool cwd from the same source as the policy facts, or re-create the
-delegate tools per call from `ctx.cwd`; at minimum add an assertion that the two agree and
-block when they do not.
+**File:** `tests/integration/path-canonicalisation.test.ts:40-48`;
+`tests/unit/path-policy.test.ts:41-43`; `tests/unit/policy-compose.test.ts:32-40`
+**Issue:** The original CR-02 fix asked for a backslash-rooted `PROJECT_ROOT`/
+`HOME` fixture in both unit tables. Neither was added — `path-policy.test.ts`
+still hardcodes `HOME = "C:/Users/Admin"` / `PROJECT_ROOT = "C:/Users/Admin/project"`
+and `policy-compose.test.ts` still hardcodes `projectRoot: "C:/repo"`,
+`home: "C:/Users/tester"`. The new integration test covers only the
+*fail-closed* half (a write inside the project) and its own docstring says so —
+then asserts:
 
-### WR-03: `OUT-OF-SCOPE` corpus rows are never driven through `evaluate()` — a real bypass can be hidden by re-bucketing
+> "The FAIL-OPEN half of CR-02 … is proven at the `paths.ts`/`policy.ts` unit
+> level instead (`tests/unit/path-policy.test.ts`, `tests/unit/policy-compose.test.ts`)"
 
-**File:** `tests/unit/evasion-corpus.test.ts:72-87`, `:129-177`
-**Issue:** Group A drives only `BLOCKED` rows through `evaluate()`. Group B checks that every
-`OUT-OF-SCOPE` row's id/class appears in `docs/SAFETY.md` and that the doc has no extra ids —
-a *documentation* consistency check, not a behavioural one. So the disarm path is mechanical:
-if a `BLOCKED` row regresses to `allow`, flipping `expect` to `OUT-OF-SCOPE` and pasting one
-markdown row turns the suite green while the guard is weaker. The corpus docstring's claim that
-every bucket was "observed by execution" is never re-verified on any later run.
-**Fix:** add a Group A' asserting each `OUT-OF-SCOPE` row genuinely returns `allow`. That makes
-the bucket falsifiable in both directions and turns "we published this limit" into "this limit
-still exists".
+That is not true of either file. This is the same defect as
+`headless-deny.test.ts:70-79` — the unverified coverage claim that let CR-01
+ship — reproduced one iteration later. The code is correct (executed above:
+`~/.bashrc` now blocks via the `bashrc` rule with a real `homedir()`), but
+nothing in the suite would notice if `toCanonicalRoot(homedir())` were reverted
+to `homedir()`, because `classifyPathWrite`'s containment rule blocks
+`~/.bashrc` anyway — for the wrong reason.
+**Fix:** add a second `describe` to `path-policy.test.ts` whose `HOME`/
+`PROJECT_ROOT` are built with the file's existing `BS` helper
+(`String.fromCharCode(92)`), and assert on the block **reason** (`"is the user's
+shell rc file"`), not merely on `kind === "block"` — the reason string is the
+only thing that distinguishes the detonation rule from the containment rule.
+Then delete the false claim from `path-canonicalisation.test.ts`'s docstring.
 
-### WR-04: The audit concurrency proof exercises a re-implementation, not the writer under test
+### WR-11: `approve_ky_command.execute()` has zero test coverage, and `headless-deny.test.ts`'s false coverage claim is unchanged
 
-**File:** `tests/integration/audit-concurrency.test.ts:103-209`
-**Issue:** Both child scripts hand-roll `appendFileSync` + a rotate-before-write loop rather
-than importing `appendJsonl`/`writeAuditRow` from `.pi/lib/jsonl.ts`. The test therefore proves
-that *Windows `appendFileSync` is atomic for ~200-byte records* — it would stay green if
-`appendJsonl` were rewritten to hold a stream and lose every post-rotation record, which is
-precisely the hazard `.pi/lib/jsonl.ts:52-58` says the test exists to rule out. (Partially
-mitigated by `jsonl-append-only.test.ts`'s grep ban on stream constructors, which is a
-different oracle for a different claim.)
-**Fix:** have the children `import { writeAuditRow } from ".../safety/audit.ts"` (they are
-`.mjs` in a temp dir; Node 22+/24 can load the `.ts` directly as the other probes in this repo
-do) so the assertion is about the shipped writer.
+**File:** `tests/integration/headless-deny.test.ts:70-79`;
+`.pi/extensions/safety/index.ts:499-577`
+**Issue:** `headless-deny.test.ts` is not in the diff since `e30e44e` — its
+claim that the confirm/`approve_ky_command` path "is unit-proven in
+`tests/unit/safety-entry.test.ts` and `tests/integration/double-enforcement.test.ts`"
+is still there and still false. The fix report says
+`confirm-approve-reissue.test.ts` makes it true, but that file's own docstring
+(`:21-34`) explicitly states it bypasses `approve_ky_command` and calls
+`approve()` directly. Grepping the whole suite: no test ever invokes
+`approve_ky_command`'s `execute()`. The three deny-by-default branches
+T-04-03 names — `validate()` refusal, `hasUI === false`, and
+`ctx.ui.select()` returning `undefined` — are unexercised.
 
-### WR-05: `pending` and `granted` grow without bound; nothing ever sweeps expired entries
+I executed all three directly and they behave correctly:
 
-**File:** `.pi/extensions/safety/approvals.ts:165-170`, `:224-232`
-**Issue:** `createPending` inserts on every confirm-block and nothing removes an expired
-pending except a successful `approve()` for that exact id. An expired grant is only removed if
-someone calls `consume()` for its key. With CR-01 in place, every retry of a confirmed command
-mints another permanent pending entry, in a `globalThis`-keyed map that outlives `/reload`.
-Over a long session this is unbounded growth keyed by model behaviour.
-**Fix:** sweep both maps for `expiresAt <= now` at the top of `createPending()` (cheap,
-amortised, no timer), and add a test that asserts the pending map shrinks after the TTL with an
-injected clock.
+```
+hasUI=false (headless)       : THREW (refused)   grant created: false
+hasUI=true, select -> "Deny" : THREW (refused)   grant created: false
+hasUI=true, select -> undef  : THREW (refused)   grant created: false
+```
 
-### WR-06: Any global `git` option before the subcommand makes the invocation "unclassified", producing false blocks
+So this is a coverage and honesty defect, not a live bug — but it is the single
+branch where "approve only on an explicit affirmative" is enforced, on a public
+repo whose SAFETY.md sells that property.
+**Fix:** add three cases to `safety-entry.test.ts` driving the registered
+`approve_ky_command` tool's `execute()` with a stub `ctx` for each of
+`{hasUI:false}`, `{hasUI:true, ui:{select:()=>"Deny"}}`,
+`{hasUI:true, ui:{select:()=>undefined}}`, asserting it throws AND that
+`peek(requestKey)` is `false` afterwards. Then correct
+`headless-deny.test.ts:70-79` to name the file that actually proves it.
 
-**File:** `.pi/extensions/safety/policy.ts:311-313`
-**Issue:** `toGitInvocation` takes `args[0]` as the subcommand verbatim. `git -C /repo status`,
-`git --no-pager log`, `git -c user.name=x diff` therefore classify with `subcommand === "-C"` /
-`"--no-pager"` / `"-c"` and hit the fail-closed unknown-subcommand arm (`git.ts:307-313`) —
-blocked whenever `HEAD` is protected, even though every one of them is a read. `EV-12`/`EV-13`
-record this as "a precision gap, not a security one", but the direction that matters for
-adoption is the other one: 04-CONTEXT.md's own stated failure mode is a guard annoying enough
-that the user disables it, and blocking `git -C … status` on `main` is exactly that. The same
-class applies to `SHELL_RUNNERS` + `GUARDED_VERB_PATTERN`: `node scripts/deploy-aws.js` is
-refused because the raw segment contains `aws` (`shell.ts:675-679`).
-**Fix:** skip leading `-`-prefixed tokens (consuming the value of `-C`/`-c`/`--git-dir`/
-`--work-tree`/`--namespace`) before selecting the subcommand — the same tabulated-arity
-approach `resolveWrappers` already uses for `env`/`sudo`. Add `git -C /repo status` → allow and
-`git -C /repo push` → block as paired rows.
+### WR-12: the hook now defers on `peek`, so a grant can go unconsumed for its whole 10-minute TTL if this extension's wrapper is not what runs
 
-### WR-07: The safety extension loads twice in this repository (user-scope stub + project-scope auto-discovery)
+**File:** `.pi/extensions/safety/index.ts:652-667`;
+`.pi/extensions/safety/approvals.ts:259-266`
+**Issue:** CR-01's fix moved the hook from "always block a `confirm`" to "return
+`undefined` whenever an unexpired grant exists, and let the wrapper consume it".
+The wrapper is the only consumer. If the tool that actually executes is *not*
+this file's wrapper — the documented T-04-08 case where another extension wins
+the `bash` name under first-registration-wins, or the CR-06 case where the
+wrapper was never registered at all — then nothing consumes the grant, `peek()`
+keeps returning `true`, and **every** re-issue of that exact command runs
+unguarded until `APPROVAL_TTL_MS` expires. Before the fix, one approval could
+never unblock anything; now one approval can unblock an unbounded number of
+executions in a 10-minute window under a failure mode this project has already
+written down as live.
+**Fix:** make the deferral self-limiting. Have the hook stamp a short-lived
+single-use "hook deferred" marker keyed on the same `requestKey` (a second map
+in `approvals.ts`, TTL of seconds not minutes) and refuse to defer twice for the
+same key without an intervening `consume()`. Add a test that calls the hook
+twice with a grant present and no wrapper execution in between, asserting the
+second call blocks.
 
-**File:** `bin/bootstrap.sh:864-902`; `package.json` `pi.extensions: ["./.pi/extensions"]`
-**Issue:** `install_safety_extension` writes `~/.pi/agent/extensions/ky-safety/index.ts`
-re-exporting `<repo>/.pi/extensions/safety/index.ts`. When `pi` runs inside this trusted repo,
-Pi also auto-discovers the project-scoped copy. Both default exports run, so
-`registerToolCallHook` registers **two** `tool_call` handlers and `registerWrappedTools`
-registers `bash`/`read`/`write`/`edit` twice (first-registration-wins silently discards the
-second set). Observable effects: two audit rows per tool call, and two `pending` entries minted
-per `confirm` block (compounding WR-05). `bootstrap-safety-stub.test.ts` only inspects the
-written bytes, never a session that has both scopes live.
-**Fix:** make the entry point idempotent — guard the default export behind a
-`globalThis`-keyed "already installed" flag (the same slot pattern `approvals.ts` already
-uses), and assert single registration in a session test that has both scopes present.
+## Info
 
-### WR-08: `docs/SAFETY.md` claims coverage the code does not deliver in three places
+### IN-01: `evaluate()` docstrings and corpus prose still say "exactly bash/read/write/edit"
 
-**File:** `docs/SAFETY.md:24-26`, `:43-50`, `:51-53`, `:61-67`
-**Issue:** Four specific over-claims, each falsified above:
-- `:24-26` "governs exactly four tool names … denies by construction" omits that Pi's own
-  `grep`/`find`/`ls` are equally default-active and unguarded (CR-04).
-- `:43-50` presents the git rules as the protected-branch control without stating that a push
-  whose *refspec* targets `main` from a non-`main` `HEAD` is allowed (CR-05).
-- `:51-53` "sensitive reads … block through both the `read` tool directly and quoted bash
-  arguments" — true, but the easiest route (`grep`) is unmentioned (CR-04), as are the NTFS
-  aliases (WR-01).
-- `:61-67` "a `write`/`edit` into … `~/.bashrc`, `~/.bash_profile`, `~/.profile`,
-  `~/.gitconfig` … blocks" — on Windows those four rules never fire at all (CR-02); the block
-  observed today comes from the containment rule for an unrelated reason.
+**File:** `tests/fixtures/evasion-corpus.ts:55-62`, `:536`
+**Issue:** The corpus module docstring ("Every row but one uses `bash`/`read`/
+`write`/`edit` — the four tool names `evaluate()` actually governs") and EV-42's
+`why` ("evaluate() governs exactly bash/read/write/edit by name — a fifth tool
+name…") were not updated when EV-52..EV-55 added `grep`/`find`/`ls` rows.
+`policy.ts` and `docs/SAFETY.md` both say seven.
+**Fix:** update both strings to seven; EV-42's `why` should say "an eighth tool
+name it does not recognise".
 
-The document's own `## Authority` section says a stale claim here "is not a documentation nit,
-it is a false sense of security". **Fix:** land the code fixes above, then re-derive these
-bullets; where a limit is accepted rather than fixed, add it to the corpus as `OUT-OF-SCOPE`
-so `evasion-corpus.test.ts` Group B keeps the table honest.
+### IN-02: the audit-concurrency count assertion cannot falsify the held-descriptor hazard its docstring says it now catches
+
+**File:** `tests/integration/audit-concurrency.test.ts:9-19`, `:434-454`
+**Issue:** WR-04's real ask — children exercise the shipped writer — is met. But
+the docstring goes further: *"A rewrite of `appendJsonl` that held a stream open
+and lost every post-rotation record would have stayed GREEN here under the old
+hand-rolled shape."* The new assertion sums records across the live file **and
+every rotated fragment** (`:436-440`), and a held descriptor writes into the
+renamed inode, which is still one of those fragments. Total would still be 200.
+The actual control for that hazard remains `jsonl-append-only.test.ts`'s grep
+ban, as the file's own note concedes.
+**Fix:** either soften the docstring to what the oracle proves, or add an
+assertion that the **live** file's own record count is non-zero after the final
+rotation, which a stream-holding writer would fail.
+
+### IN-03: CR-05's fixtures live only in `git-policy.test.ts`, not in the evasion corpus
+
+**File:** `tests/fixtures/evasion-corpus.ts`
+**Issue:** The CR-05 fix added four rows to `git-policy.test.ts` (good, and they
+would go red on revert — the pre-fix verdict for all three positives was
+`allow`), but `git push --force origin main` from a feature branch never enters
+the corpus, so it is absent from the artifact SAFE-17 designates as the
+guard's coverage inventory.
+**Fix:** add it, plus `git push origin HEAD:main`, as `BLOCKED` rows with
+`class: "different-repo"` or a new `refspec-target` class.
+
+### IN-04: audit rows for `grep`/`find`/`ls` calls with no `path` record an empty `command`
+
+**File:** `.pi/extensions/safety/index.ts:219-231`
+**Issue:** `extractCommandOrPath` reads `record.path` for every non-`bash` tool.
+A blocked `grep { pattern: "=", glob: ".env" }` therefore writes an audit row
+whose `command` column is `""` — losing the exact field that caused the block.
+**Fix:** for `grep`, fall back to `glob`, then to `pattern`, so the row can
+explain itself later.
+
+### IN-05: accepted-and-documented limitations (no action required)
+
+**File:** `docs/SAFETY.md:104-105`; `tests/fixtures/evasion-corpus.ts:609-626`
+WR-01's NTFS alternate-data-stream (`EV-56`) and 8.3 short-name (`EV-57`)
+aliases are published as `OUT-OF-SCOPE` rows in the "Known bypasses" table and
+are now driven through the real `evaluate()` by Group A', so the published limit
+cannot go stale silently. This is a legitimate disposition for this phase and
+does not block. Recorded here so a later reader does not mistake it for an
+omission.
 
 ---
 
 _Reviewed: 2026-08-14_
 _Reviewer: Claude (gsd-code-reviewer)_
-_Depth: standard_
+_Depth: standard — iteration 2, re-review after `--fix`_
