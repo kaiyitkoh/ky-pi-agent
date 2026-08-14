@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 06-03-PLAN.md -- the workflow line-budget registry, both directions
-last_updated: "2026-08-14T14:58:08.481Z"
+status: verifying
+stopped_at: Completed 06-04-PLAN.md -- the /quick walking-skeleton integration test (Phase 6 complete)
+last_updated: "2026-08-14T15:20:41.502Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
-  completed_phases: 5
+  completed_phases: 6
   total_plans: 60
-  completed_plans: 59
-  percent: 45
+  completed_plans: 60
+  percent: 55
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 Phase: 06 (Walking Skeleton — /quick & the Evidence Gate) — EXECUTING
 Plan: 4 of 4
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-14
 
-Progress: [██████████] 98%
+Progress: [██████████] 100%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -125,6 +125,7 @@ credentials can do has been done".
 | Phase 06 P01 | 45m | 3 tasks | 4 files |
 | Phase 06 P02 | ~25min | 2 tasks | 2 files |
 | Phase 06 P03 | 35m | 2 tasks | 1 files |
+| Phase 06 P04 | ~50min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -311,6 +312,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-03: countRawLines is readFileSync().split("\n").length with zero stripping -- MUTATION 2 measured the comment-excluding alternative's loophole at 16 lines on index.ts alone (74 raw vs 58 comment-excluding)
 - [Phase 06]: 06-03: WORKFLOWS_DIR_TOTAL_BUDGET is 360 (measured 353 rounded up to the next ten), a ratchet with only 7 lines of incidental headroom -- MUTATION 7 found this headroom is so small it incidentally catches large undeclared files too, so a supplementary falsification with a 3-line file proved the present-but-undeclared test is still independently load-bearing
 - [Phase 06]: 06-03: discovery is git-index UNION working-tree (D-9) across three shapes -- .pi/extensions/workflows/*.ts, .pi/prompts/*.md, .pi/skills/*.md (D-10) -- the markdown dodge was proven closed by MUTATION 5, not assumed
+- [Phase 06-04]: ctx.ui.notify is patched on the shared runner.uiContext object and restored in a finally, never shadowed per-context -- ctx.ui returns the SAME object for every context Pi builds (command or event), so a per-context shadow misses agent_end's own notification entirely
+- [Phase 06-04]: MUTATION 3 (reordering the routing and git pre-flight checks) stayed green against cases 1/2 as constructed -- each fixture only ever triggers one of the two guards, so relative check order is not independently pinned; recorded as an honest finding since the safety property (zero provider cost on any refusal) holds regardless of order
+- [Phase 06-04]: Phase 6 is now fully executed -- FLOW-01 and GATE-07 both have session-level proof (this plan) in addition to unit-level coverage from 06-01/06-03; the composed session in case 4 proves a real Phase 2 turn row lands for /quick's own work turn with no SEAM FINDING needed
 
 ### Pending Todos
 
@@ -358,8 +362,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T14:58:08.472Z
-Stopped at: Completed 06-03-PLAN.md -- the workflow line-budget registry, both directions
+Last session: 2026-08-14T15:20:41.491Z
+Stopped at: Completed 06-04-PLAN.md -- the /quick walking-skeleton integration test (Phase 6 complete)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

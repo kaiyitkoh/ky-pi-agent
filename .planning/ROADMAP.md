@@ -22,7 +22,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 3: Providers & Credentials** - Structurally complete providers with zero secrets, verified by Phase 2's instrument and a first-run runbook (all 11 plans executed 2026-08-14; **five live checks `RB-03-01..05` are OUTSTANDING** and five of its ten requirements are partial until they run — see `docs/RUNBOOK.md`)
 - [x] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents (all 12 plans executed 2026-08-14; **one live check `RB-04-01` is OUTSTANDING** and SAFE-01 is partial until it runs — see `docs/RUNBOOK.md`)
 - [x] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes (all 12 plans executed 2026-08-14; **one live check `RB-05-01` is OUTSTANDING** and ROUTE-11 is partial until it runs — see `docs/RUNBOOK.md`)
-- [ ] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size
+- [x] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size (completed 2026-08-14)
 - [ ] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified
 - [ ] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects
 - [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
@@ -296,7 +296,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 06-03-PLAN.md — FLOW-11: the workflow line-budget registry, enforced both directions with a directory aggregate
-- [ ] 06-04-PLAN.md — the seam proof: break Phase 5, break Phase 4, reject fabricated evidence, accept a real guarded commit
+- [x] 06-04-PLAN.md — the seam proof: break Phase 5, break Phase 4, reject fabricated evidence, accept a real guarded commit
 
 **Research**: Not needed — this phase is deliberately minimal and exercises components already verified.
 
@@ -420,7 +420,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 3. Providers & Credentials | 11/11 | Plans complete — 5 live checks OUTSTANDING | 2026-08-14 |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
-| 6. Walking Skeleton — `/quick` & Evidence Gate | 3/4 | In Progress|  |
+| 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 0/TBD | Not started | - |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 0/TBD | Not started | - |
