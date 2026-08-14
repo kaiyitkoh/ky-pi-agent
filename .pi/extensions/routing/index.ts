@@ -229,6 +229,14 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, mode: M
 	// entirely; see the module docstring.
 	await ctx.waitForIdle();
 
+	// WR-05: captured BEFORE the mutation, mirroring applyEscalate's own
+	// "previousModel captured before the switch" discipline -- both fields
+	// describe the state this switch is about to clear away, and only step 5
+	// below can tell whether that state included a real escalation worth a
+	// durable record.
+	const priorState = getModeState();
+	const previousModel = ctx.model !== undefined ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+
 	// Step 2 — resolve + pick a configured candidate. Escalation is cleared
 	// by every explicit mode pick (see the module docstring), so the route is
 	// resolved with escalated:false rather than whatever state preceded this
@@ -277,6 +285,26 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, mode: M
 
 	const modeData: KyModeData = { mode, escalated: false, at: Date.now() };
 	pi.appendEntry(MODE_ENTRY_TYPE, modeData);
+
+	// WR-05: `setEscalated(false)` two lines above is a REAL escalation change
+	// whenever `priorState.escalated` was true -- the module's own docstring
+	// promises a durable record for "every escalation change", and this is
+	// the one case `applyEscalate`'s own `writeEscalationRecord` call never
+	// covers (that function only runs from the /escalate command). Without
+	// this, `/escalate` -> (expensive turns) -> `/cheap` leaves an
+	// escalation-*.jsonl showing escalation turned ON and never turned OFF --
+	// precisely the "why was this turn expensive?" question T-05-32 exists to
+	// answer, answered wrongly. Written only when there was a real escalation
+	// to clear: a switch from an already-non-escalated mode has no escalation
+	// change to record.
+	if (priorState.escalated) {
+		writeEscalationRecord(ctx.cwd, {
+			mode,
+			escalated: false,
+			previousModel,
+			newModel: `${candidate.model.provider}/${candidate.model.id}`,
+		});
+	}
 
 	let overridesNote = "";
 	const overridesResult = agentOverridesFor({ mode });

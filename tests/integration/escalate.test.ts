@@ -43,14 +43,18 @@
  * `deepseek/deepseek-v4-pro` -- a genuine model change, not a same-model
  * no-op.
  */
+import { join } from "node:path";
+
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import type { CustomEntry, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { describe, expect, it } from "vitest";
 
+import { logDir } from "../../.pi/lib/jsonl.ts";
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { MODE_ENTRY_TYPE, type KyModeData } from "../../.pi/extensions/routing/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
+import { logFilesIn, readTornSafe } from "../helpers/logs.ts";
 import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
 
 /** Absolute path of the routing extension entry point this repository ships. */
@@ -430,6 +434,87 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 				findLatestModeEntry(branch),
 				"a ky:mode entry was written despite the invalid argument being refused",
 			).toBeUndefined();
+		});
+	});
+
+	it("case 7 -- WR-05: a mode switch that clears a live escalation writes a durable escalation-*.jsonl record naming escalated:false", async () => {
+		await withEscalateSession(async ({ session, cwd }) => {
+			const escalateCommand = session.extensionRunner.getCommand("escalate");
+			const cheapCommand = session.extensionRunner.getCommand("cheap");
+			expect(escalateCommand, 'getCommand("escalate") returned undefined').toBeDefined();
+			expect(cheapCommand, 'getCommand("cheap") returned undefined').toBeDefined();
+			if (escalateCommand === undefined || cheapCommand === undefined) {
+				return;
+			}
+
+			const ctx = session.extensionRunner.createCommandContext();
+			const notifications: Notification[] = [];
+			withCapturedNotify(ctx, notifications);
+
+			// -- escalate on, then run a (nominally expensive) turn.
+			await escalateCommand.handler("", ctx);
+			expect(getModeState().escalated, "setup for this case did not actually escalate first").toBe(true);
+
+			// -- the mode switch that SILENTLY clears escalation (applyMode's own
+			// step 5 always resolves with escalated:false -- see index.ts's module
+			// docstring's "MODE SWITCH CLEARS ESCALATION" section). Switching back
+			// to the SAME mode ("cheap") is deliberate: it isolates the escalation
+			// CHANGE from a mode change, so this case cannot be satisfied by a
+			// buggy implementation that only writes a record when the mode name
+			// also changes.
+			await cheapCommand.handler("", ctx);
+			expect(notifications.at(-1)?.level, "the /cheap switch was refused").toBe("info");
+			expect(getModeState().escalated, "the mode switch did not actually clear escalation").toBe(false);
+
+			const dir = logDir(cwd);
+			const files = logFilesIn(dir);
+			const escalationFile = files.find((name) => name.startsWith("escalation-"));
+			expect(
+				escalationFile,
+				`no escalation-*.jsonl transcript found under ${dir} (saw: ${files.join(", ") || "<none>"})`,
+			).toBeDefined();
+
+			const { records, unparseable } = readTornSafe(join(dir, escalationFile as string));
+			expect(unparseable).toHaveLength(0);
+			expect(
+				records.length,
+				"the escalation log exists but is empty -- the on-escalation record from step 1 (or the " +
+					"off-record this case exists to prove) never reached disk",
+			).toBeGreaterThan(0);
+
+			// THE PAIRED POSITIVE: the ON record from the earlier `escalate`
+			// command must exist too, or "ends showing escalated:false" would be
+			// trivially true of a log that never recorded the ON half either.
+			const onRecords = records.filter(
+				(record): record is { escalated: boolean } =>
+					typeof record === "object" && record !== null && (record as { escalated?: unknown }).escalated === true,
+			);
+			expect(
+				onRecords.length,
+				"no escalated:true record exists in the log -- the ON half of this pairing never happened, " +
+					"so the OFF assertion below would prove nothing about a real on-then-off sequence",
+			).toBeGreaterThan(0);
+
+			// THE ASSERTION WR-05 EXISTS FOR: the LAST record -- written by the
+			// /cheap switch, not by the earlier /escalate command -- names
+			// escalated:false. Before the fix, applyMode's setEscalated(false)
+			// wrote no durable record at all, so the log would end on the ON
+			// record from step 1 and silently misrepresent the sequence
+			// "/escalate -> (expensive turns) -> /cheap" as still escalated.
+			const last = records.at(-1) as { escalated?: unknown; mode?: unknown; previousModel?: unknown; newModel?: unknown } | undefined;
+			expect(
+				last?.escalated,
+				"the LAST escalation record does not carry escalated:false -- the mode switch that cleared " +
+					"a live escalation wrote no durable record of having done so",
+			).toBe(false);
+			expect(last?.mode, "the off-record does not name the mode the switch landed on").toBe("cheap");
+			expect(last?.newModel, "the off-record does not name the model now serving the executor").toBe(
+				"deepseek/deepseek-v4-flash",
+			);
+			expect(
+				last?.previousModel,
+				"the off-record does not name the model that was serving the executor before the switch",
+			).toBe("deepseek/deepseek-v4-pro");
 		});
 	});
 });
