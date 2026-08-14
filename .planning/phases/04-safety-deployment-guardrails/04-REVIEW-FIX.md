@@ -567,3 +567,111 @@ same reason WR-14's own iteration-3 regression tests lived in
 _Fixed: 2026-08-14T11:29:00Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 5 (final fix pass)_
+
+---
+---
+
+# Phase 4: Code Review Fix Report — Iteration 6 (cleanup pass)
+
+**Fixed at:** 2026-08-14T12:20:00Z
+**Source review:** .planning/phases/04-safety-deployment-guardrails/04-REVIEW.md (iteration 5 — FINAL verification)
+**Iteration:** 6 (cleanup only — WR-19, IN-01, IN-02, IN-03, IN-04; IN-05/IN-06 explicitly out of scope per this run's own instructions)
+
+**Summary:**
+- Findings in scope: 5 (1 warning, 4 info)
+- Fixed: 5
+- Skipped: 0
+
+**Suite:** 1180 tests / 67 files, all green (baseline for this run: 1179
+tests / 67 files — iteration 5's own ending count; the increase is IN-04's
+own new regression test in `tests/unit/safety-entry.test.ts`). `npx tsc
+--noEmit` clean after the full run. Ran entirely in the main repository on
+branch `main` — no worktree was created, per this run's explicit process
+rule; `git worktree list` showed exactly one entry throughout, before and
+after. IN-04 (the only finding that changes behaviour) was verified red
+(with `extractCommandOrPath`'s `grep` fallback absent, its regression test
+observed to fail — asserted `""` where `.env` was expected) and green
+(with the fix restored) before being committed. The other four findings are
+comment/prose/visibility changes only, per this run's own instructions;
+each was verified by re-reading the edited section and confirming the full
+suite stays green, not by a red/green cycle.
+
+**Working-tree note:** `.planning/phases/04-safety-deployment-guardrails/04-REVIEW.md`
+was already modified in the working tree at the start of this run (the
+iteration-5 review text this pass's findings are drawn from, written by the
+reviewer agent but not yet committed) — pre-existing, not created or
+touched by this pass, and deliberately left as-is: committing or reverting
+review-authored artifacts is the orchestrator's job, not this fixer's.
+
+## Fixed Issues
+
+### WR-19: `HOOK_DEFER_TTL_MS`'s docstring claimed a bound that CR-11's fix does not actually enforce for a replayed `toolCallId`
+
+**Files modified:** `.pi/extensions/safety/approvals.ts`, `docs/SAFETY.md`
+**Commit:** `2df0992`
+**Disposition:** Chose the review's second offered fix (correct the docstring and publish the residual in `docs/SAFETY.md`) over the first (a `MAX_HOOKS_PER_TOOL_CALL` count cap on `markHookDeferred`). The count-cap would be a behaviour change to the exact function `tests/integration/bootstrap-safety-stub.test.ts:656-662` (CR-11's own regression test, five reviews deep and finally genuinely falsifiable per WR-18) pins, and this run's own instructions single out IN-04 alone as needing a proven-red-then-green regression test — grouping WR-19 with the prose-only findings. A truthful docstring, not a code change, is what the review itself states is the required outcome ("a cheap genuine tightening... but a truthful docstring is the required outcome; do NOT destabilise CR-11's fix chasing it"), and the count cap's own correct value depends on how many copies of this extension may load, which is not a constant this codebase tracks anywhere today.
+**Applied fix:** `HOOK_DEFER_TTL_MS`'s docstring now states the actual bound (per-DISTINCT-`toolCallId`, not "the maximum unguarded window" unconditionally) and adds a new paragraph stating plainly that a REPLAYED `toolCallId` is exempt: every hook invocation sharing that same id may defer indefinitely for as long as the marker keeps renewing, with no cap, because `toolCallId` is the provider's id passed straight through (`pi-agent-core/dist/agent-loop.js:268,301,337,462`, never harness-generated) and CR-11 requires exactly this property so N loaded copies' hooks can all defer for one tool call. States the reachability conditions (T-04-08's wrapper-never-runs case, a prior human approval, command-bound) and that it is not reachable in this repository today. Added one bullet to `docs/SAFETY.md`'s "Load order is part of this" section publishing the same residual, alongside the existing CR-11 bullet, so the gap is true in both the source docstring and the published document rather than only the former.
+**Verification:** Re-read both edited sections; `markHookDeferred` itself is byte-for-byte unchanged (`git diff .pi/extensions/safety/approvals.ts` shows only the comment block above `HOOK_DEFER_TTL_MS` changed — confirmed by inspection before committing). Ran `tests/unit/approvals.test.ts`, `tests/unit/safety-entry.test.ts`, `tests/unit/docs-policy.test.ts`, `tests/integration/bootstrap-safety-stub.test.ts` and `tests/integration/double-enforcement.test.ts` (131 tests, all green) — CR-11's own regression test at `bootstrap-safety-stub.test.ts:656-662` is untouched and still passing, confirming this fix does not destabilise it.
+
+### IN-01: `paths.ts#sameCanonicalPath`'s export rationale was stale, and the export itself was unused outside its own module
+
+**Files modified:** `.pi/extensions/safety/paths.ts`
+**Commit:** `7b8a913`
+**Applied fix:** `grep -rn sameCanonicalPath .pi/ tests/` (re-run before editing, confirming the finding) showed four remaining call sites, all inside `paths.ts` itself (the kubeconfig check plus four detonation-target rules), and no test importing it. Dropped the `export` keyword and rewrote the docstring to name the actual in-module callers instead of the removed `policy.ts#evaluateSearchRootField` call site WR-17 deleted.
+**Verification:** `grep -rn sameCanonicalPath` after the edit confirms only the five in-module usages remain (definition + 4 call sites), no import anywhere else. `npx tsc --noEmit` clean (an un-exported function used only within its own module produces no type error). Ran `tests/unit/policy-compose.test.ts` and `tests/unit/evasion-corpus.test.ts` (139 tests, all green) — neither imports `sameCanonicalPath` directly, confirming the un-export is safe.
+
+### IN-02: the corpus's own prose still said `evaluate()` governs four tool names
+
+**Files modified:** `tests/fixtures/evasion-corpus.ts`
+**Commit:** `4d3520a`
+**Applied fix:** Corrected all three locations carrying the stale "four tool names" / "a fifth tool name" claim: the module docstring's "WHY `tool` IS A PLAIN STRING" section (`:57-62`), the `EvasionCase.tool` field's own JSDoc (`:73`, not separately cited by the review but the identical falsehood one line away — fixed for consistency with the other two), and EV-42's own `why` string (`:647`, was "evaluate() governs exactly bash/read/write/edit... a fifth tool name"). All three now say seven tool names / an eighth.
+**Verification:** No `expect` field was touched — `git diff tests/fixtures/evasion-corpus.ts` confirms only comment/string prose changed, zero rows re-bucketed. Ran `tests/unit/evasion-corpus.test.ts` (91 tests, all green, same count as iteration 5's ending state) — corpus totals unchanged: 74 total, 60 blocked, 14 not-blocked, identical id set.
+
+### IN-03: `docs/SAFETY.md`'s EV-42 row said "a sixth-party tool name"
+
+**Files modified:** `docs/SAFETY.md`
+**Commit:** `8eb2bb4`
+**Applied fix:** Corrected the EV-42 table row's wording from "a sixth-party tool name" to "an eighth tool name", matching the corpus's own corrected `why` field (IN-02) and the row's own already-correct list of all seven governed tool names earlier in the same cell.
+**Verification:** Ran `tests/unit/evasion-corpus.test.ts` and `tests/unit/docs-policy.test.ts` (161 tests, all green) — neither test asserts on this cell's exact prose (only row identities/counts are cross-checked), so this is a pure wording fix with no test dependency, confirmed safe by re-reading the edited row.
+
+### IN-04: audit rows for a `grep` blocked on its `glob` recorded an empty `command`
+
+**Files modified:** `.pi/extensions/safety/index.ts`, `tests/unit/safety-entry.test.ts`
+**Commit:** `9874a33`
+**Applied fix:** `extractCommandOrPath` read `record.path` for every non-`bash` tool and returned `""` otherwise. `grep` can be blocked on its `glob` (or `pattern`) field alone with no `path` present at all (EV-53's own shape, `{ pattern: "=", glob: ".env" }`, asserted `BLOCKED` in the corpus) — that shape's audit row previously lost the exact field that caused the block. `grep` now falls back to `glob`, then `pattern`, when `path` is absent.
+**Before/after verdict:** Drove the real `tool_call` hook directly (via `stubPi()`'s captured handler) with EV-53's exact input against a real temp `.pi/logs` directory, then read back the real JSONL row `writeAuditRow` appended. Pre-fix: the block row's `command` field was `""`. Post-fix: `.env` (the glob value that caused the block).
+**Regression test:** New `describe`/`it` block in `tests/unit/safety-entry.test.ts` ("IN-04 -- a grep blocked on its glob (no path) still records what caused the block"). Verified red first: ran the test against the unmodified `index.ts` and confirmed the exact failure (`AssertionError: expected '' to be '.env'`); then applied the fix and re-ran the same test, green; then ran the full `safety-entry.test.ts` file (20/20 green) and the broader related suites (`policy-compose.test.ts`, `evasion-corpus.test.ts`, `audit-jsonl.test.ts`, `bootstrap-safety-stub.test.ts`, `double-enforcement.test.ts` — 157 tests, all green) to confirm no regression.
+
+## Skipped Issues
+
+None — all 5 in-scope findings (WR-19, IN-01, IN-02, IN-03, IN-04) were
+fixed. `IN-05` (machine state — the installed stub is stale) and `IN-06`
+(accepted-and-documented limitations, no action required) were explicitly
+out of scope per this run's own instructions and were not touched.
+`RB-04-01` in `docs/RUNBOOK.md` remains `OUTSTANDING` in both the summary
+table (`:862`) and the detail subsection (`:866`) — untouched, confirmed by
+re-reading both locations after this pass. The evasion corpus's published
+limits are unchanged in every dimension the process rules require: 74
+total, 60 blocked, 14 not-blocked, identical id set
+(`EV-09 EV-27 EV-35 EV-36 EV-38 EV-39 EV-40 EV-41 EV-42 EV-56 EV-57 EV-65
+EV-73 EV-74`), cross-checked in both directions by
+`tests/unit/evasion-corpus.test.ts`'s Group B, no row re-bucketed or
+softened.
+
+## Suite state after this pass
+
+- **1180 tests / 67 files**, all green (`npx vitest run`, full suite). `npx
+  tsc --noEmit` clean.
+- One worktree throughout (`git worktree list`), branch `main`, no `git
+  worktree add`/`remove` at any point in this run.
+- `RB-04-01` in `docs/RUNBOOK.md` remains `OUTSTANDING` in both places —
+  untouched.
+- This file (`04-REVIEW-FIX.md`) is left UNCOMMITTED for the orchestrator,
+  per this run's own instructions. All five source/doc/test commits above
+  are already on `main`.
+
+---
+
+_Fixed: 2026-08-14T12:20:00Z_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: 6 (cleanup pass)_
