@@ -32,12 +32,13 @@
  * ---------------------------------------------------------------------------
  * WHY THE CONFIGURATION-GATE CASES NEVER CALL `execute()`
  * ---------------------------------------------------------------------------
- * They only prove `session.getActiveToolNames()` does or does not contain
- * `"qoder_delegate"` after the extension loads -- the gate this file's own
- * WR-11 fix applies is a ONE-TIME decision made inside the extension's
- * default export, evaluated once at load time from `process.env`, not a
- * per-call check. `process.env` is therefore set BEFORE `createFauxSession`
- * is called in those two cases, and restored in every case's own `finally`.
+ * They prove only whether `session.getActiveToolNames()` contains
+ * `"qoder_delegate"` AFTER a real `session_start` is emitted. The gate is a
+ * once-per-session decision made in a `session_start` HANDLER (CR-01: it
+ * cannot live in the factory -- `pi.getActiveTools()`/`setActiveTools()`
+ * throw there), reading `process.env` at that moment -- which is why
+ * `process.env` is set BEFORE `createFauxSession` in those cases and
+ * restored in each case's own `finally`.
  */
 import { join } from "node:path";
 
