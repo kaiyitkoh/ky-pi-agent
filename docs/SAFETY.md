@@ -93,6 +93,35 @@ docstring for the structural argument). Concretely, it catches:
   wrapper re-evaluating the params that actually reach execution
   (`tests/integration/double-enforcement.test.ts`).
 
+## What this guard does not register (WR-09)
+
+This extension registers exactly five tools: `bash`, `read`, `write`, `edit`
+(wrapped, with a real second enforcement layer) and `approve_ky_command`.
+`grep`, `find` and `ls` are **not** registered here, even though
+`policy.ts#evaluate()` and the `tool_call` hook's own filter both cover all
+seven of Pi's built-in tool names.
+
+Pi 0.84.1's default active tool set is `["read","bash","edit","write"]`
+(`dist/core/sdk.js:132,136`) — `grep`/`find`/`ls` are *registered* by Pi but
+not *active*, and this repository's `.pi/settings.json` is `{}`, so nothing
+overrides that. Registering them as **extension** tools would *activate*
+them (`_refreshToolRegistry`'s `includeAllExtensionTools: true`), handing the
+model three new callable tools purely in order to guard them, at a measured
+**532 tokens per turn** (`grep` 260, `find` 154, `ls` 118). On a project
+whose stated core value is that the harness must not become the bottleneck
+for a cheap model, that cost is not worth paying just to add a *second*
+enforcement layer on top of a tool the model could not call in the first
+place.
+
+The trade-off: if some other extension (or a future Pi default) ever
+activates `grep`/`find`/`ls`, the `tool_call` HOOK still audits and denies a
+call to any of the three, at zero schema cost — but there is no wrapper
+re-check the way there is for `bash`/`read`/`write`/`edit`, so a later
+extension mutating `event.input` after the hook approved a `grep`/`find`/`ls`
+call would not be caught the way `tests/integration/double-enforcement.test.ts`
+proves it is for the four wrapped tools. This is a deliberately accepted,
+narrower guarantee for a surface the model cannot reach today.
+
 ## Known bypasses this guard does not catch
 
 Every row below is one entry in `tests/fixtures/evasion-corpus.ts` tagged

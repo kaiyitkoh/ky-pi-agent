@@ -101,15 +101,7 @@ import { homedir } from "node:os";
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
-import {
-	createBashTool,
-	createEditTool,
-	createFindTool,
-	createGrepTool,
-	createLsTool,
-	createReadTool,
-	createWriteTool,
-} from "@earendil-works/pi-coding-agent";
+import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { approve, consume, createPending, peek, validate } from "./approvals.ts";
@@ -312,19 +304,40 @@ function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext
 // ---------------------------------------------------------------------------
 
 /**
- * Wrap `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` via the spread-override
- * shape 04-RESEARCH.md verified (`pi.registerTool({ ...tool, execute: wrapped
- * })`), using the exported factories `createBashTool`/`createReadTool`/
- * `createWriteTool`/`createEditTool`/`createGrepTool`/`createFindTool`/
- * `createLsTool`. Each wrapped `execute()` re-evaluates policy against the
- * PARAMS IT ACTUALLY RECEIVES -- the second enforcement layer CONTEXT.md
- * decision 5 requires, closing the gap a `tool_call`-hook-only guard leaves
- * open to a later extension's `event.input` mutation. CR-04: `grep`/`find`/
- * `ls` are three of Pi's seven built-in tools
- * [VERIFIED: `dist/core/tools/index.js`, `allToolNames`] and were previously
- * unguarded and unaudited entirely -- `grep { pattern: ".", path:
- * "~/.aws/credentials" }` returned the secret straight into the model's
- * context with no verdict at all, reachable with no shell involved.
+ * Wrap `bash`/`read`/`write`/`edit` via the spread-override shape
+ * 04-RESEARCH.md verified (`pi.registerTool({ ...tool, execute: wrapped })`),
+ * using the exported factories `createBashTool`/`createReadTool`/
+ * `createWriteTool`/`createEditTool`. Each wrapped `execute()` re-evaluates
+ * policy against the PARAMS IT ACTUALLY RECEIVES -- the second enforcement
+ * layer CONTEXT.md decision 5 requires, closing the gap a `tool_call`-hook-
+ * only guard leaves open to a later extension's `event.input` mutation.
+ *
+ * WR-09: `grep`/`find`/`ls` are deliberately NOT wrapped here, even though
+ * `policy.ts#evaluate()` and {@link registerToolCallHook}'s own filter both
+ * cover all seven of Pi's built-in tool names. CR-04 originally wrapped all
+ * three, reasoning they were "default-active" -- wrong, checked at source:
+ * Pi 0.84.1's default active tool set is `["read","bash","edit","write"]`
+ * [VERIFIED: `dist/core/sdk.js:132,136`], and this repository's
+ * `.pi/settings.json` is `{}`, so nothing overrides it -- `grep`/`find`/`ls`
+ * are *registered* by Pi but not *active*; the model cannot call them at all
+ * absent something ELSE activating them. Registering them as EXTENSION tools
+ * flips that: `_refreshToolRegistry` runs with `includeAllExtensionTools:
+ * true` at boot and on reload [`agent-session.js:158-161`, `:1993-2003`] and
+ * pushes every extension tool into the active set -- so wrapping them to
+ * GUARD them would ACTIVATE three tools the model could not otherwise call,
+ * at a measured 532 tokens/turn (`grep` 260, `find` 154, `ls` 118 -- this
+ * project's own `chars/4` estimator over the exact `tools[]` schema shape),
+ * on a project whose stated core value is that the harness must not become
+ * the bottleneck for a cheap model. The guard this file provides for
+ * grep/find/ls is therefore SINGLE-layer: {@link registerToolCallHook}'s own
+ * tool-name filter still audits/denies a call to any of the three IF some
+ * other extension (or a future Pi default) ever activates them, at zero
+ * schema cost -- but there is no wrapper re-check the way there is for the
+ * four tools below. `docs/SAFETY.md`'s "What this guard does not register"
+ * section states this trade-off; `tests/unit/contributing-boundary.test.ts`'s
+ * BOOT-10 (b) justification is accurate again once these three are not
+ * registered (its own 275-token, four-wrapped-tool accounting was true
+ * before CR-04 activated grep/find/ls and is true again now).
  *
  * The delegate call omits `ctx` (`bashTool.execute(toolCallId, params,
  * signal, onUpdate)`, four arguments): `AgentTool.execute`'s own declared
@@ -394,35 +407,6 @@ function registerWrappedTools(pi: ExtensionAPI): void {
 			const command = extractCommandOrPath("edit", params);
 			wrapperOutcome("edit", command, ctx, classifyAtWrapper("edit", params, ctx));
 			return createEditTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
-		},
-	});
-
-	// CR-04: grep/find/ls are three of Pi's seven built-in tools and were
-	// previously unwrapped entirely -- see this function's own docstring.
-	pi.registerTool({
-		...createGrepTool(metadataCwd),
-		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const command = extractCommandOrPath("grep", params);
-			wrapperOutcome("grep", command, ctx, classifyAtWrapper("grep", params, ctx));
-			return createGrepTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...createFindTool(metadataCwd),
-		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const command = extractCommandOrPath("find", params);
-			wrapperOutcome("find", command, ctx, classifyAtWrapper("find", params, ctx));
-			return createFindTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...createLsTool(metadataCwd),
-		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const command = extractCommandOrPath("ls", params);
-			wrapperOutcome("ls", command, ctx, classifyAtWrapper("ls", params, ctx));
-			return createLsTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
 		},
 	});
 }
@@ -588,11 +572,15 @@ function registerApprovalTool(pi: ExtensionAPI): void {
  * `policy.ts#evaluate`'s own "this guard governs exactly these tool names"
  * contract (SAFE-15's published limits table names the gap for every OTHER
  * tool explicitly, rather than this file silently claiming coverage it does
- * not have). CR-04: `grep`/`find`/`ls` were added to close the gap where
- * three of Pi's seven built-in tools reached execution with no verdict and no
- * audit row at all -- this list MUST stay in sync with
- * {@link registerWrappedTools}'s own tool-name set and with `policy.ts#evaluate`'s
- * `switch`.
+ * not have). WR-09: this list DELIBERATELY stays wider than
+ * {@link registerWrappedTools}'s own tool-name set -- `grep`/`find`/`ls` are
+ * NOT wrapped (see that function's own WR-09 docstring section: wrapping
+ * them would ACTIVATE three tools Pi does not activate by default, at a real
+ * per-turn token cost), but this filter still names all seven, so a call to
+ * any of the three is audited and denied at the HOOK layer alone -- at zero
+ * schema cost -- if some other extension (or a future Pi default) ever
+ * activates them. This list must stay in sync with `policy.ts#evaluate`'s
+ * own `switch`, which is the thing that actually decides the verdict.
  *
  * On `allow`, returns `undefined` -- never mutates `event.input`. On
  * `confirm`:

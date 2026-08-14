@@ -72,13 +72,17 @@ describe("the safety extension's entry point registers exactly what it claims to
 	const { pi, hooks, toolNames, tools } = stubPi();
 	safety(pi);
 
-	it("registers exactly four wrapped tools, grep/find/ls, plus approve_ky_command, in that order", () => {
+	it("registers exactly four wrapped tools plus approve_ky_command, in that order (WR-09: grep/find/ls stay unwrapped)", () => {
 		expect(
 			toolNames,
-			"the four built-in wrappers, then grep/find/ls (CR-04), then approve_ky_command -- see the " +
-				"module docstring's REGISTRATION ORDER section. If this list changes, a later plan is " +
-				"adding or removing a tool and this assertion should grow with it, not be deleted",
-		).toEqual(["bash", "read", "write", "edit", "grep", "find", "ls", "approve_ky_command"]);
+			"the four built-in wrappers, then approve_ky_command -- see the module docstring's " +
+				"REGISTRATION ORDER section. WR-09: grep/find/ls are deliberately NOT registered here -- " +
+				"wrapping them would ACTIVATE three tools Pi does not activate by default " +
+				"(registerWrappedTools's own WR-09 docstring section), at a real per-turn token cost. " +
+				"They are still governed by policy.ts#evaluate() and audited/denied by the tool_call " +
+				"hook's own filter if ever activated some other way. If this list changes, a later plan " +
+				"is adding or removing a tool and this assertion should grow with it, not be deleted",
+		).toEqual(["bash", "read", "write", "edit", "approve_ky_command"]);
 	});
 
 	it("registers exactly two hooks: tool_call and session_start", () => {
