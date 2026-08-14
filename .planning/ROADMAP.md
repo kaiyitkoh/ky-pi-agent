@@ -23,7 +23,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 4: Safety & Deployment Guardrails** - Server-side branch protection first, then an AST bash guard that fails closed and holds inside subagents (all 12 plans executed 2026-08-14; **one live check `RB-04-01` is OUTSTANDING** and SAFE-01 is partial until it runs — see `docs/RUNBOOK.md`)
 - [x] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes (all 12 plans executed 2026-08-14; **one live check `RB-05-01` is OUTSTANDING** and ROUTE-11 is partial until it runs — see `docs/RUNBOOK.md`)
 - [x] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size (completed 2026-08-14)
-- [ ] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified
+- [x] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified (all 13 plans executed 2026-08-15; **two live checks `RB-07-01` and `RB-07-02` are OUTSTANDING** and EXT-01/03/04/05/09 are partial until they run — see `docs/RUNBOOK.md`)
 - [ ] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects
 - [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
 - [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
@@ -342,7 +342,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 07-13-PLAN.md — `RB-07-01` composed smoke ritual, `PHASE_SEVEN_IDS` guard, REQUIREMENTS.md statuses *(Wave 5)*
+- [x] 07-13-PLAN.md — `RB-07-01` composed smoke ritual, `PHASE_SEVEN_IDS` guard, REQUIREMENTS.md statuses *(Wave 5)*
 
 **Research**: `--research-phase` required — every pin must be re-verified rather than inherited. File checkpointing and provider fallback are explicitly LOW-confidence categories and should be re-surveyed, not installed from the research document. Done: `07-RESEARCH.md` (+ orchestrator tarball Addendum A1-A6).
 
@@ -451,7 +451,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
-| 7. Composed Extensions, Pinned & Reviewed | 12/13 | In Progress|  |
+| 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 0/TBD | Not started | - |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |

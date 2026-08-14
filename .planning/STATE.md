@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 07-11-PLAN.md (EXT-05/EXT-06 capability registry and Phase 10 tool-count baseline)
-last_updated: "2026-08-14T22:20:18.121Z"
+status: verifying
+stopped_at: Completed 07-13-PLAN.md (RB-07-01/RB-07-02 runbook entries, every EXT requirement status reconciled) -- Phase 07 complete
+last_updated: "2026-08-14T22:40:23.710Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
-  completed_phases: 6
+  completed_phases: 7
   total_plans: 73
-  completed_plans: 72
-  percent: 55
+  completed_plans: 73
+  percent: 64
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
 Plan: 13 of 13
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-14
 
-Progress: [██████████] 99%
+Progress: [██████████] 100%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -139,6 +139,7 @@ credentials can do has been done".
 | Phase 07 P12 | 25m | 2 tasks | 2 files |
 | Phase 07 P10 | 40m | 4 tasks | 1 files |
 | Phase 07 P11 | 55m | 2 tasks | 2 files |
+| Phase 07 P13 | 50m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -361,6 +362,12 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-10: EXT-05 was marked [x] Complete by plan 07-06, before any of the five npm-installed packages were ever installed; this plan did not correct REQUIREMENTS.md but flags it as a Blocker/Concern for the user or plan 07-13 to reconcile
 - [Phase 07]: 07-11: pi-subagents parent-session tool pair corrected to subagent_supervisor+intercom (not contact_supervisor), re-verified live against the pinned tarball; contact_supervisor and structured_output are both child-process-only
 - [Phase 07]: 07-11: TOOL_COUNT_BASELINE registry closes EXT-05/EXT-06 with 4 live tools/1015 tokens now (2 tools/411 tokens Phase-7's own) and 21 declared-but-uninstalled npm tool names across 5 pinned packages, split by provenance never blended -- vendored side is grep-enforced against tracked source every run, npm side is a recorded baseline re-read this session via npm pack + tar -xf, no install
+- [Phase 07]: 07-13: RB-07-02 was needed because 07-10-SUMMARY.md recorded the pi install / pi list reconciliation UNVERIFIED (not MATCH), per its own documented fallback -- a MATCH would have meant RB-07-02 must not be invented
+- [Phase 07]: 07-13: RB-07-01 composes rather than restates -- legs 1 and 4 cite RB-02-01/RB-03-0x by id and introduce no new pinned command; only the subagent-spawn and blocked-command legs are new content
+- [Phase 07]: 07-13: the subagent-spawn leg's clean-working-tree precondition cites pi-subagents@0.49.0 src/runs/shared/worktree.ts:137-142 (resolveRepoState), the exact citation 07-09-SUMMARY.md recorded, not this plan's own approximate 138-148 line range
+- [Phase 07]: 07-13: EXT-05 moves from [x] Complete to [~] Partial with RB-07-02 named inline, closing the blocker 07-10-SUMMARY.md registered -- four of its eight named capabilities are npm-backed and have never been installed
+- [Phase 07]: 07-13: EXT-01/03/04/09 move to [~] Partial with RB-07-01 named inline -- structural/source citations against the pinned pi-subagents tarball are complete, but no subagent has ever actually spawned, run in the background, or been steered on this machine
+- [Phase 07]: 07-13: Phase 7 is closed -- all 16 docs/RUNBOOK.md entries across Phases 1-5 and 7 are OUTSTANDING and machine-governed by tests/unit/docs-policy.test.ts's ALL_IDS; full suite (1606 tests, 92 files) and tsc --noEmit green
 
 ### Pending Todos
 
@@ -380,7 +387,7 @@ None yet.
 - **BOOT-07's live CI run is OUTSTANDING**: `.github/workflows/ci.yml` exists, is valid YAML, and is statically proven (both action SHAs resolved against the GitHub API, matrix `[windows-latest, macos-latest]`, `fail-fast: false`, every execution step asserted by `tests/unit/ci-pinning.test.ts`). It has **never run** — GitHub Actions cannot be triggered from this machine. macOS behaviour, ShellCheck's verdict on the two tracked scripts, and whether the pinned global Pi install satisfies the load-path tests on a runner are all unverified until the first push. Do not report a green tick that does not exist. **It has no `docs/RUNBOOK.md` entry yet** — Plan 10 seeded only the three checks its plan named. A later phase should add it alongside `RB-01-01..03`.
 - **`shellcheck` is not installed on this machine**: full `--shell=sh` conformance of `bin/bootstrap.sh` and `scripts/check-gh-unauthenticated.sh` is UNVERIFIED locally. Narrowed by code review WR-07: `/usr/bin/dash` IS present (Git for Windows ships it) and is a genuine POSIX shell rather than bash in POSIX mode, so `tests/unit/lf-and-shell.test.ts` now parses every tracked `*.sh` with `dash -n` in addition to the four-construct bashism regex. Both scripts pass. A parse is not a lint — unquoted expansions and BSD-vs-GNU flag differences still need the Ubuntu `posix-lint` job, which has never run.
 - **Moving platform**: Pi ships every 2–3 days; the composed extension ecosystem ships 13–16 releases/month. Every pin must be re-verified at Phase 7 planning time, not inherited from research.
-- RB-07-02 (new, plan 07-13 must add to docs/RUNBOOK.md, OUTSTANDING): pi install for the five pinned specs (pi-subagents@0.49.0, pi-background-tasks@2.4.2, @narumitw/pi-lsp@0.49.4, pi-web-access@0.22.0, pi-session-finder@0.5.6) has never run in this repository -- the 07-10 install gate found its own pre-authorisation ground (a) false (live AWS SSO/static admin credentials present on this dev machine) and recorded the checkpoint NOT SATISFIED rather than auto-approving. A human must be physically present to satisfy the package-legitimacy gate and run pi install + pi list reconciliation. REQUIREMENTS.md's EXT-05 is marked [x] Complete despite this -- needs review.
+- **Two Phase 7 checks are OUTSTANDING and machine-enforced as such**: `RB-07-01` (EXT-09, the composed smoke ritual -- one turn per provider, one subagent spawn, one blocked command, one wire dump) and `RB-07-02` (install the five pinned specs with a human physically present for the package-legitimacy gate, then reconcile `pi list` against `.pi/settings.json`). `RB-07-02` must run first -- `RB-07-01`'s subagent-spawn and blocked-command legs presuppose the packages are actually installed. EXT-01, EXT-03, EXT-04 and EXT-09 are `[~]` partial in REQUIREMENTS.md with `RB-07-01` named inline; EXT-05 is `[~]` partial with `RB-07-02` named inline.
 
 ## Deferred Items
 
@@ -409,8 +416,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T22:20:18.108Z
-Stopped at: Completed 07-11-PLAN.md (EXT-05/EXT-06 capability registry and Phase 10 tool-count baseline)
+Last session: 2026-08-14T22:40:23.696Z
+Stopped at: Completed 07-13-PLAN.md (RB-07-01/RB-07-02 runbook entries, every EXT requirement status reconciled) -- Phase 07 complete
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
