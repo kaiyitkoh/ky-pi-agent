@@ -42,7 +42,12 @@ key-decisions:
 patterns-established:
   - "A refusal is a discriminated-union arm with no mechanism field at all, not an ok:true value with a null mechanism -- 'never reports a mechanism' is enforced by the type checker on every ok:false return, not just tested at runtime"
 
-requirements-completed: [ROUTE-01, ROUTE-04]
+requirements-completed: []
+requirements-partial: [ROUTE-04]
+# ROUTE-01 was already complete from plan 05-01 and is untouched by this plan.
+# ROUTE-04's pure plan/dispatch pipeline is built and unit-proven here; the
+# [FAUX] session-level proof (tests/integration/single-shot-roles.test.ts) is
+# deferred to plan 06 per this plan's own docstring -- see REQUIREMENTS.md.
 
 # Metrics
 duration: ~15min
