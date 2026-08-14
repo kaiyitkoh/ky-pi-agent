@@ -24,10 +24,10 @@
  * that twice already).
  *
  * D-11 -- THE DIRECTORY AGGREGATE IS A RATCHET WITH NO HEADROOM.
- * `WORKFLOWS_DIR_TOTAL_BUDGET` is the measured total of
- * `.pi/extensions/workflows/**\/*.ts` at commit time (353 raw lines by this
- * file's own `countRawLines`, measured 2026-08-14: 74 + 279), rounded up to
- * the next multiple of ten.
+ * `DIRECTORY_BUDGETS`'s `workflows` entry is the measured total of
+ * `.pi/extensions/workflows/**\/*.ts` at commit time (408 raw lines by this
+ * file's own `countRawLines`, measured 2026-08-15: index.ts 80 + evidence.ts
+ * 328, after CR-01/WR-01/WR-02), rounded up to the next multiple of ten.
  * Growing the directory requires a deliberate edit to this number in the
  * SAME commit as the growth -- the same discipline `docs/RUNBOOK.md`
  * statuses already use. This is what stops `/quick` from being "shrunk" by
@@ -36,6 +36,20 @@
  * A future phase raises a budget by editing the number below, in the same
  * commit as the growth that needs it, with a one-line reason in `why` -- it
  * does not delete the entry, and it does not touch the ceiling test.
+ *
+ * WR-03 -- THE RATCHET APPLIES TO EVERY COMMAND DIRECTORY, NOT ONLY
+ * `workflows/`. A per-file budget alone lets a command file stay small while
+ * an unbudgeted sibling in the SAME directory grows without limit -- proved
+ * by planting a 3-line `.pi/extensions/grill/index.ts` (spells
+ * `registerCommand(`) beside a 1,200-line `.pi/extensions/grill/steps.ts`:
+ * the file-level completeness check named only `index.ts`, and `steps.ts`
+ * would have shipped unbudgeted. `DIRECTORY_BUDGETS` and
+ * {@link filesInDir} close this: every directory holding a discovered
+ * command source is ratcheted over its WHOLE `.ts`/`.js` total, including
+ * files that do not themselves spell `registerCommand(`. `routing/`,
+ * `harness/` and `diagnostics/` are grandfathered in at their CURRENT
+ * measured totals -- this pass did not re-review their tightness, exactly
+ * per WR-05's own precedent for their per-file entries.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -59,9 +73,10 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{ file: ".pi/extensions/workflows/index.ts", budget: 80, why: "FLOW-01 -- the ROADMAP's /quick raw-line ceiling" },
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
-		budget: 300,
-		why: "CR-01 fix (baseSha param + no-commit branch) plus WR-03's armedCwd() export -- measured 298 " +
-			"raw lines 2026-08-14 (up from 279), rounded up to the next ten",
+		budget: 330,
+		why: "CR-01 iteration 2 fix: a new reject branch for ANY failed tool result in the run, placed " +
+			"before the headSha narrowing so a failure cannot be aged out by a later commit -- measured " +
+			"328 raw lines 2026-08-15 (up from 298), rounded up to the next ten",
 	},
 	// WR-05: these three are NOT under workflows/ -- discovered because they contain
 	// COMMAND_MARKER (isCommandSource). Declared here so the completeness check
@@ -85,11 +100,39 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 ];
 
 /**
- * D-11's ratchet: measured total of `.pi/extensions/workflows/**\/*.ts` was
- * 375 raw lines on 2026-08-14 (77 + 298, by `countRawLines`) after CR-01/
- * WR-01/WR-02/WR-03, rounded up to the next multiple of ten.
+ * D-11 / WR-03: the directory-level anti-offloading registry. Every
+ * directory that holds at least one discovered command source (per
+ * {@link isCommandSource}) must appear here, ratcheted over the WHOLE
+ * `.ts`/`.js` total of that directory -- see {@link filesInDir}. See the
+ * module docstring's WR-03 section for the planted-`grill/` proof of why a
+ * per-file budget alone is insufficient.
  */
-const WORKFLOWS_DIR_TOTAL_BUDGET = 380;
+const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[] = [
+	{
+		dir: WORKFLOWS_DIR,
+		budget: 410,
+		why: "D-11's original ratchet -- /quick's own directory; measured 408 raw lines 2026-08-15 " +
+			"(index.ts 80 + evidence.ts 328) after CR-01/WR-01/WR-02, rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/routing",
+		budget: 2230,
+		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 2224 " +
+			"raw lines across 5 files 2026-08-15 (not re-reviewed for tightness, same precedent as WR-05's " +
+			"per-file entries), rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/harness",
+		budget: 100,
+		why: "WR-03; measured 99 raw lines across 1 file 2026-08-15, rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/diagnostics",
+		budget: 3670,
+		why: "WR-03; measured 3662 raw lines across 9 files 2026-08-15 (not re-reviewed for tightness), " +
+			"rounded up to the next ten",
+	},
+];
 
 /** Raw line count, no stripping of any kind -- decision D-1 above. */
 function countRawLines(relPath: string): number {
@@ -114,9 +157,44 @@ function walkOnDisk(rel: string): string[] {
 	return out;
 }
 
-/** WR-05: a `.ts`/`.js` file that spells `registerCommand(` is a command surface, wherever it sits. */
+/**
+ * WR-05: a `.ts`/`.js` file that spells `registerCommand(` is a command
+ * surface, wherever it sits.
+ *
+ * WR-04: non-throwing by construction. The prior version read the file
+ * BEFORE any existence check, so a path still in the git index but deleted
+ * on disk threw a raw ENOENT here -- and because `discoverWorkflowFiles()`
+ * runs in this file's `describe` body (collection time, not inside an `it`),
+ * that throw stopped the ENTIRE file from reporting any tests at all,
+ * silently disabling FLOW-11's registry, the 80-line ceiling and the
+ * completeness check together. A file that cannot be read now classifies as
+ * `false` rather than throwing.
+ */
 function isCommandSource(p: string): boolean {
-	return /\.(ts|js)$/.test(p) && readFileSync(join(repoRoot(), p), "utf-8").includes(COMMAND_MARKER);
+	if (!/\.(ts|js)$/.test(p)) {
+		return false;
+	}
+	try {
+		return readFileSync(join(repoRoot(), p), "utf-8").includes(COMMAND_MARKER);
+	} catch {
+		return false;
+	}
+}
+
+/**
+ * WR-03: every `.ts`/`.js` file directly inside repo-relative `dir`,
+ * existsSync-filtered, from the SAME tracked+on-disk union
+ * {@link discoverWorkflowFiles} uses -- deliberately NOT limited to files
+ * that individually pass {@link isCommandSource}, so a sibling helper (the
+ * planted `grill/steps.ts` shape) is counted in the directory total even
+ * though it never spells `registerCommand(` itself.
+ */
+function filesInDir(dir: string): string[] {
+	const union = new Set([...trackedFiles(dir), ...walkOnDisk(dir)]);
+	return Array.from(union)
+		.filter((p) => p.startsWith(`${dir}/`) && /\.(ts|js)$/.test(p) && !p.slice(dir.length + 1).includes("/"))
+		.filter((p) => existsSync(join(repoRoot(), p)))
+		.sort();
 }
 
 /**
@@ -146,19 +224,23 @@ function discoverWorkflowFiles(): string[] {
 		...walkOnDisk(EXTENSIONS_DIR),
 	];
 	const union = new Set([...tracked, ...onDisk]);
-	return Array.from(union)
-		.filter(
-			(p) =>
-				(p.startsWith(`${WORKFLOWS_DIR}/`) && /\.(ts|js)$/.test(p)) ||
-				(p.startsWith(`${PROMPTS_DIR}/`) && p.endsWith(".md")) ||
-				(p.startsWith(`${SKILLS_DIR}/`) && p.endsWith(".md")) ||
-				(!p.startsWith(`${WORKFLOWS_DIR}/`) && p.startsWith(`${EXTENSIONS_DIR}/`) && isCommandSource(p)),
-		)
-		// IN-02: a file still in the git index but deleted on disk (`git rm
-		// --cached`, or a delete not yet staged) must not crash the aggregate
-		// below with a raw ENOENT -- drop it here instead.
-		.filter((p) => existsSync(join(repoRoot(), p)))
-		.sort();
+	return (
+		Array.from(union)
+			// WR-04: existence FIRST, before isCommandSource() ever reads a byte --
+			// a file still in the git index but deleted on disk (`git rm --cached`,
+			// or a delete not yet staged) must be dropped before any read is
+			// attempted, not after. See {@link isCommandSource}'s own docstring for
+			// what the prior ordering broke.
+			.filter((p) => existsSync(join(repoRoot(), p)))
+			.filter(
+				(p) =>
+					(p.startsWith(`${WORKFLOWS_DIR}/`) && /\.(ts|js)$/.test(p)) ||
+					(p.startsWith(`${PROMPTS_DIR}/`) && p.endsWith(".md")) ||
+					(p.startsWith(`${SKILLS_DIR}/`) && p.endsWith(".md")) ||
+					(!p.startsWith(`${WORKFLOWS_DIR}/`) && p.startsWith(`${EXTENSIONS_DIR}/`) && isCommandSource(p)),
+			)
+			.sort()
+	);
 }
 
 describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
@@ -199,17 +281,65 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 				"under that failure line, and a registry edit alone cannot quietly relax it",
 		).toBeLessThanOrEqual(80);
 	});
+});
 
-	it("the workflows/ directory total never exceeds its ratchet aggregate", () => {
-		const workflowTsFiles = discovered.filter((p) => p.startsWith(`${WORKFLOWS_DIR}/`) && /\.(ts|js)$/.test(p));
-		const total = workflowTsFiles.reduce((sum, f) => sum + countRawLines(f), 0);
+/**
+ * D-11 / WR-03 -- the directory-level anti-offloading ratchets. Every
+ * directory that HOLDS a discovered command source gets its own ratchet
+ * over the directory's WHOLE `.ts`/`.js` total (via {@link filesInDir}) --
+ * not merely the files WORKFLOW_BUDGETS happens to name individually. This
+ * is what stops a large sibling helper from hiding beside a small command
+ * file: the exact hole `.pi/extensions/grill/steps.ts` (planted, 1,200
+ * lines, no `registerCommand(`) demonstrated beside `grill/index.ts`
+ * (planted, 3 lines, spells `registerCommand(`) -- the OLD single-directory
+ * (`workflows/`-only) aggregate never looked at `grill/` at all, and the
+ * per-file completeness check named only `index.ts`.
+ */
+describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
+	const discovered = discoverWorkflowFiles();
+	const commandDirs = Array.from(new Set(discovered.filter(isCommandSource).map((p) => p.slice(0, p.lastIndexOf("/"))))).sort();
+
+	it("finds at least one command directory (guards against a vacuous pass)", () => {
+		expect(
+			commandDirs.length,
+			"no directory in this repository holds a discovered command source -- without this guard every " +
+				"assertion below would pass having checked nothing",
+		).toBeGreaterThanOrEqual(1);
+	});
+
+	it("declares at least one directory budget entry (guards against a vacuous pass)", () => {
+		expect(DIRECTORY_BUDGETS.length, "DIRECTORY_BUDGETS is empty -- the per-directory loop below would assert nothing").toBeGreaterThanOrEqual(1);
+	});
+
+	it("present-but-undeclared: every directory holding a command source has a DIRECTORY_BUDGETS entry", () => {
+		const declaredDirs = DIRECTORY_BUDGETS.map((e) => e.dir);
+		const offenders = commandDirs.filter((d) => !declaredDirs.includes(d));
+		expect(
+			offenders,
+			"WR-03: a command directory with no directory-level budget can hide an unbounded sibling file " +
+				"beside its command file -- add each of these to DIRECTORY_BUDGETS with a number and a reason",
+		).toEqual([]);
+	});
+
+	it.each(DIRECTORY_BUDGETS)("$dir's WHOLE .ts/.js total stays within its declared directory budget", (entry) => {
+		const files = filesInDir(entry.dir);
+		const total = files.reduce((sum, f) => sum + countRawLines(f), 0);
 		expect(
 			total,
-			`decision D-11: .pi/extensions/workflows/**/*.ts totals ${total} raw lines against a ` +
-				`ratchet of ${WORKFLOWS_DIR_TOTAL_BUDGET} -- this is the anti-offloading control; ` +
-				"shrinking one file by moving its lines into a private helper under the same directory " +
-				"does not pass here",
-		).toBeLessThanOrEqual(WORKFLOWS_DIR_TOTAL_BUDGET);
+			`${entry.dir} totals ${total} raw lines across ${files.length} files, over its directory ` +
+				`budget of ${entry.budget} (${entry.why}) -- this is the anti-offloading control; a file that ` +
+				"does not itself spell registerCommand( still counts toward this total",
+		).toBeLessThanOrEqual(entry.budget);
+	});
+
+	it("WR-03 proof: filesInDir counts a sibling file that does NOT itself spell registerCommand( (routing/modes.ts)", () => {
+		const files = filesInDir(".pi/extensions/routing");
+		expect(files, "routing/modes.ts must be counted in the directory total").toContain(".pi/extensions/routing/modes.ts");
+		expect(
+			isCommandSource(".pi/extensions/routing/modes.ts"),
+			"modes.ts does not itself register a command -- this is exactly the grill/steps.ts shape: " +
+				"present in the directory total, absent from isCommandSource",
+		).toBe(false);
 	});
 });
 
@@ -236,6 +366,28 @@ describe("WR-05 -- isCommandSource discovers a command surface by content, not b
 			"evidence.ts's own module docstring says it registers nothing and does not spell the " +
 				"registration call even in prose -- isCommandSource must not false-positive on it",
 		).toBe(false);
+	});
+});
+
+/**
+ * WR-04 -- `isCommandSource` and `discoverWorkflowFiles()` must never throw
+ * on a path that is tracked in the git index but absent on disk (a
+ * `git rm --cached`, or a delete staged/unstaged). Proved directly here
+ * rather than only by planting a real tracked-but-deleted file (which the
+ * mutation test below does, and reverts): a raw ENOENT thrown from
+ * `discoverWorkflowFiles()` -- called in every `describe` body above, i.e.
+ * at collection time -- silently reports "no tests" for this entire file,
+ * disabling FLOW-11's registry, the 80-line ceiling and the completeness
+ * check all at once with no red test to notice.
+ */
+describe("WR-04 -- a path that does not exist on disk classifies as false, never throws", () => {
+	it("isCommandSource returns false, does not throw, for a path with no file on disk", () => {
+		expect(() => isCommandSource(".pi/extensions/does-not-exist.ts")).not.toThrow();
+		expect(isCommandSource(".pi/extensions/does-not-exist.ts")).toBe(false);
+	});
+
+	it("discoverWorkflowFiles() does not throw when the union includes a nonexistent path", () => {
+		expect(() => discoverWorkflowFiles()).not.toThrow();
 	});
 });
 
