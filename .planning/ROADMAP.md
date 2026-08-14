@@ -338,7 +338,7 @@ Plans:
 **Wave 4** *(blocked on Wave 3 completion)*
 
 - [ ] 07-11-PLAN.md — capability-to-evidence registry (EXT-05/06) and the committed Phase 10 tool-count baseline *(Wave 4)*
-- [ ] 07-12-PLAN.md — EXT-03/EXT-04 mechanism evidence, bound to the pin so a bump invalidates it *(Wave 4)*
+- [x] 07-12-PLAN.md — EXT-03/EXT-04 mechanism evidence, bound to the pin so a bump invalidates it *(Wave 4)*
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -451,7 +451,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
-| 7. Composed Extensions, Pinned & Reviewed | 9/13 | In Progress|  |
+| 7. Composed Extensions, Pinned & Reviewed | 10/13 | In Progress|  |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 0/TBD | Not started | - |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-08-PLAN.md
-last_updated: "2026-08-14T21:24:18.574Z"
+stopped_at: Completed 07-12-PLAN.md
+last_updated: "2026-08-14T21:42:33.149Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 69
+  completed_plans: 70
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [██████████] 95%
+Progress: [██████████] 96%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -136,6 +136,7 @@ credentials can do has been done".
 | Phase 07 P07 | ~20min | 1 tasks | 3 files |
 | Phase 07 P09 | 55m | 3 tasks | 3 files |
 | Phase 07 P08 | 35m | 2 tasks | 4 files |
+| Phase 07 P12 | 25m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -352,6 +353,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-08: questionnaire.ts chosen over sibling question.ts -- questionnaire.ts is a strict superset (single question renders identically with isMulti=false, multi adds tab-bar navigation over the same rendering), covering both EXT-05 shapes with one tool
 - [Phase 07]: 07-08: todo (383 bytes/96 tokens) and questionnaire (1258 bytes/315 tokens) measured with node --input-type=module one-liners, not createRequire -- both typebox and @earendil-works/pi-ai ship ESM-only exports maps with no CJS entry
 - [Phase 07]: 07-08: workflow-budgets.test.ts's walkOnDisk() threw ENOTDIR on a flat top-level command file (todo.ts resolves to itself under WR-03's slice(0,3) directory rule) -- fixed with a statSync().isDirectory() guard, a real pre-existing bug this plan's flat placement was the first to exercise
+- [Phase 07]: 07-12: this plan's own drafted premise (agentScope loads .pi/agents/*.md via .pi/settings.json) is false for pi-subagents@0.49.0 -- agentScope is a per-call parameter defaulting to both, never a settings key; docs/EXTENSIONS.md and tests/unit/subagent-capabilities.test.ts both assert the true shape instead of the plan's falsified assertion
+- [Phase 07]: 07-12: pi-subagents@0.49.0 contributes exactly 4 model-facing tools to the main session (subagent, subagent_wait, contact_supervisor, intercom), none config-reducible; a fifth subagent definition in fanout-child.ts is a separate entry point loaded only in nested fanout-child pi processes and excluded from this baseline for Phase 10
 
 ### Pending Todos
 
@@ -399,8 +402,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T21:24:18.564Z
-Stopped at: Completed 07-08-PLAN.md
+Last session: 2026-08-14T21:42:33.138Z
+Stopped at: Completed 07-12-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
