@@ -1,8 +1,9 @@
 ---
 phase: 05-routing-capability-guards
-reviewed: 2026-08-14T20:05:00Z
+reviewed: 2026-08-14T21:25:00Z
 depth: standard
-files_reviewed: 23
+iteration: 3
+files_reviewed: 20
 files_reviewed_list:
   - .pi/extensions/qoder/client.ts
   - .pi/extensions/qoder/index.ts
@@ -13,631 +14,387 @@ files_reviewed_list:
   - .pi/extensions/routing/schema.ts
   - docs/ROUTING.md
   - docs/RUNBOOK.md
-  - tests/helpers/qoder-loopback.ts
-  - tests/integration/escalate.test.ts
-  - tests/integration/mode-persistence.test.ts
-  - tests/integration/mode-switch.test.ts
+  - tests/setup/agent-dir.ts
+  - tests/global-teardown.ts
+  - vitest.config.ts
+  - tests/unit/agent-dir-setup.test.ts
   - tests/integration/qoder-delegate.test.ts
-  - tests/integration/single-shot-roles.test.ts
+  - tests/integration/qoder-tool.test.ts
   - tests/integration/wire-proof.test.ts
+  - tests/integration/single-shot-roles.test.ts
   - tests/unit/agent-overrides.test.ts
-  - tests/unit/capability-guard.test.ts
-  - tests/unit/contributing-boundary.test.ts
-  - tests/unit/docs-policy.test.ts
-  - tests/unit/qoder-client.test.ts
   - tests/unit/routing-dispatch.test.ts
-  - tests/unit/routing-map.test.ts
+  - tests/unit/docs-policy.test.ts
 findings:
-  critical: 3
-  warning: 11
-  info: 5
-  total: 19
+  critical: 0
+  warning: 5
+  info: 2
+  total: 7
 status: issues_found
+resolved_after_review: true
+resolved_by_commits: 308374f..39b2ce0
+resolution_report: .planning/phases/05-routing-capability-guards/05-REVIEW-FIX.md
 ---
 
-# Phase 5: Code Review Report
+> **RESOLUTION NOTE (orchestrator, autonomous run).** This file records the state of the code at
+> review time. All 5 Warning findings below were subsequently fixed in the iteration-3 fix pass
+> (commits `308374f`, `71f4cf0`, `15391e0`, `3e2a8be`, `39b2ce0`) and are reported in
+> `05-REVIEW-FIX.md` with `status: all_fixed`, `skipped: 0`. The `status: issues_found` field above
+> is left unchanged because it faithfully describes the review, not the current tree. The 2 Info
+> findings (IN-01, IN-02) were out of the `critical_warning` fix scope and are ACCEPTED.
+> Post-fix verification: 80 test files / 1376 tests green, `tsc --noEmit` clean.
 
-**Reviewed:** 2026-08-14T20:05:00Z
+# Phase 5: Code Review Report (iteration 3 — FINAL)
+
+**Reviewed:** 2026-08-14T21:25:00Z
 **Depth:** standard
-**Files Reviewed:** 23
-**Status:** issues_found
+**Files Reviewed:** 20
+**Status:** issues_found (no BLOCKER)
 
 ## Summary
 
-The subsystem is unusually well-documented and the pure layers (`schema.ts`,
-`guard.ts`, `planRoleCall`) are genuinely well-tested. The four architectural
-invariants I was asked to police hold on inspection:
+**All eight iteration-2 fixes are real, load-bearing and verified at source.**
+The iteration-2 BLOCKER (CR-01, Qoder's configuration gate calling
+`pi.getActiveTools()` from the extension factory) is genuinely fixed, and —
+unlike iteration 1's WR-11 — the fix was **falsified in this review, not taken
+on trust**: I ran four mutate/confirm-red/revert experiments against the real
+committed source and confirmed each goes red. None of iteration 1's still-standing
+fixes were disturbed. ROADMAP criterion 1 remains CLOSED for `cheap`, `balanced`
+and `max`. All five architectural invariants hold.
 
-- **Chokepoint (invariant 1):** `modes.ts` reaches a model only via
-  `callModel()`/`callWithFallback()`; no file in `routing/` or `qoder/` spells
-  a direct-completion or raw-provider route, and no lint exemption was added.
-- **No `safety/`↔`routing/` cycle (invariant 2):** verified — `routing/`
-  imports `lib/jsonl.ts`, `diagnostics/`, `providers/`, nothing from `safety/`;
-  cross-subsystem signalling is `pi.events.emit(ROUTING_EVENT, …)`.
-- **Zero-context persistence (invariant 3):** `ky:mode` carries only mode name,
-  flag, `escalatedFrom`, `at`; `pi.appendEntry`'s "custom entries do NOT
-  participate in LLM context" claim is real
-  [VERIFIED: pi-coding-agent 0.84.1 `docs/extensions.md:1441`], and
-  `mode-persistence.test.ts` case 4 pairs the absence with a live positive
-  control. Sound.
-- **Qoder is a delegate tool only (invariant 4):** verified — Qoder appears in
-  no `ROLE_MAP`, no `CHAIN`, no `models.json` template, no guard entry. Only
-  the official Cloud Agents surface is spoken; zero bypass-proxy behaviour, no
-  signature forging, and the loopback fixture refuses any non-`127.0.0.1` host
-  before handing out a `baseUrl`. The PAT is never written to a transcript
-  record at all (not redacted-after-the-fact), and `qoder-delegate.test.ts`
-  asserts that with non-vacuity guards.
-- **RB-05-01 correctly OUTSTANDING** in both the table and the detail section,
-  and `docs-policy.test.ts` governs it. No finding filed against that.
+**The phase is in a shippable state.** No finding below is a BLOCKER. Five
+warnings remain, four of which are documentation/comment defects of the exact
+class that iteration 2's own WR-01 identified as "how a fixed bug comes back",
+and one of which (WR-01 below) is a residual half of iteration 2's WR-04 that
+should be closed **before Qoder is ever configured** (i.e. before RB-05-01 is
+run on the work laptop).
 
-That said, this code has three defects I can prove that must be fixed before it
-ships, one of which has **already modified the developer's real machine
-configuration** and one of which breaks single-shot routing on exactly the
-credential configuration the candidate-ordering rule exists to serve. The
-adjudication requested on ROADMAP criterion 1's "all three modes" clause is
-**WR-01: the cheap leg is open**, and it is open for a stronger reason than the
-prompt supposed.
+`npx vitest run` — **1373 tests / 80 files passed**. `npm run typecheck` — clean.
+Working tree restored byte-clean after every falsification (`git status --porcelain`
+shows only `.planning/` artifacts).
 
----
+### Falsification experiments run in this review (mutate → confirm red → revert)
 
-## Critical Issues
+| Mutation applied to real committed source | Test that went red | Verdict |
+|---|---|---|
+| Delete the whole `pi.on("session_start", …)` block from `qoder/index.ts` | `qoder-tool.test.ts:231` — *"qoder_delegate is STILL active after session_start fired"* | Gate is **load-bearing**, not decorative |
+| Re-introduce the factory-time `pi.getActiveTools()` call (iteration 2's CR-01) | `qoder-tool.test.ts:212` — *"the extension failed to load at all (factory threw and Pi discarded it)"* | The non-vacuity guard **really catches** the iteration-2 regression |
+| Revert `tests/setup/agent-dir.ts` to `beforeAll`-only | `agent-dir-setup.test.ts:38` — *"PI_CODING_AGENT_DIR was undefined at this file's own import time"* | WR-02's module-scope isolation is **really in force** |
+| Delete the `qoder.delegate.confirm` write from `qoder/index.ts` | both `qoder-tool.test.ts` confirmation cases (decline + approve) | WR-03's audit record is **reachable on both branches** |
+| Delete the `qoder.delegate.failed / malformed-session-id` record from `client.ts` | `qoder-delegate.test.ts:643` | WR-06's terminal record is **load-bearing** |
 
-### CR-01: The test suite writes to the developer's REAL global Pi settings file — reproduced, with the artifact on disk
+### Verification verdicts on iteration 2's eight findings
 
-**File:** `tests/integration/mode-switch.test.ts:266-336`,
-`tests/integration/mode-persistence.test.ts:183`, `:236`, `:309`
-(with `.pi/extensions/routing/agent-overrides.ts:329-334` and
-`.pi/extensions/routing/index.ts:282-290`)
+| Finding | Verdict | Evidence |
+|---|---|---|
+| **CR-01** [BLOCKER] (factory-time `getActiveTools()`) | **FIXED, and correct in production** | The factory now calls only `pi.registerTool` and `pi.on` (`qoder/index.ts:112-265`); the gate moved to `pi.on("session_start", …)` at `:257-265`, wrapped in `try`/`catch`. Verified the whole chain at source: `ExtensionRunner#emit()` dispatches to the **real registered handlers** (`dist/core/extensions/runner.js:579-608` — `ext.handlers.get(event.type)` then `await handler(event, ctx)`), and production reaches that exact method via `AgentSession#bindExtensions()` → `this._extensionRunner.emit(this._sessionStartEvent)` (`dist/core/agent-session.js:1761`), which **every** mode calls (`interactive-mode.js:1379`, `print-mode.js:53`, `rpc-mode.js:230`). So the test's `extensionRunner.emit({type:"session_start"})` is not "asserting on its own emit" — it is the same method, on the same runner, invoking the same handler map that production uses. `setActiveToolsByName` mutates `agent.state.tools` **and rebuilds the system prompt** (`agent-session.js:631-643`), so the ~329 tokens really do go away before the first request. Both falsifications above confirm the test would fail if the handler were removed **and** if the factory-time call came back. |
+| **WR-01** (stale `usesFallbackChain` docs) | **FIXED** | All three comments corrected: module docstring `modes.ts:69-74` now states membership is "a fact about `CHAIN`, not a dispatch rule"; `usesFallbackChain`'s own docstring `:294-300` says only the HEAD qualifies and names `resolvedIsChainHead`; `runSingleShotRole`'s docstring `:378-382` now says "is the HEAD of the fixed fallback chain (CR-02: not merely a member)". The dispatch code at `:427-446` is unchanged and still honours the resolved candidate. |
+| **WR-02** (guard not in force at module scope) | **FIXED, falsified** | `tests/setup/agent-dir.ts:66-67` assigns at module scope; `beforeAll:69-76` only re-asserts. `agent-dir-setup.test.ts:29` captures at its **own** module scope (the only observation point that can see the window) and asserts three things, including that the value matches `/kypi-agent-dir-suite-/` — so a developer who happens to export `PI_CODING_AGENT_DIR` in their shell cannot make it pass for the wrong reason. Reverting the fix reproduces `undefined` and turns the test red. Iteration 2's IN-03 (`afterAll` dereferencing a possibly-unassigned `dir`) is **incidentally resolved** — `dir` is now a module-scope `const`, so a `mkdtempSync` failure fails the setup file loudly instead of masking itself in `afterAll`. |
+| **WR-03** (confirmation decision unrecorded) | **FIXED, reachable on both branches** | `qoder/index.ts:185-190` writes `{event:"qoder.delegate.confirm", hasUI, approved, taskChars}` through `client.ts`'s own exported `writeQoderTranscript` (`client.ts:507-513`) — the same `redactDeep` + `appendJsonl` writer, never a second one, and never the task text. Placed **before** the `if (!approved) throw` at `:192`, so the decline branch is covered. Falsified: removing the write reddens both confirmation cases. |
+| **WR-04** (validation behind the human prompt) | **FIXED for length; see WR-01 below for the residual** | `qoder/index.ts:141-147` trims and bounds **before** `ctx.ui.select` is reachable at `:166`. `qoder-tool.test.ts:345-391` asserts `selectCallCount === 0` and `loop.received` length 0 for an over-limit task — a genuine paired absence-plus-positive-control. |
+| **WR-05** (docs contradicted WR-11) | **FIXED** | `docs/ROUTING.md` §6 gained a "Two gates, not one" block (`:250-273`) stating (a) unconfigured ⇒ not offered to the model at all, (b) configured ⇒ explicit human selection, headless refuses by design, and that both branches write a `qoder.delegate.confirm` record. `docs/RUNBOOK.md` RB-05-01 step 3 gained the approval-dialog sentence and "this check cannot be run headlessly". |
+| **WR-06** (no terminal transcript on three throw paths) | **FIXED, one falsified** | `client.ts:646` (malformed-session-id), `:717-722` and `:752-757` (both inactivity-timeout sites) each write `qoder.delegate.failed` with a `cause` before throwing. The malformed-id record is asserted at `qoder-delegate.test.ts:640-650` **together with** a check that the offending id never appears in the transcript; removing the write reddens it. |
+| **WR-07** (orphaned/colliding temp file) | **FIXED** | `agent-overrides.ts:464-478`: `${path}.${pid}.${randomUUID()}.tmp`, inner `try`/`catch` that best-effort `rmSync`es before rethrowing into the outer refusal. The new test (`agent-overrides.test.ts:337-386`) mocks only `node:fs#renameSync` (spreading `importActual` so `writeFileSync` stays real, which is what makes the orphan actually get created), asserts no `*.tmp` survives **and** that the call still returns `ok:false` rather than throwing, and unmocks in its own `afterEach` so no other case in the file is affected. |
 
-**Issue:** A successful `applyMode` calls `writeAgentOverrides(...)`, which
-resolves `join(getAgentDir(), "settings.json")` when no `settingsPath` is
-injected. `getAgentDir()` honours `PI_CODING_AGENT_DIR` and otherwise resolves
-`~/.pi/agent/` [VERIFIED: pi-coding-agent 0.84.1 `dist/config.d.ts:76`,
-`getAgentDir()` "Get the agent config directory (e.g., ~/.pi/agent/)"].
+### Regression check on iteration 1's still-standing fixes
 
-`wire-proof.test.ts` documents this trap at length (`:74-83`) and sets
-`process.env.PI_CODING_AGENT_DIR` in `beforeAll`. `mode-switch.test.ts` sets it
-for cases 2 and 4 only — **case 1 drives a successful `/balanced` with the
-variable unset** (and `afterEach:237` deletes any leakage from a prior file).
-`mode-persistence.test.ts` **never sets it at all** and drives three successful
-switches (`/max` case 1, `/balanced`+`/max` case 2, `/balanced` case 4).
+- **CR-02** (resolved chain-member candidate discarded) — **INTACT.** `modes.ts:427-446` still enters `callWithFallback` only when the resolved ref *is* `CHAIN[0]`, and serves every other candidate through `callModel(ctx, {…, model: plan.model, …})`. The regression test (`single-shot-roles.test.ts:612-707`) is unchanged, still asserts `hasConfiguredAuth("deepseek") === false` as a precondition, the reply text, `nested[0].provider === "dashscope"`, **zero** `provider === "deepseek"` rows, and the corr-joined `nested.request` payload model.
+- **CR-03** (truncated Qoder stream) — **INTACT.** `client.ts:793-802` (trailing `decoder.decode()` + final `parseSseFrames` pass, placed after the `finally`) and `:816-822` (`if (!folded.done) throw`). Iteration 2's WR-06 edits inserted records *before* the throw sites without moving either half. Both loopback cases still pass with their own fixture preconditions.
+- **WR-01 iter1 / cheap-mode wire proof** — **INTACT.** `wire-proof.test.ts:352-437` unchanged; it still switches the executor to the flash tier first (`:371`) so the "advisor ≠ executor" comparison is `pro` vs `flash`, and still joins the second oracle by `corr`.
 
-This is not theoretical. On this machine right now:
+### Architectural invariants
 
-```
-$ cat ~/.pi/agent/settings.json        # mtime 2026-08-14 19:29
-{
-  "kyPiAgent": { "bootstrapVersion": "1", ... },
-  "subagents": { "agentOverrides": { "planner": { "model": "deepseek/deepseek-v4-pro" } } }
-}
-```
+1. **Chokepoint** — HOLDS. `CHOKEPOINT_BYPASS_ALLOWLIST` is still `[]` (`tests/unit/chokepoint-lint.test.ts:89`); no exemption was added by any of the eight commits.
+2. **`safety/` ↛ `routing/`** — HOLDS. The only occurrence of "routing" under `.pi/extensions/safety/` is a prose reference in `safety/schema.ts:11`; there is no import in either direction.
+3. **Zero-context mode persistence** — HOLDS. Every record iteration 2 added (`qoder.delegate.confirm`, `qoder.delegate.failed`) goes to `.pi/logs/qoder-*.jsonl` via `appendJsonl`; nothing new touches `pi.appendEntry` or the context window.
+4. **Qoder is a delegate tool only** — HOLDS. `grep -rin qoder .pi/extensions/routing/ .pi/extensions/providers/ .pi/*.json` returns exactly one prose mention (`routing/index.ts:186`) and nothing in `models.json`, `ROLE_MAP`, `CHAIN` or the guard. Official Cloud Agents surface only (`client.ts:609,660,684`); no bypass-proxy behaviour anywhere.
+5. **No credential committed / PAT never transcribed** — HOLDS after all edits. `requestHeaders()` (`client.ts:557-559`) is the only place the token is placed; the new `qoder.delegate.confirm` record carries `{event, hasUI, approved, taskChars}` only, and `qoder-delegate.test.ts:379-381` still asserts the transcript contains neither the fixture token nor `authorization`/`bearer` in any casing.
 
-`deepseek/deepseek-v4-pro` is exactly `ROLE_MAP.balanced.planner.candidates[0]`.
-The suite silently reconfigured the user's live harness. `tests/global-teardown.ts`
-cannot see it: that tripwire diffs *tracked repository files*, and
-`~/.pi/agent/settings.json` is neither tracked nor in the repo. On a machine
-where Phase 7 later installs `pi-subagents`, this stray pin becomes a live
-routing decision nobody made.
+**RB-05-01 remains OUTSTANDING** in both the summary table (`docs/RUNBOOK.md:935`) and the detail section (`:939`), and `tests/unit/docs-policy.test.ts:400-431` still gates both halves and reports a half-flip as `INCONSISTENT`. Correct; no finding is filed against it.
 
-**Fix:** Make the temp-dir injection unconditional rather than per-case. Add a
-suite-wide guard in `vitest.config.ts` (`setupFiles`) so no test can ever reach
-the real agent dir:
+### ROADMAP criterion 1 — re-confirmed CLOSED for all three modes
 
-```ts
-// tests/setup/agent-dir.ts, referenced from vitest.config.ts setupFiles
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { afterAll, beforeAll } from "vitest";
-
-let dir: string;
-beforeAll(() => {
-	// A test must never resolve getAgentDir() to this machine's real ~/.pi/agent.
-	dir = mkdtempSync(join(tmpdir(), "kypi-agent-dir-suite-"));
-	process.env.PI_CODING_AGENT_DIR = dir;
-});
-afterAll(() => rmSync(dir, { recursive: true, force: true, maxRetries: 3 }));
-```
-
-Then delete the per-file `delete process.env.PI_CODING_AGENT_DIR` in
-`mode-switch.test.ts:237` and `agent-overrides.test.ts:77` (they now punch a
-hole in the suite-wide guard) and have those cases override to their own temp
-dir and restore the suite value. Additionally: extend `tests/global-teardown.ts`
-to snapshot/compare `~/.pi/agent/settings.json` so a future regression of this
-exact shape fails the run loudly. Finally, restore the developer's file by
-removing the stray `subagents` key.
-
----
-
-### CR-02: `runSingleShotRole` throws away the candidate it just resolved whenever that candidate is a chain member — DashScope-only machines lose every flash-tier single-shot role
-
-**File:** `.pi/extensions/routing/modes.ts:377-395`
-(with `.pi/extensions/providers/fallback.ts:252-273`)
-
-**Issue:** `planRoleCall` → `pickConfiguredCandidate` walks the ordered
-candidate list and **skips candidates with no configured auth** — that is the
-documented purpose of the ordering rule (`schema.ts:48-56`). It may therefore
-legitimately return `dashscope/deepseek-v4-flash` because `deepseek` (direct)
-has no key on this machine.
-
-`runSingleShotRole` then does:
-
-```ts
-const ref: ModelRef = { provider: plan.model.provider, id: plan.model.id };
-if (usesFallbackChain(ref)) {
-    return callWithFallback(ctx, { role, systemPrompt, messages, api });  // <-- plan.model is DROPPED
-}
-```
-
-`callWithFallback` takes no starting model. It **always restarts at `CHAIN[0]`**
-(`fallback.ts:252`), which is `deepseek/deepseek-v4-flash`
-(`providers/schema.ts:359-362`). `deepseek` is a built-in Pi provider, so
-`registry.find()` resolves it; `callModel` then fails for want of a key; and
-`classifyFailure` sends a missing/invalid-credential string down the
-non-retryable branch → `"fatal"` → `throw error` / `return message`
-(`fallback.ts:269`, `:281-286`). **The `dashscope` hop the router explicitly
-selected is never attempted.**
-
-Consequences, in order of severity:
-1. On a machine holding only DashScope credentials — the daily-driver
-   configuration this whole project is built around — `reviewer` and
-   `summariser` in `cheap`/`balanced` mode fail outright with a `deepseek`
-   auth error, despite a fully configured, guard-approved candidate existing.
-2. Even in the happy path, **the model that serves the request is `CHAIN[0]`,
-   not the model `ROLE_MAP` named.** The plan's resolution result is
-   decorative for any chain-member route. This also invalidates the only wire
-   evidence cheap mode has (see WR-01).
-3. `pickConfiguredCandidate`'s auth pre-check is bypassed, so the prompt is
-   disclosed to a provider the harness already knew would reject it — the same
-   disclosure `fallback.ts:281-286` deliberately avoids elsewhere.
-
-No test catches it: `single-shot-roles.test.ts` registers *only* `deepseek`
-(so `CHAIN[0]` is always the answer) and `wire-proof.test.ts` exercises the
-single-shot path only for `max.reviewer`, which is Bedrock and not a chain
-member.
-
-**Fix:** Do not enter the chain unless the resolved ref *is* the chain's head,
-and make that explicit rather than incidental:
-
-```ts
-const chainHead = CHAIN[0];
-const resolvedIsChainHead =
-    chainHead !== undefined && ref.provider === chainHead.provider && ref.id === chainHead.id;
-
-if (resolvedIsChainHead) {
-    return callWithFallback(ctx, { role: opts.role, systemPrompt: opts.systemPrompt, messages: opts.messages, api });
-}
-// The router already picked a specific, authed, guard-approved model. Serve THAT one.
-return callModel(ctx, { role: opts.role, model: plan.model, systemPrompt: opts.systemPrompt, messages: opts.messages, api });
-```
-
-(The alternative — teaching `callWithFallback` a `startAt`/`startFrom` option so
-the chain resumes at the resolved hop — is better long-term and keeps the
-retry taxonomy available to a DashScope-first machine; either way the resolved
-model must not be silently discarded.) Add a unit case to
-`routing-dispatch.test.ts` with a registry that authes `dashscope` only, and an
-integration case asserting the nested wire record names `dashscope`.
-
----
-
-### CR-03: A truncated Qoder stream is returned to the model as a complete delegated result
-
-**File:** `.pi/extensions/qoder/client.ts:617-644`, `.pi/extensions/qoder/index.ts:133-136`
-
-**Issue:** Two defects compound:
-
-1. **The trailing buffer is never flushed.** The read loop keeps `buffer =
-   parsed.rest` and, on `streamDone`, `break`s without parsing what is left in
-   `buffer` and without a final `decoder.decode()`. A server that ends the body
-   with the last frame *not* followed by a blank line — a very common SSE
-   server behaviour, and one this file's own docstring says the enum/envelope
-   is UNVERIFIED about — loses that final frame. If the lost frame is
-   `session.status_idle`, `done` is `false`; if it is the last
-   `content_delta`, the answer is truncated.
-2. **`done` is never checked.** `delegateTask` returns `folded` regardless, and
-   `index.ts:133-136` returns `result.text` regardless. A connection dropped
-   mid-stream, a server-side 5xx after headers, or an early close therefore
-   produces a **truncated or empty string presented to the model as Qoder's
-   answer**, with no error and no marker. The transcript records
-   `done: false`, but the model never sees it and the tool result is not
-   `isError`.
-
-For a subsystem whose stated purpose is "never a silent downgrade", and for a
-tool whose result the docs tell the user to treat as an untrusted PR, silently
-handing back half an answer is the worst available failure mode.
-
-**Fix:**
-
-```ts
-	} finally {
-		reader.releaseLock();
-	}
-
-	// Flush what the transport left unterminated: a server that closes without a
-	// final blank line must not cost us the last frame (often status_idle).
-	buffer += decoder.decode();
-	if (buffer.trim().length > 0) {
-		allFrames.push(...parseSseFrames(`${buffer}\n\n`).frames);
-		folded = foldDelegatedResult(allFrames);
-	}
-
-	writeQoderTranscript(cwd, { event: "qoder.delegate.result", done: folded.done, stopReason: folded.stopReason, textChars: folded.text.length });
-
-	if (!folded.done) {
-		throw new Error(
-			`Qoder delegate: the event stream ended without a session.status_idle frame after ` +
-				`${folded.text.length} characters -- the delegated result is incomplete and must not be ` +
-				"treated as an answer.",
-		);
-	}
-	return folded;
-```
-
-Add loopback cases for (a) a body whose final frame lacks the terminating blank
-line and (b) a stream closed before `session.status_idle`, asserting a throw
-rather than a short string.
+`ROLE_MAP.cheap.advisor.candidates[0]` is `deepseek/deepseek-v4-pro`
+(`schema.ts:205,224,251`); `CHAIN` is flash-only
+(`providers/schema.ts:359-362`). So `cheap.advisor` is genuinely not a chain
+member and, post-CR-02, is dispatched through `callModel` with the router's own
+resolved model. `wire-proof.test.ts` Task 3 still proves the nested row's
+provider **and** model, the corr-joined wire payload's model, non-identity with
+the session executor at that moment, and `advisorRef.id !== "deepseek-v4-flash"`.
+**Criterion 1 is CLOSED for `cheap`, `balanced` and `max`.**
 
 ---
 
 ## Warnings
 
-### WR-01: ADJUDICATION — criterion 1's cheap leg is NOT proven by any wire dump, and cheap's current proof path cannot prove it
+### WR-01 [WARNING]: iteration 2's WR-04 bounded the confirmation excerpt by CHARACTERS but not by LINES or control characters — and its rationale comment asserts a rendering property nothing verifies
 
-**File:** `tests/integration/wire-proof.test.ts:216`, `:490-510`;
-`tests/integration/single-shot-roles.test.ts:129-134`, `:428-447`
+**File:** `.pi/extensions/qoder/index.ts:148-151`, `:163-165`, `:166-174`
 
-**Verdict: OPEN. Cheap's proof is materially weaker than balanced's and max's —
-weaker even than the prompt's own characterisation of it.**
+**Issue:** The excerpt is capped at 500 **characters** and then interpolated
+verbatim into `ctx.ui.select`'s title. A model-controlled `task` of
+`"\n".repeat(500)` therefore still produces a ~500-line dialog title. Three
+facts verified at source make this more than cosmetic:
 
-The facts as I read them:
+1. `ExtensionSelectorComponent` renders the title as a **single, untruncated,
+   un-line-capped** `Text` child
+   [VERIFIED: pi-coding-agent 0.84.1 `dist/modes/interactive/components/extension-selector.js:29`].
+2. The **option list is added after the title**
+   (`:35-36`), so the title's height determines where the two choices land.
+3. `selectedIndex` defaults to `0` (`:12`), and this file passes
+   `[DELEGATE_CHOICE, CANCEL_CHOICE]` (`index.ts:172`) — so **the pre-highlighted
+   option is the approve one**. (`safety/index.ts:523-527` has the identical
+   `[APPROVE_CHOICE, DENY_CHOICE]` ordering, so a fix here should be considered
+   for both.)
 
-- `wire-proof.test.ts` asserts turn-row/wire-record model identity for
-  `balanced.executor` (case 1/3), `max.executor` (case 2/3) and
-  `max.reviewer` (cases 5/6, joined by `corr`). `setMode("cheap")` at `:216` is
-  fixture hygiene only; **no cheap-mode turn is ever served or asserted** in
-  that file. `/cheap` is never driven to success anywhere in the suite —
-  `mode-switch.test.ts` cases 3 and 4 drive `/cheap` specifically to *refuse*.
-- `single-shot-roles.test.ts` does serve a nested turn in cheap mode via
-  `ROLE_MAP.cheap.reviewer`, but its `TurnsRow` interface (`:129-134`) does not
-  even declare `provider`/`model`, and no case asserts them. The proof is
-  entirely indirect: case 0's api-identity guard plus "only one model is
-  registered".
-- **The indirect proof does not hold.** Two independent holes: (a) the fixture's
-  session also has `faux/faux-flash` registered and authed, so a `ROLE_MAP`
-  corrupted to point cheap's reviewer at the session's own faux model would
-  resolve, dispatch, write a `kind:"nested"` row with `role:"reviewer"`, and
-  pass every assertion in the file; and (b) far worse, per **CR-02**,
-  `cheap.reviewer` resolves a `CHAIN` member and is therefore dispatched
-  through `callWithFallback`, which **re-resolves `CHAIN[0]` itself and ignores
-  the routed candidate entirely**. Editing `ROLE_MAP.cheap.reviewer` to
-  `dashscope/deepseek-v4-flash` would change nothing observable in that test.
-  Cheap's only wire evidence runs through the one dispatch path that is
-  structurally incapable of distinguishing a routing decision from a hardcoded
-  chain head.
-- Note also that `cheap.executor` and `balanced.executor` are the *same*
-  `FLASH_CANDIDATES`, so an executor-based cheap proof would be degenerate by
-  construction. Cheap is distinguishable from balanced only at
-  `planner`/`reviewer`/`advisor`.
+The code comment at `:163-165` states the fix's rationale as fact:
 
-**What would close it.** Add a case to `single-shot-roles.test.ts` (or a cheap
-section in `wire-proof.test.ts`) that drives a role which is (i) served in
-cheap mode, (ii) resolved to a model *not* in `CHAIN`, and (iii) asserted by
-identity against the map. `cheap.advisor` is the natural choice
-(`deepseek/deepseek-v4-pro`, not a chain member, and distinct from
-`balanced.advisor`'s Bedrock Claude):
+> *"the bypass warning comes FIRST and the (now bounded) task excerpt LAST, so a
+> long task can push only its own tail out of view, never the warning the user
+> needs to read first."*
+
+That is an assertion about terminal rendering, and nothing in the repository or
+in Pi's source supports it. Pi's main-screen renderer writes the whole component
+buffer to the terminal (`pi-tui/dist/tui-main-screen.js:153-200`), so on a
+terminal shorter than the dialog it is the **top** of the title — the bypass
+warning — that scrolls out of view, not the tail. [UNVERIFIED: the exact
+on-screen outcome, which depends on viewport anchoring I could not exercise
+without a real terminal. What IS verified is (1)-(3) above and the absence of
+any line cap anywhere in the path.] Either way, the comment claims a guarantee
+the code does not provide.
+
+Not a BLOCKER today: `qoder_delegate` is deactivated on every unconfigured
+machine (this laptop, CI), so the dialog is unreachable. **It becomes live the
+moment RB-05-01 is run on the work laptop**, which is exactly when a
+model-controlled string starts driving a security confirmation on a box where
+`main` auto-deploys.
+
+**Fix:** bound line count as well as character count, and drop control
+characters, before the excerpt reaches the dialog:
 
 ```ts
-const advisorRef = ROLE_MAP.cheap.advisor.candidates[0];
-// non-vacuity first
-expect(run.turnsAfterAdvisor.length).toBeGreaterThan(0);
-const row = run.turnsAfterAdvisor.find((r) => r.kind === "nested" && r.role === "advisor");
-expect(row, "no nested advisor row -- the assertions below would key off undefined").toBeDefined();
-expect(row?.provider).toBe(advisorRef.provider);
-expect(row?.model, "cheap's advisor route did not serve the turn").toBe(advisorRef.id);
-// and the independent second oracle, joined by corr, never by position:
-const req = run.wireAfterAdvisor.find((w) => w.corr === row?.corr && w.kind === "nested.request");
-expect(req, "no nested.request joined by corr").toBeDefined();
-expect(req?.payload?.model).toBe(advisorRef.id);
-// paired distinctness, so this is routing and not the session's own model:
-expect(row?.model).not.toBe(run.executorModelAtThatPoint.id);
+// Replace every C0/C1 control character (newlines included) with a space, then
+// collapse runs, THEN bound the length. Written without regex escapes so it is
+// unambiguous: a model-controlled string must not be able to change the SHAPE
+// of a security dialog, only its content.
+const flattened = Array.from(task)
+    .map((ch) => {
+        const cp = ch.codePointAt(0) ?? 0;
+        return cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) ? " " : ch;
+    })
+    .join("")
+    .replace(/  +/g, " ")
+    .trim();
+const excerpt =
+    flattened.length > CONFIRM_EXCERPT_CHARS
+        ? `${flattened.slice(0, CONFIRM_EXCERPT_CHARS)}… (${task.length} chars total)`
+        : flattened;
 ```
 
-Until that lands (and CR-02 is fixed), criterion 1 should be recorded as proven
-for `balanced` and `max` and **unproven for `cheap`**.
+and correct the `:163-165` comment to state what is then actually true (the
+excerpt is one flattened line of bounded width, so it cannot change the dialog's
+height at all). Add a case asserting `select`'s captured title has at most N
+lines for a newline-stuffed task.
 
-### WR-02: `writeAgentOverrides` can throw despite documenting that it never does, and the throw lands mid-way through a mode switch
+### WR-02 [WARNING]: `qoder/index.ts` claims to mirror safety's "every branch writes exactly one audit row" contract — two of its four refusal branches write nothing
 
-**File:** `.pi/extensions/routing/agent-overrides.ts:363-427` (esp. `:370-373`, `:414-424`)
+**File:** `.pi/extensions/qoder/index.ts:121-126`, `:141-147`, `:180-190`
 
-**Issue:** The module docstring (`:105-112`) promises "returns a refusal rather
-than throwing, so a mode-switch command can report 'the model switched but the
-subagent pins did not'". Only `JSON.parse` is guarded. `readFileSync` (twice),
-`writeFileSync` and `statSync` are all unguarded: EACCES/EPERM/EISDIR, a
-missing `~/.pi/agent` parent directory on a fresh machine, or a Windows file
-lock all throw straight out. In `applyMode` (`index.ts:286`) that happens
-*after* `pi.setModel` succeeded, `setMode`/`setEscalated` ran and
-`pi.appendEntry` wrote — so the switch really happened, the user never gets the
-step-6 notification, and Pi swallows extension handler exceptions. The
-`void statSync(path)` at `:424` is pure dead weight: it is explicitly
-"diagnostic only, not gating", it is never read, and it is the one call most
-likely to throw for no benefit.
+**Issue:** The comment introducing WR-03's record says, verbatim:
 
-Separately, `writeFileSync` is not atomic. A crash or a concurrent Pi session
-mid-write truncates the user's **global** settings file, destroying
-`kyPiAgent`, `subagents.defaultModel` and any hand-written keys — the very
-sibling keys the read-modify-write exists to preserve.
+> *"mirroring `safety/index.ts#registerApprovalTool`'s own 'every branch writes
+> exactly one audit row' contract"* (`:182-184`).
 
-**Fix:** Wrap the whole body in `try`/`catch` returning `{ ok:false, reason, path }`;
-delete the `statSync` line; write via temp-file + `renameSync`:
+That contract genuinely holds in `safety/index.ts`: the `validate()` refusal
+writes a row (`:502-510`), the deny branch writes one (`:531-541`), the
+unreachable `approve()`-false branch writes one (`:549-558`), and the allow
+branch writes one (`:562-569`). In `qoder/index.ts` it holds for exactly two of
+four branches:
+
+| Branch | Record written? |
+|---|---|
+| `resolveQoderConfig` refusal (`:122-126`) | **no** |
+| WR-04 length/empty refusal (`:142-147`) | **no** |
+| declined / no-UI (`:192-199`) | yes |
+| approved (`:201-216`) | yes |
+
+The length-refusal gap is the one that matters: it is the branch an adversarial
+or looping model hits repeatedly, and it now leaves **zero** trace anywhere —
+no transcript record, no audit row, nothing for the operator RB-05-01 step 4
+sends to `.pi/logs/qoder-*.jsonl`. The config-refusal gap is the documented
+defence-in-depth path (`docs/ROUTING.md:265-268`), so a record there is also the
+only way to observe the deactivation hook having failed.
+
+**Fix:** write one record on each of the two silent branches, through the same
+redacted writer, before the throw:
 
 ```ts
-try {
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, nextText, "utf-8");
-    renameSync(tmp, path);           // atomic on the same filesystem
-    return { ok: true, written: true, path };
-} catch (err) {
-    return { ok: false, reason: `${path} could not be written (${err instanceof Error ? err.message : String(err)}).`, path };
-}
+writeQoderTranscript(ctx.cwd, { event: "qoder.delegate.refused", cause: "unconfigured" });
+// and
+writeQoderTranscript(ctx.cwd, { event: "qoder.delegate.refused", cause: "task-length", taskChars: task.length });
 ```
 
-Add a case asserting a refusal (not a throw) when the target directory does not
-exist.
+Never the task text. Then the `:182-184` comment becomes true as written.
 
-### WR-03: `getModeState()` validates the shape of the `globalThis` slot but not that `mode` is a real mode — `resolveRoute` then dereferences `undefined`
+### WR-03 [WARNING]: `qoder-tool.test.ts`'s file header still describes CR-01's reverted-to-broken design as the current one
 
-**File:** `.pi/extensions/routing/modes.ts:145-151`, `:205-210`
+**File:** `tests/integration/qoder-tool.test.ts:32-41`
 
-**Issue:** `isKyModeData` accepts any `{mode: string, escalated: boolean, at:
-number}`. The docstring at `:157-163` explicitly anticipates the slot holding
-"a stale shape from a version this module no longer writes" — but a stale value
-like `{mode: "turbo", …}` passes the shape check, and `resolveRoute` then
-evaluates `ROLE_MAP[state.mode][role]` → `undefined[role]` → `TypeError`,
-crashing `/escalate`, `/mode` and every `runSingleShotRole`. This is
-inconsistent with `restoreModeFromBranch`, which validates against `MODES`
-precisely for this reason (T-05-36).
+**Issue:** The header section *"WHY THE CONFIGURATION-GATE CASES NEVER CALL
+`execute()`"* still reads:
 
-**Fix:** Reuse the same narrowing in the slot reader:
+> *"the gate this file's own WR-11 fix applies is a ONE-TIME decision made
+> inside the extension's default export, evaluated once at load time from
+> `process.env`, not a per-call check."*
 
-```ts
-return typeof candidate.mode === "string" &&
-    (MODES as readonly string[]).includes(candidate.mode) &&   // T-05-36, applied at BOTH readers
-    typeof candidate.escalated === "boolean" &&
-    typeof candidate.at === "number";
+"Made inside the extension's default export, evaluated once at load time" is a
+precise description of **the factory-time gate that was the iteration-2
+BLOCKER** — the design that crashed the whole extension and that commit
+`905dc7e` removed. The `describe` block's own inline comment 120 lines below
+(`:168-190`) correctly describes the `session_start` design, so the file now
+contradicts itself, and the contradiction points a maintainer at the broken
+shape first. This is precisely the failure class iteration 2's own WR-01 filed
+against `usesFallbackChain` ("documentation that contradicts the fix is how a
+fixed bug comes back") — the fixer corrected that instance and left this one.
+
+**Fix:** rewrite `:32-41` to say what is now true, e.g.:
+
+```
+ * WHY THE CONFIGURATION-GATE CASES NEVER CALL `execute()`
+ * They prove only whether `session.getActiveToolNames()` contains
+ * `"qoder_delegate"` AFTER a real `session_start` is emitted. The gate is a
+ * once-per-session decision made in a `session_start` HANDLER (CR-01: it
+ * cannot live in the factory -- `pi.getActiveTools()`/`setActiveTools()`
+ * throw there), reading `process.env` at that moment -- which is why
+ * `process.env` is set BEFORE `createFauxSession` in those cases and
+ * restored in each case's own `finally`.
 ```
 
-### WR-04: `restoreModeFromBranch` throws on a `null` payload, contradicting its own "NEVER THROWS" contract
+### WR-04 [WARNING]: both "a newly-registered tool is active by default" citations point at a branch of `_refreshToolRegistry` that never runs from a real session
 
-**File:** `.pi/extensions/routing/index.ts:538-559` (specifically `:543`, `:553`)
+**Files:** `.pi/extensions/qoder/index.ts:239-246`; `tests/integration/qoder-tool.test.ts:155-166`
 
-**Issue:** `if (latest?.data === undefined) return;` does not catch `data:
-null` (`null === undefined` is `false`). Execution reaches `isModeName(data.mode)`
-and dereferences `null` → `TypeError`. The doc comment at `:530-536` claims the
-function never throws on a malformed payload, and `mode-persistence.test.ts`
-case 3 only exercises a malformed *mode string*, not a malformed *payload*. The
-`session_start` wrapper's `catch` contains the damage, but the exported
-function's stated contract — the thing every direct caller and every test reads
-— is false.
+**Issue:** Two load-bearing `[VERIFIED: …]` / `[MEASURED …]` citations are
+attached to the wrong branch, and one of them states the inverse of the truth.
 
-**Fix:** `if (latest === undefined || latest.data === null || typeof latest.data !== "object") return;`
-and add a case: `restoreModeFromBranch([{...entry, data: null}])` must not throw
-and must leave the perturbed state at `DEFAULT_MODE`.
+1. `qoder/index.ts:240-245` cites `dist/core/agent-session.js:2008-2014` and
+   says the tool is active by default *"when the session was **not**
+   constructed with an explicit `activeToolNames`/`allowedToolNames`/
+   **`includeAllExtensionTools`** option"*. In fact `AgentSession`'s constructor
+   **always** calls `_buildRuntime({ activeToolNames: …, includeAllExtensionTools: true })`
+   [VERIFIED: `dist/core/agent-session.js:158-161`], and `_buildRuntime` always
+   forwards a defined `activeToolNames` (`options.activeToolNames ?? ["read","bash","edit","write"]`,
+   `:2043-2045`). So the cited `else if (!options?.activeToolNames)` arm at
+   `:2008` is **unreachable from session construction**; the arm that actually
+   activates `qoder_delegate` is `else if (options?.includeAllExtensionTools)`
+   at `:2003-2006`. The behavioural conclusion ("it starts active, so the gate
+   has something to act on") is correct — I verified it independently — but the
+   stated mechanism is not, and it is stated as the *negation* of the mechanism
+   that is really responsible.
+2. `qoder-tool.test.ts:156-166` attributes the faux harness's suppression to
+   *"an EXPLICIT (though empty) `activeToolNames` array … (that default only
+   fires when `activeToolNames` was never supplied at all)"*. The real mechanism
+   is `allowedToolNames`: `createAgentSession` maps `options.tools` to it
+   (`dist/core/sdk.js:133`), and `_refreshToolRegistry`'s `if (allowedToolNames)`
+   arm (`:1996-2002`) takes precedence over `includeAllExtensionTools`. Under
+   the comment's own stated rule, the auto-activate default would never fire in
+   production either — which would make the gate pointless, and is not true.
 
-### WR-05: a mode switch clears escalation without writing the durable escalation record the module promises for "every escalation change"
+This matters in a repository whose standing rule is *"verify at source, not
+docs"*: a future maintainer checking whether the gate is still needed after a Pi
+upgrade will grep `agent-session.js:2008-2014`, find an unrelated branch, and
+draw the wrong conclusion.
 
-**File:** `.pi/extensions/routing/index.ts:275-277` vs `:46-63`, `:333-348`
+**Fix:** re-point both citations at `dist/core/agent-session.js:158-161` (the
+constructor's `includeAllExtensionTools: true`) and `:2003-2006` (the arm that
+consumes it), and correct the test comment to name `allowedToolNames` /
+`dist/core/sdk.js:133` / `agent-session.js:1996-2002`.
 
-**Issue:** The docstring states "Every escalation change ALSO writes a durable
-JSONL record (`writeEscalationRecord` below) naming the previous and new
-executor and the escalation flag — the explanation that survives after the
-session itself is gone (T-05-32)". `applyMode` calls `setEscalated(false)` at
-`:276` — a real escalation change, and one that materially changes cost — and
-writes **no** escalation record. So the sequence `/escalate` → (expensive
-turns) → `/cheap` leaves an `escalation-*.jsonl` that shows escalation being
-turned on and never turned off. That is precisely the "why was this turn
-expensive?" question T-05-32 exists to answer, answered wrongly.
+### WR-05 [WARNING]: `wire-proof.test.ts` still `delete`s the CR-01 suite guard instead of restoring it — the one pattern `tests/setup/agent-dir.ts` now explicitly forbids
 
-**Fix:** In `applyMode`, when the pre-switch `getModeState().escalated` was
-`true`, call `writeEscalationRecord(ctx.cwd, { mode, escalated: false,
-previousModel, newModel })` after the successful switch (capture
-`previousModel` from `ctx.model` before `pi.setModel`, as `applyEscalate`
-already does at `:405`).
+**File:** `tests/integration/wire-proof.test.ts:457-460`
 
-### WR-06: RB-05-01's documented failure signal cannot fire for the stream request — no transcript record is written for it
+**Issue:** WR-02's fix strengthened `tests/setup/agent-dir.ts`'s docstring into
+an explicit convention (`:49-54`):
 
-**File:** `docs/RUNBOOK.md:963-974`; `.pi/extensions/qoder/client.ts:601-608`
+> *"cases that need their OWN temp dir … must restore this suite value
+> afterward, **never merely `delete` it** — deleting would punch a hole in this
+> guard for the REST of that file's cases."*
 
-**Issue:** RB-05-01 step 4 tells the operator to read
-`.pi/logs/qoder-*.jsonl`, and names as "the failure signal that matters most" a
-`401`/`403` "on any of the three requests (visible in the transcript's
-`*.response` records, by HTTP status)". `delegateTask` writes
-request/response transcript records for step 1 and step 2 only. The **stream
-open (step 3) writes neither a request nor a response record**, so a 401/403
-there leaves the transcript showing two clean 200s and then nothing. The
-operator running the one live check this phase deliberately leaves OUTSTANDING
-would be looking at a log that cannot show the failure the runbook told them to
-look for.
+`wire-proof.test.ts:458` still does exactly that. It is benign **today** only
+because it is the last hook of the file's only `describe` (verified: `grep -n
+"^describe" tests/integration/wire-proof.test.ts` returns one match, at `:446`).
+The two sibling files that had the same pattern were converted to the restore
+shape in iteration 1 (`mode-switch.test.ts:282`, `agent-overrides.test.ts:89-93`);
+this one was left. Adding a second `describe` below it — an entirely ordinary
+edit — silently re-opens CR-01's hole against this developer's real,
+un-gitignored `~/.pi/agent/settings.json`. The `global-teardown.ts` tripwire
+would catch the resulting mutation after the fact, but a guard that relies on
+its own tripwire is not a guard.
 
-**Fix:** Add the two missing transcript writes around the stream fetch,
-mirroring the other two steps:
-
-```ts
-writeQoderTranscript(cwd, { event: "qoder.stream.open.request", url: `${config.baseUrl}/sessions/${sessionId}/events/stream` });
-const streamResponse = await fetch(...);
-writeQoderTranscript(cwd, { event: "qoder.stream.open.response", status: streamResponse.status });
-```
-
-(Do not change RB-05-01's status; only make the procedure it describes real.)
-
-### WR-07: the SSE read loop has no timeout — a stream that never idles and never closes hangs the tool indefinitely
-
-**File:** `.pi/extensions/qoder/client.ts:617-635`
-
-**Issue:** `while (!folded.done) { await reader.read(); … }` terminates only on
-`session.status_idle`, on stream close, or on abort. A Qoder session that keeps
-the connection open (a heartbeat/keepalive comment frame, a stalled agent) pins
-the tool call forever. The only escape is the user pressing Esc. The loopback
-helper's docstring claims "every failure path … is written to terminate rather
-than hang" — true of the fixture, not of the client.
-
-**Fix:** Track a last-progress timestamp and race `reader.read()` against a
-generous inactivity deadline (e.g. 5 minutes with no bytes), aborting the
-reader and throwing an actionable error naming the elapsed time. Reset the
-deadline on every chunk so a genuinely long delegation is not cut off.
-
-### WR-08: the server-supplied session id is interpolated into request paths without encoding
-
-**File:** `.pi/extensions/qoder/client.ts:588-601`
-
-**Issue:** `sessionId` comes from an untrusted network response and is spliced
-raw into two URLs (`${config.baseUrl}/sessions/${sessionId}/events` and
-`…/events/stream`). An id containing `../`, `?`, `#` or a space re-targets or
-mangles the request. The only validation is "is a non-empty string"
-(`:583-586`). The blast radius is small (the peer is the host we already
-trust with a bearer token), but this is the exact input-validation posture the
-file claims for the model-supplied `task` and does not apply to the
-server-supplied id.
-
-**Fix:** `const encodedId = encodeURIComponent(sessionId);` and use it in both
-paths; optionally reject an id that does not match `/^[A-Za-z0-9._-]{1,128}$/`
-with a message naming what came back.
-
-### WR-09: `MAX_TASK_CHARS` and the empty-task refusal are documented as the ASVS V5 control and have zero test coverage
-
-**File:** `.pi/extensions/qoder/client.ts:143-152`, `:548-556`;
-`tests/unit/qoder-client.test.ts` (no case), `tests/integration/qoder-delegate.test.ts` (no case)
-
-**Issue:** Both validation branches are stated as deliberate security controls
-mirroring `safety/index.ts`'s params validation. Neither is exercised anywhere.
-They are also the two cheapest possible tests (no server needed for the throw,
-and the loopback proves zero requests were issued).
-
-**Fix:**
+**Fix:** capture and restore, matching the two siblings:
 
 ```ts
-it("refuses a whitespace-only task before any request is issued", async () => {
-	await withQoderLoopback({ frames: FRAMES }, async (loop) => {
-		const config = resolveFixtureConfig(loop.baseUrl);
-		await expect(delegateTask({ config, task: "   \n\t ", cwd })).rejects.toThrow(/empty after trimming/);
-		expect(loop.received).toHaveLength(0);   // the load-bearing half
-	});
+let suiteAgentDir: string | undefined;
+beforeAll(async () => {
+    suiteAgentDir = process.env.PI_CODING_AGENT_DIR;
+    settingsDir = mkdtempSync(join(tmpdir(), "kypi-wire-proof-settings-"));
+    process.env.PI_CODING_AGENT_DIR = settingsDir;
+    run = await runFixture();
+}, 60_000);
+
+afterAll(() => {
+    if (suiteAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+    else process.env.PI_CODING_AGENT_DIR = suiteAgentDir;
+    rmSync(settingsDir, { recursive: true, force: true, maxRetries: 3 });
 });
-it("refuses a task one character over MAX_TASK_CHARS, naming the limit, with zero requests", async () => { /* "x".repeat(MAX_TASK_CHARS + 1) */ });
-```
-
-### WR-10: the "writeAgentOverrides is never reached for a guard-blocked derivation" case is self-fulfilling — it asserts the test's own behaviour, not the code's
-
-**File:** `tests/unit/agent-overrides.test.ts:172-193`
-
-**Issue:** The case derives an `ok:false` result, deliberately does not call
-`writeAgentOverrides`, and then asserts the settings file does not exist. That
-assertion is true because the test did not call the writer. It would pass
-unchanged if `applyMode` unwrapped an `ok:false` derivation and wrote `{}`
-anyway — which is the actual regression the "caller discipline" note exists to
-guard against. The comment at `:188-192` even says so out loud ("This case
-proves that discipline by simply never calling it"). Nothing anywhere drives
-`applyMode` against a guard-blocked subagent derivation.
-
-**Fix:** Move the assertion to the caller. In `mode-switch.test.ts`, inject a
-role map (or monkeypatch the module seam) whose `planner` candidate is
-`us.deepseek.r1-v1:0`, drive a successful `/balanced`, then assert (a) the
-notification text contains "subagent pins unchanged because" and names
-"planner", and (b) the injected settings.json still has no `subagents` key. If
-the seam is not reachable from the command path, that itself is worth fixing —
-an untestable refusal branch is an unproven one.
-
-### WR-11: `qoder_delegate` is registered active in every session, with no confirmation gate and no configuration gate
-
-**File:** `.pi/extensions/qoder/index.ts:104-138`
-
-**Issue:** Two separate problems in one registration:
-
-1. **No human in the loop.** The tool's own description states it bypasses
-   Pi's tools, AGENTS.md, the Phase 4 safety guard and the wire inspector, on a
-   laptop where merging to `main` auto-deploys to AWS. Yet the model can invoke
-   it unilaterally, mid-turn, with no `ctx.ui.select()` confirmation — while
-   `terraform apply` and a `git push` to `main`, both strictly less
-   consequential than handing an entire task to an uncontrolled foreign agent,
-   require `approve_ky_command` plus a real human selection. The description is
-   a warning to the model, not a control; a cheap model that misreads it is
-   exactly the failure mode this harness exists to prevent. I could find no
-   recorded decision in `05-CONTEXT.md` waiving a confirmation for this tool
-   (decision 11 settles delegate-vs-model, not gating), so this is not
-   re-litigation.
-2. **No configuration gate.** The tool is registered unconditionally and costs
-   a measured 329 tokens on *every* provider request, including on this machine
-   and in CI where `resolveQoderConfig` can only ever refuse. CLAUDE.md names
-   `pi.registerTool` + `pi.setActiveTools` progressive disclosure as the
-   sanctioned answer to exactly this per-turn tax.
-
-**Fix:** (1) Route the delegation through a confirmation in interactive mode —
-`if (ctx.hasUI) { const ok = await ctx.ui.select(...); if (!ok) throw new Error("Qoder delegation declined by the user."); }` — or, if a
-confirmation is deliberately not wanted, record that decision explicitly with
-its reasoning next to the `TOOL_REGISTRATION_ALLOWLIST` entry. (2) Register the
-tool always but activate it only when the three environment variables are
-present, so an unconfigured machine pays nothing:
-
-```ts
-if (resolveQoderConfig(process.env).ok) {
-	pi.setActiveTools([...pi.getActiveTools(), "qoder_delegate"]);
-}
 ```
 
 ---
 
 ## Info
 
-### IN-01: `ROUTING_EVENT` emission is entirely untested
+### IN-01 [INFO]: `global-teardown.ts`'s settings snapshot captures `size` and `mtimeMs` and compares neither
 
-**File:** `.pi/extensions/routing/index.ts:294-298`, `:453-457`
-**Issue:** No test subscribes to `pi.events` or pins the emitted payload shape
-(`{mode, escalated, model}`). Phase 11 will build a statusline on a contract
-nothing asserts.
-**Fix:** In `mode-switch.test.ts`, have the probe extension register
-`pi.events.on(ROUTING_EVENT, …)` into the existing shared `globalThis` log and
-assert one event with the expected three keys after a successful switch (with a
-non-emptiness guard first).
+**File:** `tests/global-teardown.ts:143`, `:156-158`
+**Issue:** `snapshotRealAgentSettings()` returns `{exists, size, mtimeMs, text}`,
+but the comparison at `:157-158` reads only `exists` and `text`. The two extra
+fields are dead. Comparing `text` is the correct, stronger check (a rewrite of
+identical bytes is not a regression), so this is unused state rather than a
+weakened check — but a reader will reasonably assume `mtimeMs` participates.
+**Fix:** drop `size`/`mtimeMs` from `SettingsSnapshot`, or state in the interface
+doc that they are diagnostic-only and deliberately not compared.
 
-### IN-02: `escalation-*.jsonl` is never pruned
+### IN-02 [INFO]: iteration 2's IN-01 and IN-02 are unchanged and still open
 
-**File:** `.pi/extensions/routing/index.ts:308-317`
-**Issue:** Acknowledged in-code, and `.pi/logs/` is gitignored, so this is
-disclosure rather than defect — but every other stream in this repo has an
-owner that prunes it. Worth an explicit `pruneLogs({ ownedBases:
-[ESCALATION_LOG_BASE] })` when Phase 11 touches this file.
-
-### IN-03: `VISION_CANDIDATES` is the name used for five non-vision routes
-
-**File:** `.pi/extensions/routing/schema.ts:226-227`, used at `:259`, `:265-268`
-**Issue:** `balanced.advisor`, `max.planner`, `max.reviewer` and `max.advisor`
-all read `VISION_CANDIDATES`. A reader scanning `ROLE_MAP` sees "vision" beside
-`planner` and has to go look. Rename to `BEDROCK_CLAUDE_CANDIDATES` and, if
-desired, keep `const VISION_CANDIDATES = BEDROCK_CLAUDE_CANDIDATES` with a
-comment for the vision-specific rationale.
-
-### IN-04: `waitForConfiguredAuth` is copy-pasted verbatim into four test files
-
-**File:** `tests/integration/mode-switch.test.ts:147-162`,
-`wire-proof.test.ts:164-180`, `single-shot-roles.test.ts:161-177`,
-`mode-persistence.test.ts:77-92`
-**Issue:** Four identical copies with four slightly different error messages.
-The measured finding it encodes lives in one file's header; the next person to
-fix a timing bug will fix one copy.
-**Fix:** Move it to `tests/helpers/session.ts` (which already owns
-`FauxSessionHandle`) and keep the measured-gap explanation with it.
-
-### IN-05: `docs/ROUTING.md` never says the subagent pin is written to the GLOBAL agent settings file
-
-**File:** `docs/ROUTING.md:107-114`, `:175-192`
-**Issue:** §3 says a mode switch writes "the `settings.subagents.agentOverrides`
-pin those subagents will read" without saying *where*. Given CR-01, "which
-file does `/balanced` modify on my machine?" is a question a user will
-reasonably have, and the answer (`~/.pi/agent/settings.json`, user scope, not
-the repo's `.pi/settings.json`) is a deliberate, argued decision that deserves
-one sentence in the user-facing doc.
+**Files:** `.pi/extensions/routing/index.ts:346-350`, `:505-509`;
+`tests/unit/routing-dispatch.test.ts:346-350`
+**Issue:** Re-stated for the record only, not re-filed as new findings and not
+worse than at iteration 2: (a) `ROUTING_EVENT`'s emission still has no
+subscriber test, so Phase 11's statusline will be built on a payload shape
+nothing asserts; (b) the WR-03 regression case's `resolveRoute` loop is still
+trivially satisfied, because `state` is the already-normalised return of
+`getModeState()` — the real assertion is `:337-343`, and the loop should not be
+read as a second independent check.
 
 ---
 
-_Reviewed: 2026-08-14T20:05:00Z_
+## Shippable-state adjudication
+
+**Shippable: YES.** No BLOCKER. Recommended disposition of the five warnings:
+
+| ID | Disposition | Rationale |
+|---|---|---|
+| **WR-01** | **OPEN — fix before configuring Qoder / before running RB-05-01** | Only unreachable because the tool is deactivated on unconfigured machines; goes live the moment the work laptop exports the three variables. One-line fix. |
+| **WR-02** | **OPEN — low cost** | Two silent refusal branches on the phase's one foreign-agent surface; the file's own stated contract is currently false. |
+| **WR-03** | **OPEN — must fix** | A test file header that documents the exact design the iteration-2 BLOCKER was; this is the specific mechanism by which the bug returns. |
+| **WR-04** | **OPEN — must fix** | Wrong `[VERIFIED]` citations in a codebase whose standing rule is verify-at-source; one of the two states the inverse of the truth. |
+| **WR-05** | **ACCEPTED or OPEN (reviewer's preference: OPEN)** | Benign today, latent tomorrow, six-line fix, and it contradicts a convention the same iteration just wrote down. |
+| IN-01, IN-02 | **ACCEPTED** | Documented, non-blocking, unchanged. |
+
+---
+
+_Reviewed: 2026-08-14T21:25:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+_Iteration: 3 (final)_
