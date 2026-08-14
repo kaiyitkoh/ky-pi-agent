@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-03-PLAN.md
-last_updated: "2026-08-14T05:41:06.110Z"
+stopped_at: Completed 05-04-PLAN.md
+last_updated: "2026-08-14T05:56:35.919Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 47
+  completed_plans: 48
   percent: 36
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 4 of 12
+Plan: 5 of 12
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 86%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -110,6 +110,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 05 P01 | 35m | 2 tasks | 2 files |
 | Phase 05 P02 | ~20min | 2 tasks | 2 files |
 | Phase 05 P03 | ~30m | 3 tasks | 4 files |
+| Phase 05 P04 | ~15min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -260,6 +261,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-02: isAnthropicClaudeModel is a local re-implementation of pi-ai's unexported bedrock-converse-stream.js predicate, with a residual-coupling comment matching providers/schema.ts's QUOTA_PATTERN precedent -- behaviour pinned by tests/unit/capability-guard.test.ts, not by Pi's internals
 - [Phase 05]: 05-03: qoder/index.ts is the second TOOL_REGISTRATION_ALLOWLIST entry (after safety/index.ts) -- schema measured at 1315 bytes / 329 tokens via createRequire(package.json)+typebox, per CONTRIBUTING.md's (b) rule
 - [Phase 05]: 05-03: qoder/client.ts refusal is a thrown Error (Pi converts to isError:true), not a returned isError field -- AgentToolResult carries no isError property on this Pi version
+- [Phase 05]: 05-04: usesToolLoop(role) is derived inside planRoleCall and RoleNeed omits usesToolLoop entirely from the caller-facing type -- ROUTE-08's scope is a compile-time guarantee, not just a documented convention
+- [Phase 05]: 05-04: pickConfiguredCandidate's refusal names each candidate as (did not resolve) or (no configured auth) distinctly, proven by a mixed-failure candidate list in the same test
+- [Phase 05]: 05-04: the guard-precedence falsification had to mutate the success branch (build the ok:true value before the guard ran, discard its verdict), not merely reorder when mechanism is computed relative to the guard call -- the latter mutation changes nothing observable since the ok:false path never carries mechanism regardless of ordering
 
 ### Pending Todos
 
@@ -307,8 +311,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T05:41:06.099Z
-Stopped at: Completed 05-03-PLAN.md
+Last session: 2026-08-14T05:56:35.908Z
+Stopped at: Completed 05-04-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
