@@ -498,8 +498,13 @@ export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
  * mirroring `safety/audit.ts#writeAuditRow`'s own contract. The
  * `Authorization` header value is never passed to this function at all; see
  * the call sites in {@link delegateTask}.
+ *
+ * WR-03: exported so `index.ts` can write the `qoder.delegate.confirm`
+ * audit record through this SAME redacted writer/stream rather than
+ * inventing a second one -- `index.ts` never touches `QODER_LOG_BASE` or
+ * `redactDeep` directly.
  */
-function writeQoderTranscript(cwd: string, record: Record<string, unknown>): void {
+export function writeQoderTranscript(cwd: string, record: Record<string, unknown>): void {
 	try {
 		appendJsonl(cwd, QODER_LOG_BASE, redactDeep(record));
 	} catch {

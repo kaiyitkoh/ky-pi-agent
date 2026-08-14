@@ -64,7 +64,7 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { delegateTask, MAX_TASK_CHARS, resolveQoderConfig } from "./client.ts";
+import { delegateTask, MAX_TASK_CHARS, resolveQoderConfig, writeQoderTranscript } from "./client.ts";
 
 /** How much of `task` is ever shown inside the confirmation dialog. See WR-04. */
 const CONFIRM_EXCERPT_CHARS = 500;
@@ -172,7 +172,24 @@ export default function (pi: ExtensionAPI): void {
 						[DELEGATE_CHOICE, CANCEL_CHOICE],
 					)
 				: undefined;
-			if (choice !== DELEGATE_CHOICE) {
+			const approved = choice === DELEGATE_CHOICE;
+
+			// WR-03: the single most consequential decision this file makes -- a
+			// human authorising a foreign agent to act on a machine where `main`
+			// auto-deploys -- previously wrote NO record on any branch. Written
+			// through the SAME redacted writer/stream `delegateTask` already uses
+			// (client.ts's own `writeQoderTranscript`), on BOTH branches, before
+			// either returning or throwing, mirroring `safety/index.ts#
+			// registerApprovalTool`'s own "every branch writes exactly one audit
+			// row" contract. Never the task text itself -- only its length.
+			writeQoderTranscript(ctx.cwd, {
+				event: "qoder.delegate.confirm",
+				hasUI: ctx.hasUI,
+				approved,
+				taskChars: task.length,
+			});
+
+			if (!approved) {
 				throw new Error(
 					ctx.hasUI
 						? `Qoder delegation declined by the user (did not select "${DELEGATE_CHOICE}").`

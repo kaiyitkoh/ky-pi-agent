@@ -39,11 +39,14 @@
  * per-call check. `process.env` is therefore set BEFORE `createFauxSession`
  * is called in those two cases, and restored in every case's own `finally`.
  */
+import { join } from "node:path";
+
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { logDir } from "../../.pi/lib/jsonl.ts";
 import {
 	DEFAULT_QODER_BASE_URL,
 	MAX_TASK_CHARS,
@@ -53,9 +56,28 @@ import {
 	QODER_TOKEN_ENV,
 } from "../../.pi/extensions/qoder/client.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { withTempLogCwd } from "../helpers/logs.ts";
+import { logFilesIn, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
 import { withQoderLoopback } from "../helpers/qoder-loopback.ts";
 import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+
+/**
+ * Read the `qoder.delegate.confirm` records from `<agentCwd>/.pi/logs/qoder-*.jsonl`.
+ * WR-03: `execute()` writes through `client.ts#writeQoderTranscript`, which
+ * appends under the SESSION's own cwd (`ctx.cwd`, i.e. `handle.cwd` -- NOT
+ * `withTempLogCwd`'s own throwaway directory, which this file's other cases
+ * carry only for parity with `qoder-delegate.test.ts`'s pattern but do not
+ * read from).
+ */
+function readConfirmRecords(agentCwd: string): { event?: unknown; hasUI?: unknown; approved?: unknown; taskChars?: unknown }[] {
+	const dir = logDir(agentCwd);
+	const files = logFilesIn(dir);
+	const qoderFile = files.find((name) => name.startsWith("qoder-"));
+	if (qoderFile === undefined) {
+		return [];
+	}
+	const { records } = readTornSafe(join(dir, qoderFile));
+	return (records as { event?: unknown }[]).filter((r) => r.event === "qoder.delegate.confirm");
+}
 
 /** Absolute path of the Qoder tool entry point this repository ships. */
 const QODER_ENTRY = `${repoRoot()}/.pi/extensions/qoder/index.ts`;
@@ -270,6 +292,17 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 					// THE LOAD-BEARING ASSERTION: zero requests reached the loopback --
 					// a decline must refuse BEFORE delegateTask ever opens a socket.
 					expect(loop.received).toHaveLength(0);
+
+					// WR-03: the decline branch must ALSO write an audit record --
+					// before this fix, this was the only decision point in the phase
+					// with no record on any branch.
+					const confirmRecords = readConfirmRecords(handle.cwd);
+					expect(
+						confirmRecords,
+						"no qoder.delegate.confirm record was written for a DECLINED delegation",
+					).toHaveLength(1);
+					expect(confirmRecords[0]?.approved).toBe(false);
+					expect(confirmRecords[0]?.hasUI).toBe(true);
 				} finally {
 					await handle.dispose();
 				}
@@ -393,6 +426,17 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 							"delegateTask was never actually invoked",
 					).toBeGreaterThan(0);
 					expect(result.content.some((block) => block.type === "text")).toBe(true);
+
+					// WR-03: the approve branch must ALSO write an audit record, with
+					// the SAME event name as the decline branch, distinguished only by
+					// `approved`.
+					const confirmRecords = readConfirmRecords(handle.cwd);
+					expect(
+						confirmRecords,
+						"no qoder.delegate.confirm record was written for an APPROVED delegation",
+					).toHaveLength(1);
+					expect(confirmRecords[0]?.approved).toBe(true);
+					expect(confirmRecords[0]?.hasUI).toBe(true);
 				} finally {
 					await handle.dispose();
 				}
