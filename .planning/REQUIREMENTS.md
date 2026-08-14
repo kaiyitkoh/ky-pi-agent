@@ -90,7 +90,7 @@
 - [x] **EXT-02**: Parallel subagents run in isolated git worktrees, verified to **build**, not merely check out — untracked files like `.env` and `node_modules` do not travel to a new worktree
 - [ ] **EXT-03**: Subagents can run in the background without blocking the session
 - [ ] **EXT-04**: A running subagent can be steered mid-run without killing it
-- [ ] **EXT-05**: Plan mode, todo tracking, background bash, LSP diagnostics, structured user questions, web lookup, session search, and loop detection are available
+- [x] **EXT-05**: Plan mode, todo tracking, background bash, LSP diagnostics, structured user questions, web lookup, session search, and loop detection are available
 - [x] **EXT-06**: Pi's own bundled examples are preferred over third-party packages wherever they cover the need
 - [x] **EXT-07**: File checkpointing restores the working tree, with Pi's bundled `git-checkpoint.ts` as the fallback if no third-party option proves sound
 - [x] **EXT-08**: Every pin is re-verified at planning time rather than inherited from research — the ecosystem ships 13–16 releases/month
@@ -288,7 +288,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | EXT-02 | Phase 7 | Complete |
 | EXT-03 | Phase 7 | Pending |
 | EXT-04 | Phase 7 | Pending |
-| EXT-05 | Phase 7 | Pending |
+| EXT-05 | Phase 7 | Complete |
 | EXT-06 | Phase 7 | Complete |
 | EXT-07 | Phase 7 | Complete |
 | EXT-08 | Phase 7 | Complete |
