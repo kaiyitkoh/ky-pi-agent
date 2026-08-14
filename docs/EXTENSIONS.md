@@ -323,3 +323,192 @@ plan. The live check for all of it is `RB-07-01` (written by plan 07-13,
 OUTSTANDING), which composes this evidence with the existing `RB-02-01` and
 `RB-03-0x` legs into the one end-to-end smoke ritual this project's standing
 policy requires before any of this is claimed to work.
+
+---
+
+## Install reconciliation
+
+**Run date: 2026-08-14/2026-08-15** (session spanning the date boundary;
+timestamps below are the actual command-output UTC times). This section
+records plan 07-10's execution. **No install ran.** The blocking human
+gate (Task 2) was not satisfied, so `pi install` was never invoked. Every
+fact below is a legitimacy-review finding, not an installed-and-observed
+one — read the verdict at the bottom before anything else in this section.
+
+### Gate outcome: NOT SATISFIED
+
+The user's standing pre-authorisation for this checkpoint rested on three
+stated grounds. Each was verified rather than taken on faith, per the
+package-legitimacy protocol's explicit non-auto-approvable status for this
+gate:
+
+| Ground | Claim | Verification result |
+|---|---|---|
+| (a) | "This dev machine has no credentials — no AWS SSO, no provider keys." | **FALSE.** `aws sts get-caller-identity --profile ADMIN_PROFILE` returned exit 0: Account `ACCOUNT_ID`, `arn:aws:iam::ACCOUNT_ID:user/ADMIN_USER` — live, long-lived static admin keys in plaintext at `~/.aws/credentials`, plus an SSO cache. The blast radius the pre-authorisation assumed away is real and large. |
+| (b) | `bin/bootstrap.sh --assert-hardening` exits 0 | **TRUE** — re-verified in this plan (see below). |
+| (c) | Every spec exact-pinned | **TRUE** — re-verified in this plan (see below). |
+
+Because ground (a) is falsified, the pre-authorisation does not carry.
+Plan 07-10's own Task 2 text is explicit and binding: this checkpoint is
+"NOT auto-approvable and must not be skipped on the strength of
+`workflow.auto_advance` or the autonomous-run policy — the standing
+pre-authorisations cover verification `human_needed` and `gaps_found`, not
+a supply-chain gate." The autonomous-run policy's own Standing Operating
+Policy (`STATE.md`) forbids asking the user anything until the milestone
+completes and forbids waiting — so this plan did not ask and did not
+block. It performed the review the gate exists for, recorded the
+falsified ground, and took the plan's own documented fallback (below)
+rather than installing.
+
+**No install command of any kind — `pi install`, `npm install`,
+`npm i`, `pi update`, or any command that fetches package contents and
+makes them executable — was run anywhere in this plan.** `npm view` and
+`npm pack` (download-only, no lifecycle scripts, no extraction beyond a
+scratch temp directory outside this repo and outside `~/.pi`) and `gh api`
+(read-only) were the only network commands used, per the sanctioned
+technique already established in `07-01-SUMMARY.md` and `07-09-SUMMARY.md`.
+
+### Hardening — before and after this plan's review commands
+
+```
+$ sh bin/bootstrap.sh --assert-hardening      # Task 1, BEFORE any review command
+Hardening assertions (ignore-scripts):
+  ignore-scripts=true  repo root (/c/Users/Admin/Documents/ky-pi-agent)
+  ignore-scripts=true  project prefix (/c/Users/Admin/Documents/ky-pi-agent/.pi/npm)
+  ignore-scripts=true  user-scope prefix (/c/Users/Admin/.pi/agent/npm)
+All npm scopes are hardened.
+exit=0
+```
+Run at `2026-08-14T21:45:41Z`.
+
+```
+$ sh bin/bootstrap.sh --assert-hardening      # Task 3, AFTER the review (no install occurred)
+Hardening assertions (ignore-scripts):
+  ignore-scripts=true  repo root (/c/Users/Admin/Documents/ky-pi-agent)
+  ignore-scripts=true  project prefix (/c/Users/Admin/Documents/ky-pi-agent/.pi/npm)
+  ignore-scripts=true  user-scope prefix (/c/Users/Admin/.pi/agent/npm)
+All npm scopes are hardened.
+exit=0
+```
+Run at `2026-08-14T21:48:15Z`. Both exit 0. `git status --porcelain` showed
+no modification to `.npmrc` or `.pi/npm/.npmrc` at any point in this plan;
+`.pi/npm/` on disk contains only the tracked `.npmrc` control file (no
+`node_modules/`), and `.pi/git/` does not exist — both consistent with "no
+install ran."
+
+### Per-package legitimacy evidence (Task 2 review, all five pinned specs)
+
+Read-only methods only: `npm view <pkg>@<version>` (registry metadata),
+`npm pack <pkg>@<version>` + `tar -tf`/`tar -xf` into a scratch temp
+directory outside this repo (download + list/extract, never install, never
+execute), `gh api` (repository facts). The scratch directory was deleted
+after inspection. Cross-checked against `07-01-SUMMARY.md`'s live-resolved
+record (2026-08-14T19:09–19:14Z) for drift.
+
+| Package | Pinned version | Resolved on registry? | License field | LICENSE file in tarball | Source shape | Repository | `pushed_at` (this session) | Archived | Do-not-install list? | Verdict |
+|---|---|---|---|---|---|---|---|---|---|---|
+| `pi-subagents` | `0.49.0` | Yes — `npm view pi-subagents version` (no arg) resolves to `0.49.0`, matching the pin exactly | MIT | Yes (`package/LICENSE`) | `.ts` source (192 `.ts` files under `src/`); zero `dist/*.js` | `nicobailon/pi-subagents`, 3,140★ | `2026-08-14T21:44:39Z` | false | No | **Would-install** (identity confirmed; blocked only by the gate outcome above, not by any legitimacy finding) |
+| `pi-background-tasks` | `2.4.2` | Yes — latest resolves to `2.4.2` | ISC | Yes | `.ts` source (49 `.ts` files); zero `dist/*.js` | `ismailsaleekh/pi-background-tasks`, 9★ | `2026-08-13T23:58:10Z` | false | No | **Would-install** |
+| `@narumitw/pi-lsp` | `0.49.4` | Yes — latest resolves to `0.49.4` | MIT | Yes | `.ts` source (10 `.ts` files); zero `dist/*.js` | `narumiruna/pi-extensions`, 328★ | `2026-08-14T16:17:22Z` | false | No | **Would-install** |
+| `pi-web-access` | `0.22.0` | Yes — latest resolves to `0.22.0` | MIT | Yes | `.ts` source (56 `.ts` files); zero `dist/*.js` | `nicobailon/pi-web-access`, 1,095★ | `2026-08-14T21:42:50Z` | false | No | **Would-install** |
+| `pi-session-finder` | `0.5.6` | Yes — latest resolves to `0.5.6` | MIT | Yes | `.ts` source (5 `.ts` files); zero `dist/*.js` | `pungggi/pi-session-finder`, 3★ | `2026-08-02T22:35:36Z` | false | No | **Would-install** |
+
+**Drift check against `07-01-SUMMARY.md`:** all five versions are
+UNCHANGED. Two `pushed_at` values moved since the 07-01 run — `pi-subagents`
+(`2026-08-14T19:08:02Z` → `2026-08-14T21:44:39Z`) and `pi-web-access`
+(`2026-08-12T19:44:51Z` → `2026-08-14T21:42:50Z`) — both are repository
+activity, not version bumps (the pinned versions still resolve as latest
+on the registry). This is the same "the endpoint keeps moving" finding
+`docs/EXTENSIONS.md`'s "Download counts are not evidence" section already
+names for `pushed_at` generally; recorded here rather than silently
+treated as agreement with a stale snapshot.
+
+**Do-not-install cross-check:** none of the five pinned specs matches any
+entry on the standing do-not-install list (`pi-provider-qoder`,
+`pi-qoder-provider`, `cc-safety-net`, `pi-sandbox`,
+`@ramtinj95/pi-infra-command-guard`, `@howaboua/pi-codex-conversion`,
+`@gotgenes/pi-subagents-worktrees`, `pi-defender`, `@ayulab/pi-rewind`,
+`pi-rewind`, `pi-high-availability`, `pi-provider-fallback`,
+`pi-model-fallback`, `pi-lens`, `@davideasden/pi-undo`).
+
+**Pinning re-verification:** `npx vitest run tests/unit/pinning.test.ts`
+(35 tests) re-run in this plan, exit 0 — includes the pre-existing
+`"every third-party entry in .pi/settings.json packages[] carries a ref"`
+assertion, which calls the file's own exported `isPinnedPackageSpec`
+against the live `.pi/settings.json` content. No second pinning regex was
+written; the exported function was imported and reused, per this plan's
+own constraint.
+
+**Model-facing tool call-site counts, observed this session (informal —
+not the authoritative baseline).** `grep`-counted `.registerTool(` call
+sites (allowing an optional TypeScript generic parameter) in each
+extracted tarball, main-session entry points only where distinguishable
+from a separate child-process entry point:
+
+| Package | `.registerTool(` call sites found | Note |
+|---|---|---|
+| `@narumitw/pi-lsp` | 2 | `lspDiagnosticsTool`, `lspFixTool` at `src/pi-lsp.ts:146-147` — matches the existing "Installed packages" table row above |
+| `pi-subagents` | 7 total call sites; 4 resolve into the main session (`index.ts:621`, `native-supervisor-channel.ts:311,328`, `wait-tool.ts:33`) | `fanout-child.ts:189` is a separate nested-process entry point, excluded — matches `07-12-SUMMARY.md`'s finding of exactly 4 |
+| `pi-web-access` | 4, each gated by its own `*Enabled` flag (`index.ts:1635,2207,2301,2619`) | Conditional on config; up to 4 |
+| `pi-background-tasks` | 10 total call sites across `extension.ts` (5), `delegate-extension.ts` (2), `fusion-extension.ts` (1 wrapper, invoked 4×), `delegate-child-extension.ts` (1, child-process entry point), `fusion-child-extension.ts` (1, child-process entry point) | Not fully deduplicated into a main-session tool count in this review — this repository's authoritative registry is `tests/unit/tool-count-baseline.test.ts` (plan 07-11), per the same "not restated here" discipline the "Installed packages" section above already states. Recorded here only as this session's raw observation, not as a substitute baseline. |
+| `pi-session-finder` | 0 | Matches the existing table row ("zero model-facing tools") |
+
+### Task 3: install reconciliation verdict — UNVERIFIED
+
+Per plan 07-10's own documented fallback: *"if `pi install` cannot complete
+on this machine for any reason ... record the exact command, the exact
+failure output, and stop. Mark the reconciliation UNVERIFIED in Task 4's
+section and state that plan 07-13 must append a second runbook entry
+(`RB-07-02`) marked OUTSTANDING for it. Never write MATCH for a `pi list`
+you did not observe."*
+
+- **Exact command that would have been run:** not executed. No `pi install`
+  invocation of any kind was made.
+- **Reason no install was attempted:** the blocking supply-chain gate
+  (Task 2) was **not satisfied** — ground (a) of the user's
+  pre-authorisation ("this dev machine has no credentials") is **false**,
+  as verified above. This is a gate failure, not a technical install
+  failure (no PATH issue, no project-trust refusal, no network failure was
+  encountered or would have been reached).
+- **`pi list` output:** not captured. **No `MATCH` or `MISMATCH` verdict is
+  written — the verdict is `UNVERIFIED`, honestly, because no `pi list` was
+  ever run.**
+- **Reconciliation verdict: `UNVERIFIED`.**
+- **Runbook handoff:** plan 07-13 must append a second runbook entry,
+  `RB-07-02`, marked **OUTSTANDING**, distinct from `RB-07-01` (the
+  end-to-end subagent smoke ritual). `RB-07-02` covers: (1) running
+  `pi install` for the five pinned specs with a human physically present to
+  satisfy the package-legitimacy gate on a machine whose real credential
+  exposure is known and accepted, and (2) capturing and reconciling `pi list`
+  against `.pi/settings.json`'s `packages[]` for the first time.
+
+### `tests/unit/extension-pins.test.ts` — Direction 4 remains unexercised
+
+`npx vitest run tests/unit/extension-pins.test.ts` (52 tests) re-run in
+this plan, exit 0. Its Direction 4 ("installed-but-undeclared") is
+**CONDITIONAL** and, on this machine at this moment, resolves through the
+"confirmed absent" branch: `.pi/npm/node_modules` does not exist (only the
+tracked `.pi/npm/.npmrc` file is present) and `.pi/git/` does not exist, so
+the test asserts absence rather than checking installed-package identity
+against `packages[]`. **This direction has not been exercised against a
+real installed tree by this plan or any prior plan in this phase** — that
+remains true until `RB-07-02` runs. The test passing here proves the test's
+"nothing on disk" branch works, not that the installed-but-undeclared check
+itself has ever fired against real npm output.
+
+### The honest limit of this section
+
+`.pi/npm/` and `.pi/git/` are gitignored (`.gitignore:154-157`), and CI
+never runs `pi install`. Even had this plan's gate been satisfied and an
+install completed, any resulting reconciliation would have been a local
+observation on one machine at one moment — the lockfile
+(`.pi/settings.json` `packages[]`) and the tests that diff against it
+(`tests/unit/extension-pins.test.ts`, `tests/unit/pinning.test.ts`) are
+what travels in the repository. As it stands, this plan proves only the
+legitimacy-review half: every pinned spec resolves to the version claimed,
+carries a LICENSE file, ships reviewable `.ts` source, comes from a
+non-archived repository matching the expected owner, and appears on no
+do-not-install list. It proves **nothing** about what `pi install` actually
+does on this machine, because that command was never run. `RB-07-02`
+(OUTSTANDING, plan 07-13) is what will close that gap, alongside the
+already-outstanding `RB-07-01` end-to-end smoke ritual.
