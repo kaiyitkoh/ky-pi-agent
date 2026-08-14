@@ -163,3 +163,36 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 		).toBeLessThanOrEqual(WORKFLOWS_DIR_TOTAL_BUDGET);
 	});
 });
+
+/**
+ * Registry completeness, both directions -- neither folded into the per-file
+ * loop above, which iterates the registry and therefore cannot see a file
+ * the registry omits. That omission is exactly the Phase 9 failure this
+ * requirement exists to prevent: GSD's own `quick.md` is 1,169 lines, and a
+ * registry that only checks what it already knows about would let a file
+ * that size land unbudgeted.
+ */
+describe("FLOW-11 -- registry completeness, both directions", () => {
+	const discovered = discoverWorkflowFiles();
+	const declaredFiles = WORKFLOW_BUDGETS.map((e) => e.file);
+
+	it("present-but-undeclared: every discovered workflow file has a budget entry", () => {
+		const offenders = discovered.filter((p) => !declaredFiles.includes(p));
+		expect(
+			offenders,
+			"a workflow file with no budget is a workflow with no budget -- add each of these to " +
+				"WORKFLOW_BUDGETS with a number and a reason. This is the direction that stops a future " +
+				"phase from shipping a workflow the size of GSD's own quick.md (1,169 raw lines) without " +
+				"this registry ever noticing",
+		).toEqual([]);
+	});
+
+	it("declared-but-absent: every WORKFLOW_BUDGETS entry names a file that still exists", () => {
+		const offenders = WORKFLOW_BUDGETS.filter((e) => !existsSync(join(repoRoot(), e.file))).map((e) => e.file);
+		expect(
+			offenders,
+			"each of these registry entries names a file that no longer exists on disk -- the entry is " +
+				"stale; delete it in the same commit that deleted the file",
+		).toEqual([]);
+	});
+});
