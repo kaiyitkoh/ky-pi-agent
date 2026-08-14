@@ -1,0 +1,9 @@
+This file exists solely so tests/integration/global-teardown-exit-code.test.ts
+has a real, TRACKED file it can safely append a byte to and restore, without
+touching a file any OTHER test reads for its own assertions (CLAUDE.md and
+docs/RUNBOOK.md are both read/asserted-on by other test files that may run
+concurrently in the same `vitest run` invocation -- see WR-13 in
+04-REVIEW-FIX.md for why that made them unsuitable). Do not read this file's
+content from any other test; if you need a throwaway tracked file for a
+different regression, add a new one rather than repurposing this one, so this
+file's own "nothing else depends on my content" property stays true.
