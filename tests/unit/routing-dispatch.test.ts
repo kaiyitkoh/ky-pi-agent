@@ -318,4 +318,37 @@ describe("mode/escalation state", () => {
 		expect(state.escalated).toBe(false);
 		expect(state.escalatedFrom).toBeUndefined();
 	});
+
+	it("WR-03: a stale/corrupted globalThis slot with an out-of-range mode falls back to DEFAULT_MODE, and resolveRoute never throws on it", () => {
+		// Simulate "a stale shape from a version this module no longer writes"
+		// -- modes.ts's own getModeState docstring anticipates exactly this.
+		// Reaching directly into the process-wide slot by its documented key
+		// name is the ONLY way to construct this state: no public setter
+		// (setMode/setEscalated) accepts an out-of-range mode, by construction
+		// of ModeName -- the bug this case guards is specifically about a value
+		// that bypassed that type-level guarantee (a hand-edited session, or an
+		// older version of this module that wrote a different mode vocabulary).
+		(globalThis as Record<string, unknown>)["__kypiRoutingModeState"] = {
+			mode: "turbo",
+			escalated: false,
+			at: Date.now(),
+		};
+
+		const state = getModeState();
+		expect(
+			state.mode,
+			"an out-of-range mode value in the globalThis slot was returned verbatim instead of falling " +
+				'back to DEFAULT_MODE -- resolveRoute would then evaluate ROLE_MAP["turbo"][role] -> ' +
+				"undefined[role] and throw",
+		).toBe(DEFAULT_MODE);
+		expect(state.escalated, "the shape check itself must still accept a structurally valid slot").toBe(false);
+
+		// The fix closes the actual crash, not just the symptom: resolveRoute
+		// must not throw for ANY role given this corrupted slot.
+		for (const role of ROLES) {
+			expect(() => resolveRoute(role, state)).not.toThrow();
+		}
+
+		resetModeState();
+	});
 });

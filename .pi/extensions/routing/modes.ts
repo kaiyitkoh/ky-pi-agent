@@ -98,6 +98,7 @@ import { guardRoute, type GuardNeed } from "./guard.ts";
 import {
 	DEFAULT_MODE,
 	ESCALATION_MODE,
+	MODES,
 	ROLE_MAP,
 	ROLE_MECHANISM,
 	type KyModeData,
@@ -141,13 +142,32 @@ function defaultState(): KyModeData {
 	return { mode: DEFAULT_MODE, escalated: false, at: Date.now() };
 }
 
-/** Narrow an unknown `globalThis` slot value before trusting it as state. */
+/**
+ * Narrow an unknown `globalThis` slot value before trusting it as state.
+ *
+ * WR-03: `candidate.mode` must be a MEMBER of {@link MODES}, not merely a
+ * `string` -- this module's own docstring at {@link getModeState} explicitly
+ * anticipates the slot holding "a stale shape from a version this module no
+ * longer writes" (e.g. `{mode: "turbo", ...}`), and a bare `typeof ===
+ * "string"` check lets exactly that value through. `resolveRoute` then
+ * evaluates `ROLE_MAP[state.mode][role]` -> `ROLE_MAP["turbo"]` ->
+ * `undefined[role]` -> a `TypeError` that crashes `/escalate`, `/mode` and
+ * every `runSingleShotRole`. `restoreModeFromBranch` (`../routing/index.ts`)
+ * already validates against `MODES` for precisely this reason (T-05-36);
+ * this is the SAME narrowing applied at the OTHER reader of a mode value that
+ * did not originate from this module's own `setMode`.
+ */
 function isKyModeData(value: unknown): value is KyModeData {
 	if (typeof value !== "object" || value === null) {
 		return false;
 	}
 	const candidate = value as Partial<KyModeData>;
-	return typeof candidate.mode === "string" && typeof candidate.escalated === "boolean" && typeof candidate.at === "number";
+	return (
+		typeof candidate.mode === "string" &&
+		(MODES as readonly string[]).includes(candidate.mode) &&
+		typeof candidate.escalated === "boolean" &&
+		typeof candidate.at === "number"
+	);
 }
 
 function writeModeState(state: KyModeData): void {
