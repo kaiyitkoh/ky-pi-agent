@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-04-PLAN.md -- the /quick walking-skeleton integration test (Phase 6 complete)
-last_updated: "2026-08-14T19:05:33.488Z"
-last_activity: 2026-08-14 -- Phase 07 planning complete
+stopped_at: Completed 07-01-PLAN.md -- hardening assertion and live pin re-verification, docs/EXTENSIONS.md created
+last_updated: "2026-08-14T19:18:24.753Z"
+last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 60
+  completed_plans: 61
   percent: 55
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 7 — composed extensions, pinned & reviewed
+**Current focus:** Phase 07 — composed-extensions-pinned-reviewed
 
 ## Current Position
 
-Phase: 7
-Plan: Not started
+Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
+Plan: 2 of 13
 Status: Ready to execute
-Last activity: 2026-08-14 -- Phase 07 planning complete
+Last activity: 2026-08-14
 
-Progress: [██████████] 100%
+Progress: [████████░░] 84%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -127,6 +127,7 @@ credentials can do has been done".
 | Phase 06 P02 | ~25min | 2 tasks | 2 files |
 | Phase 06 P03 | 35m | 2 tasks | 1 files |
 | Phase 06 P04 | ~50min | 2 tasks | 1 files |
+| Phase 07 P01 | 20m | 3 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -316,6 +317,9 @@ Recent decisions affecting current work:
 - [Phase 06-04]: ctx.ui.notify is patched on the shared runner.uiContext object and restored in a finally, never shadowed per-context -- ctx.ui returns the SAME object for every context Pi builds (command or event), so a per-context shadow misses agent_end's own notification entirely
 - [Phase 06-04]: MUTATION 3 (reordering the routing and git pre-flight checks) stayed green against cases 1/2 as constructed -- each fixture only ever triggers one of the two guards, so relative check order is not independently pinned; recorded as an honest finding since the safety property (zero provider cost on any refusal) holds regardless of order
 - [Phase 06-04]: Phase 6 is now fully executed -- FLOW-01 and GATE-07 both have session-level proof (this plan) in addition to unit-level coverage from 06-01/06-03; the composed session in case 4 proves a real Phase 2 turn row lands for /quick's own work turn with no SEAM FINDING needed
+- [Phase 07]: 07-01: all six re-checked package versions are UNCHANGED against 07-CONTEXT.md's 2026-08-15 table; pi-loop-police's license=NONE re-confirmed via gh api and tarball listing, EXT-10 vendoring stands
+- [Phase 07]: 07-01: vendored items sit FLAT under .pi/extensions/ per decision D-07-D, never under a vendor/ parent -- tests/unit/extension-layout.test.ts:58's NESTED_INDEX regex only matches one directory level, superseding 07-RESEARCH.md's suggested vendor/ subdirectory layout
+- [Phase 07]: 07-01: pi-web-access is the only installed package with genuine transitive caret-range residuals (8 deps, including a third uncontrolled typebox instance); pi-subagents/pi-background-tasks own dependencies are exact pins, recorded as a second-module-instance risk marked UNVERIFIED
 
 ### Pending Todos
 
@@ -363,8 +367,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T15:20:41.491Z
-Stopped at: Completed 06-04-PLAN.md -- the /quick walking-skeleton integration test (Phase 6 complete)
+Last session: 2026-08-14T19:18:24.743Z
+Stopped at: Completed 07-01-PLAN.md -- hardening assertion and live pin re-verification, docs/EXTENSIONS.md created
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
