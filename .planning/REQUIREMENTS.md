@@ -92,7 +92,7 @@
 - [ ] **EXT-04**: A running subagent can be steered mid-run without killing it
 - [ ] **EXT-05**: Plan mode, todo tracking, background bash, LSP diagnostics, structured user questions, web lookup, session search, and loop detection are available
 - [x] **EXT-06**: Pi's own bundled examples are preferred over third-party packages wherever they cover the need
-- [ ] **EXT-07**: File checkpointing restores the working tree, with Pi's bundled `git-checkpoint.ts` as the fallback if no third-party option proves sound
+- [x] **EXT-07**: File checkpointing restores the working tree, with Pi's bundled `git-checkpoint.ts` as the fallback if no third-party option proves sound
 - [x] **EXT-08**: Every pin is re-verified at planning time rather than inherited from research — the ecosystem ships 13–16 releases/month
 - [ ] **EXT-09**: A documented smoke-test ritual runs on every version bump: one turn per provider, one subagent spawn, one blocked command, one wire dump
 - [x] **EXT-10**: Any extension without a license file is vendored rather than depended on
@@ -290,7 +290,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | EXT-04 | Phase 7 | Pending |
 | EXT-05 | Phase 7 | Pending |
 | EXT-06 | Phase 7 | Complete |
-| EXT-07 | Phase 7 | Pending |
+| EXT-07 | Phase 7 | Complete |
 | EXT-08 | Phase 7 | Complete |
 | EXT-09 | Phase 7 | Pending |
 | EXT-10 | Phase 7 | Complete |

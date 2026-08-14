@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-02-PLAN.md -- worktree fixture helper and Windows-safe setup hook (EXT-02)
-last_updated: "2026-08-14T19:28:56.374Z"
+stopped_at: Completed 07-03-PLAN.md -- vendored checkpoint extension (EXT-06, EXT-07)
+last_updated: "2026-08-14T19:47:22.796Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 62
+  completed_plans: 63
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 3 of 13
+Plan: 4 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 86%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -129,6 +129,7 @@ credentials can do has been done".
 | Phase 06 P04 | ~50min | 2 tasks | 1 files |
 | Phase 07 P01 | 20m | 3 tasks | 1 files |
 | Phase 07 P02 | 10m | 2 tasks | 2 files |
+| Phase 07 P03 | ~25min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -325,6 +326,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-02: commitFile requires its parent directory to exist first -- every prior git.ts caller only ever wrote flat filenames, so mkdirSync(join(repo,"src"),{recursive:true}) precedes commitFile(repo,"src/index.js",...)
 - [Phase 07]: 07-02: the worktree setup hook fails closed on a not-yet-existing worktreePath rather than crashing on symlinkSync's own ENOENT -- matches the real invocation order where git worktree add always runs before the hook is spawned
 - [Phase 07]: 07-02: fs.symlinkSync(src,dst,"junction") verified live on this machine to succeed without Developer Mode/elevation and resolve through to the real node_modules tree -- confirms 07-RESEARCH.md's finding was not machine-specific luck
+- [Phase 07]: 07-03: GIT_INDEX_FILE + write-tree + commit-tree replaces git stash create entirely for checkpoints -- git stash create -u was measured to accept and silently drop untracked files on this machine's git
+- [Phase 07]: 07-03: /checkpoint-restore command, not session_before_fork, is the primary headless-reachable restore path -- store.ts persists to .pi/state/checkpoints.json rather than an in-memory Map cleared on agent_end
 
 ### Pending Todos
 
@@ -372,8 +375,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T19:28:56.363Z
-Stopped at: Completed 07-02-PLAN.md -- worktree fixture helper and Windows-safe setup hook (EXT-02)
+Last session: 2026-08-14T19:47:22.787Z
+Stopped at: Completed 07-03-PLAN.md -- vendored checkpoint extension (EXT-06, EXT-07)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
