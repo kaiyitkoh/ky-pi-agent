@@ -49,6 +49,8 @@ function record(toolName: string, sha: string, isError: boolean): EvidenceRecord
 interface Row {
 	readonly name: string;
 	readonly records: readonly EvidenceRecord[];
+	/** Defaults to `shaA` when omitted -- distinct from `shaB` (HEAD), so the CR-01 branch never fires by accident. */
+	readonly baseSha?: string;
 	readonly expected: "accept" | "reject";
 	readonly reasonMustContain: readonly string[];
 	readonly why: string;
@@ -61,6 +63,22 @@ const ROWS: readonly Row[] = [
 		expected: "reject",
 		reasonMustContain: ["structured", "tool result"],
 		why: "a transcript-shaped string claiming success is not evidence; the gate must reject on an empty record set regardless of what any transcript text says",
+	},
+	{
+		name: "CR-01a -- HEAD never moved: no commit landed, one passing record at the unchanged HEAD",
+		records: [record("bash", shaB, false)],
+		baseSha: shaB,
+		expected: "reject",
+		reasonMustContain: ["no commit", shaB],
+		why: "PROBE A: `bash echo hi` with no commit must not satisfy a completion claim just because the record happens to sit at an unmoved HEAD",
+	},
+	{
+		name: "CR-01b -- HEAD never moved: no commit landed, no tool result at all either",
+		records: [],
+		baseSha: shaB,
+		expected: "reject",
+		reasonMustContain: ["structured", "tool result"],
+		why: "PROBE B: a bare `read`, with no commit and no bash call, must reject at branch (1) -- empty records -- before the CR-01 branch is even reached",
 	},
 	{
 		name: "R2 -- stale SHA: evidence recorded at A, claim made at head (B)",
@@ -77,11 +95,11 @@ const ROWS: readonly Row[] = [
 		why: "a record with isError:true at HEAD, with no passing record, must reject naming the failing tool",
 	},
 	{
-		name: "A1 -- structured, non-error, at HEAD",
+		name: "A1 -- structured, non-error, at HEAD, and a commit genuinely landed (baseSha !== headSha)",
 		records: [record("bash", shaB, false)],
 		expected: "accept",
 		reasonMustContain: [],
-		why: "the one accepted shape: a non-error tool result captured at the SHA that is still HEAD",
+		why: "the one accepted shape: a non-error tool result captured at the SHA that is still HEAD, with HEAD having actually moved since the run was armed",
 	},
 	{
 		name: "M1 -- no borrowing: stale-but-passing plus fresh-but-failing",
@@ -106,7 +124,7 @@ describe("GATE-07 -- gateCompletion", () => {
 	for (const row of ROWS) {
 		it(row.name, () => {
 			const head = currentSha(repo);
-			const verdict = gateCompletion(row.records, head);
+			const verdict = gateCompletion(row.records, head, row.baseSha ?? shaA);
 
 			if (row.expected === "accept") {
 				expect(verdict.ok, `${row.why} -- got ${JSON.stringify(verdict)}`).toBe(true);
@@ -129,7 +147,7 @@ describe("GATE-07 -- gateCompletion", () => {
 	}
 
 	it("R1's reason contains no substring of the fabricated transcript -- the gate never looked at it", () => {
-		const verdict = gateCompletion([], currentSha(repo));
+		const verdict = gateCompletion([], currentSha(repo), shaA);
 		expect(verdict.ok).toBe(false);
 		if (!verdict.ok) {
 			expect(verdict.reason).not.toContain("exit 0");

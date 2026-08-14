@@ -55,17 +55,18 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{ file: ".pi/extensions/workflows/index.ts", budget: 80, why: "FLOW-01 -- the ROADMAP's /quick raw-line ceiling" },
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
-		budget: 280,
-		why: "GATE-07's predicate, run-state buffer and JSONL binding -- measured 279 raw lines 2026-08-14, rounded up to the next ten",
+		budget: 300,
+		why: "CR-01 fix: gateCompletion gained a baseSha param and a new branch rejecting a run in which HEAD " +
+			"never moved (no commit landed) -- measured 293 raw lines 2026-08-14 (up from 279), rounded up to the next ten",
 	},
 ];
 
 /**
  * D-11's ratchet: measured total of `.pi/extensions/workflows/**\/*.ts` was
- * 353 raw lines on 2026-08-14 (74 + 279, by `countRawLines`), rounded up to
- * the next multiple of ten. No headroom beyond the rounding.
+ * 367 raw lines on 2026-08-14 (74 + 293, by `countRawLines`) after CR-01's
+ * fix, rounded up to the next multiple of ten.
  */
-const WORKFLOWS_DIR_TOTAL_BUDGET = 360;
+const WORKFLOWS_DIR_TOTAL_BUDGET = 370;
 
 /** Raw line count, no stripping of any kind -- decision D-1 above. */
 function countRawLines(relPath: string): number {

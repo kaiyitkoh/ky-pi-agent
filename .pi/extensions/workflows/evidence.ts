@@ -102,26 +102,40 @@ export function recordFromToolResult(input: {
  *
  *   (1) no record at all -> reject, naming that a completion claim needs a
  *       structured tool result and that transcript text is not evidence.
- *   (2) no record whose `sha === headSha` -> reject, naming the recorded
+ *   (2) HEAD never moved (`headSha === baseSha`) -> reject: no commit landed
+ *       during this run, so every record captured is trivially "at HEAD" by
+ *       construction and cannot support a completion claim (CR-01: this is
+ *       what stops `bash echo hi` -- or a bare `read`, which is not even a
+ *       command -- from satisfying a claim when nothing was ever committed).
+ *   (3) no record whose `sha === headSha` -> reject, naming the recorded
  *       SHA(s) and `headSha`, stating the claim is stale.
- *   (3) every record at `headSha` has `isError === true` (none passing) ->
+ *   (4) every record at `headSha` has `isError === true` (none passing) ->
  *       reject, naming the failing tool(s).
- *   (4) otherwise -> accept, carrying `headSha`.
+ *   (5) otherwise -> accept, carrying `headSha`.
  *
  * Reject reasons are built from the record data itself, never from a
  * caller-supplied string. A record set containing one stale-but-passing and
- * one fresh-but-failing entry still rejects at step (3): a passing record
+ * one fresh-but-failing entry still rejects at step (4): a passing record
  * from a different SHA can never be "borrowed" to satisfy a claim at
- * `headSha`, because step (2) has already narrowed to records AT `headSha`
- * before step (3) ever inspects `isError`.
+ * `headSha`, because step (3) has already narrowed to records AT `headSha`
+ * before step (4) ever inspects `isError`.
  */
-export function gateCompletion(records: readonly EvidenceRecord[], headSha: string): EvidenceVerdict {
+export function gateCompletion(records: readonly EvidenceRecord[], headSha: string, baseSha: string): EvidenceVerdict {
 	if (records.length === 0) {
 		return {
 			ok: false,
 			reason:
 				"no structured tool result was recorded for this completion claim -- transcript text is not evidence, " +
 				"however convincing it reads",
+		};
+	}
+
+	if (headSha === baseSha) {
+		return {
+			ok: false,
+			reason:
+				`no commit was made during this run -- HEAD is still ${headSha}, so the recorded tool results predate ` +
+				"any work landing and cannot support a completion claim",
 		};
 	}
 
@@ -196,7 +210,7 @@ export function endRun(headSha: string): EvidenceVerdict | undefined {
 	if (state === undefined) {
 		return undefined;
 	}
-	const verdict = gateCompletion(state.records, headSha);
+	const verdict = gateCompletion(state.records, headSha, state.baseSha);
 	writeEvidenceRow(state.cwd, {
 		verdict: verdict.ok ? "accept" : "reject",
 		reason: verdict.ok ? `evidence accepted at ${headSha}` : verdict.reason,

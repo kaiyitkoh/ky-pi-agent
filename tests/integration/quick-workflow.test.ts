@@ -608,6 +608,11 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 						row.headSha,
 						"the accepted row's headSha does not equal a real git rev-parse HEAD read by the test itself",
 					).toBe(sha);
+					// IN-03 / CR-01's negation: HEAD genuinely moved during this run -- the
+					// cheapest possible statement that this accept is NOT the CR-01 shape.
+					expect(row.baseSha, "an accepted run's baseSha must differ from its headSha -- HEAD must have moved").not.toBe(
+						row.headSha,
+					);
 
 					// (c) the atomic-commit claim: commit count +1, subject present.
 					const after = commitCount(cwd);
@@ -646,6 +651,79 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 						evidenceAfterSecondTurn.length,
 						"a turn outside /quick's own run wrote a second evidence row -- the run was not disarmed",
 					).toBe(1);
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
+	it("case 5 (CR-01 regression) -- a real tool call that makes NO commit is rejected, and the commit count is unchanged", async () => {
+		const candidate = flashExecutorCandidate();
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					fauxAssistantMessage([fauxToolCall("bash", { command: "echo hi" })], { stopReason: "toolUse" }),
+					fauxAssistantMessage([fauxText("all done, I made the commit and the tests pass")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+				const before = commitCount(cwd);
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- case 5 needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("do the thing", ctx);
+
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					await waitFor(
+						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
+						5000,
+						"case 5's evidence row",
+					);
+
+					const rows = readEvidence(cwd);
+					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
+					const row = rows[0] as EvidenceRowShape;
+					expect(
+						row.verdict,
+						`CR-01 regression: a run with no commit must be REJECTED, got: ${JSON.stringify(row)}`,
+					).toBe("reject");
+					expect(row.reason ?? "").toContain("no commit");
+					expect(
+						row.baseSha,
+						"CR-01's own shape: HEAD never moved during this run",
+					).toBe(row.headSha);
+
+					const after = commitCount(cwd);
+					expect(after, "PROBE A: no commit may have actually landed").toBe(before);
+
+					expect(notifications.length, "a rejection must still report an outcome").toBe(1);
+					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
+
+					// The model's own prose claimed success -- the reject reason must never echo it.
+					expect(row.reason ?? "").not.toContain("I made the commit");
 				} finally {
 					restore();
 				}
