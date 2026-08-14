@@ -443,6 +443,74 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
+	it("WR-02 regression -- two models registered, session on the NON-routed one: /quick refuses at zero provider requests", async () => {
+		const candidate = flashExecutorCandidate();
+		const DECOY_MODEL_ID = "kypi-wr-02-decoy-model";
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				responses: [],
+				providerId: candidate.provider,
+				// `models[0]` becomes the session's own `ctx.model` -- the decoy, NOT
+				// the routed candidate `planRoleCall` will resolve to.
+				models: [
+					{ id: DECOY_MODEL_ID, reasoning: true, cost: FIXTURE_COST },
+					{ id: candidate.id, reasoning: true, cost: FIXTURE_COST },
+				],
+			},
+			async ({ session, faux, cwd, modelRuntime, model }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				expect(
+					model.id,
+					"the fixture's own session model must be the decoy, or this case is not exercising a genuine mismatch",
+				).toBe(DECOY_MODEL_ID);
+
+				gitInit(cwd, "work");
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- this case needs it servable").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+				expect(
+					plan.model.id,
+					"planRoleCall must resolve the REAL routed candidate, not the decoy -- otherwise this case " +
+						"proves nothing about a mismatch",
+				).toBe(candidate.id);
+				expect(
+					ctx.model?.id,
+					"ctx.model must be the decoy -- the session's own active model, independent of routing",
+				).toBe(DECOY_MODEL_ID);
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("fix the typo", ctx);
+
+					expect(notifications.length, "a refusal must still report an outcome").toBe(1);
+					expect(
+						notifications[0]?.text,
+						"WR-02's own refusal text must name the routed executor, not the session's active model",
+					).toContain(candidate.id);
+					expect(notifications[0]?.level, "a refusal is an error, not an info message").toBe("error");
+					expect(faux.state.callCount, "a WR-02 refusal must cost zero provider requests").toBe(0);
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
 	it("case 3 -- a fabricated transcript is rejected, and the gate's reason quotes none of it", async () => {
 		const candidate = flashExecutorCandidate();
 

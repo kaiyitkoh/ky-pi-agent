@@ -28,6 +28,8 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(plan.reason, "error");
 				return;
 			}
+			if (ctx.model?.id !== plan.model.id || ctx.model?.provider !== plan.model.provider)
+				return void ctx.ui.notify(`quick: session model is not the routed executor (${plan.model.provider}/${plan.model.id})`, "error");
 			try {
 				const verdict = classifyGitInvocation(
 					{ subcommand: "commit", args: [] },
