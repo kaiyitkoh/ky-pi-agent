@@ -442,6 +442,13 @@ async function runFixture(): Promise<Run> {
 
 let run: Run;
 let settingsDir: string;
+// WR-05 (iteration 3): captured so `afterAll` can RESTORE this suite's own
+// `PI_CODING_AGENT_DIR` guard instead of `delete`-ing it -- see
+// `tests/setup/agent-dir.ts`'s own docstring ("must restore this suite
+// value afterward, never merely delete it -- deleting would punch a hole
+// in this guard for the REST of that file's cases"). Matches the shape
+// `mode-switch.test.ts` and `agent-overrides.test.ts` already use.
+let suiteAgentDir: string | undefined;
 
 describe("ROUTE-10 -- the wire dump proves the intended model served the turn", () => {
 	beforeAll(async () => {
@@ -449,13 +456,18 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 		// a successful executor switch also writes settings.subagents.
 		// agentOverrides, which defaults to this machine's real global Pi
 		// settings file when this variable is unset.
+		suiteAgentDir = process.env.PI_CODING_AGENT_DIR;
 		settingsDir = mkdtempSync(join(tmpdir(), "kypi-wire-proof-settings-"));
 		process.env.PI_CODING_AGENT_DIR = settingsDir;
 		run = await runFixture();
 	}, 60_000);
 
 	afterAll(() => {
-		delete process.env.PI_CODING_AGENT_DIR;
+		if (suiteAgentDir === undefined) {
+			delete process.env.PI_CODING_AGENT_DIR;
+		} else {
+			process.env.PI_CODING_AGENT_DIR = suiteAgentDir;
+		}
 		rmSync(settingsDir, { recursive: true, force: true, maxRetries: 3 });
 	});
 
