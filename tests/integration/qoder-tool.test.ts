@@ -169,14 +169,19 @@ function withStubbedUI(
 }
 
 describe("qoder_delegate tool -- WR-11/CR-01: the configuration gate", () => {
-	// MEASURED, NOT ASSUMED: `createFauxSession`'s default `tools: []` passes
-	// an EXPLICIT (though empty) `activeToolNames` array to `createAgentSession`,
-	// which -- per `dist/core/agent-session.js:1995-2014` -- SUPPRESSES Pi's own
-	// "auto-activate every newly-registered extension tool" default entirely
-	// (that default only fires when `activeToolNames` was never supplied at
-	// all). So under this harness's own default, `qoder_delegate` would NEVER
-	// appear in `getActiveToolNames()` regardless of whether the fix under
-	// test exists -- both cases below therefore start the session with
+	// MEASURED, NOT ASSUMED (WR-04, iteration 3 -- the prior citation here named
+	// the wrong mechanism): `createFauxSession`'s default `tools: []` becomes
+	// `options.tools` on `createAgentSession`'s SDK options, which
+	// `createAgentSession` maps to `allowedToolNames` [VERIFIED:
+	// `dist/core/sdk.js:133`, `options.tools ?? (options.noTools === "all" ? []
+	// : undefined)`] -- and even an EMPTY array is truthy in JS, so
+	// `_refreshToolRegistry`'s `if (allowedToolNames)` arm
+	// (`dist/core/agent-session.js:1996-2002`) takes precedence over the
+	// `else if (options?.includeAllExtensionTools)` arm that would otherwise
+	// auto-activate every newly-registered extension tool. So under this
+	// harness's own default, `qoder_delegate` would NEVER appear in
+	// `getActiveToolNames()` regardless of whether the fix under test exists
+	// -- both cases below therefore start the session with
 	// `tools: ["qoder_delegate"]` explicitly, simulating the REAL starting
 	// condition a production session's own default would produce (a newly
 	// registered tool starts active), so the fix's `pi.setActiveTools(...

@@ -278,11 +278,17 @@ export default function (pi: ExtensionAPI): void {
 	// a handler, never a factory]: the runtime is bound by then, and
 	// `registerTool()` above already ran during load, so the tool exists to be
 	// filtered. `registerTool` makes a NEWLY-registered tool active in the
-	// session by default [VERIFIED: `dist/core/agent-session.js:2008-2014` --
-	// every tool name not already in the previous registry is pushed onto
-	// `nextActiveToolNames` when the session was not constructed with an
-	// explicit `activeToolNames`/`allowedToolNames`/`includeAllExtensionTools`
-	// option], so this tool costs its measured ~329 tokens on EVERY provider
+	// session by default [VERIFIED (WR-04, iteration 3 -- the prior citation
+	// here pointed at an unreachable branch): `AgentSession`'s constructor
+	// always calls `_buildRuntime({ activeToolNames: …, includeAllExtensionTools:
+	// true })` (`dist/core/agent-session.js:158-161`), and `_refreshToolRegistry`'s
+	// `else if (options?.includeAllExtensionTools)` arm -- the one that ACTUALLY
+	// activates every extension tool, `agent-session.js:2003-2006` -- runs
+	// because of it. The sibling `else if (!options?.activeToolNames)` arm at
+	// `:2008-2014` is dead code from session construction: `_buildRuntime`
+	// always forwards a DEFINED `activeToolNames` (`options.activeToolNames ??
+	// ["read","bash","edit","write"]`, `:2043-2046`), so that arm's own
+	// precondition never holds here], so this tool costs its measured ~329 tokens on EVERY provider
 	// request by default, including on this machine and in CI where
 	// `resolveQoderConfig` can only ever refuse. Deactivating it when
 	// unconfigured is applied here as an opt-OUT (deactivate when NOT
