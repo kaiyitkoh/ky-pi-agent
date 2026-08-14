@@ -539,6 +539,55 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 	});
 });
 
+describe("qoder-delegate -- WR-08: a malformed server-supplied session id is refused, never spliced raw into a request path", () => {
+	it("a session id containing path-traversal characters is refused before the second request is ever made", async () => {
+		// The DEFAULT loopback session id generator can never produce this --
+		// `sessionIdOverride` is the seam that lets this test hand the CLIENT a
+		// server response shaped like a malicious id, which is exactly the
+		// untrusted-input scenario WR-08 describes (`sessionId` comes from a
+		// network response the client does not control).
+		const maliciousId = "../../etc/passwd?x=1#y";
+
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES, sessionIdOverride: maliciousId }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+
+				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(
+					/does not look like one/,
+				);
+
+				// THE LOAD-BEARING ASSERTION: only the FIRST request (session
+				// create, the one that returned the malicious id) was ever made.
+				// A client that validated too late -- after already splicing the
+				// id into the events-POST path -- would still show a second
+				// request here, just possibly a mangled one.
+				expect(loop.received.length).toBeGreaterThan(0);
+				expect(loop.received).toHaveLength(1);
+				expect(loop.received[0]?.url).toBe("/sessions");
+			});
+		});
+	});
+
+	it("a well-formed session id containing a real '/' is refused the same way (the shape check, not merely a blocklist)", async () => {
+		// A slash is not on any blocklist enumerated anywhere in this file --
+		// this proves the check is a POSITIVE shape match
+		// (`/^[A-Za-z0-9._-]{1,128}$/`), not a denylist of specific dangerous
+		// substrings that a differently-shaped bad id could slip past.
+		const idWithSlash = "sess/nested";
+
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES, sessionIdOverride: idWithSlash }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+
+				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(
+					/does not look like one/,
+				);
+				expect(loop.received).toHaveLength(1);
+			});
+		});
+	});
+});
+
 describe("qoder-delegate -- this file never dials the real host", () => {
 	it("resolveQoderConfig's own documented default base URL is never used by any case in this file", () => {
 		// Every fixture config in this file supplies QODER_BASE_URL_ENV pointed

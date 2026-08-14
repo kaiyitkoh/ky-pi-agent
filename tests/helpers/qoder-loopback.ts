@@ -121,6 +121,14 @@ export interface QoderLoopbackOptions {
 	splitDelayMs?: number;
 	/** Per-endpoint status overrides. */
 	statusOverrides?: QoderLoopbackStatusOverrides;
+	/**
+	 * Override the session id returned by `POST /sessions`, in place of the
+	 * default `sess_kypi_loopback_<n>`. WR-08's own test uses this to prove the
+	 * client refuses (rather than blindly splices into a request path) a
+	 * server-supplied id shaped like `../../etc/passwd` or containing a `?`/`#`
+	 * -- a value the DEFAULT id generator can never produce on its own.
+	 */
+	sessionIdOverride?: string;
 }
 
 /** What the callback gets. */
@@ -327,7 +335,7 @@ export async function withQoderLoopback<T>(
 						return;
 					}
 					writeJson(res, status, {
-						id: `sess_kypi_loopback_${sessionCounter}`,
+						id: opts.sessionIdOverride ?? `sess_kypi_loopback_${sessionCounter}`,
 						type: "session",
 						status: "idle",
 						created_at: new Date().toISOString(),

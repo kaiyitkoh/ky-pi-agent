@@ -620,10 +620,31 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	if (sessionId === undefined || sessionId.length === 0) {
 		throw new Error("Qoder delegate: session create returned no usable session id.");
 	}
+	// WR-08: `sessionId` comes from an UNTRUSTED network response and is
+	// spliced into two request paths below. An id containing `../`, `?`, `#`
+	// or a space would re-target or mangle the request -- the same
+	// input-validation posture this file already applies to the model-
+	// supplied `task` (MAX_TASK_CHARS / the empty-task refusal above), now
+	// applied to the server-supplied id it did not previously cover. Reject
+	// with the offending value in the message (never silently truncate or
+	// coerce it) rather than relying on `encodeURIComponent` alone -- an id
+	// this file cannot validate is an id this file should refuse to use, not
+	// merely escape and hope the peer's own routing tolerates.
+	if (!/^[A-Za-z0-9._-]{1,128}$/.test(sessionId)) {
+		throw new Error(
+			`Qoder delegate: session create returned a session id that does not look like one ` +
+				`(${JSON.stringify(sessionId)}) -- refusing to splice it into a request path.`,
+		);
+	}
+	const encodedSessionId = encodeURIComponent(sessionId);
 
-	writeQoderTranscript(cwd, { event: "qoder.event.send.request", url: `${config.baseUrl}/sessions/${sessionId}/events`, taskChars: trimmed.length });
+	writeQoderTranscript(cwd, {
+		event: "qoder.event.send.request",
+		url: `${config.baseUrl}/sessions/${encodedSessionId}/events`,
+		taskChars: trimmed.length,
+	});
 
-	const eventResponse = await fetch(`${config.baseUrl}/sessions/${sessionId}/events`, {
+	const eventResponse = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/events`, {
 		method: "POST",
 		headers,
 		body: JSON.stringify({ events: [{ type: "user.message", content: [{ type: "text", text: trimmed }] }] }),
@@ -644,10 +665,10 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	// cannot show the failure the runbook told them to look for.
 	writeQoderTranscript(cwd, {
 		event: "qoder.stream.open.request",
-		url: `${config.baseUrl}/sessions/${sessionId}/events/stream`,
+		url: `${config.baseUrl}/sessions/${encodedSessionId}/events/stream`,
 	});
 
-	const streamResponse = await fetch(`${config.baseUrl}/sessions/${sessionId}/events/stream`, {
+	const streamResponse = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/events/stream`, {
 		method: "GET",
 		headers: { Authorization: headers.Authorization },
 		signal,
