@@ -38,6 +38,7 @@
  */
 import { describe, expect, it } from "vitest";
 
+import { getNormalModeTools, getPlanModeTools } from "../../.pi/extensions/plan-mode/index.ts";
 import { classifyPlanModeCommand } from "../../.pi/extensions/plan-mode/read-only.ts";
 import { isSafeCommand } from "../../.pi/extensions/plan-mode/utils.ts";
 
@@ -207,6 +208,89 @@ describe("CR-03 -- plan mode's read-only bash boundary is decided over an unbash
 			"utils.ts#isSafeCommand must be a thin delegate of read-only.ts#classifyPlanModeCommand -- two " +
 				"implementations of one boundary is how the vendored file drifts back to a regex",
 		).toEqual([]);
+	});
+
+	it("WR-18 -- getNormalModeTools(getPlanModeTools(X)) is a superset of X", () => {
+		// The round trip is the property that matters: entering plan mode and then
+		// leaving it must not cost the session a tool. `grep`, `find`, `ls` and
+		// `questionnaire` are in PLAN_MANAGED_TOOLS but were not in
+		// NORMAL_MODE_TOOLS, so the filter stripped them and the concatenation
+		// never added them back -- FOUR active tools and no search capability,
+		// permanently, with no message.
+		//
+		// REACHABILITY IS UNVERIFIED and the review's stated path does not hold --
+		// see index.ts's DEVIATION 5 for the trace. This asserts the selectors'
+		// own contract, which is true regardless of which control flow reaches it.
+		const before = ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire", "todo", "lsp_diagnostics"];
+		const roundTripped = getNormalModeTools(getPlanModeTools(before));
+		const lost = before.filter((t) => !roundTripped.includes(t));
+		expect(
+			lost,
+			"entering plan mode and leaving it again must not cost the session a tool. Anything listed here " +
+				"is silently gone for the rest of the session, with no message to the user or the model",
+		).toEqual([]);
+	});
+
+	it("WR-18 reachability -- the SHIPPED restore/toggle path goes through the SNAPSHOT, not the fallback", async () => {
+		// HONEST SCOPE. This case does NOT exercise getNormalModeTools. It exists
+		// because the review claimed the buggy fallback was reachable "after
+		// /reload when the persisted plan-mode entry carries toolsBeforePlanMode:
+		// undefined while enabled is true", and that claim was checked rather than
+		// believed: `session_start`'s tail calls `enablePlanModeTools()`
+		// unconditionally when planModeEnabled is true, and that snapshots
+		// `pi.getActiveTools()` whenever the value is undefined. So the `??`
+		// fallback is DEAD on this control flow, and the case below pins that --
+		// leaving plan mode restores the SNAPSHOT taken on entry.
+		//
+		// The defect itself is asserted by the round-trip case above, which is the
+		// one that goes red when the constant regresses. If this case ever starts
+		// showing tools missing, the fallback has become live and the round-trip
+		// property has become load-bearing rather than latent.
+		const active = ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire", "todo"];
+		const setCalls: string[][] = [];
+		const commands = new Map<string, (args: string, ctx: unknown) => unknown>();
+		const handlers = new Map<string, (event: unknown, ctx: unknown) => unknown>();
+
+		const mod = (await import("../../.pi/extensions/plan-mode/index.ts")) as { default: (pi: unknown) => void };
+		mod.default({
+			on: (name: string, fn: (event: unknown, ctx: unknown) => unknown) => handlers.set(name, fn),
+			registerCommand: (name: string, spec: { handler: (args: string, ctx: unknown) => unknown }) =>
+				commands.set(name, spec.handler),
+			registerShortcut: () => undefined,
+			registerFlag: () => undefined,
+			getActiveTools: () => [...active],
+			setActiveTools: (names: string[]) => setCalls.push([...names]),
+			appendEntry: () => undefined,
+			getFlag: () => undefined,
+			sendMessage: () => undefined,
+			sendUserMessage: () => undefined,
+		});
+
+		const ctx = {
+			ui: {
+				notify: () => undefined,
+				setStatus: () => undefined,
+				setWidget: () => undefined,
+				theme: { fg: (_key: string, text: string) => text },
+			},
+			sessionManager: {
+				// Exactly the reachable shape: enabled, and NO toolsBeforePlanMode.
+				getEntries: () => [{ type: "custom", customType: "plan-mode", data: { enabled: true } }],
+			},
+		};
+		await handlers.get("session_start")?.({}, ctx);
+
+		// Now leave plan mode through the shipped command.
+		await commands.get("plan")?.("", ctx);
+
+		expect(setCalls.length, "the /plan toggle must have set the active tool list").toBeGreaterThan(0);
+		const restored = setCalls[setCalls.length - 1] ?? [];
+		expect(
+			[...restored].sort(),
+			"leaving plan mode must restore exactly the snapshot session_start took on entry -- if this ever " +
+				"differs, the getNormalModeTools fallback has become live and DEVIATION 5's reachability note " +
+				"in index.ts is out of date",
+		).toEqual([...active].sort());
 	});
 
 	it("Direction 4 -- the six review bypasses are still in the corpus, by id", () => {

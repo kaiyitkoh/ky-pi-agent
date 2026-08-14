@@ -116,9 +116,63 @@ import { extractTodoItems, markCompletedSteps, type TodoItem } from "./utils.ts"
 
 // Tools
 const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
-const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write"];
+// DEVIATION 5 (WR-18, Phase 7 code review). Upstream ships
+// `["read", "bash", "edit", "write"]`. `grep`, `find`, `ls` and `questionnaire`
+// are in PLAN_MANAGED_TOOLS (below) but were NOT in this set, so
+// getNormalModeTools' filter strips them and the concatenation never adds them
+// back -- a call through that path leaves the session with FOUR active tools
+// and no search capability, permanently, with no message. `questionnaire` is in
+// that list precisely BECAUSE this repo vendored the questionnaire tool (plan
+// 07-08), so this is not purely upstream's problem to have.
+//
+// REACHABILITY: UNVERIFIED, and the review's stated path does NOT hold. The
+// review said the fallback is reached "after /reload when the persisted
+// plan-mode entry carries toolsBeforePlanMode: undefined while enabled is
+// true". Traced against this file: `session_start`'s tail calls
+// `enablePlanModeTools()` unconditionally whenever `planModeEnabled` is true,
+// and that function snapshots `pi.getActiveTools()` whenever the value is
+// undefined -- so every path into `restoreNormalModeTools()` is preceded by a
+// snapshot, and the `??` fallback is currently DEAD. Every call site was
+// checked (the /plan toggle, and the "Execute the plan" branch of agent_end).
+//
+// Fixed anyway, and the correction recorded rather than the reachability
+// overstated: the function's own contract is "the tool set to activate when
+// leaving plan mode", and a set that silently omits four tools it manages is
+// wrong whether or not today's control flow reaches it. A latent defect one
+// refactor away from being live, in the tool-gating path, is not something to
+// leave sitting because it currently cannot fire.
+const NORMAL_MODE_TOOLS = ["read", "bash", "edit", "write", "grep", "find", "ls", "questionnaire"];
 const PLAN_MODE_DISABLED_TOOLS = new Set<string>(["edit", "write"]);
 const PLAN_MANAGED_TOOLS = new Set<string>([...PLAN_MODE_TOOLS, ...NORMAL_MODE_TOOLS]);
+
+// DEVIATION 5, second half (WR-18). These three were nested inside the
+// extension factory upstream. They are PURE functions of their argument and the
+// module constants above -- they close over nothing -- so they are hoisted to
+// module scope and exported, and nothing else about them changed. Upstream's own
+// `utils.ts` states the principle this follows verbatim: "Extracted for
+// testability."
+//
+// It had to be done, because the defect below is otherwise UNTESTABLE. See
+// `tests/unit/plan-mode-read-only.test.ts`'s WR-18 block, which asserts the
+// round-trip property directly and was falsified against the upstream constant.
+
+export function uniqueToolNames(toolNames: string[]): string[] {
+	return [...new Set(toolNames)];
+}
+
+export function getPlanModeTools(activeToolNames: string[]): string[] {
+	return uniqueToolNames([
+		...activeToolNames.filter((name) => !PLAN_MODE_DISABLED_TOOLS.has(name)),
+		...PLAN_MODE_TOOLS,
+	]);
+}
+
+export function getNormalModeTools(activeToolNames: string[]): string[] {
+	return uniqueToolNames([
+		...NORMAL_MODE_TOOLS,
+		...activeToolNames.filter((name) => !PLAN_MANAGED_TOOLS.has(name)),
+	]);
+}
 
 interface PlanModeState {
 	enabled: boolean;
@@ -177,24 +231,6 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		} else {
 			ctx.ui.setWidget("plan-todos", undefined);
 		}
-	}
-
-	function uniqueToolNames(toolNames: string[]): string[] {
-		return [...new Set(toolNames)];
-	}
-
-	function getPlanModeTools(activeToolNames: string[]): string[] {
-		return uniqueToolNames([
-			...activeToolNames.filter((name) => !PLAN_MODE_DISABLED_TOOLS.has(name)),
-			...PLAN_MODE_TOOLS,
-		]);
-	}
-
-	function getNormalModeTools(activeToolNames: string[]): string[] {
-		return uniqueToolNames([
-			...NORMAL_MODE_TOOLS,
-			...activeToolNames.filter((name) => !PLAN_MANAGED_TOOLS.has(name)),
-		]);
 	}
 
 	function enablePlanModeTools(): void {

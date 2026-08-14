@@ -134,7 +134,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/plan-mode/index.ts",
-		budget: 500,
+		budget: 540,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/index.ts, " +
 			"registers /plan and /plan-todos -- WR-05 widened discovery to catch command surfaces outside " +
 			"workflows/; upstream's own 390 lines plus this plan's vendoring header (the only permitted " +
@@ -144,7 +144,11 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"the review defeated six ways, including an exfiltration of ~/.aws/credentials. The gate now " +
 			"calls ./read-only.ts and the file carries DEVIATION 4, the vendoring record for the only " +
 			"BEHAVIOURAL change ever made to this copy -- a deviation a future Pi bump must see. " +
-			"Re-measured 492 raw lines 2026-08-15, rounded up to the next ten",
+			"Then RAISED 500 -> 540 in the same pass for WR-18: NORMAL_MODE_TOOLS silently omitted " +
+			"grep/find/ls/questionnaire, and the three PURE selectors were hoisted out of the extension " +
+			"factory and exported (DEVIATION 5) because the round-trip property was otherwise untestable. " +
+			"The reachability trace showing the review's stated path does NOT hold is recorded there too, " +
+			"rather than the finding being overstated. Re-measured 529 raw lines 2026-08-15, rounded up",
 	},
 	{
 		file: ".pi/extensions/todo.ts",
@@ -223,7 +227,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 970,
+		budget: 1010,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
@@ -238,7 +242,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"path. This raise is the anti-offloading control working AS DESIGNED -- utils.ts shrank 174 -> " +
 			"102 and the lines did not vanish, they moved, and the directory total is what says so. " +
 			"Re-measured 960 raw lines across 3 files 2026-08-15 (index.ts 492 + read-only.ts 366 + " +
-			"utils.ts 102), rounded up to the next ten",
+			"utils.ts 102), then 999 across the same 3 files after WR-18 (index.ts 529), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
