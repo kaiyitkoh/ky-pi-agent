@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI): void {
 					{ currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES },
 				);
 				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
-				if (isRunArmed()) return void ctx.ui.notify("quick: a run is already in flight -- wait for its verdict", "error");
+				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
 				startRun(ctx.cwd, currentSha(ctx.cwd));
 				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
 			} catch (err) {
@@ -62,10 +62,12 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
+		let sha = ""; // WR-02: currentSha fails closed by design (safety/git.ts:171)
+		try { sha = currentSha(armedCwd() ?? ctx.cwd); } catch { /* gate rejects on unknown SHA below */ }
 		try {
-			const verdict = endRun(currentSha(armedCwd() ?? ctx.cwd));
-			if (verdict === undefined) return;
-			ctx.ui.notify(verdict.ok ? `quick: evidence accepted at ${verdict.sha}` : verdict.reason, verdict.ok ? "info" : "error");
+			const verdict = endRun(sha);
+			// CR-01: accept wording states what was checked, not an endorsement.
+			if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: a commit landed at ${verdict.sha} with no failed tool result -- the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
 		} catch {
 			// Swallowed -- same rule as the tool_result handler above.
 		}

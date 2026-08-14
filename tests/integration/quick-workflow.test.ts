@@ -799,6 +799,85 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
+	it("case 6 (CR-01 iteration 2 regression, PROBE F) -- a failed verification command is not buried by a commit that lands afterwards", async () => {
+		const candidate = flashExecutorCandidate();
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					// (1) a real verification command that genuinely fails (exit 1).
+					fauxAssistantMessage([fauxToolCall("bash", { command: "exit 1" })], { stopReason: "toolUse" }),
+					// (2) the model, undeterred, makes the commit anyway.
+					fauxAssistantMessage([fauxToolCall("bash", { command: 'git commit --allow-empty -m "quick: PROBE F"' })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage([fauxText("tests pass, done")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- case 6 needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("run verification, then commit", ctx);
+
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					await waitFor(
+						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
+						5000,
+						"case 6's evidence row",
+					);
+
+					const rows = readEvidence(cwd);
+					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
+					const row = rows[0] as EvidenceRowShape;
+					expect(
+						row.verdict,
+						`PROBE F: a run holding a recorded failure must be REJECTED even though a commit landed ` +
+							`afterwards, got: ${JSON.stringify(row)}`,
+					).toBe("reject");
+					expect(row.reason ?? "", "the reject reason must name the failing tool").toContain("bash");
+					expect(
+						row.recordCount ?? 0,
+						"both the failing verification AND the passing commit must have been recorded",
+					).toBe(2);
+					expect(
+						row.baseSha,
+						"HEAD genuinely moved during this run -- the commit really landed, and still rejected",
+					).not.toBe(row.headSha);
+
+					expect(notifications.length, "a rejection must still report an outcome").toBe(1);
+					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
+
+					// The model's own prose claimed success -- the reject reason must never echo it.
+					expect(row.reason ?? "").not.toContain("tests pass");
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
 	it("WR-01 regression -- a second /quick while a run is in flight is refused, and does not steal the first run's buffer", async () => {
 		const candidate = flashExecutorCandidate();
 
@@ -866,6 +945,163 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(rows[0]?.verdict, `run 1's own commit must still be accepted, got: ${JSON.stringify(rows[0])}`).toBe(
 						"accept",
 					);
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
+	it("WR-01 iteration 2 regression (PROBE H2) -- /quick refuses while an ORDINARY turn (not a second /quick) is in flight, and never arms a run for it", async () => {
+		const candidate = flashExecutorCandidate();
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					fauxAssistantMessage(
+						[fauxToolCall("bash", { command: 'git commit --allow-empty -m "ordinary work"' })],
+						{ stopReason: "toolUse" },
+					),
+					fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- this case needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					// Fire an ORDINARY prompt (not through /quick at all) and do not await
+					// it -- this is the shape that WR-01's original fix (guarding only
+					// against a second /quick) could not see: no `/quick` run is armed by
+					// this turn, so `isRunArmed()` alone stays false throughout.
+					const ordinary = session.prompt("do some ordinary work");
+					await waitFor(() => !ctx.isIdle(), 2000, "the ordinary turn to actually start (ctx.isIdle() false)");
+
+					await command.handler("do the quick thing", ctx);
+
+					expect(notifications.length, "a refusal must still report an outcome").toBe(1);
+					expect(
+						notifications[0]?.text,
+						"the refusal must come from the isIdle() guard, not the isRunArmed() one -- same wording either way",
+					).toContain("already in flight");
+					expect(notifications[0]?.level, "a refusal is an error, not an info message").toBe("error");
+
+					await ordinary;
+
+					// Disarm proof: /quick's own handler never called startRun(), so no
+					// evidence row exists at all for this cwd -- not even a reject row.
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					expect(
+						existsSync(evidenceFile) ? readJsonl(evidenceFile).length : 0,
+						"the ordinary turn's own commit must never be attributed to a /quick run that was refused " +
+							"before it ever armed",
+					).toBe(0);
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
+	it("WR-02 regression (PROBE I) -- a currentSha failure inside agent_end still disarms and writes a reject row, never leaves /quick armed forever", async () => {
+		const candidate = flashExecutorCandidate();
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					fauxAssistantMessage(
+						[fauxToolCall("bash", { command: 'git commit --allow-empty -m "done" && rm -rf .git' })],
+						{ stopReason: "toolUse" },
+					),
+					fauxAssistantMessage([fauxText("done, committed and tests pass")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- this case needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("destroy the repo after committing", ctx);
+
+					// Before WR-02's fix this timeout never resolved: agent_end's own
+					// currentSha() throw was swallowed whole, endRun() was never
+					// reached, no row was ever written, and isRunArmed() stayed true
+					// forever. waitFor's own timeout IS the RED signal for that shape.
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					await waitFor(
+						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
+						5000,
+						"a reject row to land after agent_end's currentSha() failure",
+					);
+
+					const rows = readEvidence(cwd);
+					expect(rows.length, "exactly one row for the one run").toBe(1);
+					expect(rows[0]?.verdict, `a currentSha failure must fail CLOSED (reject), got: ${JSON.stringify(rows[0])}`).toBe(
+						"reject",
+					);
+
+					// The slot must be free: a second /quick must be servable again.
+					const { notifications: notifications2, restore: restore2 } = captureNotify(ctx);
+					try {
+						await command.handler("try again", ctx);
+						expect(
+							notifications2.some((n) => n.text.includes("already in flight")),
+							"the run-armed slot must have been freed by WR-02's fix -- a second /quick must not be " +
+								"permanently refused",
+						).toBe(false);
+					} finally {
+						restore2();
+					}
+
+					// The .git destruction happened INSIDE the one bash call, so the
+					// tool_result handler's own currentSha() read also throws (swallowed,
+					// same rule) -- no structured record ever lands, so the reject reason
+					// is the empty-records branch, not a stale-SHA one.
+					expect(notifications.length, "run 1's own outcome must still be reported").toBe(1);
+					expect(notifications[0]?.text, "notification text must equal the written row's own reason").toBe(
+						rows[0]?.reason,
+					);
+					expect(notifications[0]?.level, "a reject is an error, not an info message").toBe("error");
 				} finally {
 					restore();
 				}
