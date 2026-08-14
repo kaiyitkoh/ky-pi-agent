@@ -1072,13 +1072,13 @@ in `.pi/settings.json`.
    because it is the one leg with a complete offline proxy — see below. Run
    one representative blocked command (for example `terraform destroy`,
    unconfirmed) interactively, inside a session that actually has
-   `pi-subagents` installed, and confirm the audit JSONL row appears: `tail
-   -n 1 .pi/logs/audit-$(date +%F).jsonl`. This is the one leg composing does
-   not weaken: the guard binds to the tool name at the `tool_call` hook
-   regardless of which other extensions are active (`07-07-SUMMARY.md`'s
-   T-07-27 finding), so a blocked command inside a session carrying five
-   newly-installed extensions is exactly as covered as one inside a bare
-   session.
+   `pi-subagents` installed, and confirm the audit JSONL row appears:
+   `tail -n 1 .pi/logs/audit-$(date +%F).jsonl`. This is the one leg
+   composing does not weaken: the guard binds to the tool name at the
+   `tool_call` hook regardless of which other extensions are active
+   (`07-07-SUMMARY.md`'s T-07-27 finding), so a blocked command inside a
+   session carrying five newly-installed extensions is exactly as covered as
+   one inside a bare session.
 4. **One wire dump.** Cite `RB-02-01` — confirm a dump lands under
    `.pi/logs/wire-$(date +%F).jsonl` and carries no credential-shaped value,
    which is `RB-02-02`'s subject and is not re-litigated here.
