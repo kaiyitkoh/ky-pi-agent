@@ -313,14 +313,15 @@ function basenameOf(canonicalPath: string): string {
 
 /**
  * Case-insensitive whole-path equality once both sides are reduced to root +
- * segments (never a raw string compare). Exported for WR-14:
- * `policy.ts#evaluateSearchRootField` needs the SAME "are these the same
- * canonical path" test this module's own detonation-target rules use, to
- * decide whether the session's project root and home directory canonicalise
- * identically -- reusing this rather than a second, hand-rolled comparison
- * is what keeps the two notions of path equality from drifting apart.
+ * segments (never a raw string compare). IN-01: WR-17 removed
+ * `policy.ts#evaluateSearchRootField`'s only call site, so this is no longer
+ * exported for a caller outside this module -- it stays module-private,
+ * shared by this file's own kubeconfig check and its four detonation-target
+ * rules (`.bashrc`/`.bash_profile`/`.profile`/`.gitconfig`), so the "are
+ * these the same canonical path" test does not get hand-rolled a second time
+ * even within this one module.
  */
-export function sameCanonicalPath(a: string, b: string): boolean {
+function sameCanonicalPath(a: string, b: string): boolean {
 	const left = rootedSegmentsOf(a);
 	const right = rootedSegmentsOf(b);
 	if (left.root.toLowerCase() !== right.root.toLowerCase()) {
