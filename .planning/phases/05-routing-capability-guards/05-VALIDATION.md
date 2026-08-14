@@ -1,8 +1,8 @@
 ---
 phase: 5
 slug: routing-capability-guards
-status: draft
-nyquist_compliant: false
+status: approved
+nyquist_compliant: true
 wave_0_complete: false
 created: 2026-08-14
 ---
@@ -87,12 +87,12 @@ Everything else in this phase is `[FAUX]` and must be planned as **passing**, no
 
 ## Validation Sign-Off
 
-- [ ] All tasks have `<automated>` verify or a Wave 0 dependency
-- [ ] Sampling continuity: no 3 consecutive tasks without automated verify
-- [ ] Wave 0 covers all MISSING references
-- [ ] No watch-mode flags (`vitest run`, never bare `vitest`)
-- [ ] Feedback latency < 60s for quick runs
-- [ ] ROUTE-10's assertion reads the **wire record**, not a `setModel` spy
-- [ ] `nyquist_compliant: true` set in frontmatter
+- [x] All tasks have `<automated>` verify or a Wave 0 dependency
+- [x] Sampling continuity: no 3 consecutive tasks without automated verify
+- [x] Wave 0 covers all MISSING references
+- [x] No watch-mode flags (`vitest run`, never bare `vitest`)
+- [x] Feedback latency < 60s for quick runs
+- [x] ROUTE-10's assertion reads the **wire record**, not a `setModel` spy — `05-11-PLAN.md` additionally forbids a `setModel` spy by grep
+- [x] `nyquist_compliant: true` set in frontmatter
 
-**Approval:** pending
+**Approval:** approved 2026-08-14 — verified by `gsd-plan-checker` against all 12 plans (`## VERIFICATION PASSED`, 0 blockers). `wave_0_complete` stays `false` until execution actually creates the Wave 0 test files.

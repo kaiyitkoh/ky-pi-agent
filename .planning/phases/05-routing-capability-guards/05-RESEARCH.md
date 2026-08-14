@@ -701,14 +701,20 @@ function buildAdditionalModelRequestFields(model, options) {
 
 **If this table is empty:** N/A — see above, four items recorded.
 
-## Open Questions
+## Open Questions (RESOLVED — both settled during planning, 2026-08-14)
+
+> Neither question survived into the plan set. Both were decided in-plan under the Standing
+> Operating Policy (the user is asleep; pick the option consistent with the recorded decisions,
+> note it in one line, move on). Resolutions are recorded inline below.
 
 1. **Does the R1 tool-calling deny-list (ROUTE-08) apply only when R1 is assigned the executor role, or to every role assignment?**
+   - **RESOLVED in `05-02-PLAN.md`: role-scoped.** The deny-list applies when `usesToolLoop` is true (the executor and any subagent role) and is skipped for pure single-shot `callModel()` roles that pass no `tools`. This matches ROUTE-08's own wording and the actual defect, and avoids over-blocking a technically-fine tool-less use. `05-05-PLAN.md` extends the same guard call to the subagent-pin write, so a subagent role — which is a tool-loop role by definition — cannot be pinned to R1 silently.
    - What we know: ROUTE-08's own wording is executor-specific ("Bedrock DeepSeek R1 as executor... it supports no tool calling at all"); `05-CONTEXT.md` decision 4 frames all four blocks together as "the capability guard," which could be read as role-agnostic.
    - What's unclear: whether a single-shot role with no tool loop (e.g. `summariser`) should also be blocked from R1, given R1 genuinely has no defect for a tool-less request.
    - Recommendation: scope the deny-list check to roles that go through a tool loop (executor, and any subagent role) and skip it for pure single-shot `callModel()` roles that pass no `tools` — this matches the stated defect precisely and avoids over-blocking a technically-fine use.
 
 2. **Which `agentOverrides` shape will Phase 7's actual `pi-subagents` package expect?**
+   - **RESOLVED in `05-05-PLAN.md`: write ARCHITECTURE.md's documented shape now, flagged for Phase 7 re-verification.** `.pi/extensions/routing/agent-overrides.ts` writes `{ "<agentName>": { "model": "<provider>/<id>" } }` under `settings.subagents.agentOverrides`, carries a mandatory `PHASE 7 RE-VERIFICATION` docstring section naming EXT-08, and targets the GLOBAL agent settings file (`join(getAgentDir(), "settings.json")`) rather than the git-tracked `.pi/settings.json` — resolving Assumption A1 in the same plan.
    - What we know: ARCHITECTURE.md's Pattern 7 states the precedence chain (`settings.subagents.agentOverrides.<name>.model` sits between per-run override/frontmatter and `settings.subagents.defaultModel`/parent-session-model) and cites `pi-subagents@0.47.1`'s `docs/agents.md:11` for it — but that package is not yet installed in this repository (Phase 7).
    - What's unclear: the exact JSON key names Phase 5 should write today, before the package that reads them exists, risk drift.
    - Recommendation: write the shape ARCHITECTURE.md already documents (`{ "<agentName>": { "model": "<provider>/<id>" } }` under `settings.subagents.agentOverrides`) and flag in the plan that Phase 7 must re-verify this shape against the actually-pinned package version at that time (per EXT-08's own "every pin is re-verified at planning time" rule) — do not treat this as settled beyond "forward-compatible best guess."
