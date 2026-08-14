@@ -156,7 +156,8 @@
  */
 import type { Model } from "@earendil-works/pi-ai";
 import { getAgentDir } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { guardRoute } from "./guard.ts";
@@ -438,9 +439,43 @@ export function writeAgentOverrides(
 		// target (same directory, so same filesystem/volume) rather than in a
 		// system temp dir, which could straddle a volume boundary and turn the
 		// rename into a copy.
-		const tmpPath = `${path}.${process.pid}.tmp`;
-		writeFileSync(tmpPath, nextText, "utf-8");
-		renameSync(tmpPath, path);
+		//
+		// WR-07: two defects in the ORIGINAL `${path}.${process.pid}.tmp` name,
+		// fixed together:
+		//   1. ORPHANED TEMP FILE ON RENAME FAILURE. If `renameSync` throws
+		//      (EPERM, EXDEV, a Windows antivirus/indexer lock -- this project's
+		//      own target platform), the outer `catch` below returns a refusal,
+		//      but the temp file the `writeFileSync` above already created was
+		//      left sitting in the user's GLOBAL `~/.pi/agent/` directory
+		//      forever. This function's own contract is that a refusal leaves
+		//      the filesystem as it found it -- true only for the ENOENT case,
+		//      where the temp write itself never happens. `rmSync` below cleans
+		//      up on any failure between the write and a successful rename.
+		//   2. TEMP-NAME COLLISION ACROSS TWO JITI COPIES IN ONE PROCESS.
+		//      `modes.ts`'s own module docstring documents at length that jiti
+		//      can hold two separate copies of one module in one process. Two
+		//      concurrent `applyMode` calls from two different copies share the
+		//      SAME `process.pid`, so they collided on the identical temp path:
+		//      copy A writes, copy B overwrites the same file, A renames
+		//      (succeeds), B's rename then hits ENOENT and reports a spurious
+		//      refusal to the user for a write that had already succeeded.
+		//      `randomUUID()` makes every call's temp path unique regardless of
+		//      which copy or how many run concurrently.
+		const tmpPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+		try {
+			writeFileSync(tmpPath, nextText, "utf-8");
+			renameSync(tmpPath, path);
+		} catch (err) {
+			try {
+				rmSync(tmpPath, { force: true });
+			} catch {
+				// Best-effort -- see this catch's own comment above. A leftover
+				// temp file from a doubly-failed cleanup is noise, not a second
+				// error to report; the outer catch below still reports the
+				// original failure.
+			}
+			throw err;
+		}
 
 		return { ok: true, written: true, path };
 	} catch (err) {

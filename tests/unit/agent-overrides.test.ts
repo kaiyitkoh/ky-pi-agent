@@ -47,7 +47,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 
 import {
 	agentOverridesFor,
@@ -331,6 +331,57 @@ describe("writeAgentOverrides -- WR-02: the write is atomic, no temp file is lef
 		const dir = dirname(settingsPath);
 		const leftover = readdirSync(dir).filter((name) => name.includes(".tmp"));
 		expect(leftover, `stray temp file(s) left behind: ${JSON.stringify(leftover)}`).toHaveLength(0);
+	});
+});
+
+describe("writeAgentOverrides -- WR-07: a renameSync failure cleans up the temp file and still refuses (never throws)", () => {
+	// `renameSync` cannot be made to fail reliably, cross-platform, through
+	// filesystem tricks alone: a rename onto an existing regular file target
+	// SUCCEEDS by design (that is what atomicity relies on), and a directory
+	// target instead fails EARLIER, at the `readFileSync(path)` guard above
+	// the write/rename section, never reaching it at all -- neither shape
+	// proves the temp file was cleaned up. `node:fs` is mocked for this ONE
+	// case, real everywhere else in this file, and unmocked/reset immediately
+	// after so no other case in this file is affected.
+	afterEach(() => {
+		vi.doUnmock("node:fs");
+		vi.resetModules();
+	});
+
+	it("renameSync throwing leaves NO `*.tmp` file behind, and the call still returns ok:false rather than throwing", async () => {
+		const settingsPath = freshSettingsPath();
+
+		vi.resetModules();
+		vi.doMock("node:fs", async () => {
+			const actual = await vi.importActual<typeof import("node:fs")>("node:fs");
+			return {
+				...actual,
+				renameSync: vi.fn(() => {
+					// Simulates EPERM/EXDEV/a Windows antivirus or indexer lock --
+					// this project's own target platform (CLAUDE.md).
+					throw new Error("EPERM: simulated rename failure for the WR-07 regression test");
+				}),
+			};
+		});
+
+		const { writeAgentOverrides: writeAgentOverridesMocked } = await import(
+			"../../.pi/extensions/routing/agent-overrides.ts"
+		);
+
+		let result: ReturnType<typeof writeAgentOverridesMocked> | undefined;
+		expect(() => {
+			result = writeAgentOverridesMocked({ planner: { model: "dashscope/deepseek-v4-flash" } }, { settingsPath });
+		}, "a renameSync failure must be caught and returned as a refusal, never rethrown past the caller").not.toThrow();
+
+		expect(result?.ok, `expected ok:false, got ${JSON.stringify(result)}`).toBe(false);
+
+		// THE LOAD-BEARING ASSERTION: no `*.tmp` file survives in the target's
+		// directory -- before this fix, the temp file `writeFileSync` created
+		// was left orphaned in the user's GLOBAL ~/.pi/agent/ directory forever
+		// whenever renameSync failed.
+		const dir = dirname(settingsPath);
+		const leftover = existsSync(dir) ? readdirSync(dir).filter((name) => name.includes(".tmp")) : [];
+		expect(leftover, `stray temp file(s) left behind after a renameSync failure: ${JSON.stringify(leftover)}`).toHaveLength(0);
 	});
 });
 
