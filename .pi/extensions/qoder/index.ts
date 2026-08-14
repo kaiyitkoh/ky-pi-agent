@@ -101,6 +101,10 @@ const QODER_DELEGATE_DESCRIPTION =
 	"unfamiliar contributor -- reviewed, never merged on the strength of 'an agent said so'. Full " +
 	"statement: docs/ROUTING.md.";
 
+/** The two choices `qoder_delegate`'s own confirmation offers -- mirrors `safety/index.ts#registerApprovalTool`'s `APPROVE_CHOICE`/`DENY_CHOICE` naming exactly. */
+const DELEGATE_CHOICE = "Delegate to Qoder";
+const CANCEL_CHOICE = "Cancel";
+
 export default function (pi: ExtensionAPI): void {
 	pi.registerTool({
 		name: "qoder_delegate",
@@ -116,6 +120,35 @@ export default function (pi: ExtensionAPI): void {
 				// Actionable, never opaque -- see this file's own docstring
 				// section on the refusal path.
 				throw new Error(configResult.message);
+			}
+
+			// WR-11: a human in the loop, mirroring `safety/index.ts#
+			// registerApprovalTool`'s exact deny-by-default shape. This tool's
+			// OWN description already states it bypasses Pi's own tools, this
+			// project's AGENTS.md and system prompt, the Phase 4 safety guard
+			// and the Phase 2 wire inspector -- on a laptop where merging to
+			// main auto-deploys to AWS, a model invoking it unilaterally,
+			// mid-turn, on the strength of a description alone is exactly the
+			// failure mode this harness exists to prevent. `undefined` (no UI
+			// bound -- headless/`-p`) and `hasUI === false` both refuse via the
+			// SAME branch below, never via a separately-written headless
+			// allow-path.
+			const choice = ctx.hasUI
+				? await ctx.ui.select(
+						`Delegate this task to Qoder's own hosted agent loop?\n\n  ${params.task}\n\n` +
+							"This bypasses Pi's own tools, this project's AGENTS.md and system prompt, the " +
+							"Phase 4 safety guard and the Phase 2 wire inspector -- Qoder's own agent runs " +
+							"unsupervised inside its own container with its own file/shell tools.",
+						[DELEGATE_CHOICE, CANCEL_CHOICE],
+					)
+				: undefined;
+			if (choice !== DELEGATE_CHOICE) {
+				throw new Error(
+					ctx.hasUI
+						? `Qoder delegation declined by the user (did not select "${DELEGATE_CHOICE}").`
+						: "Qoder delegation refused: no UI bound -- this tool requires an interactive " +
+							"confirmation and none is available in this mode.",
+				);
 			}
 
 			const result = await delegateTask({
@@ -136,4 +169,21 @@ export default function (pi: ExtensionAPI): void {
 			};
 		},
 	});
+
+	// WR-11: the configuration gate. `registerTool` makes a NEWLY-registered
+	// tool active in the session by default [VERIFIED: pi-coding-agent 0.84.1
+	// `dist/core/agent-session.js:2008-2014` -- every tool name not already in
+	// the previous registry is pushed onto `nextActiveToolNames` when the
+	// session was not constructed with an explicit `activeToolNames`/
+	// `allowedToolNames`/`includeAllExtensionTools` option], so this tool costs
+	// its measured ~329 tokens on EVERY provider request by default, including
+	// on this machine and in CI where `resolveQoderConfig` can only ever
+	// refuse. Immediately deactivating it when unconfigured is CLAUDE.md's own
+	// sanctioned "register everything, activate on demand via
+	// `pi.setActiveTools`" pattern, applied here as an opt-OUT (deactivate when
+	// NOT configured) rather than the more common opt-IN shape, because Pi's
+	// own default is "active unless removed".
+	if (!resolveQoderConfig(process.env).ok) {
+		pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "qoder_delegate"));
+	}
 }
