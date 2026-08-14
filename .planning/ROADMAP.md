@@ -282,7 +282,14 @@ Plans:
   2. A completion claim is rejected unless a `tool_result` exit code bound to the current git SHA supports it. Prose in the transcript that merely *looks like* command output does not pass, which matters because the model that writes prose tool calls can also write plausible command output.
   3. CI fails the build when any workflow file exceeds its line budget — the budget exists *before* the cathedral is built, not after.
 
-**Plans**: TBD
+**Plans**: 4 plans in 3 waves
+
+Plans:
+- [ ] 06-01-PLAN.md — GATE-07 core: currentSha(), the pure evidence-gate predicate, run state, real-SHA unit tests
+- [ ] 06-02-PLAN.md — FLOW-01: /quick in <=80 raw lines, plus docs/WORKFLOWS.md
+- [ ] 06-03-PLAN.md — FLOW-11: the workflow line-budget registry, enforced both directions with a directory aggregate
+- [ ] 06-04-PLAN.md — the seam proof: break Phase 5, break Phase 4, reject fabricated evidence, accept a real guarded commit
+
 **Research**: Not needed — this phase is deliberately minimal and exercises components already verified.
 
 ### Phase 7: Composed Extensions, Pinned & Reviewed
