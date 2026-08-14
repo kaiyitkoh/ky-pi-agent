@@ -130,8 +130,16 @@ const PHASE_FIVE_IDS = ["RB-05-01"] as const;
  * been installed and `pi list` has never been reconciled against
  * `.pi/settings.json`. `RB-07-01`'s second and third legs presuppose
  * `RB-07-02` has already run.
+ *
+ * `RB-07-03` was appended by this phase's code-review fix pass (CR-01). The
+ * real AWS account number, IAM principal ARN and admin profile name recorded
+ * by plan 07-10 have been redacted from every tracked file and are guarded by
+ * `tests/unit/secret-scan.test.ts` — but they remain in local, unpushed commit
+ * objects, and the choice between rewriting 400-plus commits of history and
+ * accepting the exposure is the account owner's to make, not an agent's. It is
+ * OUTSTANDING for that reason and not because a machine could not do it.
  */
-const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02"] as const;
+const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02", "RB-07-03"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
@@ -442,6 +450,16 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-07-01": [
 		"git status --porcelain",
 		`tail -n 1 .pi/logs/audit-$(date +%F).jsonl`,
+	],
+	// RB-07-03 pins the two DISCOVERY commands, not the remedy: `git filter-repo`
+	// is named in prose as Option A but is deliberately NOT pinned here, because
+	// the operator may legitimately choose Option B (accept and rotate) and a
+	// pinned remedy command would imply one branch is the expected one. Both
+	// commands below were grepped before commit and occur exactly once in
+	// docs/RUNBOOK.md, inside RB-07-03's own section.
+	"RB-07-03": [
+		"git ls-remote --heads origin",
+		'git log --all --oneline -S"$KYPI_REDACTED_ACCOUNT_ID"',
 	],
 	"RB-07-02": [
 		"pi install -l npm:pi-subagents@0.49.0",

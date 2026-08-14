@@ -102,11 +102,15 @@ not because it breaks anything.
 describes as "a public GitHub repo", and it contains verbatim:
 
 ```
-Account `ACCOUNT_ID`, `arn:aws:iam::ACCOUNT_ID:user/ADMIN_USER` — live,
+Account <redacted>, arn:aws:iam::<redacted>:user/<redacted> — live,
 long-lived static admin keys in plaintext at `~/.aws/credentials`, plus an SSO cache.
 ```
 
-`docs/RUNBOOK.md` repeats the profile name (`ADMIN_PROFILE`) and the claim that
+(The real account number, ARN and principal name stood in that line verbatim.
+They have since been redacted from every tracked file, including this one — see
+the CR-01 outcome at the end of this report and `RB-07-03` in `docs/RUNBOOK.md`.)
+
+`docs/RUNBOOK.md` repeats the admin profile name and the claim that
 long-lived static admin keys are present at `~/.aws/credentials` in two more places.
 
 This publishes, together: the account number, the IAM principal name, the named
@@ -133,7 +137,7 @@ treatment if they are pushed.
 ```
 
 Then, because the strings are already in git history, treat this as a disclosure
-event, not a typo: rotate the `ADMIN_USER` access keys and re-scope that principal away
+event, not a typo: rotate that principal's access keys and re-scope it away
 from long-lived admin keys before pushing anything further. Add the account number to
 a secret-scanning denylist so a re-introduction fails CI (this repo already has
 `tests/unit/gitignore-policy.test.ts` and `tests/unit/redact.test.ts` as the natural

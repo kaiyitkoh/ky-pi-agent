@@ -344,7 +344,7 @@ gate:
 
 | Ground | Claim | Verification result |
 |---|---|---|
-| (a) | "This dev machine has no credentials — no AWS SSO, no provider keys." | **FALSE.** `aws sts get-caller-identity --profile ADMIN_PROFILE` returned exit 0: Account `ACCOUNT_ID`, `arn:aws:iam::ACCOUNT_ID:user/ADMIN_USER` — live, long-lived static admin keys in plaintext at `~/.aws/credentials`, plus an SSO cache. The blast radius the pre-authorisation assumed away is real and large. |
+| (a) | "This dev machine has no credentials — no AWS SSO, no provider keys." | **FALSE.** `aws sts get-caller-identity --profile <admin-profile>` returned exit 0, resolving a live IAM **admin** principal for a production account, backed by long-lived static keys in plaintext at `~/.aws/credentials` plus an SSO cache. The account number, principal ARN and profile name are deliberately **not** recorded here — this is a public repository and jointly they are precise targeting information (see `RB-07-03`). The operator knows which profile is meant and can re-run the command to check this claim. The blast radius the pre-authorisation assumed away is real and large. |
 | (b) | `bin/bootstrap.sh --assert-hardening` exits 0 | **TRUE** — re-verified in this plan (see below). |
 | (c) | Every spec exact-pinned | **TRUE** — re-verified in this plan (see below). |
 

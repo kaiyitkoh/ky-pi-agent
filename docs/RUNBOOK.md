@@ -1006,7 +1006,9 @@ install gate (plan 07-10, Task 2) was found **NOT SATISFIED** on this
 machine: its own pre-authorisation rested on the ground that this development
 machine holds no credentials, and that ground is FALSE — live AWS SSO /
 static admin keys are present (`aws sts get-caller-identity --profile
-ADMIN_PROFILE` returned exit 0, resolving live IAM admin credentials).
+<admin-profile>` returned exit 0, resolving live IAM admin credentials for a
+production account; the account number, principal ARN and profile name are
+deliberately not recorded in this public repository — see `RB-07-03`).
 No package has ever been installed here. That single fact is why this section
 carries **two** outstanding entries instead of one: `RB-07-01` is the
 composed smoke ritual EXT-09 names, and `RB-07-02` is the install-and-
@@ -1022,6 +1024,7 @@ the two is reported as `INCONSISTENT`, which is never an acceptable status.
 |----|-------|--------|
 | RB-07-01 | EXT-09 — the composed smoke ritual: one turn per provider, one subagent spawn, one blocked command, one wire dump | OUTSTANDING |
 | RB-07-02 | install the five pinned specs and reconcile `pi list` against `.pi/settings.json` | OUTSTANDING |
+| RB-07-03 | decide, before the first `git push`, what to do about the account identifiers still present in unpushed local history | OUTSTANDING |
 
 ### RB-07-01 — EXT-09: the composed smoke ritual, run after any version bump
 
@@ -1141,8 +1144,10 @@ prove:**
 checkpoint could not be auto-approved: its pre-authorisation's ground (a) —
 "this development machine has no credentials" — was verified rather than
 assumed and found FALSE (`aws sts get-caller-identity --profile
-ADMIN_PROFILE` returned exit 0, resolving live long-lived static admin
-keys present at `~/.aws/credentials`, plus an SSO cache). Per that
+<admin-profile>` returned exit 0, resolving live long-lived static IAM **admin**
+keys present at `~/.aws/credentials`, plus an SSO cache; the account number,
+principal ARN and profile name are deliberately not recorded in this public
+repository — see `RB-07-03`). Per that
 checkpoint's own binding text, this gate is not auto-approvable on the
 strength of the standing autonomous-run pre-authorisations, which cover
 `[RUNBOOK]` verification, not a supply-chain install gate. No install command
@@ -1194,3 +1199,83 @@ branch whenever `.pi/npm/node_modules` and `.pi/git/` do not exist, which is
 the case on this machine right now (`07-10-SUMMARY.md`). It proves the
 lockfile-comparison mechanism is sound. It does not prove `pi install` and
 `pi list` agree in practice, which is this entry and cannot be substituted.
+
+### RB-07-03 — the account identifiers redacted from the working tree are still in local history
+
+**Status:** OUTSTANDING
+
+**What happened.** Plan 07-10 verified the install gate's pre-authorisation
+ground (a) — "this dev machine has no credentials" — by actually running
+`aws sts get-caller-identity` and found it **FALSE**. That finding is correct
+and it stays. The way it was *recorded* was not: the real 12-digit AWS account
+number, the full IAM principal ARN and the named admin profile were written
+verbatim into `docs/EXTENSIONS.md`, `docs/RUNBOOK.md` and three `.planning/`
+artifacts, in a repository `PROJECT.md` describes as public and whose
+constraint is unqualified — *"Public repo. No credential may ever be
+committed."*
+
+None of those strings is a secret in the API-key sense. Jointly they are
+precise targeting information: an account id is the first thing needed for
+cross-account role enumeration and `sts:AssumeRole` probing, and the
+"long-lived static admin keys in plaintext on this laptop" line names the
+highest-value target on the machine.
+
+**The good news, verified rather than assumed.** *Nothing containing these
+strings has ever been pushed.* The remote's `refs/heads/main` resolves to a
+commit reachable in 15 commits (step 1 below re-checks this), all of which predate
+Phase 7; the identifiers were introduced by three Phase 7 commits that are
+among the 400-plus commits ahead of the remote. Searching the pushed history
+directly found nothing. So this is a **must-decide-before-the-first-push**
+item, not a completed public disclosure.
+
+**What has already been done (no human needed).**
+
+- Every occurrence has been redacted from every tracked file in the working
+  tree. The finding, its force and its checkability all survive — the docs now
+  say "a live IAM **admin** principal for a production account" and name the
+  profile as `<admin-profile>`, following the `RB-04-01` `<work-repo>`
+  precedent. The operator knows which profile is meant and can re-run the
+  command to check the claim.
+- `tests/unit/secret-scan.test.ts` now scans every tracked file for those
+  identifiers on every test run, in both directions, with no exemption for
+  itself. A re-introduction turns the suite red.
+
+**What is OUTSTANDING, and why a human must decide it.** The strings remain in
+**local, unpushed commit objects**. Rewriting 400-plus commits of history is
+destructive and irreversible, and choosing to accept the exposure instead is a
+risk decision only the account's owner can make. This agent will not do either
+unasked.
+
+**Procedure, before the first `git push` to the public remote — pick ONE:**
+
+1. Confirm the identifiers really are unpushed and really are still in local
+   history:
+   - `git ls-remote --heads origin`
+   - `git log --all --oneline -S"$KYPI_REDACTED_ACCOUNT_ID"`
+     (export `KYPI_REDACTED_ACCOUNT_ID` in the shell first; it is deliberately
+     not written down in this repository)
+2. **Option A — rewrite.** Run a history filter (`git filter-repo --replace-text`
+   with the account id, ARN and profile name as replacements) over the whole
+   local history, then force-push. Every commit SHA after the first affected
+   commit changes; any other clone must be re-cloned. This is the only option
+   that makes the strings unrecoverable.
+3. **Option B — accept.** Push as-is and treat the identifiers as public.
+   Then rotate that principal's access keys and re-scope it away from
+   long-lived static admin credentials, because the "plaintext admin keys on
+   this laptop" claim is the part that actually matters and it is true.
+4. Whichever is chosen, record the choice and its date in this entry and flip
+   the status — in **both** the summary-table row and the `**Status:**` line
+   above, or `tests/unit/docs-policy.test.ts` reports `INCONSISTENT`.
+
+**Expected output.** Step 1's `git ls-remote` names a remote `main` that does
+not contain any of the redacted strings. After Option A, the same
+`git log --all --oneline -S...` search returns nothing. After Option B, it
+still returns the three Phase 7 commits and the entry records that this is
+accepted rather than missed.
+
+**Offline proxy:** `tests/unit/secret-scan.test.ts` — proves no *tracked file*
+carries any of the denied identifiers, and (Direction 2) that the scanner
+genuinely fires when one is present, so the empty result is a measurement
+rather than a broken matcher. It says nothing about **commit objects**, which
+is this entry and cannot be substituted: a working tree can be clean while
+every historical blob still holds the string.
