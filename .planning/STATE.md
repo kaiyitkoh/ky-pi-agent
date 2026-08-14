@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-12-PLAN.md -- Phase 5 complete
-last_updated: "2026-08-14T14:20:29.523Z"
-last_activity: 2026-08-14 -- Phase 06 planning complete
+stopped_at: Completed 06-01-PLAN.md -- currentSha() and GATE-07 evidence gate
+last_updated: "2026-08-14T14:34:18.212Z"
+last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 60
-  completed_plans: 56
+  completed_plans: 57
   percent: 45
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 6 — walking skeleton — `/quick` & the evidence gate
+**Current focus:** Phase 06 — Walking Skeleton — /quick & the Evidence Gate
 
 ## Current Position
 
-Phase: 6
-Plan: Not started
+Phase: 06 (Walking Skeleton — /quick & the Evidence Gate) — EXECUTING
+Plan: 2 of 4
 Status: Ready to execute
-Last activity: 2026-08-14 -- Phase 06 planning complete
+Last activity: 2026-08-14
 
-Progress: [██████████] 100%
+Progress: [██████████] 95%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -122,6 +122,7 @@ credentials can do has been done".
 | Phase 05 P10 | 25m | 2 tasks | 2 files |
 | Phase 05 P11 | 35m | 2 tasks | 1 files |
 | Phase 05 P12 | 20m | 3 tasks | 6 files |
+| Phase 06 P01 | 45m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -297,6 +298,10 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-12: docs/ROUTING.md's role->model table is asserted against ROLE_MAP in BOTH directions -- the converse (every provider/id the doc names is a real ROLE_MAP candidate) is what stops the doc from growing a row the code does not have; verified by falsification (added a fake row, confirmed red, reverted)
 - [Phase 05]: 05-12: Bedrock R1 deny-list ids are written WITHOUT a provider/ prefix in docs/ROUTING.md so the doc<->ROLE_MAP extraction regex (scoped to deepseek|dashscope|amazon-bedrock) never mistakes a refusal-section id for a claimed routing candidate
 - [Phase 05]: 05-12: Phase 5 is complete -- eleven ROUTE requirements accounted for: ten [x] (ROUTE-01..10) and ROUTE-11 [~] partial with RB-05-01 named inline and appended to docs/RUNBOOK.md, OUTSTANDING and machine-governed by tests/unit/docs-policy.test.ts. Full suite 1346 tests / 78 files green, tsc --noEmit clean
+- [Phase 06]: 06-01: currentSha(cwd) lands in safety/git.ts (production), not a test helper -- GATE-07's production capture path needs a runtime SHA reader (decision D-A)
+- [Phase 06]: 06-01: currentSha throws on non-zero exit, unlike currentBranch's DETACHED_HEAD sentinel -- no safe default exists for an unknown SHA (decision D-B)
+- [Phase 06]: 06-01: EvidenceVerdict mirrors GuardVerdict/PlanResult ({ok:true,sha}|{ok:false,reason}) rather than safety's {kind:allow|block} -- GATE-07 renders a verdict about a claim, routing's semantics (decision D-C)
+- [Phase 06]: 06-01: endRun() never throws and writes exactly one row, copying safety/audit.ts's never-throw contract (decision D-D)
 
 ### Pending Todos
 
@@ -344,8 +349,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T11:25:07.049Z
-Stopped at: Completed 05-12-PLAN.md -- Phase 5 complete
+Last session: 2026-08-14T14:34:18.202Z
+Stopped at: Completed 06-01-PLAN.md -- currentSha() and GATE-07 evidence gate
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

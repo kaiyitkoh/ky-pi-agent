@@ -287,7 +287,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 06-01-PLAN.md — GATE-07 core: currentSha(), the pure evidence-gate predicate, run state, real-SHA unit tests
+- [x] 06-01-PLAN.md — GATE-07 core: currentSha(), the pure evidence-gate predicate, run state, real-SHA unit tests
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -420,7 +420,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 3. Providers & Credentials | 11/11 | Plans complete — 5 live checks OUTSTANDING | 2026-08-14 |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
-| 6. Walking Skeleton — `/quick` & Evidence Gate | 0/TBD | Not started | - |
+| 6. Walking Skeleton — `/quick` & Evidence Gate | 1/4 | In Progress | - |
 | 7. Composed Extensions, Pinned & Reviewed | 0/TBD | Not started | - |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 0/TBD | Not started | - |
