@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { armedCwd, endRun, isRunArmed, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
+import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
 
 export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("quick", {
@@ -35,10 +35,7 @@ export default function (pi: ExtensionAPI): void {
 					{ subcommand: "commit", args: [] },
 					{ currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES },
 				);
-				if (verdict.kind === "block") {
-					ctx.ui.notify(verdict.reason, "error");
-					return;
-				}
+				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
 				if (isRunArmed()) return void ctx.ui.notify("quick: a run is already in flight -- wait for its verdict", "error");
 				startRun(ctx.cwd, currentSha(ctx.cwd));
 				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
@@ -72,5 +69,9 @@ export default function (pi: ExtensionAPI): void {
 		} catch {
 			// Swallowed -- same rule as the tool_result handler above.
 		}
+	});
+
+	pi.on("session_start", (_event, ctx) => {
+		pruneEvidenceLogs(ctx.cwd);
 	});
 }
