@@ -38,6 +38,7 @@ import {
 	DEFAULT_QODER_BASE_URL,
 	delegateTask,
 	type FoldedResult,
+	MAX_TASK_CHARS,
 	QODER_AGENT_ID_ENV,
 	QODER_BASE_URL_ENV,
 	QODER_ENVIRONMENT_ID_ENV,
@@ -307,6 +308,46 @@ describe("qoder-delegate -- the missing-PAT refusal happens before any network a
 			// observing the server's own request log stayed empty for the
 			// entire scope of this callback.
 			expect(loop.received).toHaveLength(0);
+		});
+	});
+});
+
+describe("qoder-delegate -- WR-09: the ASVS V5 task-validation refusals happen before any network attempt", () => {
+	it("refuses a whitespace-only task before any request is issued", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				await expect(delegateTask({ config, task: "   \n\t ", cwd })).rejects.toThrow(/empty after trimming/);
+				// THE LOAD-BEARING HALF: zero requests, not merely the right
+				// message -- see the sibling missing-PAT describe block's own
+				// identical discipline for why the message alone is not enough.
+				expect(loop.received).toHaveLength(0);
+			});
+		});
+	});
+
+	it("refuses a task one character over MAX_TASK_CHARS, naming the limit, with zero requests", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				const overLimitTask = "x".repeat(MAX_TASK_CHARS + 1);
+				await expect(delegateTask({ config, task: overLimitTask, cwd })).rejects.toThrow(
+					new RegExp(`over the ${MAX_TASK_CHARS}-character limit`),
+				);
+				expect(loop.received).toHaveLength(0);
+			});
+		});
+	});
+
+	it("accepts a task exactly AT MAX_TASK_CHARS (the paired positive -- the limit is inclusive, not off-by-one)", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				const atLimitTask = "x".repeat(MAX_TASK_CHARS);
+				const folded = await delegateTask({ config, task: atLimitTask, cwd });
+				expect(loop.received.length).toBeGreaterThan(0);
+				expect(folded.done).toBe(true);
+			});
 		});
 	});
 });
