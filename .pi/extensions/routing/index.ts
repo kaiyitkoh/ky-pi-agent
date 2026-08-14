@@ -1,16 +1,19 @@
 /**
- * ky-pi-agent — the routing extension entry point: `/cheap`, `/balanced` and
- * `/max` (ROUTE-02, ROUTE-05, ROUTE-09).
+ * ky-pi-agent — the routing extension entry point: `/cheap`, `/balanced`,
+ * `/max`, `/escalate` and `/mode` (ROUTE-02, ROUTE-03, ROUTE-05, ROUTE-09).
  *
  * ---------------------------------------------------------------------------
  * PURPOSE
  * ---------------------------------------------------------------------------
- * Registers exactly three commands, one shared code path behind them. Every
- * other file in `routing/` is a table or a pure predicate; this is the ONLY
- * file that touches a live session — it is where a mode name a user typed
- * becomes a real `setModel` call, a real session entry and a real settings
- * write, or a refusal with a reason if any step along that chain cannot be
- * done safely.
+ * Registers the three mode-switch commands behind one shared code path
+ * (`applyMode`), `/escalate`'s own two-way switch (`applyEscalate`, sharing
+ * `applyMode`'s pre-flight → guard → `setModel` → persist shape but never its
+ * function body — see that function's own doc comment for why), and the
+ * read-only `/mode` status command. Every other file in `routing/` is a table
+ * or a pure predicate; this is the ONLY file that touches a live session — it
+ * is where a mode name or an escalation request a user typed becomes a real
+ * `setModel` call, a real session entry and a real settings write, or a
+ * refusal with a reason if any step along that chain cannot be done safely.
  *
  * ---------------------------------------------------------------------------
  * THE THREE-MECHANISMS DECISION, RESTATED FOR THE ROLE THIS FILE PLAYS
@@ -35,7 +38,28 @@
  * route below is always resolved with `escalated: false`, and the module
  * state is written the same way, so a later read of `getModeState()` never
  * reports an escalation this command did not itself request. `/escalate`
- * itself is a later plan's command, not this file's.
+ * itself is this file's own command, defined immediately below `applyMode`
+ * — see `applyEscalate`'s own doc comment for why it is a separate,
+ * symmetrical function rather than a third branch grafted onto `applyMode`.
+ *
+ * ---------------------------------------------------------------------------
+ * ESCALATION IS STICKY, VISIBLE, AND RECORDED (ROUTE-03)
+ * ---------------------------------------------------------------------------
+ * ARCHITECTURE:55 chose sticky-and-visible over auto-restore deliberately:
+ * auto-restore makes "why was this turn expensive?" unanswerable after the
+ * fact. `/escalate` (with no argument, or `on`) therefore does not revert on
+ * its own — it lifts the executor to `schema.ts`'s `ESCALATION_MODE` route
+ * and STAYS there across every subsequent turn until `/escalate off` (or an
+ * explicit mode switch, see above) clears it. `/mode` is the visible half:
+ * it prints the concrete `provider/id` serving the executor right now and
+ * whether that is an escalation, so "why was this turn expensive" always has
+ * an answer on screen rather than only in a log file. Every escalation
+ * change ALSO writes a durable JSONL record (`writeEscalationRecord` below)
+ * naming the previous and new executor and the escalation flag — the
+ * explanation that survives after the session itself is gone (T-05-32). The
+ * flag is set only after `pi.setModel` returns `true`: a state that claims
+ * an escalation that never took effect is the Tampering threat this plan's
+ * register calls T-05-33, and the refusal path below never sets it.
  *
  * ---------------------------------------------------------------------------
  * THE ORDER BELOW IS THE REQUIREMENT, NOT A STYLE CHOICE
@@ -127,15 +151,17 @@
  *     ROUTE-04/09's state primitives.
  *   - `agent-overrides.ts` — the `settings.subagents.agentOverrides`
  *     read-modify-write helper. ROUTE-05.
- *   - `index.ts` (this file) — the three mode commands. ROUTE-02/09, and the
- *     ROUTE-05 write's call site.
+ *   - `index.ts` (this file) — the three mode commands, `/escalate` and the
+ *     read-only `/mode` status command. ROUTE-02/03/09, and the ROUTE-05
+ *     write's call site.
  */
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
+import { appendJsonl } from "../../lib/jsonl.ts";
 import { agentOverridesFor, writeAgentOverrides } from "./agent-overrides.ts";
 import { guardRoute } from "./guard.ts";
-import { pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
-import { MODE_ENTRY_TYPE, MODES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
+import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
+import { MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
 /**
  * The one code path all three commands share, so `/cheap`, `/balanced` and
@@ -224,6 +250,206 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, mode: M
 	);
 }
 
+/**
+ * The JSONL base name `/escalate`'s durable record is appended under.
+ * Routing-owned, distinct from `diagnostics/`'s `wire-*`/`turns-*` and
+ * `safety/`'s `audit-*` — the same ownership-not-shape discipline
+ * `.pi/lib/jsonl.ts`'s `pruneLogs` requires of every binding. Nothing here
+ * prunes this stream; `/escalate` fires rarely enough that retention was not
+ * worth the extra surface for this plan, and `.pi/logs/` is already
+ * gitignored wholesale (`.gitignore:23,79`).
+ */
+const ESCALATION_LOG_BASE = "escalation";
+
+/**
+ * Append `/escalate`'s durable record (T-05-32) — reusing `.pi/lib/jsonl.ts`,
+ * the SAME hardened writer `safety/audit.ts#writeAuditRow` binds to, never a
+ * second one. `previousModel` is `undefined` only when `ctx.model` itself was
+ * `undefined` (no model selected yet), which `JSON.stringify` then simply
+ * omits from the written line.
+ *
+ * NEVER THROWS. Best-effort, mirroring `safety/audit.ts#writeAuditRow`'s own
+ * catch-and-swallow discipline: a failed record write must never turn a
+ * successful `setModel` switch into a reported error, which is exactly why
+ * this is called AFTER the switch already succeeded, not as a precondition
+ * for it. The residual risk — an unexplained cost spike if this write itself
+ * starts failing — is accepted and stated, never hidden (T-05-35).
+ */
+function writeEscalationRecord(
+	cwd: string,
+	input: { mode: ModeName; escalated: boolean; previousModel: string | undefined; newModel: string },
+): void {
+	try {
+		appendJsonl(cwd, ESCALATION_LOG_BASE, {
+			ts: Date.now(),
+			mode: input.mode,
+			escalated: input.escalated,
+			previousModel: input.previousModel,
+			newModel: input.newModel,
+		});
+	} catch {
+		// Best-effort -- see this function's own doc comment and T-05-35.
+	}
+}
+
+/**
+ * `/escalate`'s own two-way switch: `escalate === true` lifts the executor to
+ * `ESCALATION_MODE`'s route (via `resolveRoute`'s own executor-only lift —
+ * see `modes.ts`'s ESCALATION LIFTS THE EXECUTOR ONLY section); `escalate ===
+ * false` restores the CURRENT mode's own executor route. The current mode
+ * itself is never touched either way — only the escalation flag and the
+ * executor model change.
+ *
+ * A SEPARATE FUNCTION FROM `applyMode`, DELIBERATELY, THOUGH THE SHAPE
+ * RHYMES. `applyMode` always resolves with `escalated: false` (an explicit
+ * mode pick clears escalation) and always calls `setMode`; this function
+ * always resolves with `escalated: <the argument>` and never calls `setMode`
+ * at all — the mode itself is not what changed. Folding both into one
+ * function would need a mode of caller intent threaded through every step
+ * below, which is exactly the kind of implicit branching this codebase's own
+ * `guard.ts`/`policy.ts` house style avoids. The two functions share no code
+ * beyond the modules they both import.
+ *
+ * Runs the identical pre-flight → guard → `setModel` → persist shape
+ * `applyMode` uses: `await ctx.waitForIdle()` first: resolve the route and
+ * pick a configured candidate (a refusal here leaves both the model and the
+ * escalation flag untouched); the capability guard for the executor role;
+ * `pi.setModel` in a `try`/`catch` with the boolean return checked
+ * explicitly; and ONLY on a `true` return does the escalation state change,
+ * the `ky:mode` entry get written, the durable escalation record get
+ * appended, and `ROUTING_EVENT` fire.
+ */
+async function applyEscalate(pi: ExtensionAPI, ctx: ExtensionCommandContext, escalate: boolean): Promise<void> {
+	// Step 1 — FIRST, before anything is read or written. Same reason as
+	// `applyMode`'s own step 1.
+	await ctx.waitForIdle();
+
+	// Step 2 — resolve + pick a configured candidate. The CURRENT mode is
+	// preserved either way; only `escalated` reflects the target state.
+	const state = getModeState();
+	const route = resolveRoute("executor", { mode: state.mode, escalated: escalate });
+	const candidate = pickConfiguredCandidate(ctx.modelRegistry, route.candidates);
+	if (!candidate.ok) {
+		ctx.ui.notify(
+			`cannot ${escalate ? "escalate" : "clear escalation"}: ${candidate.reason}`,
+			"error",
+		);
+		return;
+	}
+
+	// Step 3 — the capability guard, scoped to a tool-loop role exactly like
+	// `applyMode`'s own step 3 (an executor is a tool-loop role by definition).
+	const guardVerdict = guardRoute(candidate.model, "executor", { usesToolLoop: true });
+	if (!guardVerdict.ok) {
+		ctx.ui.notify(guardVerdict.reason, "error");
+		return;
+	}
+
+	// Captured BEFORE the mutation, for the durable record below -- this is
+	// what "previous" means in that record.
+	const previousModel = ctx.model !== undefined ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
+
+	// Step 4 — the mutation. Both failure modes are surfaced, neither is
+	// swallowed, neither is followed by silently trying something else --
+	// same discipline as `applyMode`'s own step 4.
+	let switched: boolean;
+	try {
+		switched = await pi.setModel(candidate.model);
+	} catch (err) {
+		ctx.ui.notify(
+			`setModel threw switching executor to ${candidate.model.provider}/${candidate.model.id}: ${String(err)}`,
+			"error",
+		);
+		return;
+	}
+	if (!switched) {
+		ctx.ui.notify(
+			`setModel returned false for ${candidate.model.provider}/${candidate.model.id} -- no configured auth`,
+			"error",
+		);
+		return;
+	}
+
+	// Step 5 — only reached after a true return. The state must not claim an
+	// escalation that never took effect (T-05-33) -- `setEscalated` runs only
+	// here, never before the switch is known to have succeeded.
+	setEscalated(escalate, escalate ? state.mode : undefined);
+
+	const modeData: KyModeData = {
+		mode: state.mode,
+		escalated: escalate,
+		escalatedFrom: escalate ? state.mode : undefined,
+		at: Date.now(),
+	};
+	pi.appendEntry(MODE_ENTRY_TYPE, modeData);
+
+	// The durable, explanatory record -- see writeEscalationRecord's own doc
+	// comment. Best-effort: this call can never turn the switch above, which
+	// already succeeded, into a reported failure.
+	writeEscalationRecord(ctx.cwd, {
+		mode: state.mode,
+		escalated: escalate,
+		previousModel,
+		newModel: `${candidate.model.provider}/${candidate.model.id}`,
+	});
+
+	// Cross-subsystem signalling is an event, never an import -- see the
+	// module docstring.
+	pi.events.emit(ROUTING_EVENT, {
+		mode: state.mode,
+		escalated: escalate,
+		model: `${candidate.model.provider}/${candidate.model.id}`,
+	});
+
+	// Step 6 — the outcome, in one message.
+	ctx.ui.notify(
+		escalate
+			? `escalated -- executor is now ${candidate.model.provider}/${candidate.model.id} (from ${state.mode}).`
+			: `escalation cleared -- executor restored to ${state.mode}'s own model: ` +
+				`${candidate.model.provider}/${candidate.model.id}.`,
+		"info",
+	);
+}
+
+/**
+ * The read-only `/mode` status command (criterion 2's "visible" half in the
+ * only surface this phase owns — Phase 11 renders the statusline from
+ * `ROUTING_EVENT` instead). Prints the current mode, whether `/escalate` is
+ * active and from which mode, the concrete `provider/id` currently serving
+ * the executor, and — for every OTHER role — the model it would resolve to
+ * right now, so the executor-only scope of escalation (ROUTE-08's own
+ * boundary, restated for a human reading this output rather than a test) is
+ * visible in one place. Never touches a session's model or writes anything;
+ * it only reads `getModeState()` and resolves candidates the same way
+ * `applyMode`/`applyEscalate` do, through `resolveRoute` +
+ * `pickConfiguredCandidate`.
+ */
+async function reportMode(ctx: ExtensionCommandContext): Promise<void> {
+	const state = getModeState();
+
+	const lines: string[] = [
+		state.escalated
+			? `mode: ${state.mode} (escalated from ${state.escalatedFrom ?? state.mode})`
+			: `mode: ${state.mode} (not escalated)`,
+		`executor: ${ctx.model !== undefined ? `${ctx.model.provider}/${ctx.model.id}` : "(no model selected)"}`,
+	];
+
+	for (const role of ROLES) {
+		if (role === "executor") {
+			// Already reported above, from the session's real `ctx.model` rather
+			// than a re-derived candidate -- see the module docstring.
+			continue;
+		}
+		const route = resolveRoute(role, state);
+		const candidate = pickConfiguredCandidate(ctx.modelRegistry, route.candidates);
+		lines.push(
+			`${role}: ${candidate.ok ? `${candidate.model.provider}/${candidate.model.id}` : `unavailable (${candidate.reason})`}`,
+		);
+	}
+
+	ctx.ui.notify(lines.join("\n"), "info");
+}
+
 export default function (pi: ExtensionAPI): void {
 	for (const mode of MODES) {
 		pi.registerCommand(mode, {
@@ -233,4 +459,30 @@ export default function (pi: ExtensionAPI): void {
 			},
 		});
 	}
+
+	// Argument parsing is exact and unforgiving -- see ESCALATION IS STICKY,
+	// VISIBLE, AND RECORDED above and `applyEscalate`'s own doc comment.
+	// Anything other than empty/"on"/"off" is refused, naming the accepted
+	// forms, rather than being silently treated as "on".
+	pi.registerCommand("escalate", {
+		description: "Lift the executor to the strongest configured model, sticky until `escalate off` clears it",
+		handler: async (args, ctx) => {
+			const arg = args.trim();
+			if (arg !== "" && arg !== "on" && arg !== "off") {
+				ctx.ui.notify(
+					`escalate: unrecognized argument ${JSON.stringify(arg)} -- accepted forms are: "" (same as "on"), "on", "off"`,
+					"error",
+				);
+				return;
+			}
+			await applyEscalate(pi, ctx, arg !== "off");
+		},
+	});
+
+	pi.registerCommand("mode", {
+		description: "Show the current mode, escalation state, and every role's resolved route",
+		handler: async (_args, ctx) => {
+			await reportMode(ctx);
+		},
+	});
 }
