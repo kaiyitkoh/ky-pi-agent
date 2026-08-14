@@ -152,7 +152,7 @@
 import type { CanonicalInvocation } from "./shell.ts";
 import { canonicalise, normaliseExecutable } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
-import { canonicalisePathArg, classifyPathRead, classifyPathWrite, isSensitiveSearchRoot, sameCanonicalPath } from "./paths.ts";
+import { canonicalisePathArg, classifyPathRead, classifyPathWrite, isSensitiveSearchRoot } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
 import { classifyGitInvocation, classifyGlabInvocation } from "./git.ts";
 import type { InfraVerdict } from "./infra.ts";
@@ -492,20 +492,28 @@ function extractOptionalStringField(input: Readonly<Record<string, unknown>>, fi
  * allow. `facts.projectRoot` is already canonical (see `PolicyFacts`'s own
  * docstring), so it is used as-is, with no second `canonicalisePathArg` pass.
  *
- * WR-14: the ABSENT-path case is exempt from {@link isSensitiveSearchRoot}'s
- * own `isWithinRoot(facts.home, canonicalPath)` half specifically when
- * `facts.projectRoot === facts.home` (a session opened directly IN `$HOME`,
- * so the project root and the home directory canonicalise identically). An
- * earlier version of this function did not carve that out: a bare
- * `grep { pattern: "x" }` / `find {}` / `ls {}` with no `path` at all
- * defaulted to `facts.projectRoot`, and `isSensitiveSearchRoot` then found
- * `facts.home` at-or-below that exact same root and blocked -- an
- * unconditional block on the tool's own documented default (search the
- * project root) purely because of WHERE the session happened to be opened,
- * never a defensible reading of SAFE-06. A CALLER-SUPPLIED `path` that
- * happens to equal the project root (`path: "."`, or the literal project
- * root string) is NOT exempted here -- only the true absent-field default
- * is, so an explicit `path` argument is still evaluated the normal way.
+ * WR-14/WR-17: an earlier version of this function EXEMPTED the ABSENT-path
+ * case from {@link isSensitiveSearchRoot} outright whenever
+ * `facts.projectRoot === facts.home` (a session opened directly IN `$HOME`),
+ * reasoning that blocking the tool's own documented default (search the
+ * project root) purely because of WHERE the session happened to be opened
+ * was "never a defensible reading of SAFE-06." That reasoning does not
+ * survive contact with what the exempted tools actually do: `grep`/`find`/
+ * `ls` with NO path recurse from the project root, and when the project root
+ * IS `$HOME`, that recursion walks straight through `~/.aws`, `~/.ssh`,
+ * `~/.kube`, `~/.gnupg` -- confirmed by execution, `grep { pattern:
+ * "aws_secret_access_key" }` with no `path` at all, session rooted at
+ * `$HOME`, returned `allow` -- the precise SAFE-06 leak CR-07 exists to
+ * close, reopened by this exemption for the one case where the danger is
+ * highest. There is no textual difference between this default and an
+ * EXPLICIT `path: "."` from the same session, which correctly still blocks
+ * (see the CR-07-RE-RUN cases below) -- so the exemption bought a UX
+ * convenience this project's own deny-by-default posture does not license,
+ * for a class of tool that is not even registered as an active tool today
+ * (WR-09) and therefore has zero practical UX cost while unregistered.
+ * REMOVED: an absent `path` is evaluated through `isSensitiveSearchRoot`
+ * exactly like every other search root, with no special case for where the
+ * session happens to be rooted.
  */
 function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: PolicyFacts, fieldLabel: string): Verdict {
 	if (extraction.kind === "malformed") {
@@ -519,11 +527,6 @@ function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: Pol
 	const fileVerdict = classifyPathRead(canonicalPath, pathFacts);
 	if (fileVerdict.kind === "block") {
 		return { kind: "block", reason: fileVerdict.reason };
-	}
-	const pathWasAbsent = extraction.kind === "absent";
-	const sessionRootIsHome = sameCanonicalPath(facts.projectRoot, facts.home);
-	if (pathWasAbsent && sessionRootIsHome) {
-		return { kind: "allow" };
 	}
 	if (isSensitiveSearchRoot(canonicalPath, pathFacts)) {
 		return {

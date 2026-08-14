@@ -64,9 +64,15 @@ docstring for the structural argument). Concretely, it catches:
   sensitive directory (`~/.aws`), sits BELOW one, or reaches `$HOME` itself
   (every conventional per-user secret directory lives directly under it)
   blocks even when no single file's basename matches — `grep { path:
-  "~/.aws" }`, not only `grep { path: "~/.aws/credentials" }`. `grep`'s own
-  `glob` field is checked by exact basename only; a wildcard glob (`.env*`)
-  is a published gap, not a covered case (see Known bypasses, EV-65).
+  "~/.aws" }`, not only `grep { path: "~/.aws/credentials" }`. A genuinely
+  ABSENT `path` is evaluated the SAME way, against the session's own
+  project root — so a bare `grep`/`find`/`ls` with no `path` at all, in a
+  session rooted directly at `$HOME`, also blocks rather than silently
+  recursing through `~/.aws` (WR-17: an earlier version of this rule
+  exempted the absent-path default outright, which reopened exactly this
+  leak; the exemption is removed). `grep`'s own `glob` field is checked by
+  exact basename only; a wildcard glob (`.env*`) is a published gap, not a
+  covered case (see Known bypasses, EV-65).
   `grep`/`find`/`ls` are three of Pi's own seven built-in tools and are
   evaluated by the same `policy.ts#evaluate()` switch `bash`/`read`/`write`/
   `edit` go through — but, unlike those four, this extension does not

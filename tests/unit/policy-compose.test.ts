@@ -307,29 +307,34 @@ describe("SAFE-03 -- purity: policy.ts never reads ctx, process.env, hasUI or no
 });
 
 /**
- * WR-14 -- CR-07's own `isSensitiveSearchRoot` and `evaluateSearchRootField`
- * over-blocked in two shapes, both fail-closed (never a security defect) but
- * both the "annoying enough to get the guard disabled" class this project's
- * own `<specifics>` names as the real risk once `grep`/`find`/`ls` are
- * active anywhere:
+ * WR-14 -- CR-07's own `isSensitiveSearchRoot` over-blocked one shape, fail-
+ * closed (never a security defect) but the "annoying enough to get the guard
+ * disabled" class this project's own `<specifics>` names as the real risk
+ * once `grep`/`find`/`ls` are active anywhere: `isSensitiveSearchRoot`
+ * matched a `.aws`/`.kube`/`.ssh`/`.gnupg` segment ANYWHERE in the path,
+ * unanchored -- a legitimate in-project path merely CONTAINING one of those
+ * segment names (`tests/fixtures/.ssh/...`, `node_modules/<pkg>/.aws/`) was
+ * denied. That half of WR-14 is still correct and unaffected by WR-17 below.
  *
- *   1. `isSensitiveSearchRoot` matched a `.aws`/`.kube`/`.ssh`/`.gnupg`
- *      segment ANYWHERE in the path, unanchored -- a legitimate in-project
- *      path merely CONTAINING one of those segment names
- *      (`tests/fixtures/.ssh/...`, `node_modules/<pkg>/.aws/`) was denied.
- *   2. `evaluateSearchRootField` mapped an ABSENT `path` to `facts.projectRoot`,
- *      and when `projectRoot === home` (a session opened directly in
- *      `$HOME`), `isSensitiveSearchRoot`'s `isWithinRoot(facts.home,
- *      canonicalPath)` half fired on that exact same root -- a bare
- *      `grep`/`find`/`ls` with no `path` at all could not list anything.
+ * WR-14's OTHER half -- exempting an ABSENT `path` outright whenever
+ * `projectRoot === home` -- is REVERTED here as **WR-17**: that exemption
+ * reopened the exact SAFE-06 leak CR-07 exists to close, for the one case
+ * where the danger is highest. A bare `grep { pattern:
+ * "aws_secret_access_key" }` with no `path` at all, in a session rooted
+ * directly at `$HOME`, recurses straight through `~/.aws` and returned
+ * `allow` -- confirmed by execution. There is no principled difference
+ * between that default and an EXPLICIT `path: "."` from the same session,
+ * which correctly still blocks (see the case below) -- so the exemption is
+ * removed outright: an absent path is evaluated through
+ * `isSensitiveSearchRoot` exactly like every other search root.
  *
  * Every case here is paired with a CR-07 RE-RUN -- the exact fixtures
  * CR-07's own corpus rows (EV-61..EV-64) already prove, reproduced directly
  * here against `evaluate()` so this fix's own test file is self-contained
- * proof that WR-14 does not reopen CR-07, not merely a claim that the corpus
- * elsewhere still passes.
+ * proof that neither WR-14's segment-anchoring fix nor WR-17's reversal
+ * reopens CR-07, not merely a claim that the corpus elsewhere still passes.
  */
-describe("WR-14 -- grep/find/ls search-root false positives are fixed WITHOUT reopening CR-07", () => {
+describe("WR-14/WR-17 -- grep/find/ls search-root false positives are fixed WITHOUT reopening CR-07 or SAFE-06", () => {
 	it("a legitimate in-project path containing a .ssh segment, NOT under $HOME, is allowed", () => {
 		const facts = makeFacts({ projectRoot: "C:/repo", home: "C:/Users/tester" });
 		const verdict = evaluate("grep", { pattern: "x", path: "C:/repo/tests/fixtures/.ssh/known_hosts_fixture" }, facts);
@@ -348,24 +353,24 @@ describe("WR-14 -- grep/find/ls search-root false positives are fixed WITHOUT re
 		).toBe("allow");
 	});
 
-	it("a bare grep/find/ls with NO path, opened directly in $HOME, is allowed (the tool's own documented default)", () => {
+	it("WR-17: a bare grep/find/ls with NO path, opened directly in $HOME, now BLOCKS -- the tool's own documented default recurses straight through ~/.aws", () => {
 		const facts = makeFacts({ projectRoot: "C:/Users/tester", home: "C:/Users/tester" });
-		const grepVerdict = evaluate("grep", { pattern: "x" }, facts);
+		const grepVerdict = evaluate("grep", { pattern: "aws_secret_access_key" }, facts);
 		const findVerdict = evaluate("find", {}, facts);
 		const lsVerdict = evaluate("ls", {}, facts);
-		expect(grepVerdict.kind, "reason" in grepVerdict ? grepVerdict.reason : undefined).toBe("allow");
-		expect(findVerdict.kind, "reason" in findVerdict ? findVerdict.reason : undefined).toBe("allow");
-		expect(lsVerdict.kind, "reason" in lsVerdict ? lsVerdict.reason : undefined).toBe("allow");
+		expect(grepVerdict.kind, "a bare grep from a session rooted at $HOME must block, not silently walk ~/.aws").toBe(
+			"block",
+		);
+		expect(findVerdict.kind).toBe("block");
+		expect(lsVerdict.kind).toBe("block");
 	});
 
-	it("an EXPLICIT path equal to $HOME, opened in $HOME, is NOT exempted -- only the true absent-field default is", () => {
+	it("an EXPLICIT path equal to $HOME, opened in $HOME, blocks identically to the absent-path default (WR-17 removed the difference between them)", () => {
 		const facts = makeFacts({ projectRoot: "C:/Users/tester", home: "C:/Users/tester" });
 		const verdict = evaluate("grep", { pattern: "x", path: "C:/Users/tester" }, facts);
-		expect(
-			verdict.kind,
-			"an EXPLICIT path argument must still be evaluated the normal way even when it equals the " +
-				"project root/home -- only a genuinely absent path is exempted",
-		).toBe("block");
+		expect(verdict.kind, "an EXPLICIT path argument equal to $HOME must block, same as the absent-path default").toBe(
+			"block",
+		);
 	});
 
 	it("CR-07 RE-RUN (EV-61): grep over the ~/.aws DIRECTORY itself still blocks", () => {
