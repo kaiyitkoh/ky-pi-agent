@@ -101,12 +101,21 @@ import { homedir } from "node:os";
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
-import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-coding-agent";
+import {
+	createBashTool,
+	createEditTool,
+	createFindTool,
+	createGrepTool,
+	createLsTool,
+	createReadTool,
+	createWriteTool,
+} from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { approve, consume, createPending, validate } from "./approvals.ts";
+import { approve, consume, createPending, peek, validate } from "./approvals.ts";
 import { pruneAuditLogs, writeAuditRow } from "./audit.ts";
 import { currentBranch } from "./git.ts";
+import { canonicalisePathArg } from "./paths.ts";
 import { evaluate, type PolicyFacts, type Verdict } from "./policy.ts";
 
 // ---------------------------------------------------------------------------
@@ -147,21 +156,48 @@ const DENY_CHOICE = "Deny";
 // ---------------------------------------------------------------------------
 
 /**
+ * CR-02: reduce an already-absolute path (`ctx.cwd`, `os.homedir()`) to the
+ * SAME canonical forward-slash form `paths.ts#classifyPathWrite`'s
+ * containment check and its `DETONATION_TARGETS` home-anchored rules compare
+ * against. On Windows both `ctx.cwd` and `homedir()` are backslash strings
+ * (`C:\Users\Admin\...`); `paths.ts` canonicalises the TARGET path it is
+ * given but never re-normalises a caller-supplied `facts.projectRoot`/
+ * `facts.home` -- so handing either through unnormalised makes
+ * `rootedSegmentsOf()` parse a `C:\...` root as root `"/"` with one giant
+ * segment (fail-closed but harness-breaking: every write blocked) and makes
+ * the home-anchored detonation rules build a comparand
+ * (`` `${facts.home}/.bashrc` ``) that can never match the canonicalised
+ * target (fail-open: a real `~/.bashrc` write stops being caught by the
+ * `bashrc` rule at all, and instead only accidentally blocks via the
+ * containment rule for the wrong reason).
+ *
+ * `cwd`/`home` are already absolute here, so `canonicalisePathArg` is called
+ * with a resolution context that is the path itself -- `isAbsolutePath` short-
+ * circuits the relative-join branch, so the self-referential `cwd`/`home`
+ * values passed as context are never actually used to resolve anything.
+ */
+function toCanonicalRoot(absolutePath: string): string {
+	return canonicalisePathArg({ text: absolutePath, value: absolutePath }, { cwd: absolutePath, home: absolutePath });
+}
+
+/**
  * Build the caller-supplied facts `evaluate()` needs, from a real
  * `ExtensionContext`. `policy.ts`/`git.ts`/`paths.ts` all stay pure; this
  * function is where `ctx.cwd`, `os.homedir()` and `process.env.KUBECONFIG`
  * — the impure world — become the plain data object those modules read.
  *
- * `projectRoot` is `ctx.cwd`: this extension has no separate notion of "the
- * project" beyond the session's own working directory, which is exactly what
- * `paths.ts#classifyPathWrite`'s containment check needs to compare a write
- * target against.
+ * `projectRoot` is `ctx.cwd`, canonicalised: this extension has no separate
+ * notion of "the project" beyond the session's own working directory, which
+ * is exactly what `paths.ts#classifyPathWrite`'s containment check needs to
+ * compare a write target against -- and that comparison is only correct when
+ * both sides went through the SAME canonicalisation (CR-02).
  */
 function buildFacts(ctx: ExtensionContext): PolicyFacts {
+	const cwd = toCanonicalRoot(ctx.cwd);
 	return {
-		cwd: ctx.cwd,
-		projectRoot: ctx.cwd,
-		home: homedir(),
+		cwd,
+		projectRoot: cwd,
+		home: toCanonicalRoot(homedir()),
 		// Called lazily by evaluate() -- ONLY for an invocation whose executable
 		// is literally "git", per git.ts's own module docstring. A command with
 		// no git invocation never triggers this spawnSync call.
@@ -276,13 +312,19 @@ function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext
 // ---------------------------------------------------------------------------
 
 /**
- * Wrap `bash`/`read`/`write`/`edit` via the spread-override shape
- * 04-RESEARCH.md verified (`pi.registerTool({ ...tool, execute: wrapped })`),
- * using the exported factories `createBashTool`/`createReadTool`/
- * `createWriteTool`/`createEditTool`. Each wrapped `execute()` re-evaluates
- * policy against the PARAMS IT ACTUALLY RECEIVES -- the second enforcement
- * layer CONTEXT.md decision 5 requires, closing the gap a `tool_call`-hook-
- * only guard leaves open to a later extension's `event.input` mutation.
+ * Wrap `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` via the spread-override
+ * shape 04-RESEARCH.md verified (`pi.registerTool({ ...tool, execute: wrapped
+ * })`), using the exported factories `createBashTool`/`createReadTool`/
+ * `createWriteTool`/`createEditTool`/`createGrepTool`/`createFindTool`/
+ * `createLsTool`. Each wrapped `execute()` re-evaluates policy against the
+ * PARAMS IT ACTUALLY RECEIVES -- the second enforcement layer CONTEXT.md
+ * decision 5 requires, closing the gap a `tool_call`-hook-only guard leaves
+ * open to a later extension's `event.input` mutation. CR-04: `grep`/`find`/
+ * `ls` are three of Pi's seven built-in tools
+ * [VERIFIED: `dist/core/tools/index.js`, `allToolNames`] and were previously
+ * unguarded and unaudited entirely -- `grep { pattern: ".", path:
+ * "~/.aws/credentials" }` returned the secret straight into the model's
+ * context with no verdict at all, reachable with no shell involved.
  *
  * The delegate call omits `ctx` (`bashTool.execute(toolCallId, params,
  * signal, onUpdate)`, four arguments): `AgentTool.execute`'s own declared
@@ -293,49 +335,94 @@ function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext
  * reads `ctx` to decorate the child environment with session metadata when
  * `ctx` is truthy [VERIFIED: `dist/core/tools/bash.js:124`], and the path
  * tools resolve every path against their OWN closed-over `cwd`, never `ctx`
- * [VERIFIED: `dist/core/tools/read.js:134,158`]. `cwd` is `process.cwd()`,
- * matching 04-RESEARCH.md's own verified reference shape.
+ * [VERIFIED: `dist/core/tools/read.js:134,158`].
+ *
+ * WR-02: EVERY delegate is constructed FRESH, from `ctx.cwd`, INSIDE each
+ * call's own `execute()` -- never from a single `process.cwd()`-closed-over
+ * instance built once at registration time. `registerTool` still needs one
+ * definition object up front for its static metadata (name/description/
+ * parameter schema), built from `process.cwd()` at registration time because
+ * no `ctx` exists yet at that point -- but that instance's own `execute` is
+ * NEVER what actually runs; it exists only to be spread for its schema. The
+ * REAL work always goes through a tool built from `ctx.cwd`, the exact same
+ * root `classifyAtWrapper`/`buildFacts` just evaluated policy against. Without
+ * this, a session whose `ctx.cwd` diverges from the extension's own
+ * `process.cwd()` (a subagent process, or -- proven by
+ * `tests/integration/double-enforcement.test.ts`'s own faux-session harness,
+ * whose session cwd is a temp dir while the vitest process's own cwd is the
+ * repo root) would have policy check ONE root while the real tool acted
+ * against ANOTHER -- a genuine check-here/act-there split. The factories are
+ * cheap, pure constructors (`createBashTool` etc. just close over `cwd` and
+ * return a plain object -- no I/O, no subprocess) so re-creating one per call
+ * costs nothing measurable.
  */
 function registerWrappedTools(pi: ExtensionAPI): void {
-	const cwd = process.cwd();
+	// ONLY for registerTool's static metadata (name/description/schema) --
+	// see the WR-02 section of this function's docstring. Never executed.
+	const metadataCwd = process.cwd();
 
-	const bashTool = createBashTool(cwd);
 	pi.registerTool({
-		...bashTool,
+		...createBashTool(metadataCwd),
 		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
 			const command = extractCommandOrPath("bash", params);
 			wrapperOutcome("bash", command, ctx, classifyAtWrapper("bash", params, ctx));
-			return bashTool.execute(toolCallId, params, signal, onUpdate);
+			return createBashTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
 		},
 	});
 
-	const readTool = createReadTool(cwd);
 	pi.registerTool({
-		...readTool,
+		...createReadTool(metadataCwd),
 		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
 			const command = extractCommandOrPath("read", params);
 			wrapperOutcome("read", command, ctx, classifyAtWrapper("read", params, ctx));
-			return readTool.execute(toolCallId, params, signal, onUpdate);
+			return createReadTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
 		},
 	});
 
-	const writeToolInstance = createWriteTool(cwd);
 	pi.registerTool({
-		...writeToolInstance,
+		...createWriteTool(metadataCwd),
 		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
 			const command = extractCommandOrPath("write", params);
 			wrapperOutcome("write", command, ctx, classifyAtWrapper("write", params, ctx));
-			return writeToolInstance.execute(toolCallId, params, signal, onUpdate);
+			return createWriteTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
 		},
 	});
 
-	const editTool = createEditTool(cwd);
 	pi.registerTool({
-		...editTool,
+		...createEditTool(metadataCwd),
 		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
 			const command = extractCommandOrPath("edit", params);
 			wrapperOutcome("edit", command, ctx, classifyAtWrapper("edit", params, ctx));
-			return editTool.execute(toolCallId, params, signal, onUpdate);
+			return createEditTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
+		},
+	});
+
+	// CR-04: grep/find/ls are three of Pi's seven built-in tools and were
+	// previously unwrapped entirely -- see this function's own docstring.
+	pi.registerTool({
+		...createGrepTool(metadataCwd),
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			const command = extractCommandOrPath("grep", params);
+			wrapperOutcome("grep", command, ctx, classifyAtWrapper("grep", params, ctx));
+			return createGrepTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
+		},
+	});
+
+	pi.registerTool({
+		...createFindTool(metadataCwd),
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			const command = extractCommandOrPath("find", params);
+			wrapperOutcome("find", command, ctx, classifyAtWrapper("find", params, ctx));
+			return createFindTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
+		},
+	});
+
+	pi.registerTool({
+		...createLsTool(metadataCwd),
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			const command = extractCommandOrPath("ls", params);
+			wrapperOutcome("ls", command, ctx, classifyAtWrapper("ls", params, ctx));
+			return createLsTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
 		},
 	});
 }
@@ -496,15 +583,34 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 // ---------------------------------------------------------------------------
 
 /**
- * Fires for `bash`/`read`/`write`/`edit` only -- every other tool name
- * returns `undefined` immediately, unaudited, matching `policy.ts#evaluate`'s
- * own "this guard governs exactly four tool names" contract (SAFE-15's
- * published limits table names the gap for every OTHER tool explicitly,
- * rather than this file silently claiming coverage it does not have).
+ * Fires for `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` only -- every
+ * other tool name returns `undefined` immediately, unaudited, matching
+ * `policy.ts#evaluate`'s own "this guard governs exactly these tool names"
+ * contract (SAFE-15's published limits table names the gap for every OTHER
+ * tool explicitly, rather than this file silently claiming coverage it does
+ * not have). CR-04: `grep`/`find`/`ls` were added to close the gap where
+ * three of Pi's seven built-in tools reached execution with no verdict and no
+ * audit row at all -- this list MUST stay in sync with
+ * {@link registerWrappedTools}'s own tool-name set and with `policy.ts#evaluate`'s
+ * `switch`.
  *
  * On `allow`, returns `undefined` -- never mutates `event.input`. On
- * `confirm`, creates a pending approval and blocks with a reason that embeds
- * the request id and a literal instruction to call {@link APPROVE_TOOL_NAME}.
+ * `confirm`:
+ *   - if an approval grant ALREADY EXISTS for this exact command (CR-01: the
+ *     model re-issuing a command a human just approved via
+ *     {@link APPROVE_TOOL_NAME}), the hook returns `undefined` and lets the
+ *     call proceed to the wrapped tool's own `execute()`, which performs the
+ *     actual one-shot {@link consume} -- see `approvals.ts`'s module
+ *     docstring, "THE PROTOCOL THIS STORE IMPLEMENTS", step 4. The hook itself
+ *     NEVER consumes: `peek()` is a non-mutating read, so the SAME grant is
+ *     still there for the wrapper to actually spend. If the hook consumed
+ *     here, the wrapper's own `consume()` on this exact retry would always
+ *     find nothing and block the just-approved command forever -- this is the
+ *     bug CR-01 fixes: `approve_ky_command` was dead code because nothing
+ *     ever reached this branch's now-removed unconditional re-block.
+ *   - otherwise, creates a pending approval and blocks with a reason that
+ *     embeds the request id and a literal instruction to call
+ *     {@link APPROVE_TOOL_NAME}.
  * On `block`, blocks with the classifier's reason. `terminate` is never set
  * -- RESEARCH/CONTEXT both note it applies only to a blocked call and only
  * stops the agent when EVERY finalized result in the batch terminates, so it
@@ -519,7 +625,10 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			event.toolName !== "bash" &&
 			event.toolName !== "read" &&
 			event.toolName !== "write" &&
-			event.toolName !== "edit"
+			event.toolName !== "edit" &&
+			event.toolName !== "grep" &&
+			event.toolName !== "find" &&
+			event.toolName !== "ls"
 		) {
 			return undefined;
 		}
@@ -541,6 +650,22 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 		}
 
 		if (verdict.kind === "confirm") {
+			// CR-01: a grant already exists (the command was approved and is now
+			// being re-issued) -- defer to the wrapper, which performs the actual
+			// one-shot consume. NEVER consume here; see this function's own
+			// docstring.
+			if (peek(verdict.requestKey)) {
+				writeAuditRow(ctx.cwd, {
+					event: HOOK_AUDIT_EVENT,
+					tool: toolName,
+					command,
+					cwd: ctx.cwd,
+					verdict: "allow",
+					reason: `hook: an approval grant is present for this exact command -- deferring to the wrapper's one-shot consume -- ${verdict.reason}`,
+				});
+				return undefined;
+			}
+
 			const requestId = createPending(verdict.requestKey, command, verdict.reason);
 			writeAuditRow(ctx.cwd, {
 				event: HOOK_AUDIT_EVENT,
@@ -576,7 +701,55 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 // The entry point
 // ---------------------------------------------------------------------------
 
+/**
+ * `globalThis` slot name guarding WR-07's double-registration hazard --
+ * `bin/bootstrap.sh#install_safety_extension` writes a user-scope stub that
+ * re-exports this file's default export, and Pi ALSO auto-discovers the
+ * project-scoped copy at `.pi/extensions/safety/index.ts` when running inside
+ * this trusted repository. Both default exports would otherwise run: harmless
+ * for `pi.registerTool` (first-registration-wins silently discards the
+ * second set), but NOT harmless for `pi.on("tool_call", ...)` -- Pi calls
+ * EVERY registered handler for a given event, so a second `registerToolCallHook`
+ * call registers a SECOND independent handler, producing two audit rows per
+ * tool call and, worse, two `pending` entries minted per `confirm` block
+ * (compounding WR-05). Exported so a test can assert against the real key
+ * rather than retyping the literal, matching the house rule
+ * `approvals.ts#APPROVALS_STORE_KEY` already follows for the identical
+ * cross-instance hazard.
+ */
+export const SAFETY_INSTALLED_KEY = "__kyPiSafetyExtensionInstalled";
+
+/**
+ * Test-only: forget that the safety extension has already installed itself
+ * into this process. A real `pi` process is one session, so production code
+ * never calls this -- but a single vitest WORKER process legitimately
+ * simulates several independent sessions in a row within one process
+ * (`tests/unit/safety-entry.test.ts` and
+ * `tests/integration/double-enforcement.test.ts` both invoke this file's
+ * default export more than once), and the WR-07 guard below would otherwise
+ * make every session after the first a silent no-op in exactly those tests.
+ * Mirrors `.pi/lib/jsonl.ts#resetProducedPaths`'s own "exported for tests"
+ * pattern for the identical class of hazard.
+ */
+export function resetSafetyInstalledForTests(): void {
+	const globalSlot = globalThis as unknown as Record<string, boolean | undefined>;
+	delete globalSlot[SAFETY_INSTALLED_KEY];
+}
+
 export default function (pi: ExtensionAPI): void {
+	// WR-07: idempotent across the double-load this project's own bootstrap
+	// deliberately causes (project-scope auto-discovery + user-scope stub).
+	// `globalThis` is shared across every jiti module instance in one process
+	// -- the same pattern `approvals.ts#getStore` already uses for the
+	// identical class of hazard -- so the SECOND invocation, regardless of
+	// which load path reached it, sees the flag and returns before
+	// registering anything a second time.
+	const globalSlot = globalThis as unknown as Record<string, boolean | undefined>;
+	if (globalSlot[SAFETY_INSTALLED_KEY] === true) {
+		return;
+	}
+	globalSlot[SAFETY_INSTALLED_KEY] = true;
+
 	// Tool registrations FIRST -- see the module docstring's REGISTRATION
 	// ORDER section. tests/unit/safety-entry.test.ts pins this source order.
 	registerWrappedTools(pi);

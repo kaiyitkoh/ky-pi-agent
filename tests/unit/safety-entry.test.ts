@@ -32,7 +32,7 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 
 import { describe, expect, it } from "vitest";
 
-import safety, { APPROVE_TOOL_NAME } from "../../.pi/extensions/safety/index.ts";
+import safety, { APPROVE_TOOL_NAME, resetSafetyInstalledForTests } from "../../.pi/extensions/safety/index.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
 
@@ -64,16 +64,21 @@ function stubPi(): {
 }
 
 describe("the safety extension's entry point registers exactly what it claims to", () => {
+	// WR-07: this file invokes the default export more than once in one
+	// process (this describe block, and the "never delegates" describe below)
+	// -- reset the idempotency guard first so each simulated "session" here
+	// actually registers, rather than the second one being a silent no-op.
+	resetSafetyInstalledForTests();
 	const { pi, hooks, toolNames, tools } = stubPi();
 	safety(pi);
 
-	it("registers exactly four wrapped tools plus approve_ky_command, in that order", () => {
+	it("registers exactly four wrapped tools, grep/find/ls, plus approve_ky_command, in that order", () => {
 		expect(
 			toolNames,
-			"the four built-in wrappers must be registered before approve_ky_command -- see the " +
+			"the four built-in wrappers, then grep/find/ls (CR-04), then approve_ky_command -- see the " +
 				"module docstring's REGISTRATION ORDER section. If this list changes, a later plan is " +
 				"adding or removing a tool and this assertion should grow with it, not be deleted",
-		).toEqual(["bash", "read", "write", "edit", "approve_ky_command"]);
+		).toEqual(["bash", "read", "write", "edit", "grep", "find", "ls", "approve_ky_command"]);
 	});
 
 	it("registers exactly two hooks: tool_call and session_start", () => {
@@ -230,6 +235,7 @@ describe("the safety extension's source order matches its own documented guarant
  */
 describe("a wrapped tool never delegates to the real implementation on a non-allow verdict", () => {
 	it("throws instead of running the real bash tool when the command field is malformed", async () => {
+		resetSafetyInstalledForTests();
 		const { pi, tools } = stubPi();
 		safety(pi);
 
@@ -252,5 +258,52 @@ describe("a wrapped tool never delegates to the real implementation on a non-all
 				),
 			).rejects.toThrow(/malformed/);
 		});
+	});
+});
+
+/**
+ * WR-07 -- `bin/bootstrap.sh#install_safety_extension` writes a user-scope
+ * stub that re-exports this file's default export, and Pi ALSO auto-
+ * discovers the project-scoped copy when running inside this trusted
+ * repository. Both defaults would otherwise run, registering the `tool_call`
+ * hook TWICE -- Pi calls every registered handler for an event, so this is
+ * two audit rows per call and two `pending` entries minted per `confirm`
+ * block, unlike `registerTool`'s own first-registration-wins collision
+ * handling, which stays silently correct either way.
+ */
+describe("WR-07 -- the entry point is idempotent across more than one invocation in one process", () => {
+	it("a second invocation of the default export, against a FRESH pi object, registers nothing", () => {
+		resetSafetyInstalledForTests();
+
+		const first = stubPi();
+		safety(first.pi);
+		expect(
+			first.toolNames.length,
+			"the first invocation must have registered the full tool set, or this test proves nothing",
+		).toBeGreaterThan(0);
+		expect(
+			first.hooks.length,
+			"the first invocation must have registered its hooks, or this test proves nothing",
+		).toBeGreaterThan(0);
+
+		// A SECOND, entirely fresh pi/stub -- exactly what Pi hands the SECOND
+		// extension load (project scope vs. the user-scope stub re-exporting
+		// the same file) -- each load gets its OWN api object
+		// [VERIFIED: `dist/core/extensions/loader.js#createExtensionAPI` is
+		// called once per extension, closing over that extension's own `tools`/
+		// `handlers` collections]. The globalThis-keyed guard must still catch
+		// this as "already installed" because it is process-wide, not
+		// pi-object-scoped.
+		const second = stubPi();
+		safety(second.pi);
+		expect(
+			second.toolNames,
+			"a second invocation in the SAME process must register NOTHING -- registering a second " +
+				"time would silently duplicate the tool_call hook and mint two pending approvals per " +
+				"confirm block (this is the CR-01-adjacent WR-05 compounding effect WR-07 names)",
+		).toEqual([]);
+		expect(second.hooks, "the second invocation's own hooks array must stay empty too").toEqual([]);
+
+		resetSafetyInstalledForTests();
 	});
 });

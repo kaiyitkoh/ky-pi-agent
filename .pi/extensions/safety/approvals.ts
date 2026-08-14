@@ -15,12 +15,20 @@
  *   3. The `approve_*` tool's `execute()` — which only runs with a real UI
  *      bound (`ctx.hasUI`) — drives `ctx.ui.select()` and, on a human "yes",
  *      calls {@link approve}.
- *   4. The model re-issues the original tool call. The `tool_call` hook (or
- *      the wrapped tool's own `execute()` — CONTEXT.md decision 5's second
- *      enforcement layer) recomputes the SAME `requestKey`
- *      (`policy.ts`'s `computeRequestKey` is pure and deterministic) and
- *      calls {@link consume}. A `true` result allows the retried call
- *      through.
+ *   4. The model re-issues the original tool call. The `tool_call` hook
+ *      recomputes the SAME `requestKey` (`policy.ts`'s `computeRequestKey` is
+ *      pure and deterministic) and calls {@link peek} -- a NON-CONSUMING
+ *      read. If a grant is present, the hook returns `undefined` (never
+ *      blocks) so the call reaches the wrapped tool's own `execute()` --
+ *      CONTEXT.md decision 5's second enforcement layer -- which recomputes
+ *      the identical `requestKey` and calls {@link consume}, the one call
+ *      site that actually removes the grant. CR-01: the hook must NEVER call
+ *      `consume()` itself -- if it did, the wrapper's own `consume()` on the
+ *      SAME retry would always find the grant already gone (single-use,
+ *      already used) and block the just-approved command forever. Splitting
+ *      "is there a grant" (hook, `peek`) from "use the grant" (wrapper,
+ *      `consume`) is what makes the grant single-use ACROSS the two-layer
+ *      composition rather than single-use at the hook alone.
  *
  * ---------------------------------------------------------------------------
  * WHY THE GRANT IS KEYED ON `requestKey`, NOT ON THE REQUEST ID
@@ -164,9 +172,31 @@ function getStore(): ApprovalsStore {
  */
 export function createPending(requestKey: string, command: string, reason: string, now: number = Date.now()): string {
 	const store = getStore();
+	sweepExpired(store, now);
 	const id = randomUUID();
 	store.pending.set(id, { requestKey, command, reason, expiresAt: now + APPROVAL_TTL_MS });
 	return id;
+}
+
+/**
+ * WR-05: remove every expired `pending`/`granted` entry. Called at the top of
+ * {@link createPending} -- the one call site that fires on every confirm-block,
+ * including every retry of an already-blocked command -- so the two maps
+ * cannot grow without bound across a long session. Cheap and amortised: no
+ * timer, no background sweep, just a pass over whatever is already in memory
+ * at the moment a new pending entry is about to be created.
+ */
+function sweepExpired(store: ApprovalsStore, now: number): void {
+	for (const [id, entry] of store.pending) {
+		if (entry.expiresAt <= now) {
+			store.pending.delete(id);
+		}
+	}
+	for (const [key, grant] of store.granted) {
+		if (grant.expiresAt <= now) {
+			store.granted.delete(key);
+		}
+	}
 }
 
 /**
@@ -209,6 +239,30 @@ export function approve(id: string, command: string, reason: string, now: number
 	store.pending.delete(id);
 	store.granted.set(entry.requestKey, { command, reason, expiresAt: now + APPROVAL_TTL_MS });
 	return true;
+}
+
+/**
+ * True when an unexpired grant exists for `requestKey`, WITHOUT consuming it.
+ *
+ * CR-01: the `tool_call` HOOK uses this instead of {@link consume} to decide
+ * whether to defer a re-issued `confirm`-classified call to the wrapped
+ * tool's own `execute()`. If the hook consumed the grant itself, the
+ * wrapper's own `consume()` call on the retry would always find the grant
+ * already gone and block anyway -- the exact bug this finding fixes. Keeping
+ * the READ (hook) and the CONSUME (wrapper) as two separate operations on the
+ * SAME grant is what makes the grant single-use across the two-layer
+ * enforcement composition as a whole, rather than single-use at the hook
+ * alone. Pure with respect to the store: never deletes, never fails toward
+ * "no grant" past expiry silently -- an expired grant returns `false` here
+ * exactly as it would from `consume()`.
+ */
+export function peek(requestKey: string, now: number = Date.now()): boolean {
+	const store = getStore();
+	const grant = store.granted.get(requestKey);
+	if (grant === undefined) {
+		return false;
+	}
+	return grant.expiresAt > now;
 }
 
 /**
