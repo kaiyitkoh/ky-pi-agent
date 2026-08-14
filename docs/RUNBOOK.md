@@ -987,3 +987,210 @@ right requests and parses a response shaped like Qoder's documented envelope
 correctly. It says nothing about whether a real personal access token
 reaches `api.qoder.com` or what a real delegation returns, which is this
 entry and cannot be substituted.
+
+---
+
+## Phase 7 — Composed Extensions, Pinned & Reviewed
+
+Phase 7 composed five pinned npm packages (`pi-subagents@0.49.0`,
+`pi-background-tasks@2.4.2`, `@narumitw/pi-lsp@0.49.4`, `pi-web-access@0.22.0`,
+`pi-session-finder@0.5.6`) with five vendored Pi-bundled extensions
+(`.pi/extensions/{todo,questionnaire,plan-mode,loop-police,checkpoint}`), wired
+the worktree-isolation setup hook the subagent runner needs, and closed
+EXT-01 through EXT-08 and EXT-10 against real pinned source rather than a
+fixture: `docs/EXTENSIONS.md`'s Subagent capability evidence table
+(EXT-01/EXT-03/EXT-04, plan 07-12), `tests/unit/extension-composition.test.ts`
+(EXT-05/EXT-06, plan 07-11) and `tests/unit/tool-count-baseline.test.ts` (the
+Phase 10 tool-schema handoff, plan 07-11). The blocking package-legitimacy
+install gate (plan 07-10, Task 2) was found **NOT SATISFIED** on this
+machine: its own pre-authorisation rested on the ground that this development
+machine holds no credentials, and that ground is FALSE — live AWS SSO /
+static admin keys are present (`aws sts get-caller-identity --profile
+ADMIN_PROFILE` returned exit 0, resolving live IAM admin credentials).
+No package has ever been installed here. That single fact is why this section
+carries **two** outstanding entries instead of one: `RB-07-01` is the
+composed smoke ritual EXT-09 names, and `RB-07-02` is the install-and-
+reconcile step every one of `RB-07-01`'s four legs presupposes but which has
+itself never run.
+
+`tests/unit/docs-policy.test.ts` guards these statuses exactly as it guards the
+Phase 1 through 5 ones: it parses both the summary-table row and the
+`**Status:**` line of every `RB-<phase>-<n>` entry, and a disagreement between
+the two is reported as `INCONSISTENT`, which is never an acceptable status.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-07-01 | EXT-09 — the composed smoke ritual: one turn per provider, one subagent spawn, one blocked command, one wire dump | OUTSTANDING |
+| RB-07-02 | install the five pinned specs and reconcile `pi list` against `.pi/settings.json` | OUTSTANDING |
+
+### RB-07-01 — EXT-09: the composed smoke ritual, run after any version bump
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** This machine has no provider credentials, no
+installed `pi-subagents` package on disk (`RB-07-02` is OUTSTANDING), and no
+interactive session outside this repository's own test harness. The composed
+ritual is by definition an end-to-end sequence against real models and a real
+installed extension tree, and no fixture this repository wrote can stand in
+for either. State it plainly, without hedging: none of the four legs below has
+ever run on this machine.
+
+**Precondition.** Run this only after `RB-07-02` has completed — the second
+and third legs need the five packages actually installed, not merely pinned
+in `.pi/settings.json`.
+
+**Procedure, on the work laptop, after any version bump — a pin change in
+`.pi/settings.json` or a Pi / `@earendil-works/*` upgrade:**
+
+1. **One turn per provider.** Run the procedure in `RB-02-01` for each
+   configured provider (DeepSeek-direct, DashScope, Bedrock Claude) and
+   confirm each produces a wire dump. Where the provider is DashScope and the
+   prompt forces two tool turns, this also exercises `RB-03-02`'s check; where
+   it is Bedrock, this is `RB-03-03`'s turn. This leg introduces no new
+   command of its own — see the cited ids for the exact procedure, rather
+   than restating it here.
+2. **One subagent spawn.** Confirm the five installed packages are still
+   current per `RB-07-02`'s own reconciliation step — then confirm the
+   working tree is clean: `git status --porcelain`. Worktree-isolated
+   subagents call `resolveRepoState()` (`pi-subagents@0.49.0
+   src/runs/shared/worktree.ts:137-142`), which runs the equivalent check
+   scoped to exclude `.pi/subagents` and throws `"worktree isolation
+   requires a clean git working tree. Commit or stash changes first."` on
+   any non-empty result — an operational precondition, not a suggestion.
+   Then spawn the `planner`
+   subagent (`.pi/agents/planner.md`) on a small task and confirm two things:
+   (a) it ran with the model Phase 5's `agentOverrides` selected for the
+   `planner` role, and **not** a `model:` key read from the agent's own
+   frontmatter — `.pi/agents/planner.md` deliberately ships no such key
+   (`07-04-SUMMARY.md`), and one creeping back in would silently defeat
+   `/cheap` `/balanced` `/max` `/escalate` for this agent without any visible
+   error; (b) if the spawn used worktree isolation, the worktree genuinely
+   **builds** — dependencies resolve and the entry point runs — rather than
+   merely checking out, since a broken `node_modules` junction fails at build
+   time, not at `git worktree add` time.
+3. **One blocked command.** There is no Phase 4 `[RUNBOOK]` id for this leg
+   because it is the one leg with a complete offline proxy — see below. Run
+   one representative blocked command (for example `terraform destroy`,
+   unconfirmed) interactively, inside a session that actually has
+   `pi-subagents` installed, and confirm the audit JSONL row appears: `tail
+   -n 1 .pi/logs/audit-$(date +%F).jsonl`. This is the one leg composing does
+   not weaken: the guard binds to the tool name at the `tool_call` hook
+   regardless of which other extensions are active (`07-07-SUMMARY.md`'s
+   T-07-27 finding), so a blocked command inside a session carrying five
+   newly-installed extensions is exactly as covered as one inside a bare
+   session.
+4. **One wire dump.** Cite `RB-02-01` — confirm a dump lands under
+   `.pi/logs/wire-$(date +%F).jsonl` and carries no credential-shaped value,
+   which is `RB-02-02`'s subject and is not re-litigated here.
+
+**Expected output, specific and falsifiable per leg — never "it seemed
+fine":**
+
+- Leg 1: a wire dump file exists for each provider and names the thinking
+  parameters exactly as `RB-02-01` (and, where applicable, `RB-03-01`
+  through `RB-03-03`) specify.
+- Leg 2: `RB-07-02`'s own reconciliation still reports `MATCH`; the
+  subagent result returns; the recorded model matches Phase 5's routing
+  table for the `planner` role, not the model the frontmatter would imply if
+  it carried one; if worktree-isolated, the worktree's own build step exits
+  0.
+- Leg 3: the blocked command produces a `BLOCK` verdict to the model and
+  exactly one new audit row — not zero, not two.
+- Leg 4: the dump contains no credential-shaped value under the patterns
+  `RB-02-02`'s procedure greps for.
+
+**Offline proxy — named by path, with what each one does and does not
+prove:**
+
+- `tests/integration/worktree-build.test.ts` — proves the worktree-isolation
+  mechanism and this repository's own setup hook: symlinking `node_modules`
+  into the new worktree and building the checked-out tree. It does **not**
+  prove that `pi-subagents` actually invokes this hook on a real spawn — that
+  binding is wired into `pi-subagents`' own global config file
+  (`07-09-SUMMARY.md`) and nothing in this repository's test suite spawns
+  `pi-subagents`' real spawn path; only leg 2 above does.
+- `tests/unit/subagent-capabilities.test.ts` — proves ten `file:line`
+  citations against the pinned `pi-subagents@0.49.0` tarball are genuine and
+  bound to the exact pinned version (`docs/EXTENSIONS.md`'s Subagent
+  capability evidence table). It proves the citations are real source, not
+  that the mechanisms they cite behave correctly once actually invoked in a
+  live session.
+- `tests/integration/subagent-block.test.ts` — proves a blocked command stays
+  blocked inside a real spawned headless `pi --mode json` child process whose
+  working directory carries a project-scoped `.pi/extensions/` sentinel, with
+  the audit row as evidence. It proves this repository's own guard
+  composition survives that spawn topology, not that `pi-subagents`' real
+  spawn topology matches the proxy's in every respect.
+- `tests/unit/evasion-corpus.test.ts` and `tests/unit/audit-jsonl.test.ts` —
+  prove the blocked-command classifier and the audit writer respectively,
+  over 30-plus fixtures this repository wrote. Neither has ever classified a
+  command actually typed by a real model inside a session carrying the five
+  newly-installed extensions.
+- `tests/integration/wire-capture.test.ts` (Phase 2) and
+  `tests/integration/dashscope-payload.test.ts` (Phase 3) — prove the
+  capture and redaction mechanism against a faux provider and a loopback
+  server this repository wrote. They say nothing about what a real provider
+  payload looks like, which is legs 1 and 4 of this ritual and cannot be
+  substituted.
+
+### RB-07-02 — install the five pinned specs and reconcile `pi list`
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Plan 07-10's blocking package-legitimacy
+checkpoint could not be auto-approved: its pre-authorisation's ground (a) —
+"this development machine has no credentials" — was verified rather than
+assumed and found FALSE (`aws sts get-caller-identity --profile
+ADMIN_PROFILE` returned exit 0, resolving live long-lived static admin
+keys present at `~/.aws/credentials`, plus an SSO cache). Per that
+checkpoint's own binding text, this gate is not auto-approvable on the
+strength of the standing autonomous-run pre-authorisations, which cover
+`[RUNBOOK]` verification, not a supply-chain install gate. No install command
+of any kind (`pi install`, `npm install`, `pi update`) has ever run in this
+repository — confirmed by `.pi/npm/` holding only the tracked `.npmrc` and
+`.pi/git/` not existing at all (`docs/EXTENSIONS.md`'s Install reconciliation
+section, plan 07-10). **This is not a technical install failure** — no PATH
+issue, no project-trust refusal, and no network failure was encountered or
+would even have been reached. It is a gate that requires a human physically
+present, on a machine whose real credential exposure is now known rather than
+assumed absent.
+
+**Procedure, on the work laptop, with a human physically present to satisfy
+the package-legitimacy gate:**
+
+1. Re-confirm each of the five pinned specs' identity against the registry
+   and repository pages named in `docs/EXTENSIONS.md`'s per-package
+   legitimacy evidence table — that review is current as of 2026-08-14/15 and
+   should be re-run if this procedure runs materially later, since the
+   ecosystem ships 13-16 releases/month.
+2. `pi install -l npm:pi-subagents@0.49.0`
+3. `pi install -l npm:pi-background-tasks@2.4.2`
+4. `pi install -l npm:@narumitw/pi-lsp@0.49.4`
+5. `pi install -l npm:pi-web-access@0.22.0`
+6. `pi install -l npm:pi-session-finder@0.5.6`
+7. `pi list`
+8. Reconcile step 7's output against `.pi/settings.json`'s `packages[]`:
+   every spec must appear at its pinned version, and `pi list` must contain
+   nothing that `packages[]` does not declare. Record the verdict as `MATCH`
+   or an itemised `MISMATCH` — never "looks right".
+9. Re-run `sh bin/bootstrap.sh --assert-hardening` and confirm it still exits
+   0 — an install that silently rewrote an `.npmrc` is exactly the kind of
+   regression this repository has caught before.
+10. `npx vitest run tests/unit/extension-pins.test.ts`
+
+**Expected output.** Step 7 lists all five specs at their pinned versions and
+nothing else project-scoped. Step 9 exits 0. Step 10 exits 0, and its own
+Direction 4 ("installed-but-undeclared") now resolves through its real branch
+for the first time, because `.pi/npm/` exists — record whether it passed
+through the real branch or the "confirmed absent" branch this time, since
+only the former is new information this machine has never had before.
+
+**Offline proxy:** `tests/unit/pinning.test.ts` and
+`tests/unit/extension-pins.test.ts` — assert `.pi/settings.json`'s
+`packages[]` is exact-pinned and, on Direction 4, that nothing installed is
+undeclared. But Direction 4's own installed-but-undeclared check has never
+fired against real npm output — it resolves through the "confirmed absent"
+branch whenever `.pi/npm/node_modules` and `.pi/git/` do not exist, which is
+the case on this machine right now (`07-10-SUMMARY.md`). It proves the
+lockfile-comparison mechanism is sound. It does not prove `pi install` and
+`pi list` agree in practice, which is this entry and cannot be substituted.
