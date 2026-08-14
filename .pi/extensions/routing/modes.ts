@@ -59,12 +59,19 @@
  * ---------------------------------------------------------------------------
  * `providers/schema.ts`'s `CHAIN` (DeepSeek-direct → DashScope) is imported
  * here and never re-declared: {@link usesFallbackChain} asks "is this
- * `{provider,id}` a member of the one chain that exists", not "what chain
+ * `{provider,id}` a MEMBER of the one chain that exists", not "what chain
  * does `max` use". `max` routes most roles to Bedrock Claude, which has no
  * hop in `CHAIN` by design — that role goes through `callModel()` directly,
  * never through the chain, and nothing in this file gives `max` (or any
  * other mode) a chain of its own. A future edit that reads otherwise is the
  * exact mistake 05-CONTEXT.md decision 10 warns against.
+ *
+ * NOTE (CR-02): membership is a fact about `CHAIN`, not a dispatch rule.
+ * {@link runSingleShotRole} does NOT call `usesFallbackChain` to decide
+ * between `callWithFallback()` and a direct chokepoint call — see its own
+ * `resolvedIsChainHead` check and doc comment for why only the chain's HEAD
+ * qualifies. `usesFallbackChain` today has no production caller; it remains
+ * exported and tested as a pure predicate on `CHAIN` membership only.
  *
  * ---------------------------------------------------------------------------
  * BOUNDARY RULE (DIAG-02/03)
@@ -284,10 +291,12 @@ export function usesToolLoop(role: Role): boolean {
 }
 
 /**
- * Whether `ref` is a member of the fixed fallback chain — asked, never
- * assumed, against the imported `CHAIN`. See THE FALLBACK CHAIN IS FIXED
- * above: this is the only test a caller needs to decide between
- * `callWithFallback()` and a direct chokepoint call.
+ * Whether `ref` is a MEMBER of the fixed fallback chain. NOTE (CR-02): a
+ * member is NOT sufficient to justify `callWithFallback()`, which always
+ * restarts at CHAIN[0] and takes no starting model -- only the chain HEAD is.
+ * See {@link runSingleShotRole}'s own `resolvedIsChainHead` check; do not
+ * replace it with this predicate. Kept as a pure, tested predicate on
+ * `CHAIN` membership; it has no production caller today.
  */
 export function usesFallbackChain(ref: ModelRef): boolean {
 	return CHAIN.some((entry) => entry.provider === ref.provider && entry.id === ref.id);
@@ -366,9 +375,11 @@ export interface RunSingleShotRoleOptions {
  * `call-model` — the four ROUTE-04 names (reviewer, advisor, vision,
  * summariser). Reads the current mode/escalation state, plans the call via
  * {@link planRoleCall}, and on success dispatches through the Phase 2
- * chokepoint: `callWithFallback()` when the resolved `{provider,id}` is a
- * member of the fixed fallback chain, `callModel()` directly otherwise (a
- * Bedrock-pinned role has no hop in that chain by design).
+ * chokepoint: `callWithFallback()` when the resolved `{provider,id}` is the
+ * HEAD of the fixed fallback chain (CR-02: not merely a member), `callModel()`
+ * directly for every other resolved candidate (a Bedrock-pinned role has no
+ * hop in that chain by design, and a later chain member must be served with
+ * the router's own specific model, never by restarting the chain at its head).
  *
  * A plan refusal is thrown as an `Error` carrying the reason verbatim — never
  * swallowed into an `undefined` result, so the caller (a command or a tool)
