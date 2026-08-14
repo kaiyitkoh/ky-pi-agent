@@ -233,8 +233,43 @@ Plans:
   5. **Verified live on the work laptop**: Qoder accepts a delegated task and folds the result back, documented as a *foreign agent* that bypasses the harness's tools, safety hooks and wire inspector.
 
 **Contains [RUNBOOK] requirements**: ROUTE-11.
-**Plans**: TBD
-**Research**: Not needed — the three-tier routing mechanism is verified at source; the virtual-provider path is explicitly out of scope for v1.
+**Plans**: 12 plans across 7 waves
+
+Plans:
+**Wave 1**
+
+- [ ] 05-01-PLAN.md — `routing/schema.ts`: the role→model map for six roles × three modes, and its resolvability proof (ROUTE-01)
+- [ ] 05-02-PLAN.md — `routing/guard.ts`: the four hard blocks as pure predicates, each with a paired negative (ROUTE-06, ROUTE-07, ROUTE-08)
+- [ ] 05-03-PLAN.md — `qoder/`: the Cloud Agents client, the tolerant SSE parser and the allowlisted delegate tool with a measured schema cost (ROUTE-11)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 05-04-PLAN.md — `routing/modes.ts`: state, candidate resolution, guard precedence and single-shot dispatch through the chokepoint (ROUTE-01, ROUTE-04)
+- [ ] 05-05-PLAN.md — `routing/agent-overrides.ts`: the validated `settings.subagents.agentOverrides` read-modify-write (ROUTE-05)
+- [ ] 05-06-PLAN.md — the Qoder loopback HTTP+SSE fixture and ROUTE-11's offline proxy test (ROUTE-11)
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 05-07-PLAN.md — `routing/index.ts`: `/cheap`, `/balanced`, `/max` after `waitForIdle`, with every `setModel` failure surfaced (ROUTE-02, ROUTE-05, ROUTE-09)
+- [ ] 05-08-PLAN.md — single-shot roles: nested rows, per-call reasoning effort, no session mutation (ROUTE-04)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
+- [ ] 05-09-PLAN.md — `/escalate` and `/escalate off`, sticky across turns and executor-scoped (ROUTE-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
+- [ ] 05-10-PLAN.md — the `session_start` restore and the zero-context-token absence proof (ROUTE-09)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
+- [ ] 05-11-PLAN.md — the wire proof: two switches, two models, read from the log and never from a `setModel` spy (ROUTE-10)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
+- [ ] 05-12-PLAN.md — `docs/ROUTING.md`, `RB-05-01` (OUTSTANDING) and requirements traceability (all ROUTE ids)
+
+**Research**: DONE — `05-RESEARCH.md`. Two findings changed the plan: Pi already persists and restores the executor model natively via `model_change` session entries, so the `ky:mode` custom entry carries only the mode name and the escalation flag; and `Model<TApi>` carries **no** tool-calling-support field at all, so ROUTE-08 must be an explicit model-id deny-list rather than a catalogue predicate. `isAnthropicClaudeModel` is not exported from pi-ai and is re-implemented locally, with the same borrowed-not-imported risk Phase 3 already accepted for `QUOTA_PATTERN`.
 
 ### Phase 6: Walking Skeleton — `/quick` & the Evidence Gate
 
