@@ -217,6 +217,20 @@ export type AgentOverridesResult =
 	| { readonly ok: false; readonly reason: string };
 
 /**
+ * Test-only injection seam for {@link agentOverridesFor}. Production code
+ * NEVER passes this — it defaults to the real `./schema.ts` tables. It exists
+ * so `tests/unit/agent-overrides.test.ts` can build a fixture role map whose
+ * only subagent candidate is guard-blocked, without mutating the real,
+ * shared `ROLE_MAP` module singleton (which every other routing test also
+ * imports).
+ */
+export interface AgentOverridesForOptions {
+	readonly roleMap?: typeof ROLE_MAP;
+	readonly roleMechanism?: typeof ROLE_MECHANISM;
+	readonly agentNameByRole?: typeof AGENT_NAME_BY_ROLE;
+}
+
+/**
  * Derive `settings.subagents.agentOverrides` for the mode carried by `state`.
  *
  * For every role whose {@link ROLE_MECHANISM} is `"subagent"`, this walks
@@ -234,15 +248,22 @@ export type AgentOverridesResult =
  * must never be called with a partial or absent result — see the caller
  * discipline note at that function's own doc comment.
  */
-export function agentOverridesFor(state: Pick<KyModeData, "mode">): AgentOverridesResult {
-	const overrides: Record<string, AgentOverrideEntry> = {};
-	const modeMap = ROLE_MAP[state.mode];
+export function agentOverridesFor(
+	state: Pick<KyModeData, "mode">,
+	opts: AgentOverridesForOptions = {},
+): AgentOverridesResult {
+	const roleMap = opts.roleMap ?? ROLE_MAP;
+	const roleMechanism = opts.roleMechanism ?? ROLE_MECHANISM;
+	const agentNameByRole = opts.agentNameByRole ?? AGENT_NAME_BY_ROLE;
 
-	for (const roleKey of Object.keys(ROLE_MECHANISM) as Role[]) {
-		if (ROLE_MECHANISM[roleKey] !== "subagent") {
+	const overrides: Record<string, AgentOverrideEntry> = {};
+	const modeMap = roleMap[state.mode];
+
+	for (const roleKey of Object.keys(roleMechanism) as Role[]) {
+		if (roleMechanism[roleKey] !== "subagent") {
 			continue;
 		}
-		const agentName = AGENT_NAME_BY_ROLE[roleKey];
+		const agentName = agentNameByRole[roleKey];
 		if (agentName === undefined) {
 			// A subagent-mechanism role with no entry in AGENT_NAME_BY_ROLE is a
 			// schema.ts authoring bug, not a runtime condition this function should
