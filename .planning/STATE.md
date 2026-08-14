@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-01-PLAN.md -- currentSha() and GATE-07 evidence gate
-last_updated: "2026-08-14T14:34:18.212Z"
+stopped_at: Completed 06-02-PLAN.md -- /quick, the walking skeleton command
+last_updated: "2026-08-14T14:45:17.351Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 60
-  completed_plans: 57
+  completed_plans: 58
   percent: 45
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 06 (Walking Skeleton — /quick & the Evidence Gate) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [██████████] 95%
+Progress: [██████████] 97%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -123,6 +123,7 @@ credentials can do has been done".
 | Phase 05 P11 | 35m | 2 tasks | 1 files |
 | Phase 05 P12 | 20m | 3 tasks | 6 files |
 | Phase 06 P01 | 45m | 3 tasks | 4 files |
+| Phase 06 P02 | ~25min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -302,6 +303,9 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-01: currentSha throws on non-zero exit, unlike currentBranch's DETACHED_HEAD sentinel -- no safe default exists for an unknown SHA (decision D-B)
 - [Phase 06]: 06-01: EvidenceVerdict mirrors GuardVerdict/PlanResult ({ok:true,sha}|{ok:false,reason}) rather than safety's {kind:allow|block} -- GATE-07 renders a verdict about a claim, routing's semantics (decision D-C)
 - [Phase 06]: 06-01: endRun() never throws and writes exactly one row, copying safety/audit.ts's never-throw contract (decision D-D)
+- [Phase 06]: 06-02: /quick never makes a nested model call for the work itself -- runSingleShotRole throws for the executor role by design (modes.ts:401-406), so the task is handed to the session's ordinary prompt loop via pi.sendUserMessage
+- [Phase 06]: 06-02: the completion gate fires on Pi's agent_end event, never on an awaited ctx.waitForIdle() -- waitForIdle resolves immediately as a no-op in every headless session this repo's test harness uses (runner.js:260)
+- [Phase 06]: 06-02: /quick's header is capped short as a deliberate, stated exception to house style -- the rationale is relocated to docs/WORKFLOWS.md, not deleted, and the raw-line budget itself is registered only in tests/unit/workflow-budgets.test.ts (plan 06-03), never restated as a number in the doc
 
 ### Pending Todos
 
@@ -349,8 +353,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T14:34:18.202Z
-Stopped at: Completed 06-01-PLAN.md -- currentSha() and GATE-07 evidence gate
+Last session: 2026-08-14T14:45:17.343Z
+Stopped at: Completed 06-02-PLAN.md -- /quick, the walking skeleton command
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

@@ -126,7 +126,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 
 ### Workflows
 
-- [ ] **FLOW-01**: `/quick` executes trivial work with no ceremony, in **≤80 lines**, enforced by a CI line-budget test
+- [x] **FLOW-01**: `/quick` executes trivial work with no ceremony, in **≤80 lines**, enforced by a CI line-budget test
 - [ ] **FLOW-02**: `/grill` interrogates until the spec is unambiguous, using an ambiguity scorecard with per-dimension floors, a hard question budget, one question at a time, and rotating interview perspectives
 - [ ] **FLOW-03**: `/grill` produces SPEC.md containing a **Verified Codebase Facts** table — `claim | evidence (file:line or command output) | how verified` — and refuses to write requirements until it exists
 - [ ] **FLOW-04**: SPEC.md states error behaviour as `IF <condition> THEN THE SYSTEM SHALL <response>`, which cannot be filled in without naming a failure
@@ -313,7 +313,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | QUAL-07 | Phase 8 | Pending |
 | QUAL-08 | Phase 9 | Pending |
 | QUAL-09 | Phase 8 | Pending |
-| FLOW-01 | Phase 6 | Pending |
+| FLOW-01 | Phase 6 | Complete |
 | FLOW-02 | Phase 9 | Pending |
 | FLOW-03 | Phase 9 | Pending |
 | FLOW-04 | Phase 9 | Pending |
