@@ -117,6 +117,19 @@ const ROWS: readonly Row[] = [
 		reasonMustContain: ["bash"],
 		why: "a passing record from a DIFFERENT sha may not be borrowed to rescue a claim at HEAD -- only records already at headSha are considered for the isError check",
 	},
+	{
+		name: "CR-01c (iteration 2, PROBE F) -- a failure at the STALE sha cannot be buried by a later commit's own passing record at headSha",
+		records: [record("bash", shaA, true), record("bash", shaB, false)],
+		baseSha: shaA,
+		expected: "reject",
+		reasonMustContain: ["bash"],
+		why:
+			"PROBE F, verbatim: a verification command fails (isError:true, captured at the pre-commit sha), then a " +
+			"commit lands (its own tool_result is a passing record at the new HEAD). Before this branch existed the " +
+			"predicate narrowed to records AT headSha before ever inspecting isError, so the failing record -- sitting " +
+			"at baseSha, not headSha -- was silently discarded and this shape ACCEPTED. The failure must reject " +
+			"regardless of where HEAD ends up.",
+	},
 ];
 
 describe("GATE-07 -- gateCompletion", () => {

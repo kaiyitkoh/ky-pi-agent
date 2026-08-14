@@ -104,21 +104,41 @@ export function recordFromToolResult(input: {
  *       structured tool result and that transcript text is not evidence.
  *   (2) HEAD never moved (`headSha === baseSha`) -> reject: no commit landed
  *       during this run, so every record captured is trivially "at HEAD" by
- *       construction and cannot support a completion claim (CR-01: this is
+ *       construction and cannot support a completion claim (CR-01a: this is
  *       what stops `bash echo hi` -- or a bare `read`, which is not even a
  *       command -- from satisfying a claim when nothing was ever committed).
- *   (3) no record whose `sha === headSha` -> reject, naming the recorded
+ *   (3) ANY record in the run has `isError === true` -> reject, naming every
+ *       failing tool. This branch sits BEFORE the `headSha` narrowing on
+ *       purpose (CR-01b): a failed tool result is a fact about this run's
+ *       task, and a commit landing AFTER the failure does not retroactively
+ *       make it irrelevant -- the failing record must not be "aged out" of
+ *       the predicate just because it no longer sits at the SHA that ends up
+ *       being HEAD. Without this branch the accept condition silently
+ *       reduced to "a commit landed via a tool call that exited 0", because
+ *       the only record that can ever sit AT a post-commit HEAD is the
+ *       commit call itself.
+ *   (4) no record whose `sha === headSha` -> reject, naming the recorded
  *       SHA(s) and `headSha`, stating the claim is stale.
- *   (4) every record at `headSha` has `isError === true` (none passing) ->
- *       reject, naming the failing tool(s).
- *   (5) otherwise -> accept, carrying `headSha`.
+ *   (5) otherwise -> accept, carrying `headSha`. Because branch (3) already
+ *       rejected any run containing a failure, every record surviving to
+ *       here is known-passing; there is no separate "all failing at HEAD"
+ *       branch left to reach.
  *
  * Reject reasons are built from the record data itself, never from a
  * caller-supplied string. A record set containing one stale-but-passing and
- * one fresh-but-failing entry still rejects at step (4): a passing record
- * from a different SHA can never be "borrowed" to satisfy a claim at
- * `headSha`, because step (3) has already narrowed to records AT `headSha`
- * before step (4) ever inspects `isError`.
+ * one fresh-but-failing entry still rejects at step (3), globally, before
+ * `headSha` is even consulted -- the fresh failure cannot be diluted by an
+ * unrelated stale pass, and (per CR-01) cannot be buried by a LATER commit
+ * either.
+ *
+ * WHAT THIS PREDICATE DOES NOT, AND CANNOT, PROVE: that the commit's diff
+ * contains the claimed work, or that anything meaningful was verified at
+ * all -- an empty commit (`git commit --allow-empty`) or a commit of wholly
+ * unrelated content both still ACCEPT here, because distinguishing "the
+ * commit contains the work" from "the commit is empty" needs a diff or a
+ * tree hash, which this phase does not have (Phase 8's job). Callers must
+ * not describe an ACCEPT verdict as an endorsement of the work; see
+ * `index.ts`'s notification text and `docs/WORKFLOWS.md` section 4.
  */
 export function gateCompletion(records: readonly EvidenceRecord[], headSha: string, baseSha: string): EvidenceVerdict {
 	if (records.length === 0) {
@@ -139,6 +159,21 @@ export function gateCompletion(records: readonly EvidenceRecord[], headSha: stri
 		};
 	}
 
+	// (3) CR-01: any failed tool result ANYWHERE in this run -> reject. Sits
+	// BEFORE the headSha narrowing so a failure cannot be aged out of
+	// relevance by a commit made after it -- within one run every record
+	// belongs to the same task.
+	const failing = records.filter((r) => r.isError);
+	if (failing.length > 0) {
+		const failingTools = Array.from(new Set(failing.map((r) => r.toolName))).join(", ");
+		return {
+			ok: false,
+			reason:
+				`a tool result in this run failed (${failingTools}) -- a completion claim cannot be supported by a ` +
+				"run that contains a recorded failure, even if a commit landed afterwards",
+		};
+	}
+
 	const atHead = records.filter((r) => r.sha === headSha);
 	if (atHead.length === 0) {
 		const recordedShas = Array.from(new Set(records.map((r) => r.sha))).join(", ");
@@ -147,15 +182,6 @@ export function gateCompletion(records: readonly EvidenceRecord[], headSha: stri
 			reason:
 				`recorded evidence is stale: recorded at ${recordedShas}, but HEAD is now ${headSha} -- this ` +
 				"completion claim's evidence does not match the current commit",
-		};
-	}
-
-	const passingAtHead = atHead.filter((r) => !r.isError);
-	if (passingAtHead.length === 0) {
-		const failingTools = Array.from(new Set(atHead.filter((r) => r.isError).map((r) => r.toolName))).join(", ");
-		return {
-			ok: false,
-			reason: `evidence at HEAD (${headSha}) includes a failed tool result from ${failingTools} and no passing one`,
 		};
 	}
 
@@ -218,7 +244,11 @@ export function endRun(headSha: string): EvidenceVerdict | undefined {
 	const verdict = gateCompletion(state.records, headSha, state.baseSha);
 	writeEvidenceRow(state.cwd, {
 		verdict: verdict.ok ? "accept" : "reject",
-		reason: verdict.ok ? `evidence accepted at ${headSha}` : verdict.reason,
+		// CR-01 item 2: state what was actually checked, not an endorsement --
+		// a commit landed with no captured failure, NOT "the work is verified".
+		reason: verdict.ok
+			? `a commit landed at ${headSha} with no failed tool result recorded during this run -- the work itself is not verified`
+			: verdict.reason,
 		baseSha: state.baseSha,
 		headSha,
 		recordCount: state.records.length,
