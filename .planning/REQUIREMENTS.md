@@ -74,7 +74,7 @@
 
 - [x] **ROUTE-01**: An explicit role→model map covers executor, planner, reviewer, advisor, vision, and summariser — no auto-classification
 - [x] **ROUTE-02**: `/cheap`, `/balanced`, `/max` swap the whole role→model map via `pi.setModel()` from a command after `await ctx.waitForIdle()`, which removes the race **[FAUX]**
-- [ ] **ROUTE-03**: `/escalate` pulls a stronger model for one invocation, and the elevated state is visible and sticky until cleared **[FAUX]**
+- [x] **ROUTE-03**: `/escalate` pulls a stronger model for one invocation, and the elevated state is visible and sticky until cleared **[FAUX]**
 - [x] **ROUTE-04**: Single-shot roles (review, advisor, vision, summarise) run through `callModel()` → `ctx.modelRegistry.complete()` with per-call reasoning effort, not by mutating session state **[FAUX]** — *the pure plan/dispatch pipeline (`resolveRoute`, `pickConfiguredCandidate`, `planRoleCall`, `runSingleShotRole`) was proven at the unit level in plan 05-04 (`tests/unit/routing-dispatch.test.ts`); the `[FAUX]` session-level proof — `tests/integration/single-shot-roles.test.ts` (plan 05-08) driving `runSingleShotRole` against a real faux session and reading back the wire/turns records — proves the nested-row identity, no-session-mutation, per-call-reasoning-effort-on-the-wire (both directions) and zero-cost-guard-refusal properties*
 - [x] **ROUTE-05**: Roles needing a tool loop run as subagents **[FAUX]**
 - [x] **ROUTE-06**: Capability guards hard-block impossible routes: image → text-only model; oversized context → small-window model **[FAUX]**
@@ -275,7 +275,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-17 | Phase 4 | Complete — plan 04-11 |
 | ROUTE-01 | Phase 5 | Complete |
 | ROUTE-02 | Phase 5 | Complete |
-| ROUTE-03 | Phase 5 | Pending |
+| ROUTE-03 | Phase 5 | Complete |
 | ROUTE-04 | Phase 5 | Complete — plan pipeline (05-04) plus [FAUX] session proof (05-08, `tests/integration/single-shot-roles.test.ts`) |
 | ROUTE-05 | Phase 5 | Complete |
 | ROUTE-06 | Phase 5 | Complete |

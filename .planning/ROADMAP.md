@@ -255,7 +255,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 05-09-PLAN.md — `/escalate` and `/escalate off`, sticky across turns and executor-scoped (ROUTE-03)
+- [x] 05-09-PLAN.md — `/escalate` and `/escalate off`, sticky across turns and executor-scoped (ROUTE-03)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
