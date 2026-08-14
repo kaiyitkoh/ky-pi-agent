@@ -31,6 +31,27 @@ human_verification:
 
 **Score:** 5/5 in-repo truths verified; 1 (#5) has a live-service half correctly deferred to a human-run runbook item, per phase design.
 
+> **POST-VERIFICATION AMENDMENT (orchestrator, autonomous run).** This report was written BEFORE the
+> phase code review. The subsequent 3-iteration review (`05-REVIEW.md`, `05-REVIEW-FIX.md`) found and
+> fixed **27 findings, including 4 blockers**, two of which materially affect truths marked ✓ VERIFIED
+> above and would not have been caught by the test suite as it stood:
+> - **Truth #4** was passed while `runSingleShotRole` discarded the candidate it had just resolved and
+>   restarted at `CHAIN[0]`, so on a DashScope-only machine the router's chosen hop was never tried
+>   (fixed, `70ec78f`).
+> - **Truth #1's cheap-mode clause was in fact OPEN.** Cheap's only wire evidence ran through
+>   `callWithFallback`, which re-resolves `CHAIN[0]` itself and therefore could not distinguish a
+>   routing decision from a hardcoded chain head. Closed by asserting on `cheap.advisor`
+>   (a non-chain member) — turn-row provider/model plus the `corr`-joined `nested.request` payload
+>   (`5191812`). Criterion 1 is now genuinely proven for **cheap, balanced and max**.
+>
+> Also fixed: the suite was writing `subagents.agentOverrides` into the developer's REAL
+> `~/.pi/agent/settings.json` (confirmed on disk, then cleaned; structural isolation added, `b4a5711`),
+> and a truncated Qoder SSE stream was returned as a complete answer (`83e887e`).
+>
+> **Status is unchanged (`human_needed`, RB-05-01 only) and the score stands at 5/5** — the fixes
+> strengthened the evidence behind these truths rather than invalidating them. Post-fix state:
+> 80 test files / 1376 tests green, `tsc --noEmit` clean.
+
 ### Required Artifacts
 
 | Artifact | Expected | Status | Details |
