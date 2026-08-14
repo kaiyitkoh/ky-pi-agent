@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-12-PLAN.md
-last_updated: "2026-08-14T21:42:33.149Z"
+stopped_at: Completed 07-10-PLAN.md (install gate NOT SATISFIED, no install ran, UNVERIFIED recorded)
+last_updated: "2026-08-14T21:57:15.046Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 70
+  completed_plans: 71
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 11 of 13
+Plan: 12 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [██████████] 96%
+Progress: [██████████] 97%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -137,6 +137,7 @@ credentials can do has been done".
 | Phase 07 P09 | 55m | 3 tasks | 3 files |
 | Phase 07 P08 | 35m | 2 tasks | 4 files |
 | Phase 07 P12 | 25m | 2 tasks | 2 files |
+| Phase 07 P10 | 40m | 4 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -355,6 +356,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-08: workflow-budgets.test.ts's walkOnDisk() threw ENOTDIR on a flat top-level command file (todo.ts resolves to itself under WR-03's slice(0,3) directory rule) -- fixed with a statSync().isDirectory() guard, a real pre-existing bug this plan's flat placement was the first to exercise
 - [Phase 07]: 07-12: this plan's own drafted premise (agentScope loads .pi/agents/*.md via .pi/settings.json) is false for pi-subagents@0.49.0 -- agentScope is a per-call parameter defaulting to both, never a settings key; docs/EXTENSIONS.md and tests/unit/subagent-capabilities.test.ts both assert the true shape instead of the plan's falsified assertion
 - [Phase 07]: 07-12: pi-subagents@0.49.0 contributes exactly 4 model-facing tools to the main session (subagent, subagent_wait, contact_supervisor, intercom), none config-reducible; a fifth subagent definition in fanout-child.ts is a separate entry point loaded only in nested fanout-child pi processes and excluded from this baseline for Phase 10
+- [Phase 07]: 07-10: install gate found NOT SATISFIED -- pre-authorisation ground (a) ('no credentials on this machine') is FALSE, live AWS SSO/static admin keys confirmed present via aws sts get-caller-identity; no pi install ran, full read-only package-legitimacy review performed instead, reconciliation recorded UNVERIFIED with RB-07-02 handed to plan 07-13
+- [Phase 07]: 07-10: EXT-05 was marked [x] Complete by plan 07-06, before any of the five npm-installed packages were ever installed; this plan did not correct REQUIREMENTS.md but flags it as a Blocker/Concern for the user or plan 07-13 to reconcile
 
 ### Pending Todos
 
@@ -374,6 +377,7 @@ None yet.
 - **BOOT-07's live CI run is OUTSTANDING**: `.github/workflows/ci.yml` exists, is valid YAML, and is statically proven (both action SHAs resolved against the GitHub API, matrix `[windows-latest, macos-latest]`, `fail-fast: false`, every execution step asserted by `tests/unit/ci-pinning.test.ts`). It has **never run** — GitHub Actions cannot be triggered from this machine. macOS behaviour, ShellCheck's verdict on the two tracked scripts, and whether the pinned global Pi install satisfies the load-path tests on a runner are all unverified until the first push. Do not report a green tick that does not exist. **It has no `docs/RUNBOOK.md` entry yet** — Plan 10 seeded only the three checks its plan named. A later phase should add it alongside `RB-01-01..03`.
 - **`shellcheck` is not installed on this machine**: full `--shell=sh` conformance of `bin/bootstrap.sh` and `scripts/check-gh-unauthenticated.sh` is UNVERIFIED locally. Narrowed by code review WR-07: `/usr/bin/dash` IS present (Git for Windows ships it) and is a genuine POSIX shell rather than bash in POSIX mode, so `tests/unit/lf-and-shell.test.ts` now parses every tracked `*.sh` with `dash -n` in addition to the four-construct bashism regex. Both scripts pass. A parse is not a lint — unquoted expansions and BSD-vs-GNU flag differences still need the Ubuntu `posix-lint` job, which has never run.
 - **Moving platform**: Pi ships every 2–3 days; the composed extension ecosystem ships 13–16 releases/month. Every pin must be re-verified at Phase 7 planning time, not inherited from research.
+- RB-07-02 (new, plan 07-13 must add to docs/RUNBOOK.md, OUTSTANDING): pi install for the five pinned specs (pi-subagents@0.49.0, pi-background-tasks@2.4.2, @narumitw/pi-lsp@0.49.4, pi-web-access@0.22.0, pi-session-finder@0.5.6) has never run in this repository -- the 07-10 install gate found its own pre-authorisation ground (a) false (live AWS SSO/static admin credentials present on this dev machine) and recorded the checkpoint NOT SATISFIED rather than auto-approving. A human must be physically present to satisfy the package-legitimacy gate and run pi install + pi list reconciliation. REQUIREMENTS.md's EXT-05 is marked [x] Complete despite this -- needs review.
 
 ## Deferred Items
 
@@ -402,8 +406,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T21:42:33.138Z
-Stopped at: Completed 07-12-PLAN.md
+Last session: 2026-08-14T21:57:15.031Z
+Stopped at: Completed 07-10-PLAN.md (install gate NOT SATISFIED, no install ran, UNVERIFIED recorded)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
