@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-10-PLAN.md (install gate NOT SATISFIED, no install ran, UNVERIFIED recorded)
-last_updated: "2026-08-14T21:57:15.046Z"
+stopped_at: Completed 07-11-PLAN.md (EXT-05/EXT-06 capability registry and Phase 10 tool-count baseline)
+last_updated: "2026-08-14T22:20:18.121Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 71
+  completed_plans: 72
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 12 of 13
+Plan: 13 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [██████████] 97%
+Progress: [██████████] 99%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -138,6 +138,7 @@ credentials can do has been done".
 | Phase 07 P08 | 35m | 2 tasks | 4 files |
 | Phase 07 P12 | 25m | 2 tasks | 2 files |
 | Phase 07 P10 | 40m | 4 tasks | 1 files |
+| Phase 07 P11 | 55m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -358,6 +359,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-12: pi-subagents@0.49.0 contributes exactly 4 model-facing tools to the main session (subagent, subagent_wait, contact_supervisor, intercom), none config-reducible; a fifth subagent definition in fanout-child.ts is a separate entry point loaded only in nested fanout-child pi processes and excluded from this baseline for Phase 10
 - [Phase 07]: 07-10: install gate found NOT SATISFIED -- pre-authorisation ground (a) ('no credentials on this machine') is FALSE, live AWS SSO/static admin keys confirmed present via aws sts get-caller-identity; no pi install ran, full read-only package-legitimacy review performed instead, reconciliation recorded UNVERIFIED with RB-07-02 handed to plan 07-13
 - [Phase 07]: 07-10: EXT-05 was marked [x] Complete by plan 07-06, before any of the five npm-installed packages were ever installed; this plan did not correct REQUIREMENTS.md but flags it as a Blocker/Concern for the user or plan 07-13 to reconcile
+- [Phase 07]: 07-11: pi-subagents parent-session tool pair corrected to subagent_supervisor+intercom (not contact_supervisor), re-verified live against the pinned tarball; contact_supervisor and structured_output are both child-process-only
+- [Phase 07]: 07-11: TOOL_COUNT_BASELINE registry closes EXT-05/EXT-06 with 4 live tools/1015 tokens now (2 tools/411 tokens Phase-7's own) and 21 declared-but-uninstalled npm tool names across 5 pinned packages, split by provenance never blended -- vendored side is grep-enforced against tracked source every run, npm side is a recorded baseline re-read this session via npm pack + tar -xf, no install
 
 ### Pending Todos
 
@@ -406,8 +409,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T21:57:15.031Z
-Stopped at: Completed 07-10-PLAN.md (install gate NOT SATISFIED, no install ran, UNVERIFIED recorded)
+Last session: 2026-08-14T22:20:18.108Z
+Stopped at: Completed 07-11-PLAN.md (EXT-05/EXT-06 capability registry and Phase 10 tool-count baseline)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
