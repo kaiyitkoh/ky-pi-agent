@@ -109,6 +109,12 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 		budget: 710,
 		why: "Phase 2's /budget command -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 703 raw lines 2026-08-14, rounded up to the next ten",
 	},
+	{
+		file: ".pi/extensions/checkpoint/index.ts",
+		budget: 170,
+		why: "Phase 7 plan 03 (EXT-07)'s /checkpoint-restore command -- WR-05 widened discovery to catch " +
+			"command surfaces outside workflows/; measured 161 raw lines 2026-08-15, rounded up to the next ten",
+	},
 ];
 
 /**
@@ -143,6 +149,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 		budget: 3670,
 		why: "WR-03; measured 3662 raw lines across 9 files 2026-08-15 (not re-reviewed for tightness), " +
 			"rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/checkpoint",
+		budget: 530,
+		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
+			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
+			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten",
 	},
 ];
 
