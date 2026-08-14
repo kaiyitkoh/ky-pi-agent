@@ -540,10 +540,22 @@ export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
 		(entry): entry is CustomEntry<KyModeData> => entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE,
 	);
 	const latest = modeEntries.at(-1);
-	if (latest?.data === undefined) {
-		// Nothing persisted yet on this branch -- the module's own
-		// getModeState() default (DEFAULT_MODE, not escalated) already covers
-		// this case; there is nothing to restore.
+	// WR-04: `latest?.data === undefined` does NOT catch `data: null` --
+	// `null === undefined` is `false` in JavaScript, so a malformed payload of
+	// exactly `{ data: null }` used to fall through to `isModeName(data.mode)`
+	// and dereference `null`, throwing a TypeError straight past this
+	// function's own "NEVER THROWS" doc comment (the `session_start` wrapper's
+	// `catch` contained the damage there, but the exported function's stated
+	// contract -- the thing every direct caller and every test reads -- was
+	// false). Checking `typeof latest.data !== "object"` catches `null` (whose
+	// typeof IS "object" in JS) via the explicit `=== null` arm first, and
+	// catches every other non-object payload shape (a bare string, a number)
+	// in the same branch.
+	if (latest === undefined || latest.data === null || typeof latest.data !== "object") {
+		// Nothing persisted yet on this branch, or the payload is not an
+		// object at all -- the module's own getModeState() default
+		// (DEFAULT_MODE, not escalated) already covers this case; there is
+		// nothing to restore.
 		return;
 	}
 

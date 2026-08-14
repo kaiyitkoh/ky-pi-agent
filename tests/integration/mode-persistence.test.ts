@@ -306,6 +306,51 @@ describe("ROUTE-09 -- mode persistence: branch restore and the zero-context-toke
 		).toBe(DEFAULT_MODE);
 	});
 
+	it("case 3b -- WR-04: a branch whose latest ky:mode payload carries data: null never throws, and leaves whatever state was already in force untouched", () => {
+		// `latest?.data === undefined` (the pre-fix check) does NOT catch
+		// `data: null` -- `null === undefined` is `false` in JavaScript.
+		// Execution used to reach `isModeName(data.mode)` and dereference
+		// `null`, throwing a TypeError straight past this function's own
+		// "NEVER THROWS" doc comment. Case 3 above only exercises a malformed
+		// MODE STRING inside an otherwise-well-formed payload object; this case
+		// exercises a malformed PAYLOAD itself. The fix treats `data: null` as
+		// "nothing to restore" (an early return, the same branch an absent
+		// `data` field already takes) -- it does NOT force DEFAULT_MODE the way
+		// case 3's malformed-mode-STRING path does, because that path only
+		// runs once `data` is confirmed to be an object worth reading `mode`
+		// off of. Perturbing to "balanced" (a mode DEFAULT_MODE is not) and
+		// asserting it STAYS "balanced" is the stronger, non-vacuous proof:
+		// asserting a fall-back TO DEFAULT_MODE here would pass just as well
+		// for a buggy implementation that unconditionally reset state on any
+		// malformed payload, which is not what "leave it untouched" means.
+		const fabricatedBranch: SessionEntry[] = [
+			{
+				type: "custom",
+				id: "fabricated-null-data",
+				parentId: null,
+				timestamp: new Date().toISOString(),
+				customType: MODE_ENTRY_TYPE,
+				data: null,
+			} as unknown as SessionEntry,
+		];
+
+		setMode("balanced");
+		setEscalated(false);
+		expect(getModeState().mode, "perturbation before restore did not take").toBe("balanced");
+
+		expect(
+			() => restoreModeFromBranch(fabricatedBranch),
+			"restoreModeFromBranch threw on a data: null payload -- a corrupt or hand-edited branch must " +
+				"never be able to stop a session from starting (T-05-39)",
+		).not.toThrow();
+
+		expect(
+			getModeState().mode,
+			'a null payload was not treated as "nothing to restore" -- the perturbed state was changed ' +
+				"instead of being left alone",
+		).toBe("balanced");
+	});
+
 	it("case 4 -- zero context tokens: the ky:mode marker never reaches a provider payload, proven with a positive control", async () => {
 		await withPersistenceSession(async ({ session, modelRuntime }, captured) => {
 			void modelRuntime;
