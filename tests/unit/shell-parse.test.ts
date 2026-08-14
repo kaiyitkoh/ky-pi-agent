@@ -132,6 +132,49 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 			"the raw 'git.exe' word, only the internal gate is normalised.",
 	},
 	{
+		label: "/usr/bin/env, path-qualified (CR-10 regression)",
+		cmd: "/usr/bin/env git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["env"],
+		why:
+			"CR-10: resolveWrappers' own env gate compared a bare .toLowerCase(), so the path-qualified " +
+			"canonical POSIX spelling '/usr/bin/env' was never recognised as the env wrapper at all -- " +
+			"the loop broke immediately and 'executable' became '/usr/bin/env' itself, with 'git push' " +
+			"left unclassified in args. Fixed by routing through normaliseExecutable, same as every other " +
+			"bare-verb gate this module owns.",
+	},
+	{
+		label: "env.exe (CR-10 regression, Git-for-Windows spelling)",
+		cmd: "env.exe git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["env"],
+		why: "same class as the /usr/bin/env row above, for the '.exe'-suffixed Git-for-Windows spelling -- the same argument CR-03 already made for git.exe.",
+	},
+	{
+		label: "/usr/bin/sudo, path-qualified (CR-10 regression)",
+		cmd: "/usr/bin/sudo git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["sudo"],
+		why: "same class as the env rows above, for resolveWrappers' own sudo gate.",
+	},
+	{
+		label: "/usr/bin/nohup, path-qualified (CR-10 regression)",
+		cmd: "/usr/bin/nohup git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["nohup"],
+		why: "same class as the env/sudo rows above, for resolveWrappers' own PASSTHROUGH_WRAPPERS gate.",
+	},
+	{
+		label: "/usr/bin/env with a non-guarded verb (CR-10 paired negative)",
+		cmd: "/usr/bin/env echo hi",
+		expectedExecutable: "echo",
+		expectedWrappers: ["env"],
+		why:
+			"a paired negative proving the CR-10 fix does not degenerate into 'any path-qualified env " +
+			"blocks': the wrapper still resolves generically to whatever real executable follows it, " +
+			"guarded or not -- policy.ts is what decides whether 'echo' itself is interesting, and it isn't.",
+	},
+	{
 		label: "npm run deploy (task-runner indirection)",
 		cmd: "npm run deploy",
 		outOfScope: true,
@@ -154,7 +197,7 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 describe("SAFE-02 -- wrapper-resolution table is non-empty (vacuous-pass guard)", () => {
 	it("covers every wrapper row named in the plan's <behavior> block plus the out-of-scope rows", () => {
 		expect(WRAPPER_TABLE.length, "a shortened table silently drops a Pitfall-2 regression or an out-of-scope row").toBeGreaterThanOrEqual(
-			14,
+			20,
 		);
 		const outOfScopeCount = WRAPPER_TABLE.filter((r) => r.outOfScope === true).length;
 		expect(outOfScopeCount, "SAFE-15 requires at least two rows explicitly tagged out-of-scope").toBeGreaterThanOrEqual(2);

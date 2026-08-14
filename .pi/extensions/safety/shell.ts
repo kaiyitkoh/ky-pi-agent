@@ -574,6 +574,18 @@ interface ResolvedWrappers {
  * quote-resolved) consuming recognised wrapper executables and their option
  * grammars, stopping at the first word that is not itself a wrapper. That
  * word — `values[index]` — is the real executable.
+ *
+ * CR-10: each wrapper name is matched via {@link normaliseExecutable}, not a
+ * bare `.toLowerCase()` — this module's own `normaliseExecutable` docstring
+ * already says every caller that gates on a bare verb name MUST route
+ * through it, and this function's three gates (`env`, `sudo`,
+ * {@link PASSTHROUGH_WRAPPERS}) were the ones CR-08 missed inside `shell.ts`
+ * itself. Executed before this fix: `/usr/bin/env git push`, `env.exe git
+ * push`, `/usr/bin/sudo git push` and `/usr/bin/nohup git push` all came back
+ * `allow` -- `/usr/bin/env` is the canonical POSIX spelling and `env.exe` is
+ * the Git-for-Windows one, neither adversarial, and this module's own
+ * docstring already names `env -i git push` and `sudo -u root git push`
+ * (bare spellings only) as the shapes wrapper resolution exists to handle.
  */
 function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 	const wrappers: string[] = [];
@@ -582,9 +594,9 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 
 	while (i < values.length) {
 		const word = values[i];
-		const lower = word.toLowerCase();
+		const verb = normaliseExecutable(word);
 
-		if (lower === "env") {
+		if (verb === "env") {
 			wrappers.push("env");
 			i += 1;
 			while (i < values.length && values[i].startsWith("-")) {
@@ -607,7 +619,7 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 			continue;
 		}
 
-		if (lower === "sudo") {
+		if (verb === "sudo") {
 			wrappers.push("sudo");
 			i += 1;
 			while (i < values.length && values[i].startsWith("-")) {
@@ -623,8 +635,8 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 			continue;
 		}
 
-		if (PASSTHROUGH_WRAPPERS.has(lower)) {
-			wrappers.push(lower);
+		if (PASSTHROUGH_WRAPPERS.has(verb)) {
+			wrappers.push(verb);
 			i += 1;
 			while (i < values.length && values[i].startsWith("-")) {
 				i += 1;
