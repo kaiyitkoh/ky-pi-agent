@@ -180,6 +180,220 @@ describe("EXT-02 -- a fresh worktree provably cannot build, and the shipped hook
 	);
 });
 
+/**
+ * Spawn the SHIPPED hook with `payload` on stdin and parse its one line of
+ * stdout. `cwd` defaults to the OS temp directory: the hook's behaviour must
+ * not depend on where it was launched from, and launching it inside this
+ * repository would risk a bug writing here.
+ */
+function runHook(
+	payload: unknown,
+	cwd: string = tmpdir(),
+): { status: number | null; stderr: string; syntheticPaths: string[]; rawStdout: string } {
+	const run = spawnSync(process.execPath, [HOOK_PATH], {
+		cwd,
+		encoding: "utf-8",
+		shell: false,
+		windowsHide: true,
+		input: JSON.stringify(payload),
+	});
+	const lines = run.stdout
+		.split("\n")
+		.map((line) => line.trim())
+		.filter((line) => line !== "");
+	// The contract is ONE line of JSON on stdout, on success AND on failure.
+	// Parsing it here rather than in each case means a hook that printed
+	// nothing, or printed prose, fails every case below with a clear message.
+	const parsed = lines.length === 1 ? (JSON.parse(lines[0]) as { syntheticPaths: string[] }) : { syntheticPaths: [] };
+	return { status: run.status, stderr: run.stderr, syntheticPaths: parsed.syntheticPaths, rawStdout: run.stdout };
+}
+
+/**
+ * WR-08 -- the hook's fail-closed validation branches, which had ZERO coverage.
+ *
+ * `worktree-build.test.ts`'s Pattern C chain is a genuinely strong proof of the
+ * happy path, and it covers exactly one hook invocation with one valid payload.
+ * Nothing exercised non-object stdin, malformed JSON, a wrong `version`, a
+ * non-absolute or empty `repoRoot`/`worktreePath`, a `worktreePath` that does
+ * not exist, or -- most importantly -- the containment guard the hook's own
+ * header calls "the one catastrophic failure mode here". A regression that
+ * deleted `isAncestorOrEqual` outright would have kept the entire suite green.
+ * MUTATION-VERIFIED: see this file's commit message for the recorded run.
+ */
+describe("EXT-02 / WR-08 -- the hook fails closed on every invalid payload", () => {
+	/** A directory that exists, so `worktreePath does not exist` is not what trips a case. */
+	function scratch(prefix: string): string {
+		const dir = mkdtempSync(join(tmpdir(), prefix));
+		cleanups.push(() => rmSync(dir, { recursive: true, force: true, maxRetries: 3 }));
+		return dir;
+	}
+
+	it("refuses every malformed payload with exit 1, an empty syntheticPaths and a stated reason", () => {
+		const repo = scratch("kypi-hook-repo-");
+		const worktree = scratch("kypi-hook-wt-");
+		const nonexistent = join(tmpdir(), `kypi-hook-nope-${randomUUID()}`);
+
+		const refusals: { label: string; payload: unknown }[] = [
+			{ label: "not an object", payload: "just a string" },
+			{ label: "an array", payload: [{ version: 1 }] },
+			{ label: "null", payload: null },
+			{ label: "wrong version", payload: { version: 2, repoRoot: repo, worktreePath: worktree } },
+			{ label: "missing version", payload: { repoRoot: repo, worktreePath: worktree } },
+			{ label: "relative repoRoot", payload: { version: 1, repoRoot: "rel/ative", worktreePath: worktree } },
+			{ label: "empty repoRoot", payload: { version: 1, repoRoot: "", worktreePath: worktree } },
+			{ label: "non-string repoRoot", payload: { version: 1, repoRoot: 42, worktreePath: worktree } },
+			{ label: "relative worktreePath", payload: { version: 1, repoRoot: repo, worktreePath: "rel" } },
+			{ label: "empty worktreePath", payload: { version: 1, repoRoot: repo, worktreePath: "" } },
+			{ label: "worktreePath IS repoRoot", payload: { version: 1, repoRoot: repo, worktreePath: repo } },
+			{
+				label: "worktreePath is an ANCESTOR of repoRoot",
+				payload: { version: 1, repoRoot: join(repo, "nested"), worktreePath: repo },
+			},
+			{ label: "worktreePath does not exist", payload: { version: 1, repoRoot: repo, worktreePath: nonexistent } },
+		];
+
+		const survivors: string[] = [];
+		for (const { label, payload } of refusals) {
+			const run = runHook(payload);
+			if (run.status !== 1) survivors.push(`${label}: exit ${run.status} (stdout: ${run.rawStdout.trim()})`);
+			else if (run.syntheticPaths.length !== 0) survivors.push(`${label}: reported ${JSON.stringify(run.syntheticPaths)}`);
+			else if (run.stderr.trim() === "") survivors.push(`${label}: refused silently, with no reason on stderr`);
+		}
+		expect(
+			survivors,
+			"every one of these must fail closed: exit 1, {\"syntheticPaths\":[]} on stdout, and a stated " +
+				"reason on stderr. A refusal that exits 0, or reports paths it did not create, or says nothing, " +
+				"is a hook a caller cannot distinguish from a successful no-op",
+		).toEqual([]);
+
+		// And the catastrophic case specifically: nothing may have been written
+		// into the parent repository by the containment refusals above.
+		expect(
+			existsSync(join(repo, "node_modules")) || existsSync(join(repo, ".env")),
+			"the containment refusal must run BEFORE any write -- provisioning into the parent repository " +
+				"is the one catastrophic failure mode this guard exists for (T-07-06)",
+		).toBe(false);
+	});
+
+	it("WR-04 -- containment holds when the worktreePath is spelled with different case (Windows)", () => {
+		// `resolve()` does not normalise drive-letter case and Windows paths are
+		// case-insensitive, so `c:\repo` and `C:\repo` are ONE directory that a
+		// raw `===` calls different. Before the canonical() fix the hook would
+		// have junctioned and copied into the parent. On POSIX the two spellings
+		// really are different directories, so this case asserts the platform's
+		// own truth rather than a universal.
+		const repo = scratch("kypi-hook-case-");
+		const swapped = repo.replace(/^([a-zA-Z]):/, (_m, drive: string) =>
+			`${drive === drive.toLowerCase() ? drive.toUpperCase() : drive.toLowerCase()}:`,
+		);
+		const differsOnlyByCase = swapped !== repo && swapped.toLowerCase() === repo.toLowerCase();
+		if (process.platform !== "win32" || !differsOnlyByCase) {
+			// Not applicable here -- but say so out loud rather than silently
+			// passing, so a green run on POSIX is not mistaken for coverage.
+			console.log(
+				`WR-04 case-folding: not applicable on platform=${process.platform} (repo=${repo}) -- ` +
+					"the assertion below still runs against the identical-spelling form",
+			);
+			const same = runHook({ version: 1, repoRoot: repo, worktreePath: repo });
+			expect(same.status, "worktreePath === repoRoot must always be refused").toBe(1);
+			return;
+		}
+
+		const run = runHook({ version: 1, repoRoot: repo, worktreePath: swapped });
+		expect(
+			run.status,
+			`a worktreePath that differs from repoRoot ONLY by drive-letter case is the SAME directory on ` +
+				`Windows and must be refused. repoRoot=${repo} worktreePath=${swapped}`,
+		).toBe(1);
+		expect(run.syntheticPaths).toEqual([]);
+		expect(
+			existsSync(join(repo, "node_modules")),
+			"nothing may have been provisioned into the parent under a differently-cased spelling",
+		).toBe(false);
+	});
+
+	it("WR-05/WR-07 -- every declined provisioning step says so, and declares the right synthetic paths", () => {
+		// Case A: parent has no node_modules and no .env. Exits 0 (a repository
+		// with no dependencies is legitimate) but must NOT be silent.
+		const bareRepo = scratch("kypi-hook-bare-");
+		const bareWorktree = scratch("kypi-hook-bare-wt-");
+		const bare = runHook({ version: 1, repoRoot: bareRepo, worktreePath: bareWorktree });
+		expect(bare.status, `a parent with no dependencies is not a failure: ${bare.stderr}`).toBe(0);
+		expect(bare.syntheticPaths, "nothing was provisioned, so nothing may be declared synthetic").toEqual([]);
+		expect(
+			bare.stderr,
+			"WR-05: this used to be a SILENT skip -- the subagent got an unbuildable worktree with no " +
+				"diagnostic, indistinguishable on stdout from a successful no-op",
+		).toContain("does not exist");
+
+		// Case B: the worktree ALREADY has node_modules and .env. The hook must
+		// leave both alone, say so, and declare node_modules synthetic anyway
+		// while NOT declaring .env.
+		const repo = scratch("kypi-hook-exists-");
+		mkdirSync(join(repo, "node_modules"), { recursive: true });
+		writeFileSync(join(repo, "node_modules", "marker.txt"), "PARENT\n", "utf-8");
+		writeFileSync(join(repo, ".env"), "FROM=parent\n", "utf-8");
+
+		const worktree = scratch("kypi-hook-exists-wt-");
+		mkdirSync(join(worktree, "node_modules"), { recursive: true });
+		writeFileSync(join(worktree, "node_modules", "marker.txt"), "WORKTREE\n", "utf-8");
+		writeFileSync(join(worktree, ".env"), "FROM=worktree-tracked\n", "utf-8");
+
+		const run = runHook({ version: 1, repoRoot: repo, worktreePath: worktree });
+		expect(run.status, `leaving existing content alone is not a failure: ${run.stderr}`).toBe(0);
+		expect(
+			readFileSync(join(worktree, ".env"), "utf-8"),
+			"WR-07, the most dangerous of the five: the .env copy was UNCONDITIONAL. In a repository where " +
+				".env is TRACKED, git worktree add checks it out and the hook silently overwrote it with the " +
+				"parent's -- then declared it synthetic, which makes pi-subagents DELETE it before every " +
+				"diff/cleanup pass",
+		).toBe("FROM=worktree-tracked\n");
+		expect(
+			readFileSync(join(worktree, "node_modules", "marker.txt"), "utf-8"),
+			"an existing worktree node_modules must be left exactly as it was",
+		).toBe("WORKTREE\n");
+		expect(
+			run.syntheticPaths,
+			"WR-05 case 2: node_modules must STILL be declared synthetic even though this hook did not " +
+				"create it, or pi-subagents treats it as real worktree content and walks it in every " +
+				"diff/cleanup pass. .env must NOT be, because the worktree's own .env is real content and " +
+				"may be tracked",
+		).toEqual(["node_modules"]);
+		expect(run.stderr, "the node_modules skip must be stated").toContain("already exists");
+		expect(run.stderr, "the .env skip must be stated too").toContain("already exists in the worktree");
+	});
+
+	it("WR-06 -- a failure AFTER provisioning reports what exists, not an empty list", () => {
+		// The .env copy runs after the node_modules junction, so a copy failure
+		// used to print {"syntheticPaths":[]} while the junction was already on
+		// disk -- a half-provisioned FAILURE whose reported state was wrong.
+		// Forced here by making the destination .env path un-writable: a
+		// DIRECTORY named `.env` in the worktree makes copyFileSync throw EISDIR
+		// while existsSync(envDst) is... true. So instead, make the .env source
+		// unreadable is unreliable on Windows; use the source-is-a-directory form,
+		// which makes existsSync(envSrc) true and copyFileSync throw.
+		const repo = scratch("kypi-hook-partial-");
+		mkdirSync(join(repo, "node_modules"), { recursive: true });
+		writeFileSync(join(repo, "node_modules", "marker.txt"), "PARENT\n", "utf-8");
+		mkdirSync(join(repo, ".env"), { recursive: true }); // a DIRECTORY, so the copy throws
+
+		const worktree = scratch("kypi-hook-partial-wt-");
+		const run = runHook({ version: 1, repoRoot: repo, worktreePath: worktree });
+
+		expect(run.status, `the .env copy must genuinely fail for this case to mean anything: ${run.stderr}`).toBe(1);
+		expect(
+			existsSync(join(worktree, "node_modules")),
+			"fixture sanity: the junction must have been created BEFORE the .env copy failed, or this case " +
+				"is not exercising the half-provisioned shape at all",
+		).toBe(true);
+		expect(
+			run.syntheticPaths,
+			"WR-06: fail() must report what actually exists. pi-subagents reads the declared syntheticPaths " +
+				"for diff and cleanup, so an undeclared junction appears in the subagent's patch output",
+		).toEqual(["node_modules"]);
+	});
+});
+
 describe("EXT-02 -- the link mechanism the hook depends on is measured, not assumed", () => {
 	it("the junction form (fs.symlinkSync(target, link, \"junction\")) works unconditionally", () => {
 		const base = mkdtempSync(join(tmpdir(), "kypi-link-mechanism-"));

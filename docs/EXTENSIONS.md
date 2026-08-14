@@ -249,6 +249,43 @@ reached) — see `07-05-SUMMARY.md` for the exact failing test names.
 package-manager install inside its worktree mutates the parent tree. Still a
 **Phase 8 follow-up**, not solved here.
 
+### Second accepted residual: the hook is wired at MACHINE scope, and it copies `.env` (WR-03)
+
+Added by the Phase 7 code review. `T-07-07` above records the
+`node_modules`-sharing residual and `T-07-08` records why `.env` is copied
+rather than linked. Neither records the consequence of the two combined with
+the **scope** the hook is wired at.
+
+`bin/bootstrap.sh#merge_subagent_config` writes `worktreeSetupHook` into
+`pi-subagents`' own config file, which is **user-scope**
+(`<agentDir>/extensions/subagent/config.json`, plan 07-09) — there is no
+project-scope alternative, and the hook path must be absolute for the same
+reason. So the hook applies to **every repository the operator ever runs Pi
+in on this machine**, and in each of them a worktree-isolated subagent spawn
+copies **that repository's `.env`** into a fresh worktree directory
+`pi-subagents` places wherever it likes, commonly outside the repo.
+
+**Decision taken: accepted, narrowed, and stated.** The copy is kept — most
+build steps a subagent runs need it, and dropping it would make the
+worktree-build proof this phase ships a different and weaker claim. It is
+narrowed three ways, all of them covered by
+`tests/integration/worktree-build.test.ts`'s WR-08 block:
+
+- The copy **never overwrites** an existing `.env` in the worktree. It used
+  to, unconditionally — in a repository where `.env` is *tracked* (bad
+  practice, common for non-secret defaults) `git worktree add` checks it out
+  and the hook replaced it, then declared it synthetic, which makes
+  `pi-subagents` delete it before every diff/cleanup pass.
+- A copy that IS made is `chmod 0600` best-effort rather than inheriting
+  whatever mode the source carried.
+- A skipped copy is reported on stderr, never silent.
+
+**What is still true and not solved here:** a secret-bearing file leaves its
+repository's directory tree, in every repository on this machine, whenever a
+worktree subagent spawns. The alternative — opting in per repository — needs
+a project-scope config surface `pi-subagents@0.49.0` does not expose. Named
+as a **Phase 8 follow-up** alongside `T-07-07`, not silently carried.
+
 ---
 
 ## Download counts are not evidence

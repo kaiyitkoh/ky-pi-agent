@@ -48,12 +48,27 @@
  * non-absolute `repoRoot`/`worktreePath`, a `worktreePath` that does not yet
  * exist, a `worktreePath` that equals or contains `repoRoot` -- this script
  * prints `{"syntheticPaths":[]}`, writes a diagnostic to stderr, and exits
- * non-zero. It never emits a half-provisioned success.
+ * non-zero. It never emits a half-provisioned success, and since WR-06 it no
+ * longer emits a half-provisioned FAILURE either: a failure that happens after
+ * something was created reports what exists (see {@link fail}). Every one of
+ * these branches is exercised by `tests/integration/worktree-build.test.ts`'s
+ * REFUSALS table -- before WR-08 they had no coverage at all, and deleting the
+ * containment check outright would have kept the whole suite green.
  *
  * CONTAINMENT IS ASSERTED BEFORE ANY WRITE. Provisioning "into" the parent
  * repository -- a `worktreePath` that equals or is an ancestor of
  * `repoRoot` -- is the one catastrophic failure mode here, and must be
- * impossible rather than merely unlikely (threat T-07-06).
+ * impossible rather than merely unlikely (threat T-07-06). Compared on
+ * canonicalised, case-folded real paths, not raw strings -- see
+ * {@link canonical} for why a case-sensitive comparison did not meet that bar
+ * on this project's own target platform (WR-04).
+ *
+ * NOTHING IS SKIPPED SILENTLY. Every branch that declines to provision says so
+ * on stderr (WR-05, WR-07): a parent with no `node_modules` (the worktree will
+ * not build), a worktree that already has one (left as-is but still DECLARED
+ * synthetic, or pi-subagents walks it in every diff/cleanup pass), and a
+ * worktree that already has a `.env` (left as-is and NOT declared synthetic,
+ * because it is the worktree's own content and may be tracked).
  *
  * NODE_MODULES: A JUNCTION, NEVER AN UNQUALIFIED SYMLINK. Verified directly
  * on this machine [RESEARCH.md, executed 2026-08-15]: the two-argument form
@@ -67,11 +82,23 @@
  * failure on stderr and exits non-zero -- a degraded worktree must be
  * visible, never silent.
  *
- * .ENV: COPIED, NEVER LINKED. A shared `.env` mutated inside one worktree
- * must not be visible to every other worktree or to the parent (threat
- * T-07-08). The copy is listed in `syntheticPaths` precisely so
- * pi-subagents excludes it from diff/cleanup output and it can never be
- * committed by the subagent.
+ * .ENV: COPIED, NEVER LINKED, AND NEVER OVER AN EXISTING FILE. A shared `.env`
+ * mutated inside one worktree must not be visible to every other worktree or
+ * to the parent (threat T-07-08). The copy is listed in `syntheticPaths`
+ * precisely so pi-subagents excludes it from diff/cleanup output and it can
+ * never be committed by the subagent. The destination is chmod'd 0600
+ * best-effort rather than inheriting whatever mode the source carried.
+ *
+ * ACCEPTED RESIDUAL (WR-03, recorded in `docs/EXTENSIONS.md` alongside T-07-07
+ * and T-07-08): this hook is wired at MACHINE scope by
+ * `bin/bootstrap.sh#merge_subagent_config`, because pi-subagents' config file
+ * is user-scope and the hook path must be absolute. So a worktree-isolated
+ * subagent spawned in ANY repository on this machine copies THAT repository's
+ * `.env` into a fresh worktree directory pi-subagents places wherever it
+ * likes, commonly outside the repo. The `.env` is not shared and is declared
+ * synthetic, but it is a secret-bearing file leaving its repository's
+ * directory tree, and that consequence is a property of the machine-scope
+ * wiring rather than of any one project.
  *
  * ACCEPTED RESIDUAL (threat T-07-07, recorded in `docs/EXTENSIONS.md`): the
  * `node_modules` junction points at the PARENT's real dependency tree, not a
@@ -82,7 +109,7 @@
  * deliberately if it ever becomes unacceptable.
  */
 
-import { copyFileSync, existsSync, symlinkSync } from "node:fs";
+import { chmodSync, copyFileSync, existsSync, realpathSync, symlinkSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 
 /** Read the whole of stdin as a UTF-8 string. */
@@ -98,16 +125,56 @@ async function readStdin() {
  * Emit the contract-conformant failure shape and mark the process for a
  * non-zero exit. Never calls `process.exit()` directly, so stdout/stderr are
  * flushed before Node actually exits.
+ *
+ * WR-06: `provisioned` is what has ALREADY been created on disk at the moment
+ * of the failure, and it is reported rather than assumed empty. The `.env`
+ * copy runs after the `node_modules` junction, so a `copyFileSync` throw used
+ * to print `{"syntheticPaths":[]}` while the junction existed -- a
+ * half-provisioned FAILURE whose reported state was wrong. pi-subagents reads
+ * the declared `syntheticPaths` for diff and cleanup, so an undeclared
+ * junction shows up in the subagent's patch output and may be walked during
+ * cleanup. Callers that have provisioned nothing yet simply omit the argument.
  */
-function fail(reason) {
+function fail(reason, provisioned = []) {
 	console.error(`worktree-setup-hook: ${reason}`);
-	process.stdout.write(`${JSON.stringify({ syntheticPaths: [] })}\n`);
+	process.stdout.write(`${JSON.stringify({ syntheticPaths: provisioned })}\n`);
 	process.exitCode = 1;
+}
+
+/**
+ * Canonical form of a path for containment comparison (WR-04).
+ *
+ * `resolve()` alone is NOT enough on this project's own target platform.
+ * Windows paths are case-insensitive and `resolve()` does not normalise
+ * drive-letter case, so `c:\repo` and `C:\repo` are the same directory and
+ * compare unequal -- a `worktreePath` spelled with the other case would pass
+ * the containment guard and the hook would then junction and copy INTO the
+ * parent repository. The same holds for 8.3 short names (`C:\Users\ADMIN~1\`)
+ * and for a repoRoot reached through a junction alias. The guard's own stated
+ * bar is "impossible, not merely unlikely", and a case-sensitive string
+ * comparison does not meet it.
+ *
+ * `realpathSync.native` resolves junctions, symlinks and short names to the
+ * real on-disk path. It throws when the path does not exist yet -- which is a
+ * legitimate state here, since the worktree existence check runs AFTER
+ * containment on purpose -- so that case falls back to `resolve()` alone, and
+ * the case-fold below still covers the drive-letter and casing forms.
+ */
+function canonical(p) {
+	let out = resolve(p);
+	try {
+		out = realpathSync.native(out);
+	} catch {
+		// Not on disk yet: resolve() is the best available canonical form.
+	}
+	return process.platform === "win32" ? out.toLowerCase() : out;
 }
 
 /** True when `a` equals `b`, or `a` is a directory ancestor of `b`. */
 function isAncestorOrEqual(a, b) {
-	return a === b || b.startsWith(a + sep);
+	const ca = canonical(a);
+	const cb = canonical(b);
+	return ca === cb || cb.startsWith(ca + sep);
 }
 
 async function main() {
@@ -178,7 +245,30 @@ async function main() {
 	// See the header comment for why.
 	const nodeModulesSrc = resolve(resolvedRepoRoot, "node_modules");
 	const nodeModulesDst = resolve(resolvedWorktreePath, "node_modules");
-	if (existsSync(nodeModulesSrc) && !existsSync(nodeModulesDst)) {
+	if (!existsSync(nodeModulesSrc)) {
+		// WR-05 case 1. This used to be a SILENT skip: the hook exited 0 reporting
+		// `syntheticPaths: []`, and the subagent got an unbuildable worktree with
+		// no diagnostic -- indistinguishable on stdout from a successful no-op, and
+		// the exact failure this hook exists to prevent. The header's own rule is
+		// "a degraded worktree must be visible, never silent". Not a hard failure,
+		// because a repository with no dependencies is a legitimate state.
+		console.error(
+			`worktree-setup-hook: ${nodeModulesSrc} does not exist -- the parent repository has no ` +
+				"installed dependencies, so this worktree will not be able to build. Run an install in " +
+				"the parent and re-spawn.",
+		);
+	} else if (existsSync(nodeModulesDst)) {
+		// WR-05 case 2. Also a silent skip before, and worse than case 1: it left
+		// node_modules OUT of syntheticPaths, so pi-subagents treated the directory
+		// as real worktree content and included it in every diff/cleanup pass --
+		// precisely the consequence the syntheticPaths contract exists to avoid.
+		// Declared synthetic even though this hook did not create it.
+		console.error(
+			`worktree-setup-hook: ${nodeModulesDst} already exists -- left as-is, declared synthetic so ` +
+				"pi-subagents still excludes it from diff and cleanup",
+		);
+		syntheticPaths.push("node_modules");
+	} else {
 		try {
 			symlinkSync(nodeModulesSrc, nodeModulesDst, "junction");
 			syntheticPaths.push("node_modules");
@@ -187,6 +277,7 @@ async function main() {
 				`failed to junction node_modules into the worktree: ` +
 					`${err instanceof Error ? err.message : String(err)} -- a degraded worktree must be ` +
 					"visible, not silent",
+				syntheticPaths,
 			);
 			return;
 		}
@@ -196,12 +287,38 @@ async function main() {
 	// seen by all of them or by the parent.
 	const envSrc = resolve(resolvedRepoRoot, ".env");
 	const envDst = resolve(resolvedWorktreePath, ".env");
-	if (existsSync(envSrc)) {
+	if (existsSync(envDst)) {
+		// WR-07, and the most dangerous of the five: this copy was UNCONDITIONAL.
+		// The hook is wired at machine scope (WR-03), so it runs in repositories
+		// this project has never seen. Where `.env` is TRACKED -- bad practice but
+		// common for non-secret defaults -- `git worktree add` checks it out, and
+		// the hook then silently overwrote that tracked file with the parent's copy
+		// AND declared it synthetic, which makes pi-subagents delete it before every
+		// diff/cleanup pass. The subagent would work against a replaced file that
+		// is then removed. Skipping is the only safe answer, and it must not be
+		// declared synthetic either: the worktree's own `.env` is real content.
+		console.error(
+			`worktree-setup-hook: ${envDst} already exists in the worktree -- left as-is, NOT declared ` +
+				"synthetic (it is the worktree's own content, possibly tracked)",
+		);
+	} else if (existsSync(envSrc)) {
 		try {
 			copyFileSync(envSrc, envDst);
+			// The parent's `.env` may hold secrets and `copyFileSync` propagates the
+			// source's mode, which on Windows is effectively meaningless and on POSIX
+			// is whatever the source happened to carry. Set it explicitly.
+			try {
+				chmodSync(envDst, 0o600);
+			} catch {
+				// Best-effort: a filesystem that cannot express POSIX modes (or a
+				// Windows volume) must not turn a successful copy into a failure.
+			}
 			syntheticPaths.push(".env");
 		} catch (err) {
-			fail(`failed to copy .env into the worktree: ${err instanceof Error ? err.message : String(err)}`);
+			fail(
+				`failed to copy .env into the worktree: ${err instanceof Error ? err.message : String(err)}`,
+				syntheticPaths,
+			);
 			return;
 		}
 	}
