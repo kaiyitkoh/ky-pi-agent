@@ -54,8 +54,9 @@
  * ---------------------------------------------------------------------------
  * `evaluate("some_unrelated_tool", ...)` returns `{ kind: "allow" }` — this
  * is a DIFFERENT question from "is this shape recognised". This module
- * governs exactly four tool names (`bash`, `read`, `write`, `edit`) and says
- * so in the `switch`'s `default` arm. A tool this guard does not wrap is a
+ * governs exactly seven tool names (`bash`, `read`, `write`, `edit`, `grep`,
+ * `find`, `ls` -- every one of Pi's own built-in tools, CR-04) and says so in
+ * the `switch`'s `default` arm. A tool this guard does not wrap is a
  * real bypass (an extension-registered tool that shells out internally,
  * say) — SAFE-15's published limits table names that gap explicitly rather
  * than this module silently claiming coverage it does not have [T-04-41,
@@ -149,7 +150,7 @@
  * substring across every tracked source under `.pi/extensions/`.
  */
 import type { CanonicalInvocation } from "./shell.ts";
-import { canonicalise } from "./shell.ts";
+import { canonicalise, normaliseExecutable } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
 import { canonicalisePathArg, classifyPathRead, classifyPathWrite } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
@@ -308,14 +309,47 @@ function fromInfraVerdict(verdict: InfraVerdict, requestKey: string): Verdict {
 	}
 }
 
+/**
+ * WR-06: `git`'s OWN global options (`-C <path>`, `-c <name>=<value>`,
+ * `--git-dir <path>`, `--work-tree <path>`, `--namespace <name>`) may appear
+ * BEFORE the subcommand -- `git -C /repo status`, `git --no-pager log`,
+ * `git -c user.name=x diff` are all legitimate, common invocations. Taking
+ * `args[0]` as the subcommand verbatim (the previous shape) reads `"-C"` /
+ * `"--no-pager"` / `"-c"` as the subcommand itself, which hits
+ * `classifyGitInvocation`'s fail-closed unknown-subcommand arm and blocks a
+ * plain read on a protected `HEAD` -- exactly the "annoying enough to get
+ * disabled" failure mode 04-CONTEXT.md's own stated risk names. Skips every
+ * leading `-`-prefixed token, consuming the next word as that flag's value
+ * for the ones that take one (mirrors `shell.ts#resolveWrappers`'s own
+ * tabulated-arity approach for `env`/`sudo`), so the subcommand this function
+ * selects is the first POSITIONAL word, regardless of how many global options
+ * precede it. `extractGitCwdOverride` (`shell.ts`) already resolves `-C`/
+ * `--git-dir` for the `currentBranchFor` oracle independently -- this
+ * function only has to skip past them to find the subcommand.
+ */
+const GIT_GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+
 function toGitInvocation(invocation: CanonicalInvocation): GitInvocation {
-	return { subcommand: invocation.args[0] ?? "", args: invocation.args.slice(1) };
+	const args = invocation.args;
+	let i = 0;
+	while (i < args.length && args[i].startsWith("-")) {
+		const flag = args[i];
+		if (GIT_GLOBAL_VALUE_OPTIONS.has(flag)) {
+			i += 2;
+		} else {
+			// An unrecognised global flag, or a boolean one (--no-pager, -p, ...):
+			// skip only the flag itself, never guessing an arity that could
+			// over-consume into the real subcommand.
+			i += 1;
+		}
+	}
+	return { subcommand: args[i] ?? "", args: args.slice(i + 1) };
 }
 
 /** One invocation's own strongest verdict across git/glab, infra and path classification — see module docstring, evaluation-order step 2. */
 function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string): Verdict {
 	let strongest: Verdict = { kind: "allow" };
-	const executable = invocation.executable.toLowerCase();
+	const executable = normaliseExecutable(invocation.executable);
 
 	if (executable === "git") {
 		const gitFacts: GitPolicyFacts = {
@@ -408,6 +442,89 @@ function evaluateWrite(input: unknown, facts: PolicyFacts): Verdict {
 	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
 }
 
+/**
+ * CR-04: read an OPTIONAL path-shaped field ("path" on `grep`/`find`/`ls`,
+ * "glob" on `grep`) -- all three default to the tool's own cwd/every file
+ * when the field is omitted, so an ABSENT field is not malformed input the
+ * way a missing "command"/"path" is for `bash`/`read`/`write`/`edit`.
+ * `undefined` for anything but a non-empty string, so callers can skip
+ * classification entirely rather than misread "search the whole project" as
+ * a sensitive-read match.
+ */
+function extractOptionalStringField(input: Readonly<Record<string, unknown>>, field: string): string | undefined {
+	const value = input[field];
+	return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+/**
+ * CR-04: classify one path-shaped field against the SAME sensitive-read table
+ * SAFE-06 already uses for the `read` tool. `undefined` (field absent)
+ * allows -- see {@link extractOptionalStringField}.
+ */
+function evaluatePathReadIfPresent(rawPath: string | undefined, facts: PolicyFacts): Verdict {
+	if (rawPath === undefined) {
+		return { kind: "allow" };
+	}
+	const canonicalPath = canonicalisePathArg(
+		{ text: rawPath, value: rawPath },
+		{ cwd: facts.cwd, home: facts.home },
+	);
+	const verdict = classifyPathRead(canonicalPath, {
+		projectRoot: facts.projectRoot,
+		home: facts.home,
+		kubeconfigEnv: facts.kubeconfigEnv,
+	});
+	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
+}
+
+/**
+ * CR-04: `grep`'s own schema is `{ pattern, path?, glob?, ignoreCase?,
+ * literal?, context?, limit? }` and it returns matching LINES OF FILE
+ * CONTENT -- `grep { pattern: ".", path: "~/.aws/credentials" }` (or
+ * `grep { pattern: "=", glob: ".env" }`) previously reached execution with no
+ * verdict and no audit row at all, reachable with no shell involved. Both
+ * `path` and `glob` are checked against the same sensitive-read table; `glob`
+ * is not a real filesystem path, but resolving it exactly like one and
+ * checking its basename is enough to catch this finding's own worked
+ * examples. `pattern` itself is never inspected -- SAFE-06's contract is
+ * about WHICH FILE is read, not what text is searched for.
+ */
+function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
+	if (input === null || typeof input !== "object" || Array.isArray(input)) {
+		return {
+			kind: "block",
+			reason: `grep input is malformed: input is not an object (received ${describeShape(input)})`,
+		};
+	}
+	const record = input as Record<string, unknown>;
+	const pathVerdict = evaluatePathReadIfPresent(extractOptionalStringField(record, "path"), facts);
+	if (pathVerdict.kind === "block") {
+		return pathVerdict;
+	}
+	const globVerdict = evaluatePathReadIfPresent(extractOptionalStringField(record, "glob"), facts);
+	if (globVerdict.kind === "block") {
+		return { kind: "block", reason: `grep glob refers to a sensitive file: ${globVerdict.reason}` };
+	}
+	return { kind: "allow" };
+}
+
+/**
+ * CR-04: `find`/`ls` both carry an optional `path`; both leak file/directory
+ * NAMES rather than CONTENTS, but a name under a sensitive directory (e.g.
+ * every filename inside `~/.aws`) is still worth denying rather than
+ * silently allowing -- defense in depth, cheap to apply since the same table
+ * already exists.
+ */
+function evaluateFindOrLs(input: unknown, facts: PolicyFacts): Verdict {
+	if (input === null || typeof input !== "object" || Array.isArray(input)) {
+		return {
+			kind: "block",
+			reason: `find/ls input is malformed: input is not an object (received ${describeShape(input)})`,
+		};
+	}
+	return evaluatePathReadIfPresent(extractOptionalStringField(input as Record<string, unknown>, "path"), facts);
+}
+
 // ---------------------------------------------------------------------------
 // The public entry point
 // ---------------------------------------------------------------------------
@@ -428,10 +545,17 @@ export function evaluate(toolName: string, input: unknown, facts: PolicyFacts): 
 			case "write":
 			case "edit":
 				return evaluateWrite(input, facts);
+			case "grep":
+				return evaluateGrep(input, facts);
+			case "find":
+			case "ls":
+				return evaluateFindOrLs(input, facts);
 			default:
-				// This guard governs exactly bash/read/write/edit -- SAFE-15's
-				// published limits table names every other tool as a real gap,
-				// never silently claimed as covered. See module docstring.
+				// This guard governs exactly bash/read/write/edit/grep/find/ls --
+				// every one of Pi's built-in tools. SAFE-15's published limits
+				// table names every OTHER tool (an extension-registered one that
+				// shells out internally) as a real gap, never silently claimed as
+				// covered. See module docstring.
 				return { kind: "allow" };
 		}
 	} catch (err) {

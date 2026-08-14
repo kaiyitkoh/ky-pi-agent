@@ -109,6 +109,7 @@
  * substring across every tracked source under `.pi/extensions/`.
  */
 import type { CanonicalInvocation } from "./shell.ts";
+import { normaliseExecutable } from "./shell.ts";
 
 // ---------------------------------------------------------------------------
 // AWS classification (SAFE-07) — reproduced from `04-RESEARCH.md`'s
@@ -412,7 +413,10 @@ export type InfraVerdict =
  * special-casing "this classifier had nothing to say about this command."
  */
 export function classifyInfraInvocation(invocation: CanonicalInvocation): InfraVerdict {
-	const executable = invocation.executable.toLowerCase();
+	// CR-03: basename-reduced and extension-stripped, so `aws.exe`,
+	// `terraform.exe`, `kubectl.exe` and path-qualified/`./`-relative forms
+	// classify identically to the bare verb -- see `shell.ts#normaliseExecutable`.
+	const executable = normaliseExecutable(invocation.executable);
 	if (executable === "aws") {
 		return classifyAwsInvocation(invocation.args);
 	}

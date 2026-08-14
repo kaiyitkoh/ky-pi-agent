@@ -87,6 +87,41 @@ describe("Group A -- every BLOCKED row is non-allow through the real evaluate()"
 });
 
 // ---------------------------------------------------------------------------
+// Group A' — WR-03: every OUT-OF-SCOPE row genuinely returns `allow` through
+// the real evaluate(), not merely "we published this limit in a table". Group
+// B (below) only checks the DOC agrees with the corpus -- a documentation
+// consistency check, not a behavioural one. Without Group A', the disarm path
+// is mechanical: a BLOCKED row that regresses to `allow` can be silently
+// re-bucketed to OUT-OF-SCOPE plus one pasted markdown row, and the suite
+// stays green while the guard is strictly weaker. Group A' makes the bucket
+// falsifiable in BOTH directions: a row that is actually STILL blocked (the
+// limit no longer exists, e.g. a future fix closes it) must be caught here,
+// not silently left stale in the "OUT-OF-SCOPE" bucket forever.
+// ---------------------------------------------------------------------------
+
+describe("Group A' -- every OUT-OF-SCOPE row genuinely returns allow (WR-03)", () => {
+	it("the OUT-OF-SCOPE bucket is non-empty (vacuous-pass guard)", () => {
+		expect(
+			OUT_OF_SCOPE_ROWS.length,
+			"no OUT-OF-SCOPE rows found -- Group A' would otherwise pass vacuously",
+		).toBeGreaterThan(0);
+	});
+
+	for (const row of OUT_OF_SCOPE_ROWS) {
+		it(`${row.id} (${row.class}): ${JSON.stringify(row.input)} -> allow (the published limit still exists)`, () => {
+			const verdict = evaluate(row.tool, row.input, FACTS);
+			expect(
+				verdict.kind,
+				`${row.id} (${row.class}) is published in docs/SAFETY.md as a limit this guard does not catch, ` +
+					`but evaluate("${row.tool}", ${JSON.stringify(row.input)}, ...) returned "${verdict.kind}" -- ` +
+					"the limit no longer exists. Either the corpus row is stale (move it to BLOCKED, in the " +
+					"same commit as removing its docs/SAFETY.md row) or a real regression re-opened this gap.",
+			).toBe("allow");
+		});
+	}
+});
+
+// ---------------------------------------------------------------------------
 // Group B — the OUT-OF-SCOPE bucket, cross-checked against docs/SAFETY.md
 // ---------------------------------------------------------------------------
 

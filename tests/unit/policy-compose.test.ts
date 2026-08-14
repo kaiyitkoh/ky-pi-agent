@@ -160,6 +160,41 @@ const ROWS: readonly Row[] = [
 	{ name: "write src/index.ts inside project root -- allowed", toolName: "write", input: { path: "src/index.ts" }, expected: "allow" },
 
 	// -------------------------------------------------------------------------
+	// WR-06 -- a leading git GLOBAL option before the subcommand must not be
+	// mistaken for the subcommand itself. Paired positive (read, allowed even
+	// on protected main) and negative (write, still blocked on protected main).
+	// -------------------------------------------------------------------------
+	{
+		name: "git -C /repo status on protected main -- allowed, -C is a global option, not the subcommand",
+		toolName: "bash",
+		input: { command: "git -C /repo status" },
+		facts: PROTECTED_MAIN,
+		expected: "allow",
+	},
+	{
+		name: "git -C /repo push on protected main -- still blocked, -C must not shadow the real subcommand",
+		toolName: "bash",
+		input: { command: "git -C /repo push" },
+		facts: PROTECTED_MAIN,
+		expected: "block",
+		reasonIncludes: "writes to the checked-out branch",
+	},
+	{
+		name: "git --no-pager log on protected main -- allowed, a boolean global flag before the subcommand",
+		toolName: "bash",
+		input: { command: "git --no-pager log" },
+		facts: PROTECTED_MAIN,
+		expected: "allow",
+	},
+	{
+		name: "git -c user.name=x diff on protected main -- allowed, -c takes a value and must be skipped as a pair",
+		toolName: "bash",
+		input: { command: "git -c user.name=x diff" },
+		facts: PROTECTED_MAIN,
+		expected: "allow",
+	},
+
+	// -------------------------------------------------------------------------
 	// Garbage / unknown-shape inputs -- T-04-38, every one of these must block,
 	// never throw and never fall through to allow
 	// -------------------------------------------------------------------------

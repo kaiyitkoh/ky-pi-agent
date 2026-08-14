@@ -309,6 +309,34 @@ export type ShellVerdict =
 	| { readonly kind: "refused"; readonly cause: ShellRefusalCause; readonly detail: string }
 	| { readonly kind: "ok"; readonly invocations: readonly CanonicalInvocation[] };
 
+/**
+ * CR-03: reduce `CanonicalInvocation.executable` to the verb `policy.ts`/
+ * `infra.ts` actually classify on -- basename only, lower-cased, a Windows
+ * executable extension stripped.
+ *
+ * `CanonicalInvocation.executable` is the literal argv[0] word after wrapper
+ * resolution, never basename-reduced and never extension-stripped
+ * (`extractInvocations` below just slices `values[resolved.index]` verbatim).
+ * `policy.ts`'s git/glab gate and `infra.ts`'s aws/terraform/kubectl gate both
+ * compared this against a bare lower-cased literal (`=== "git"`) -- exact
+ * string equality, not a verb match. Executed against the real `evaluate()`:
+ * `git.exe push`, `/usr/bin/git push`, `./git push`, `terraform.exe apply`,
+ * `kubectl.exe delete pod x`, `aws.exe secretsmanager get-secret-value ...`
+ * and `glab.exe mr merge` all came back `allow` -- and `git.exe` in
+ * particular is not an adversarial spelling on this project's own target
+ * platform, it is what Git for Windows installs. `SHELL_RUNNERS` does not
+ * catch this either (`git.exe` is not a runner).
+ *
+ * Every caller that gates on a bare verb name (`policy.ts#evaluateInvocation`,
+ * `infra.ts#classifyInfraInvocation`) MUST route through this function rather
+ * than reading `invocation.executable` directly, so `git.exe` and `git`
+ * classify identically everywhere this project cares which verb ran.
+ */
+export function normaliseExecutable(executable: string): string {
+	const base = executable.replace(/\\/g, "/").split("/").pop() ?? executable;
+	return base.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
+}
+
 // ---------------------------------------------------------------------------
 // Generic AST walking — mirrors `tests/unit/unbash-ast.test.ts`'s
 // `walkableKeys()` / `collectNodeTypes()` shape so this module and its own
