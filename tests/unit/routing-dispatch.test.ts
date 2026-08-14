@@ -1,0 +1,321 @@
+/**
+ * ROUTE-01/04/06/07/08/09 — `.pi/extensions/routing/modes.ts`, the PURE half
+ * (everything up to and including the mechanism decision), proven with no
+ * session and no registry involved.
+ *
+ * ---------------------------------------------------------------------------
+ * ONE FAKE REGISTRY, SCRIPTED PER CASE, SAME CANDIDATE LIST BOTH DIRECTIONS
+ * ---------------------------------------------------------------------------
+ * `pickConfiguredCandidate`'s registry parameter is the structural
+ * `{find, hasConfiguredAuth}` interface `modes.ts` declares -- never
+ * `ExtensionContext` -- so a plain object built from a small per-case script
+ * satisfies it exactly. The "first resolves, no auth -> second" case and the
+ * "first resolves, has auth -> first" case below share the SAME two
+ * candidate refs; only the auth script differs. A one-directional test
+ * (auth always true) would pass against an implementation that ignores
+ * `hasConfiguredAuth` entirely and returns the first candidate that merely
+ * resolves -- proving the skip is genuinely on auth, not on resolution,
+ * needs both directions on one list.
+ *
+ * ---------------------------------------------------------------------------
+ * THE GUARD-PRECEDENCE CASE COMPARES AGAINST `guardRoute`'S OWN REASON
+ * ---------------------------------------------------------------------------
+ * Asserting only `ok === false` would pass against an implementation that
+ * refused for the WRONG reason (e.g. treating "no configured auth" as a
+ * capability block) -- "refused with a reason" is the requirement, not
+ * merely "refused". The vision/text-only case below calls `guardRoute`
+ * directly with the identical model/role/need and asserts the two reason
+ * STRINGS are equal.
+ *
+ * ---------------------------------------------------------------------------
+ * VACUOUS-PASS GUARD (this project's house rule)
+ * ---------------------------------------------------------------------------
+ * `usesFallbackChain` is asserted against the IMPORTED `CHAIN`, with a
+ * length check first -- an empty `CHAIN` would make the "every entry is a
+ * chain member" loop vacuously pass. Mode-state cases run a dedicated test
+ * that mutates state and then proves the reset helper actually restores the
+ * default, rather than trusting a `beforeEach` that might itself be a no-op.
+ */
+import { beforeEach, describe, expect, it } from "vitest";
+
+import type { Api, Model } from "@earendil-works/pi-ai";
+
+import { guardRoute } from "../../.pi/extensions/routing/guard.ts";
+import {
+	getModeState,
+	pickConfiguredCandidate,
+	planRoleCall,
+	resolveRoute,
+	setEscalated,
+	setMode,
+	usesFallbackChain,
+	usesToolLoop,
+	type ModeState,
+	type ModelRegistryLike,
+	type RoleNeed,
+} from "../../.pi/extensions/routing/modes.ts";
+import { DEFAULT_MODE, ROLE_MAP, ROLES, type ModelRef, type Role } from "../../.pi/extensions/routing/schema.ts";
+import { CHAIN } from "../../.pi/extensions/providers/schema.ts";
+
+// -----------------------------------------------------------------------------
+// Fixture builders
+// -----------------------------------------------------------------------------
+
+/** A minimal, valid `Model<Api>` -- every required field, overridable. */
+function makeModel(overrides: Partial<Model<Api>> = {}): Model<Api> {
+	return {
+		id: "fixture-model",
+		name: "Fixture Model",
+		api: "openai-completions",
+		provider: "fixture-provider",
+		baseUrl: "https://example.invalid",
+		reasoning: false,
+		input: ["text"],
+		cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0 },
+		contextWindow: 128000,
+		maxTokens: 4096,
+		...overrides,
+	};
+}
+
+/** One candidate's scripted answer: whether it resolves, and if so, whether it carries auth. */
+interface CandidateScript {
+	readonly ref: ModelRef;
+	readonly model?: Model<Api>;
+	readonly authed?: boolean;
+}
+
+/** Builds a `ModelRegistryLike` whose `find`/`hasConfiguredAuth` answer exactly what `script` says, nothing inferred. */
+function makeRegistry(script: readonly CandidateScript[]): ModelRegistryLike {
+	return {
+		find(provider, id) {
+			const entry = script.find((s) => s.ref.provider === provider && s.ref.id === id);
+			return entry?.model;
+		},
+		hasConfiguredAuth(model) {
+			const entry = script.find((s) => s.model === model);
+			return entry?.authed ?? false;
+		},
+	};
+}
+
+// -----------------------------------------------------------------------------
+// resolveRoute -- ROUTE-03: escalation lifts the executor only
+// -----------------------------------------------------------------------------
+
+describe("resolveRoute", () => {
+	it("escalated executor differs from non-escalated executor", () => {
+		const off = resolveRoute("executor", { mode: "cheap", escalated: false });
+		const on = resolveRoute("executor", { mode: "cheap", escalated: true });
+		expect(off).not.toEqual(on);
+		expect(on).toEqual(ROLE_MAP.max.executor);
+	});
+
+	it("every non-executor role's route is identical whether or not escalated is true", () => {
+		const nonExecutorRoles = ROLES.filter((role) => role !== "executor");
+		expect(nonExecutorRoles.length, "vacuity guard -- ROLES must contain non-executor roles").toBeGreaterThan(0);
+		for (const role of nonExecutorRoles) {
+			const off = resolveRoute(role, { mode: "balanced", escalated: false });
+			const on = resolveRoute(role, { mode: "balanced", escalated: true });
+			expect(on, `role "${role}" must be unaffected by escalation`).toEqual(off);
+		}
+	});
+});
+
+// -----------------------------------------------------------------------------
+// pickConfiguredCandidate -- ordering, auth-skipping (both directions, same list), refusal naming
+// -----------------------------------------------------------------------------
+
+describe("pickConfiguredCandidate", () => {
+	const REF_A: ModelRef = { provider: "p", id: "a" };
+	const REF_B: ModelRef = { provider: "p", id: "b" };
+	const MODEL_A = makeModel({ provider: "p", id: "a" });
+	const MODEL_B = makeModel({ provider: "p", id: "b" });
+
+	it("returns the FIRST candidate when it resolves and has auth", () => {
+		const registry = makeRegistry([
+			{ ref: REF_A, model: MODEL_A, authed: true },
+			{ ref: REF_B, model: MODEL_B, authed: true },
+		]);
+		const result = pickConfiguredCandidate(registry, [REF_A, REF_B]);
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.ref).toEqual(REF_A);
+		}
+	});
+
+	it("skips to the SECOND candidate when the first resolves but has no auth -- same candidate list as the case above, auth direction flipped", () => {
+		const registry = makeRegistry([
+			{ ref: REF_A, model: MODEL_A, authed: false },
+			{ ref: REF_B, model: MODEL_B, authed: true },
+		]);
+		const result = pickConfiguredCandidate(registry, [REF_A, REF_B]);
+		expect(result.ok).toBe(true);
+		if (result.ok) {
+			expect(result.ref).toEqual(REF_B);
+		}
+	});
+
+	it("refuses, naming EVERY candidate tried, when no candidate has auth", () => {
+		const registry = makeRegistry([
+			{ ref: REF_A, model: MODEL_A, authed: false },
+			{ ref: REF_B, model: MODEL_B, authed: false },
+		]);
+		const result = pickConfiguredCandidate(registry, [REF_A, REF_B]);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.reason).toContain("p/a");
+			expect(result.reason).toContain("p/b");
+			expect(result.reason).toContain("no configured auth");
+		}
+	});
+
+	it("names an unresolved candidate distinctly from an unauthenticated one", () => {
+		const registry = makeRegistry([
+			{ ref: REF_A, model: undefined },
+			{ ref: REF_B, model: MODEL_B, authed: false },
+		]);
+		const result = pickConfiguredCandidate(registry, [REF_A, REF_B]);
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.reason).toContain("did not resolve");
+			expect(result.reason).toContain("no configured auth");
+		}
+	});
+});
+
+// -----------------------------------------------------------------------------
+// planRoleCall -- guard precedence, and the reason-string comparison
+// -----------------------------------------------------------------------------
+
+describe("planRoleCall", () => {
+	it("returns the GUARD's own reason for a vision role planned against a text-only model", () => {
+		const ref: ModelRef = { provider: "amazon-bedrock", id: "anthropic.claude-sonnet-4-5-20250929-v1:0" };
+		const textOnlyVisionModel = makeModel({ provider: ref.provider, id: ref.id, input: ["text"] });
+		const registry = makeRegistry([{ ref, model: textOnlyVisionModel, authed: true }]);
+		const need: RoleNeed = { image: true };
+		const state: ModeState = { mode: "cheap", escalated: false };
+
+		const result = planRoleCall(registry, { role: "vision", state, need });
+		expect(result.ok, `expected a refusal, got ${JSON.stringify(result)}`).toBe(false);
+
+		const directVerdict = guardRoute(textOnlyVisionModel, "vision", { ...need, usesToolLoop: usesToolLoop("vision") });
+		expect(directVerdict.ok, "vacuity guard -- the direct guardRoute call must itself refuse for this comparison to mean anything").toBe(false);
+
+		if (!result.ok && !directVerdict.ok) {
+			expect(result.reason).toBe(directVerdict.reason);
+		}
+	});
+
+	it("guard precedence: a role whose only configured candidate is blocked by the guard returns ok:false and NEVER reports a mechanism", () => {
+		const executorRoute = ROLE_MAP.cheap.executor;
+		expect(executorRoute.candidates.length, "vacuity guard").toBeGreaterThan(0);
+		const ref = executorRoute.candidates[0]!;
+		// The model's OWN id is the deny-listed one, regardless of which ref was
+		// requested -- pickConfiguredCandidate never checks that find() honoured
+		// the id it was asked for, and this fake registry is free to answer with
+		// whatever fixture the case needs.
+		const deniedModel = makeModel({ provider: ref.provider, id: "deepseek.r1-v1:0" });
+		const registry = makeRegistry([{ ref, model: deniedModel, authed: true }]);
+
+		const result = planRoleCall(registry, { role: "executor", state: { mode: "cheap", escalated: false }, need: {} });
+
+		expect(result.ok).toBe(false);
+		expect("mechanism" in result, "a refusal must never carry a mechanism field").toBe(false);
+		if (!result.ok) {
+			expect(result.reason).toContain("tool calling");
+		}
+	});
+
+	it("succeeds and reports a mechanism when the guard allows the resolved candidate", () => {
+		const summariserRoute = ROLE_MAP.cheap.summariser;
+		const ref = summariserRoute.candidates[0]!;
+		const okModel = makeModel({ provider: ref.provider, id: ref.id, input: ["text"] });
+		const registry = makeRegistry([{ ref, model: okModel, authed: true }]);
+
+		const result = planRoleCall(registry, { role: "summariser", state: { mode: "cheap", escalated: false }, need: {} });
+
+		expect(result.ok, `expected ok:true, got ${JSON.stringify(result)}`).toBe(true);
+		if (result.ok) {
+			expect(result.mechanism).toBe("call-model");
+			expect(result.model).toBe(okModel);
+		}
+	});
+});
+
+// -----------------------------------------------------------------------------
+// usesToolLoop -- pure mechanism helper
+// -----------------------------------------------------------------------------
+
+describe("usesToolLoop", () => {
+	it("is true for executor and planner, false for the four single-shot roles", () => {
+		expect(usesToolLoop("executor")).toBe(true);
+		expect(usesToolLoop("planner")).toBe(true);
+		const singleShotRoles: readonly Role[] = ["reviewer", "advisor", "vision", "summariser"];
+		for (const role of singleShotRoles) {
+			expect(usesToolLoop(role), `role "${role}" must not use a tool loop`).toBe(false);
+		}
+	});
+});
+
+// -----------------------------------------------------------------------------
+// usesFallbackChain -- asserted against the IMPORTED CHAIN, no literal copy
+// -----------------------------------------------------------------------------
+
+describe("usesFallbackChain", () => {
+	it("is true for every {provider,id} in the imported CHAIN and false for a Bedrock ref", () => {
+		expect(CHAIN.length, "vacuity guard -- an empty CHAIN would make the loop below pass on nothing").toBeGreaterThan(0);
+		for (const entry of CHAIN) {
+			expect(usesFallbackChain({ provider: entry.provider, id: entry.id }), `${entry.provider}/${entry.id} is a member of CHAIN`).toBe(true);
+		}
+		expect(usesFallbackChain({ provider: "amazon-bedrock", id: "anthropic.claude-sonnet-4-5-20250929-v1:0" })).toBe(false);
+	});
+});
+
+// -----------------------------------------------------------------------------
+// Mode / escalation state -- process-wide slot round-trips, reset proven
+// -----------------------------------------------------------------------------
+
+/** Returns the slot to its default via the PUBLIC API only -- no direct globalThis reach-in from a test. */
+function resetModeState(): void {
+	setEscalated(false);
+	setMode(DEFAULT_MODE);
+}
+
+describe("mode/escalation state", () => {
+	beforeEach(() => {
+		resetModeState();
+	});
+
+	it("the reset helper is not a no-op: a mutated state genuinely returns to default after reset", () => {
+		setMode("max");
+		setEscalated(true, "cheap");
+		expect(getModeState().mode, "vacuity guard -- the mutation itself must be observable before testing the reset").toBe("max");
+		expect(getModeState().escalated).toBe(true);
+
+		resetModeState();
+
+		expect(getModeState().mode).toBe(DEFAULT_MODE);
+		expect(getModeState().escalated).toBe(false);
+	});
+
+	it("setMode(\"max\") then getModeState().mode === \"max\"", () => {
+		setMode("max");
+		expect(getModeState().mode).toBe("max");
+	});
+
+	it('setEscalated(true, "cheap") records escalatedFrom', () => {
+		setEscalated(true, "cheap");
+		const state = getModeState();
+		expect(state.escalated).toBe(true);
+		expect(state.escalatedFrom).toBe("cheap");
+	});
+
+	it("setEscalated(false) clears escalatedFrom", () => {
+		setEscalated(true, "cheap");
+		setEscalated(false);
+		const state = getModeState();
+		expect(state.escalated).toBe(false);
+		expect(state.escalatedFrom).toBeUndefined();
+	});
+});
