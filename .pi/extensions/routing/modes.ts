@@ -377,7 +377,27 @@ export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleSh
 	const ref: ModelRef = { provider: plan.model.provider, id: plan.model.id };
 	const api = plan.reasoningEffort !== undefined ? { reasoningEffort: plan.reasoningEffort } : undefined;
 
-	if (usesFallbackChain(ref)) {
+	// CR-02: `callWithFallback` always restarts at the chain's OWN head
+	// (`../providers/fallback.ts`'s own doc comment, "Per entry, in order",
+	// starting from index 0) -- it takes no starting model. `plan.model` may
+	// legitimately be a LATER chain member: `pickConfiguredCandidate` skips a
+	// candidate with no configured auth (that is the ordering rule's whole
+	// purpose, `schema.ts:48-56`), so on a machine with only the second hop's
+	// credentials configured, `plan.model` can resolve to that second hop
+	// while the chain's own head has no auth at all. Entering the chain in
+	// that case would silently discard the candidate the router just picked,
+	// guard-approved, and restart at a head this machine cannot authenticate
+	// against -- disclosing the prompt to a provider already known to reject
+	// it (see this function's own module docstring, T-03-10-02's sibling
+	// concern applied one layer up). So the chain is entered ONLY when the
+	// resolved candidate genuinely IS the chain's head; every other resolved
+	// candidate -- chain member or not -- is served directly through the
+	// chokepoint with the SPECIFIC model the router selected.
+	const chainHead = CHAIN[0];
+	const resolvedIsChainHead =
+		chainHead !== undefined && ref.provider === chainHead.provider && ref.id === chainHead.id;
+
+	if (resolvedIsChainHead) {
 		return callWithFallback(ctx, {
 			role: opts.role,
 			systemPrompt: opts.systemPrompt,

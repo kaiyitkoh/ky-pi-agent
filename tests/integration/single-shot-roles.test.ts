@@ -579,3 +579,129 @@ describe("ROUTE-04 — single-shot roles through runSingleShotRole", () => {
 		).toBe(run.wireBeforeRefusal);
 	});
 });
+
+// -----------------------------------------------------------------------------
+// CR-02 REGRESSION -- a DashScope-only machine must reach dashscope, not
+// silently discard the resolved candidate and restart the chain at deepseek.
+// -----------------------------------------------------------------------------
+
+/**
+ * CR-02: `cheap.reviewer`'s candidates are `FLASH_CANDIDATES` -- byte-identical
+ * to `CHAIN` in `.pi/extensions/providers/schema.ts` (`deepseek/deepseek-v4-
+ * flash` first, `dashscope/deepseek-v4-flash` second). `deepseek` is
+ * DELIBERATELY LEFT UNREGISTERED here (Pi's own real, built-in catalogue entry
+ * stands in `ctx.modelRegistry` unmodified) -- this fixture only registers and
+ * grants auth to `dashscope`, exactly what "no configured auth" looks like for
+ * `pickConfiguredCandidate`'s ordering rule on a real DashScope-only machine
+ * (CR-02's own "daily-driver configuration this whole project is built
+ * around"). MEASURED, NOT ASSUMED: registering a SECOND faux provider under
+ * `deepseek` and granting `dashscope` a runtime key was tried first and found
+ * to flip `hasConfiguredAuth("deepseek")` to `true` as a side effect of
+ * `ModelRuntime`'s own snapshot refresh -- an unrelated quirk this fixture
+ * routes around by never touching `deepseek`'s native registration at all,
+ * which also means NO PATH in this test can ever reach a real network
+ * endpoint: the fix under test dispatches `dashscope`'s resolved candidate
+ * through `callModel` directly and never enters `callWithFallback` (which is
+ * the only code path that would ever resolve real `deepseek`).
+ *
+ * `planRoleCall` must resolve `dashscope/deepseek-v4-flash` -- the fix under
+ * test is whether `runSingleShotRole` actually SERVES that resolved candidate
+ * (`callModel` directly) instead of discarding it and restarting
+ * `callWithFallback` at the chain's own head.
+ */
+async function runDashscopeOnlyFixture(): Promise<{
+	turnsAfterReviewer: (TurnsRow & { provider?: string; model?: string })[];
+	wireAfterReviewer: WireRow[];
+	reviewerReplyText: string | undefined;
+}> {
+	setMode("cheap");
+	setEscalated(false);
+	expect(getModeState().mode, "test setup did not reset the mode slot to cheap").toBe("cheap");
+
+	const handle = await createFauxSession({
+		extensionSource: EXTENSION_SOURCE,
+		responses: [fauxAssistantMessage("warm", { stopReason: "stop" })],
+	});
+
+	try {
+		const dashscopeFaux = fauxProvider({
+			provider: "dashscope",
+			models: [{ id: "deepseek-v4-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } }],
+		});
+		dashscopeFaux.setResponses([fauxAssistantMessage("dashscope-reviewer-reply", { stopReason: "stop" })]);
+
+		// dashscope: the only provider this fixture registers and grants auth to.
+		// deepseek is deliberately left as Pi's own real, unmodified built-in
+		// entry -- see this function's own doc comment for why.
+		handle.modelRuntime.registerNativeProvider(wrapFauxWithPayload(dashscopeFaux, buildOpenAiFixturePayload));
+		await handle.modelRuntime.setRuntimeApiKey("dashscope", "kypi-fixture-not-a-real-key");
+		await waitForConfiguredAuth(handle.modelRuntime, "dashscope");
+		expect(
+			handle.modelRuntime.hasConfiguredAuth("deepseek"),
+			"the auth precondition for this fixture is wrong -- deepseek must carry NO configured auth",
+		).toBe(false);
+
+		await handle.session.prompt("warm up");
+		const ctx = handle.session.extensionRunner.createCommandContext();
+
+		const turnsFile = logPath(handle.cwd, TURNS_LOG_BASE);
+		const wireFile = logPath(handle.cwd, WIRE_LOG_BASE);
+
+		const reply = await runSingleShotRole(ctx, {
+			role: "reviewer",
+			messages: [{ role: "user", content: "please review this change", timestamp: Date.now() }],
+			need: {},
+		});
+
+		return {
+			turnsAfterReviewer: readRows<TurnsRow & { provider?: string; model?: string }>(turnsFile),
+			wireAfterReviewer: readRows<WireRow>(wireFile),
+			reviewerReplyText: reply.content?.find((block) => block.type === "text")?.text,
+		};
+	} finally {
+		await handle.dispose();
+	}
+}
+
+describe("ROUTE-04 / CR-02 -- runSingleShotRole on a DashScope-only machine reaches dashscope, not a discarded-candidate chain restart at deepseek", () => {
+	it("resolves and dispatches to dashscope/deepseek-v4-flash directly, never attempting the unauthed deepseek chain head", async () => {
+		const result = await runDashscopeOnlyFixture();
+
+		expect(
+			result.reviewerReplyText,
+			"runSingleShotRole threw or returned no text -- before CR-02's fix this call restarted " +
+				"callWithFallback at CHAIN[0] (deepseek, no configured auth) and failed instead of serving " +
+				"the dashscope candidate pickConfiguredCandidate actually resolved",
+		).toBe("dashscope-reviewer-reply");
+
+		const nested = result.turnsAfterReviewer.filter((row) => row.kind === "nested" && row.role === "reviewer");
+		expect(
+			nested.length,
+			`expected exactly one kind:"nested" row with role "reviewer"; found ` +
+				`${JSON.stringify(result.turnsAfterReviewer.map((r) => ({ kind: r.kind, role: r.role, provider: r.provider })))}`,
+		).toBe(1);
+		expect(
+			nested[0]?.provider,
+			"the nested reviewer row does not name dashscope as the serving provider -- CR-02's chain-" +
+				"restart bug would instead show (or fail before ever writing) a deepseek attempt",
+		).toBe("dashscope");
+		expect(nested[0]?.model).toBe("deepseek-v4-flash");
+
+		// No row at all named "deepseek" resulted from this call -- the chain
+		// restart CR-02 describes would have produced a failed deepseek attempt
+		// (or thrown before writing anything); either way, zero deepseek-provider
+		// rows is the non-vacuous proof the router's OWN resolved candidate was
+		// served, not the chain's hardcoded head.
+		const deepseekRows = result.turnsAfterReviewer.filter((row) => row.provider === "deepseek");
+		expect(
+			deepseekRows.length,
+			"a deepseek-provider row was written despite deepseek carrying no configured auth in this " +
+				"fixture -- the resolved dashscope candidate was discarded and the chain was restarted",
+		).toBe(0);
+
+		const corr = nested[0]?.corr;
+		const req = result.wireAfterReviewer.find((w) => w.corr === corr && w.kind === "nested.request");
+		expect(req, "no nested.request wire record joined by corr").toBeDefined();
+		expect(req?.payload?.model).toBe("deepseek-v4-flash");
+	});
+});
