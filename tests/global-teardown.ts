@@ -45,8 +45,26 @@
  * changing content is. Widening this to untracked paths would make the guard
  * fail on totally ordinary scratch output and teach the same "ignore it"
  * reflex the snapshot-diff design above is built to avoid.
+ *
+ * ---------------------------------------------------------------------------
+ * CR-01 EXTENSION -- the REAL, UNTRACKED, out-of-repo global agent settings
+ * ---------------------------------------------------------------------------
+ * The tracked-file diff above cannot see `~/.pi/agent/settings.json`: it is
+ * neither tracked nor inside the repo. That is exactly the file
+ * `writeAgentOverrides` (`.pi/extensions/routing/agent-overrides.ts`)
+ * resolves to by default, and it is exactly the file CR-01 found mutated on a
+ * real developer machine (`subagents.agentOverrides.planner` written by a
+ * test that never injected `PI_CODING_AGENT_DIR`). `tests/setup/agent-dir.ts`
+ * is the structural fix (every test file now gets a throwaway
+ * `PI_CODING_AGENT_DIR` before any of its tests run); this is the tripwire
+ * for the NEXT test that regresses that guard -- snapshotted once here,
+ * compared once here, independent of whatever any individual test file does
+ * to `process.env` for its own worker.
  */
 import { spawnSync } from "node:child_process";
+import { existsSync, readFileSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
 
 function repoRootSync(): string {
 	const result = spawnSync("git", ["rev-parse", "--show-toplevel"], {
@@ -96,13 +114,63 @@ function modifiedTrackedFiles(cwd: string): Set<string> {
 	return out;
 }
 
+/**
+ * Absolute path of THIS machine's real, global agent settings file --
+ * `getAgentDir()`'s own default, computed independently of that function
+ * (this file runs in vitest's main process, once, outside any test file's
+ * own `PI_CODING_AGENT_DIR` override) [VERIFIED: pi-coding-agent 0.84.1
+ * `dist/config.d.ts:76` -- "Get the agent config directory (e.g.,
+ * ~/.pi/agent/)"].
+ */
+function realAgentSettingsPath(): string {
+	return join(homedir(), ".pi", "agent", "settings.json");
+}
+
+/** A cheap, sufficient fingerprint of the real settings file: absence, or size + mtime + content. */
+interface SettingsSnapshot {
+	exists: boolean;
+	size?: number;
+	mtimeMs?: number;
+	text?: string;
+}
+
+function snapshotRealAgentSettings(): SettingsSnapshot {
+	const path = realAgentSettingsPath();
+	if (!existsSync(path)) {
+		return { exists: false };
+	}
+	const stat = statSync(path);
+	return { exists: true, size: stat.size, mtimeMs: stat.mtimeMs, text: readFileSync(path, "utf-8") };
+}
+
 export default async function setup(): Promise<() => Promise<void>> {
 	const root = repoRootSync();
 	const before = modifiedTrackedFiles(root);
+	const beforeRealAgentSettings = snapshotRealAgentSettings();
 
 	return async () => {
 		const after = modifiedTrackedFiles(root);
 		const newlyDirtied = [...after].filter((path) => !before.has(path)).sort();
+
+		const afterRealAgentSettings = snapshotRealAgentSettings();
+		const realAgentSettingsChanged =
+			beforeRealAgentSettings.exists !== afterRealAgentSettings.exists ||
+			beforeRealAgentSettings.text !== afterRealAgentSettings.text;
+
+		if (realAgentSettingsChanged) {
+			// CR-01's exact regression shape. Set independently of the
+			// newlyDirtied throw below so BOTH tripwires fire (and both set
+			// process.exitCode) even if only one of the two conditions holds.
+			process.exitCode = 1;
+			throw new Error(
+				`tests/global-teardown.ts: the test suite modified this machine's REAL, global agent ` +
+					`settings file (${realAgentSettingsPath()}) -- this is exactly CR-01's regression shape. ` +
+					"A test resolved getAgentDir() to the real ~/.pi/agent instead of a throwaway " +
+					"PI_CODING_AGENT_DIR. See tests/setup/agent-dir.ts for the suite-wide guard that is " +
+					"supposed to prevent this, and check whether a test file deleted (rather than restored) " +
+					"process.env.PI_CODING_AGENT_DIR mid-run.",
+			);
+		}
 
 		if (newlyDirtied.length > 0) {
 			// WR-13: vitest reports a globalSetup teardown throw as an "error

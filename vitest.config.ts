@@ -17,5 +17,10 @@ export default defineConfig({
 		// against a setup-time snapshot rather than demanding an empty
 		// `git status --porcelain` outright.
 		globalSetup: ["./tests/global-teardown.ts"],
+		// CR-01: structural guard against ANY test resolving getAgentDir() to
+		// this machine's real ~/.pi/agent. Runs once per test file, before
+		// every test in that file -- see tests/setup/agent-dir.ts's own
+		// docstring for the reproduced incident this closes.
+		setupFiles: ["./tests/setup/agent-dir.ts"],
 	},
 });

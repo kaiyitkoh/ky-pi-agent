@@ -47,7 +47,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
 	agentOverridesFor,
@@ -69,12 +69,28 @@ function freshSettingsPath(): string {
 	return join(dir, "settings.json");
 }
 
+/**
+ * CR-01: the suite-wide value `tests/setup/agent-dir.ts`'s `beforeAll`
+ * already set for this file, captured here so the "resolves under
+ * PI_CODING_AGENT_DIR" case below can restore it instead of `delete`-ing the
+ * variable outright -- deleting would punch a hole in the suite-wide guard
+ * for the rest of this file's cases. See that file's own docstring.
+ */
+let suiteAgentDir: string | undefined;
+beforeAll(() => {
+	suiteAgentDir = process.env.PI_CODING_AGENT_DIR;
+});
+
 afterEach(() => {
 	for (const dir of tempDirs) {
 		rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
 	}
 	tempDirs = [];
-	delete process.env.PI_CODING_AGENT_DIR;
+	if (suiteAgentDir === undefined) {
+		delete process.env.PI_CODING_AGENT_DIR;
+	} else {
+		process.env.PI_CODING_AGENT_DIR = suiteAgentDir;
+	}
 });
 
 // -----------------------------------------------------------------------------
