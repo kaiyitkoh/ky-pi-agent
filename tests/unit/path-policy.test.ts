@@ -373,3 +373,87 @@ describe("SAFE-08/SAFE-13 -- every DETONATION_TARGETS entry is matched by at lea
 		}
 	});
 });
+
+// ---------------------------------------------------------------------------
+// WR-10 -- the detonation-rule REASON, not merely the block kind, on a
+// genuinely native-Windows-shaped (backslash-rooted) home/project root.
+// ---------------------------------------------------------------------------
+
+/**
+ * WR-10: `tests/integration/path-canonicalisation.test.ts`'s own docstring
+ * claimed CR-02's fail-open half "is proven at the paths.ts/policy.ts unit
+ * level instead" -- untrue of this file, whose `HOME`/`PROJECT_ROOT` above
+ * are forward-slash literals (`"C:/Users/Admin"`), never built via the
+ * `BS` helper this file already defines for exactly this purpose. A
+ * forward-slash-only fixture cannot distinguish "the bashrc rule matched"
+ * from "the containment rule accidentally matched too" -- `classifyPathWrite`
+ * would block `~/.bashrc` via containment alone even if the bashrc
+ * DETONATION_TARGETS entry were deleted outright, as long as `HOME` sits
+ * outside `PROJECT_ROOT` (as `bashrc`'s own fixture does), because CR-02's
+ * bug was specifically about un-canonicalised (backslash-native) facts
+ * reaching this module, and only a backslash-native fixture exercises that
+ * shape.
+ *
+ * `index.ts#toCanonicalRoot` is reproduced here verbatim (not imported --
+ * that function is private to `index.ts`, and re-deriving it from the SAME
+ * `canonicalisePathArg` primitive this file already imports is the more
+ * faithful proof: it shows `paths.ts` itself, given a genuinely
+ * backslash-rooted home run through the real canonicalisation pipeline,
+ * produces the SAME detonation-rule-vs-containment-rule distinction
+ * `index.ts#buildFacts` relies on).
+ */
+function toCanonicalRoot(absolutePath: string): string {
+	return canonicalisePathArg({ text: absolutePath, value: absolutePath }, { cwd: absolutePath, home: absolutePath });
+}
+
+describe("WR-10 -- classifyPathWrite's detonation reason distinguishes the specific rule from generic containment, on a native-Windows-shaped home", () => {
+	// A genuinely backslash-rooted home and project root -- exactly the shape
+	// `os.homedir()`/`ctx.cwd` actually produce on this project's target
+	// platform, built with the file's own BS helper rather than a
+	// forward-slash literal that happens to look similar.
+	const RAW_HOME = winPath("C:/Users/tester");
+	const RAW_PROJECT_ROOT = winPath("C:/Users/tester/project");
+	const CANONICAL_HOME = toCanonicalRoot(RAW_HOME);
+	const CANONICAL_PROJECT_ROOT = toCanonicalRoot(RAW_PROJECT_ROOT);
+	const FACTS: PathPolicyFacts = { projectRoot: CANONICAL_PROJECT_ROOT, home: CANONICAL_HOME };
+
+	it("fixture sanity: the raw home is genuinely backslash-rooted, or this test proves nothing", () => {
+		expect(RAW_HOME, "BS must have produced a real backslash, not a forward slash").toContain(BS);
+		expect(CANONICAL_HOME, "toCanonicalRoot must have normalised it to forward slashes").not.toContain(BS);
+	});
+
+	it('~/.bashrc blocks because of the "shell rc file" reason, not "resolves outside the project root"', () => {
+		const canonical = canonicalisePathArg(arg("~/.bashrc"), { cwd: CANONICAL_PROJECT_ROOT, home: CANONICAL_HOME });
+		const verdict = classifyPathWrite(canonical, FACTS);
+		expect(verdict.kind).toBe("block");
+		if (verdict.kind === "block") {
+			expect(
+				verdict.reason,
+				"the bashrc DETONATION_TARGETS rule must be what fires -- if this instead reads " +
+					"'resolves outside the project root', the containment rule matched by ACCIDENT (the " +
+					"failure mode CR-02 fixed and this test guards against regressing)",
+			).toContain("shell rc file");
+			expect(verdict.reason).not.toContain("resolves outside the project root");
+		}
+	});
+
+	it('~/.gitconfig blocks because of the "global git config" reason, not containment', () => {
+		const canonical = canonicalisePathArg(arg("~/.gitconfig"), { cwd: CANONICAL_PROJECT_ROOT, home: CANONICAL_HOME });
+		const verdict = classifyPathWrite(canonical, FACTS);
+		expect(verdict.kind).toBe("block");
+		if (verdict.kind === "block") {
+			expect(verdict.reason).toContain("global git config");
+			expect(verdict.reason).not.toContain("resolves outside the project root");
+		}
+	});
+
+	it("an ordinary write inside the (canonicalised, backslash-native) project root is still allowed", () => {
+		const canonical = canonicalisePathArg(arg("src/index.ts"), { cwd: CANONICAL_PROJECT_ROOT, home: CANONICAL_HOME });
+		const verdict = classifyPathWrite(canonical, FACTS);
+		expect(
+			verdict.kind,
+			"a genuinely backslash-native home/project-root pair, once correctly canonicalised, must not " +
+				"over-block an ordinary in-project write -- the false-positive half of the same property",
+		).toBe("allow");
+	});
+});

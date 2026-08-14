@@ -40,12 +40,23 @@
  * WHAT THIS FILE DOES NOT TEST
  * ---------------------------------------------------------------------------
  * The FAIL-OPEN half of CR-02 (an un-canonicalised `facts.home` making the
- * `~/.bashrc` detonation rule silently stop matching) is proven at the
- * `paths.ts`/`policy.ts` unit level instead
- * (`tests/unit/path-policy.test.ts`, `tests/unit/policy-compose.test.ts`) --
- * driving a REAL write to this machine's REAL `~/.bashrc` through a real
- * session, even one this guard is expected to block, is a real-file-system
- * side effect this test suite does not need to risk to prove the point.
+ * `~/.bashrc` detonation rule silently stop matching, and matching the
+ * containment rule instead -- for the WRONG reason) is proven at the
+ * `paths.ts` unit level instead: `tests/unit/path-policy.test.ts`'s WR-10
+ * describe block ("classifyPathWrite's detonation reason distinguishes the
+ * specific rule from generic containment, on a native-Windows-shaped home")
+ * builds a genuinely backslash-rooted home/project-root pair with that
+ * file's own `BS`/`winPath` helpers, runs it through the SAME
+ * `canonicalisePathArg` pipeline `index.ts#toCanonicalRoot` uses, and
+ * asserts on the block REASON, not merely the block kind -- the reason
+ * string is the only thing that distinguishes the bashrc detonation rule
+ * firing from the containment rule matching by accident. (WR-10: this
+ * docstring previously named `tests/unit/policy-compose.test.ts` too and
+ * neither file actually carried this coverage at the time -- corrected
+ * here, and the coverage gap closed in the same change.) Driving a REAL
+ * write to this machine's REAL `~/.bashrc` through a real session, even one
+ * this guard is expected to block, is a real-file-system side effect this
+ * test suite still does not need to risk to prove the point.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
