@@ -86,7 +86,7 @@
 
 ### Composed Extensions
 
-- [ ] **EXT-01**: Subagents support per-agent model, system prompt, tool restriction, and thinking level
+- [x] **EXT-01**: Subagents support per-agent model, system prompt, tool restriction, and thinking level
 - [x] **EXT-02**: Parallel subagents run in isolated git worktrees, verified to **build**, not merely check out — untracked files like `.env` and `node_modules` do not travel to a new worktree
 - [ ] **EXT-03**: Subagents can run in the background without blocking the session
 - [ ] **EXT-04**: A running subagent can be steered mid-run without killing it
@@ -284,7 +284,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | ROUTE-09 | Phase 5 | Complete |
 | ROUTE-10 | Phase 5 | Complete |
 | ROUTE-11 | Phase 5 | Partial — the delegate tool is built, registered and proven offline (config refusal, SSE parser, `tests/unit/qoder-client.test.ts`, plan 05-03; the three-request sequence and folded result against a real loopback fixture, `tests/integration/qoder-delegate.test.ts`, plan 05-06), and documented as a foreign agent in `docs/ROUTING.md` §6 (plan 05-12). The live check against a real PAT is `RB-05-01`, appended to `docs/RUNBOOK.md` (plan 05-12), **OUTSTANDING**. Not complete |
-| EXT-01 | Phase 7 | Pending |
+| EXT-01 | Phase 7 | Complete |
 | EXT-02 | Phase 7 | Complete |
 | EXT-03 | Phase 7 | Pending |
 | EXT-04 | Phase 7 | Pending |
