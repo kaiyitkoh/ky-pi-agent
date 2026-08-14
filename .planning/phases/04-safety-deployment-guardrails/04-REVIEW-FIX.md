@@ -351,3 +351,104 @@ None.
 _Fixed: 2026-08-14_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: ad-hoc (post-2)_
+
+---
+---
+
+# Phase 4: Code Review Fix Report — Iteration 4 (final fix pass)
+
+**Fixed at:** 2026-08-14T02:51:26Z
+**Source review:** .planning/phases/04-safety-deployment-guardrails/04-REVIEW.md (iteration 3 — FINAL re-review)
+**Iteration:** 4
+
+**Summary:**
+- Findings in scope: 4 (2 blockers, 2 warnings)
+- Fixed: 4
+- Skipped: 0
+
+**Suite:** 1175 tests / 67 files, all green (baseline for this run: 1152 tests
+/ 66 files — iteration 3's own ending count; the increase is this pass's own
+regression tests: 12 new evasion-corpus rows, 6 new shell-parse rows, 8 new
+policy-compose rows, a new bootstrap-safety-stub case, a new
+global-teardown-exit-code integration test file). `tsc --noEmit` clean after
+every commit. Ran entirely in the main repository on branch `main` — no
+worktree was created, per this run's explicit process rule; `git worktree
+list` showed exactly one entry throughout, before and after. Every fix below
+was verified red (with the fix reverted via `git stash`, its regression test
+observed to fail for the exact reason the finding names) and green (with the
+fix restored) before being committed.
+
+## Fixed Issues
+
+### CR-09: the CR-06 relocation reintroduced a total fail-open in the untrusted-project case — headless, neither copy of the guard loaded
+
+**Files modified:** `bin/bootstrap.sh`, `.pi/extensions/safety/index.ts`, `tests/helpers/session.ts`, `tests/integration/bootstrap-safety-stub.test.ts`
+**Commit:** `e14ea53`
+**Applied fix:** Chose the review's own Option 2 over Option 1 — the review's text explicitly argues for it ("CR-09 is a *blocker* about zero enforcement, and trading the second for the first is backwards"), and Option 1's `(pi as any).__kySafetyInstalled` flag on the `ExtensionAPI` object would not actually work: iteration 1's own WR-07 fix report already established that the project-scope and user-scope loads each get their OWN `api` object from Pi's `createExtensionAPI` (one per extension, not one per runner build), so a flag set on one extension's `pi` would never be visible to the other. The generated user-scope stub (`bin/bootstrap.sh#install_safety_extension`) no longer has ANY existence check or dedup mechanism — it unconditionally imports and calls the real safety extension's default export, every time. `.pi/extensions/safety/index.ts`'s own CR-06 docstring section is corrected to state this (it previously claimed the stub "checks whether the trusted project's own copy exists on disk … so at most one of the two paths ever registers anything", which was the CR-09 bug itself, restated as if it were the fix).
+**Before/after verdict:** Reproduced the reviewer's exact evidence — the real generated stub driven through jiti with `cwd` = this repository's own root registered `[]` tools and `[]` events pre-fix. Post-fix, the identical drive registers the full `["bash","read","write","edit","approve_ky_command"]` set regardless of whether a project-scoped copy also sits on disk at that cwd.
+**Regression test:** `tests/integration/bootstrap-safety-stub.test.ts`'s CR-06 describe block is renamed to CR-09 and case 7 is rewritten from asserting the fail-open behaviour as correct (`toEqual([])` when a project-scoped copy is present at cwd) to asserting the fix (`toBeGreaterThan(0)`) — this is the exact executed proof the review demanded: a cwd that DOES contain `.pi/extensions/safety/index.ts` but where nothing grants trust, so Pi itself would never have loaded that copy. A new case 8 pins the accepted duplicate-load trade (both copies loading independently registers the SAME full tool set twice, never a missing one) as an executed fact rather than only a documented consequence. `tests/helpers/session.ts#writeUserScopeShim` is also updated to generate the same stub shape production now writes (an unconditional dynamic-import wrapper, not a static re-export) — the aggravating factor the review named: `headless-deny.test.ts` was exercising a simplified shim that did not match what `install_safety_extension` actually generated. Verified red (2 failures, cases 7/8, `expected 0 to be greater than 0`) with `bin/bootstrap.sh`'s stub-content generation reverted via `git stash`; green restored.
+
+### CR-10: `resolveWrappers`' three bare-verb gates were not routed through `normaliseExecutable` — `/usr/bin/env git push` and `env.exe git push` were allowed
+
+**Files modified:** `.pi/extensions/safety/shell.ts`, `tests/fixtures/evasion-corpus.ts`, `tests/unit/shell-parse.test.ts`
+**Commit:** `9cf1eca`
+**Applied fix:** `resolveWrappers`' three gates (`lower === "env"`, `lower === "sudo"`, `PASSTHROUGH_WRAPPERS.has(lower)`) now compare `normaliseExecutable(word)` instead of a bare `.toLowerCase()`, exactly as the review's own Fix section specified — this was the fourth and final bare-verb gate inside `shell.ts` itself that CR-03 (policy.ts/infra.ts) and CR-08 (this module's other two gates) had not yet reached.
+**Before/after verdict:** Reproduced all seven of the reviewer's own executed shapes: `/usr/bin/env git push`, `env.exe git push`, `/usr/bin/sudo git push`, `/usr/bin/nohup git push`, `/usr/bin/env terraform apply`, `/usr/bin/env kubectl delete pod x`, `/usr/bin/env aws secretsmanager get-secret-value --secret-id x` all `allow` pre-fix on a protected `main`, all non-allow post-fix.
+**Regression test:** `tests/fixtures/evasion-corpus.ts` gains EV-66..EV-72 (all `BLOCKED`), covering all seven executed shapes. `tests/unit/shell-parse.test.ts`'s `WRAPPER_TABLE` gains five rows (four positive, one paired negative — `/usr/bin/env echo hi` still resolves to executable `echo`, proving the fix does not degenerate into "any path-qualified env blocks") asserting directly on the resolved `executable`/`wrappers`, which is the "every wrapper name is compared post-normalisation" assertion the review's Fix section asked for. Verified red (12 failures across both files) with `shell.ts` reverted via `git stash`; green restored.
+
+### WR-13: the BUG-01 regression guard fired but did not fail the run — `npx vitest run` exited 0 with the tripwire tripped
+
+**Files modified:** `tests/global-teardown.ts`, `tests/fixtures/global-teardown-probe.txt` (new), `tests/integration/global-teardown-exit-code.test.ts` (new)
+**Commits:** `e2e17f1` (probe fixture), `e8a2eb7` (fix + regression test)
+**Applied fix:** `tests/global-teardown.ts`'s teardown now sets `process.exitCode = 1` immediately before its existing `throw`, exactly the shape the review's Fix section proposed. The throw is kept for the human-readable stderr message; the exit code is what survives vitest reporting a `globalSetup` teardown throw as a logged "error during close" rather than translating it into a non-zero process exit status.
+**Before/after verdict:** A real, separate `npx vitest run` subprocess, spawned from a new integration test, that dirties a dedicated tracked probe fixture from inside a throwaway child test: pre-fix, the child exits `0` even though the tripwire fired and logged its message on stderr (reproduced manually first, then via the automated test below); post-fix, the child exits non-zero, with the tripwire message still present on stderr.
+**Regression test:** `tests/integration/global-teardown-exit-code.test.ts` — a new file that spawns a real, separate `npx vitest run` subprocess against a throwaway dirtying test file and asserts on the CHILD's actual process exit code in both directions (non-zero when dirtied mid-run, zero on a clean tree, paired negative). A dedicated new fixture, `tests/fixtures/global-teardown-probe.txt`, is used instead of the earlier `CLAUDE.md` precedent (BUG-01's own manual proof) specifically because `CLAUDE.md` and `docs/RUNBOOK.md` are both read/asserted-on by other test files that may run concurrently in the same overall `vitest run` invocation, and mutating either mid-suite risked a real race with an unrelated assertion. The dirtying itself had to be written as a throwaway test file discovered by the CHILD's own `vitest run` invocation, not performed by the parent process before spawning the child — an earlier draft that dirtied the fixture from the parent process before spawning produced a false negative (the child's own `globalSetup` baseline already saw the fixture as dirty, so its teardown never detected anything "newly" dirtied), caught and corrected before this test was considered complete. Verified red (case 1 failed, `expected a non-zero exit code … but got 0`) with the `process.exitCode = 1` line reverted; green restored, case 2 (the clean-tree paired negative) unaffected throughout.
+
+### WR-14: `SENSITIVE_SEARCH_ROOT_SEGMENTS` matched any `.aws`/`.kube`/`.ssh`/`.gnupg` segment anywhere in the path, and an absent `path` blocked outright when the session root was `$HOME`
+
+**Files modified:** `.pi/extensions/safety/paths.ts`, `.pi/extensions/safety/policy.ts`, `tests/unit/policy-compose.test.ts`
+**Commit:** `2beecfe`
+**Applied fix:** `isSensitiveSearchRoot`'s segment-anywhere check is now anchored to paths at or under `$HOME` (`isWithinRoot(canonicalPath, facts.home) && parts.some(...)`), exactly as the review's Fix section specified. `evaluateSearchRootField` now exempts a genuinely ABSENT `path` (never an explicit path argument that happens to equal the project root) when `facts.projectRoot` and `facts.home` canonicalise identically (`sameCanonicalPath`, newly exported from `paths.ts` for this purpose). Both fixes are narrowly scoped: neither reopens CR-07's own gap (a search root that IS or sits below a sensitive directory, or reaches `$HOME` itself, still blocks unconditionally).
+**Before/after verdict:** `grep { path: "C:/repo/tests/fixtures/.ssh/known_hosts_fixture" }` (a project-internal path merely containing a `.ssh` segment, not under `$HOME`) and `ls { path: "C:/repo/node_modules/some-pkg/.aws" }` both `block` pre-fix, `allow` post-fix. A bare `grep`/`find`/`ls` with no `path` at all, with `facts.projectRoot === facts.home` (a session opened directly in `$HOME`), `block`s pre-fix, `allow`s post-fix.
+**Regression test:** `tests/unit/policy-compose.test.ts` gains a WR-14 describe block: the two false-positive fixes, a paired negative proving an EXPLICIT path equal to `$HOME` is still evaluated the normal way (not exempted), and four "CR-07 RE-RUN" cases reproducing EV-61..EV-64 directly against `evaluate()` so this fix's own test file is self-contained proof it does not reopen CR-07, not merely a claim that the corpus elsewhere still passes. Verified red (exactly the 3 WR-14 cases failed, all with "expected allow, got block") with both `paths.ts` and `policy.ts` reverted via `git stash`; green restored, all CR-07 re-run cases and the existing corpus (`evasion-corpus.test.ts`, EV-61..65) unaffected throughout.
+
+## Skipped Issues
+
+None — all 4 in-scope findings (2 blockers, 2 warnings) were fixed. `IN-01`..`IN-05` (info-tier) were out of `fix_scope: critical_warning` and were not touched; `RB-04-01` in `docs/RUNBOOK.md` was deliberately left untouched, still `OUTSTANDING` in both the summary table and the detail subsection.
+
+## Final evasion-corpus numbers (executed, post-fix)
+
+```
+total corpus cases          : 72   (was 65 at iteration 3; +7 from CR-10's EV-66..EV-72)
+blocked by real evaluate()  : 60   (was 53; +7)
+NOT blocked (allow)         : 12   (unchanged)
+not-blocked ids             : EV-09 EV-27 EV-35 EV-36 EV-38 EV-39 EV-40 EV-41 EV-42 EV-56 EV-57 EV-65
+```
+
+The not-blocked (`OUT-OF-SCOPE`) set is byte-identical to iteration 3's — every
+row this pass added is `BLOCKED`, and WR-14's fix reduces false blocks on
+paths never in the `OUT-OF-SCOPE` bucket to begin with, so the published
+limitations table needed no edit. `tests/unit/evasion-corpus.test.ts`'s
+Group B (doc/corpus cross-check, 89 tests total in that file after this
+pass) confirms `docs/SAFETY.md`'s "Known bypasses" table lists **exactly**
+this same 12-id set, in both directions — no row was re-bucketed, softened,
+or moved to appear caught.
+
+## Suite state after this pass
+
+- **1175 tests / 67 files**, all green. `npm run typecheck` clean.
+- Tree clean after a full `npx vitest run` (the WR-13 fix's own global-teardown
+  guard enforces this mechanically, and this run's own regression test for
+  WR-13 proves that guard itself now fails the build correctly if it ever
+  fires again).
+- One worktree throughout (`git worktree list`), branch `main`, no
+  `git worktree add`/`remove` at any point in this run.
+- `RB-04-01` in `docs/RUNBOOK.md` remains `OUTSTANDING` in both the summary
+  table (`:862`) and the detail subsection (`:866`) — untouched, per this
+  run's explicit process rule.
+
+---
+
+_Fixed: 2026-08-14T02:51:26Z_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: 4 (final fix pass)_
