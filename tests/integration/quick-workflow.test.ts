@@ -878,6 +878,181 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
+	it("case 7 (CR-01 iteration 3 regression, PROBE P4) -- a call BLOCKED by this repo's own safety layer is not invisible to the gate", async () => {
+		const candidate = flashExecutorCandidate();
+		const BLOCKED_PUSH = "git push --force origin main";
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					// (1) BLOCKED before it ever executes -- CR-05's own pushTargetsProtected
+					// check fires on the refspec destination regardless of the checked-out
+					// branch, so this blocks even though gitInit below checks out "work".
+					fauxAssistantMessage([fauxToolCall("bash", { command: BLOCKED_PUSH })], { stopReason: "toolUse" }),
+					// (2) undeterred, the model commits anyway.
+					fauxAssistantMessage([fauxToolCall("bash", { command: 'git commit --allow-empty -m "quick: PROBE P4"' })], {
+						stopReason: "toolUse",
+					}),
+					fauxAssistantMessage([fauxText("pushed and verified, tests pass")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- case 7 needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("push and commit", ctx);
+
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					await waitFor(
+						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
+						5000,
+						"case 7's evidence row",
+					);
+
+					// The audit log independently confirms the push was really blocked --
+					// the same fact the evidence gate must now also be able to see.
+					const auditRows = readAudit(cwd);
+					const pushAuditRows = auditRows.filter((r) => (r.command ?? "").includes(BLOCKED_PUSH));
+					expect(
+						pushAuditRows.some((r) => r.verdict === "block"),
+						"the safety audit log must record a block verdict for the push -- otherwise this case is not " +
+							"exercising a genuine block and proves nothing about CR-01",
+					).toBe(true);
+
+					const rows = readEvidence(cwd);
+					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
+					const row = rows[0] as EvidenceRowShape;
+					expect(
+						row.verdict,
+						`PROBE P4: a run containing a call BLOCKED by this repo's own safety layer must be REJECTED, ` +
+							`even though a commit landed afterwards, got: ${JSON.stringify(row)}`,
+					).toBe("reject");
+					expect(
+						row.recordCount ?? 0,
+						"both the BLOCKED push and the passing commit must have been recorded -- a blocked call must " +
+							"not be structurally invisible to the gate",
+					).toBe(2);
+					expect(
+						row.baseSha,
+						"HEAD genuinely moved during this run -- the commit really landed, and still rejected",
+					).not.toBe(row.headSha);
+
+					expect(notifications.length, "a rejection must still report an outcome").toBe(1);
+					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
+
+					// The model's own prose claimed success -- the reject reason must never echo it.
+					expect(row.reason ?? "").not.toContain("pushed and verified");
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
+	it("case 8 (CR-01 iteration 3 regression, PROBE P7) -- a dropped capture (currentSha throws mid-run) must reject, never silently vanish into an ACCEPT", async () => {
+		const candidate = flashExecutorCandidate();
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					// (1) a REAL, successful command (mv exits 0) whose own EVIDENCE
+					// CAPTURE nonetheless throws: tool_execution_end's currentSha(cwd)
+					// call cannot find a `.git` to read while it is renamed away.
+					fauxAssistantMessage([fauxToolCall("bash", { command: "mv .git .gitx" })], { stopReason: "toolUse" }),
+					// (2) restore .git and make the real commit -- this call's own
+					// capture succeeds normally.
+					fauxAssistantMessage(
+						[fauxToolCall("bash", { command: 'mv .gitx .git && git commit --allow-empty -m "quick: PROBE P7"' })],
+						{ stopReason: "toolUse" },
+					),
+					fauxAssistantMessage([fauxText("tests pass, done")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- case 8 needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("rename .git away, then restore and commit", ctx);
+
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					await waitFor(
+						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
+						5000,
+						"case 8's evidence row",
+					);
+
+					const rows = readEvidence(cwd);
+					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
+					const row = rows[0] as EvidenceRowShape;
+					expect(
+						row.verdict,
+						`PROBE P7: a run holding a DROPPED capture must be REJECTED, not silently accepted just ` +
+							`because the surviving record's own SHA happens to match headSha, got: ${JSON.stringify(row)}`,
+					).toBe("reject");
+					expect(
+						row.reason ?? "",
+						"the reject reason must name the capture-failed record so a human can tell it apart from an ordinary tool failure",
+					).toContain("capture failed");
+					expect(
+						row.recordCount ?? 0,
+						"the capture failure must be recorded as ITS OWN row, not silently dropped -- CR-01 iteration 3's whole point",
+					).toBe(2);
+					expect(
+						row.baseSha,
+						"HEAD genuinely moved during this run -- the commit really landed, and still rejected",
+					).not.toBe(row.headSha);
+
+					expect(notifications.length, "a rejection must still report an outcome").toBe(1);
+					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
 	it("WR-01 regression -- a second /quick while a run is in flight is refused, and does not steal the first run's buffer", async () => {
 		const candidate = flashExecutorCandidate();
 
