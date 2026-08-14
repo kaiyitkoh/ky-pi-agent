@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 06-02-PLAN.md -- /quick, the walking skeleton command
-last_updated: "2026-08-14T14:45:17.351Z"
+stopped_at: Completed 06-03-PLAN.md -- the workflow line-budget registry, both directions
+last_updated: "2026-08-14T14:58:08.481Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 60
-  completed_plans: 58
+  completed_plans: 59
   percent: 45
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 06 (Walking Skeleton — /quick & the Evidence Gate) — EXECUTING
-Plan: 3 of 4
+Plan: 4 of 4
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [██████████] 97%
+Progress: [██████████] 98%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -124,6 +124,7 @@ credentials can do has been done".
 | Phase 05 P12 | 20m | 3 tasks | 6 files |
 | Phase 06 P01 | 45m | 3 tasks | 4 files |
 | Phase 06 P02 | ~25min | 2 tasks | 2 files |
+| Phase 06 P03 | 35m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -306,6 +307,10 @@ Recent decisions affecting current work:
 - [Phase 06]: 06-02: /quick never makes a nested model call for the work itself -- runSingleShotRole throws for the executor role by design (modes.ts:401-406), so the task is handed to the session's ordinary prompt loop via pi.sendUserMessage
 - [Phase 06]: 06-02: the completion gate fires on Pi's agent_end event, never on an awaited ctx.waitForIdle() -- waitForIdle resolves immediately as a no-op in every headless session this repo's test harness uses (runner.js:260)
 - [Phase 06]: 06-02: /quick's header is capped short as a deliberate, stated exception to house style -- the rationale is relocated to docs/WORKFLOWS.md, not deleted, and the raw-line budget itself is registered only in tests/unit/workflow-budgets.test.ts (plan 06-03), never restated as a number in the doc
+- [Phase 06]: 06-03: the registry (WORKFLOW_BUDGETS) is the single authoritative source of every workflow file's budget -- docs/WORKFLOWS.md (06-02) deliberately carries no numbers, per decision D-8
+- [Phase 06]: 06-03: countRawLines is readFileSync().split("\n").length with zero stripping -- MUTATION 2 measured the comment-excluding alternative's loophole at 16 lines on index.ts alone (74 raw vs 58 comment-excluding)
+- [Phase 06]: 06-03: WORKFLOWS_DIR_TOTAL_BUDGET is 360 (measured 353 rounded up to the next ten), a ratchet with only 7 lines of incidental headroom -- MUTATION 7 found this headroom is so small it incidentally catches large undeclared files too, so a supplementary falsification with a 3-line file proved the present-but-undeclared test is still independently load-bearing
+- [Phase 06]: 06-03: discovery is git-index UNION working-tree (D-9) across three shapes -- .pi/extensions/workflows/*.ts, .pi/prompts/*.md, .pi/skills/*.md (D-10) -- the markdown dodge was proven closed by MUTATION 5, not assumed
 
 ### Pending Todos
 
@@ -353,8 +358,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T14:45:17.343Z
-Stopped at: Completed 06-02-PLAN.md -- /quick, the walking skeleton command
+Last session: 2026-08-14T14:58:08.472Z
+Stopped at: Completed 06-03-PLAN.md -- the workflow line-budget registry, both directions
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

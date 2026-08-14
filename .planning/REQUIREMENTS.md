@@ -136,7 +136,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [ ] **FLOW-08**: `/review` produces REVIEW.md and opens an MR targeting **staging, never main**
 - [ ] **FLOW-09**: Subagents receive self-contained handoff packets, so delegation costs negative tokens in the parent
 - [ ] **FLOW-10**: The total artifact set is SPEC, PLAN, REVIEW plus a PROGRESS append — no document that no downstream consumer reads
-- [ ] **FLOW-11**: Every workflow has a CI-enforced line budget
+- [x] **FLOW-11**: Every workflow has a CI-enforced line budget
 
 ### Context Budget
 
@@ -323,7 +323,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | FLOW-08 | Phase 9 | Pending |
 | FLOW-09 | Phase 9 | Pending |
 | FLOW-10 | Phase 9 | Pending |
-| FLOW-11 | Phase 6 | Pending |
+| FLOW-11 | Phase 6 | Complete |
 | CTX-01 | Phase 10 | Pending |
 | CTX-02 | Phase 10 | Pending |
 | CTX-03 | Phase 10 | Pending |

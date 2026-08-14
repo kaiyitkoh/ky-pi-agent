@@ -295,7 +295,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 06-03-PLAN.md — FLOW-11: the workflow line-budget registry, enforced both directions with a directory aggregate
+- [x] 06-03-PLAN.md — FLOW-11: the workflow line-budget registry, enforced both directions with a directory aggregate
 - [ ] 06-04-PLAN.md — the seam proof: break Phase 5, break Phase 4, reject fabricated evidence, accept a real guarded commit
 
 **Research**: Not needed — this phase is deliberately minimal and exercises components already verified.
@@ -420,7 +420,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 3. Providers & Credentials | 11/11 | Plans complete — 5 live checks OUTSTANDING | 2026-08-14 |
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
-| 6. Walking Skeleton — `/quick` & Evidence Gate | 2/4 | In Progress|  |
+| 6. Walking Skeleton — `/quick` & Evidence Gate | 3/4 | In Progress|  |
 | 7. Composed Extensions, Pinned & Reviewed | 0/TBD | Not started | - |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 0/TBD | Not started | - |
