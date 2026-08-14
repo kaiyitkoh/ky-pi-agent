@@ -737,14 +737,36 @@ function registerToolCallHook(pi: ExtensionAPI): void {
  * this runner build already registered" from "a fresh runner build" (the
  * runtime's own `getAllTools()`/`getActiveTools()` throw "not initialized"
  * during extension loading -- `dist/core/extensions/loader.js:151-152`).
- * The fix lives one level up, in the STUB `bin/bootstrap.sh` generates: the
- * stub checks whether the trusted project's OWN `.pi/extensions/safety/
- * index.ts` exists on disk before importing and calling this file's default
- * export, so at most one of the two paths ever registers anything, in EVERY
- * runner build, including after `/reload` (see `install_safety_extension`'s
- * own docstring). This file's own default export is therefore
- * UNCONDITIONALLY idempotent-per-call: it always fully registers, every
- * single time it runs, which is exactly the property `/reload` needs.
+ *
+ * CR-09 -- an earlier fix tried to solve the double-load hazard one level up
+ * anyway, by having the STUB `bin/bootstrap.sh` generates check whether the
+ * trusted project's OWN `.pi/extensions/safety/index.ts` exists on disk
+ * before importing and calling this file's default export. That was wrong:
+ * existence-on-disk is not a valid proxy for "Pi will actually load it" --
+ * Pi only auto-discovers a project-scoped `.pi/extensions/` copy when the
+ * project is TRUSTED [`dist/core/package-manager.js:1980`], and headless
+ * trust resolves `false` with no UI bound
+ * [`dist/core/project-trust.js#resolveProjectTrusted`] absent a persisted
+ * `~/.pi/agent/trust.json` decision. So in an UNTRUSTED headless run rooted
+ * at a repository that itself ships a project-scoped copy -- exactly this
+ * repository, on a machine with no trust decision recorded -- the project
+ * copy never loaded (filtered out for lack of trust) AND the stub's
+ * existence check found the file on disk and returned early, so NEITHER copy
+ * ever registered anything. Executed: the stub run with `cwd` set to this
+ * repository's own root registered `[]` tools and `[]` events -- a total
+ * fail-open, in exactly the scenario SAFE-11 exists to cover.
+ *
+ * The stub `bin/bootstrap.sh` now generates has NO dedupe of any kind: it
+ * unconditionally imports and calls this file's default export, every time.
+ * The residual double-load WR-07 named is therefore accepted rather than
+ * "solved" -- see `bin/bootstrap.sh`'s own CR-09 docstring section and
+ * `docs/SAFETY.md`'s WR-07 note for why a duplicate `tool_call` hook
+ * (duplicate audit rows, at worst a duplicate block) is the strictly lesser
+ * problem next to a guaranteed missed block. This file's own default export
+ * is therefore UNCONDITIONALLY idempotent-per-call: it always fully
+ * registers, every single time it runs, which is exactly the property
+ * `/reload` needs AND exactly what a stub with no dedupe of its own now
+ * relies on.
  */
 export default function (pi: ExtensionAPI): void {
 	// Tool registrations FIRST -- see the module docstring's REGISTRATION

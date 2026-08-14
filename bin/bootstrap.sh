@@ -862,19 +862,44 @@ console.log("  auth.json provider entries added: " + added.join(", "));
 # function configures Pi, it does not gate the BOOT-01 hardening ordering, so
 # it must never move above install_pi.
 #
-# CR-06: the stub this function writes GUARDS ITSELF BY EXISTENCE, not by
-# re-exporting the safety extension's default export unconditionally. When
-# this repository is the trusted project, Pi ALSO auto-discovers the
-# project-scoped copy at `.pi/extensions/safety/index.ts` -- both would
-# otherwise load, registering the `tool_call` hook TWICE. Putting the dedupe
-# inside `.pi/extensions/safety/index.ts` itself (the iteration-1 WR-07 fix)
-# broke `/reload`: a `globalThis`-keyed flag cannot tell "two paths
-# registering in one runner build" apart from "one path registering again
-# after /reload" (see that file's own CR-06 docstring section). The stub
-# below checks for the project-scoped copy's existence at the SESSION's own
-# `process.cwd()` -- re-evaluated fresh on every factory invocation,
-# including every `/reload` -- and only imports+calls the real safety
-# extension when that copy is absent.
+# CR-09 (supersedes CR-06's own note, kept here rather than deleted so the
+# history of the mistake is legible): the stub used to GUARD ITSELF BY
+# EXISTENCE -- `if (existsSync(<cwd>/.pi/extensions/safety/index.ts)) return;`
+# -- reasoning that when THIS repository is the trusted project, Pi ALSO
+# auto-discovers the project-scoped copy at `.pi/extensions/safety/index.ts`,
+# so registering twice would double the `tool_call` hook. That reasoning was
+# wrong: Pi only auto-discovers a project-scoped `.pi/extensions/` copy when
+# the project is TRUSTED [dist/core/package-manager.js:1980,
+# `if (projectTrusted) { addResources("extensions", ...) }`], and headless
+# trust resolves `false` with NO UI bound
+# [dist/core/project-trust.js, `resolveProjectTrusted`: `if
+# (!options.projectTrustContext.hasUI) return false;`] absent a persisted
+# `~/.pi/agent/trust.json` decision. So in every UNTRUSTED headless run rooted
+# at a repository that itself ships a project-scoped copy (`--mode json`,
+# `-p`, a spawned subagent) -- which describes THIS repository on a machine
+# with no trust decision recorded -- the project copy never loads (filtered
+# out for lack of trust) AND the existence check finds the file on disk and
+# returns early, so NEITHER copy registers. Executed: the stub run with `cwd`
+# = this repository's own root registered `[]` tools and `[]` events --
+# exactly the failure signature this function's own docstring, above, says it
+# exists to close. Existence-on-disk is not a valid proxy for "will actually
+# load"; only project TRUST decides that, and this stub has no way to probe
+# trust state.
+#
+# The fix: the stub below ALWAYS imports and calls the real safety extension,
+# unconditionally, with no existence check of any kind. The double-load
+# hazard the existence check was trying to prevent (both copies genuinely
+# loading, in the one case where the project IS trusted and this repository
+# is also the session's own cwd) is real but strictly the LESSER problem: a
+# duplicate `tool_call` hook produces duplicate audit rows and, at worst, a
+# duplicate block -- never a missed one. Trading a guaranteed missed block
+# (every untrusted headless run) for occasional duplicate audit rows (one
+# interactive, trusted session inside this repo) is not a fair trade, and the
+# existence check made exactly that trade backwards. See
+# `.pi/extensions/safety/index.ts`'s own CR-06/CR-09 docstring section for the
+# other half of this (why the dedupe cannot instead live inside the extension
+# itself), and `docs/SAFETY.md`'s WR-07 note for how this residual duplicate
+# load is published rather than hidden.
 install_safety_extension() {
 	_safety_src="$REPO_ROOT/.pi/extensions/safety/index.ts"
 	if [ ! -f "$_safety_src" ]; then
@@ -904,22 +929,25 @@ const out = [
   "// regardless of project trust (SAFE-11) -- project-scoped extensions never",
   "// load in a headless subagent, which has no UI to grant trust with.",
   "//",
-  "// CR-06: guarded by existence, not a globalThis flag inside the extension",
-  "// itself -- see the module docstring in .pi/extensions/safety/index.ts",
-  "// for why the extension cannot safely self-dedupe against a Pi /reload.",
-  "// When THIS repository is the trusted project, Pi ALSO auto-discovers the",
-  "// project-scoped copy at .pi/extensions/safety/index.ts, which registers",
-  "// first; this stub then finds that file already present at the current",
-  "// session cwd and returns without registering a second time. Nothing",
-  "// here is module-global state, so a reload (which rebuilds this stub as",
-  "// a fresh extension instance) re-evaluates the check fresh every time,",
-  "// with no residue left over from a previous load.",
-  "import { existsSync } from \"node:fs\";",
-  "import { join } from \"node:path\";",
+  "// CR-09: this stub ALWAYS imports and calls the real safety extension --",
+  "// no existsSync(...) guard, no globalThis flag, no dedupe of any kind. An",
+  "// earlier shape returned early when a project-scoped copy of the safety",
+  "// extension existed ON DISK at the session own cwd, reasoning that Pi",
+  "// would also auto-discover and load that copy. Wrong: Pi only",
+  "// auto-discovers a project-scoped .pi/extensions/ copy when the project is",
+  "// TRUSTED, and headless trust resolves false with no UI bound absent a",
+  "// persisted decision -- so in an UNTRUSTED headless run rooted at a",
+  "// repository that itself ships a project-scoped copy, the project copy",
+  "// never loaded AND this stub existence check found the file and",
+  "// returned early, so NEITHER copy ever registered the tool_call hook.",
+  "// See bin/bootstrap.sh own CR-09 docstring section for the executed",
+  "// proof and the full citation trail. Removing the guard means BOTH copies",
+  "// genuinely load when the project IS trusted and this repository is also",
+  "// the session own cwd -- a duplicate tool_call hook, duplicate audit",
+  "// rows, at worst a duplicate block. Never a missed one. That is the",
+  "// deliberate, documented trade (see docs/SAFETY.md, the WR-07 note): a",
+  "// double block is still a block.",
   "export default async function (pi) {",
-  "  if (existsSync(join(process.cwd(), \".pi\", \"extensions\", \"safety\", \"index.ts\"))) {",
-  "    return;",
-  "  }",
   "  const mod = await import(" + JSON.stringify(specifier) + ");",
   "  await mod.default(pi);",
   "}",

@@ -159,7 +159,8 @@ export interface FauxSessionHandle {
 }
 
 /**
- * Write a user-scope extension that re-exports another file's default export.
+ * Write a user-scope extension that imports and calls another file's default
+ * export.
  *
  * Pi discovers user extensions at `<agentDir>/extensions/<name>/index.ts`.
  * Project-scoped `.pi/extensions` is NOT usable here: project resources are
@@ -167,6 +168,20 @@ export interface FauxSessionHandle {
  * so trust resolves `false` and the extension silently never loads (RESEARCH
  * §8.4). A silently-absent extension under test is a green run that proved
  * nothing, so the shim route is mandatory rather than convenient.
+ *
+ * CR-09: this shape (a dynamic `import()` inside an `async function` wrapper,
+ * unconditional -- no existence check, no dedup) is deliberately kept in sync
+ * with the REAL stub `bin/bootstrap.sh#install_safety_extension` generates,
+ * not a simplified `export { default } from "..."` re-export. The review that
+ * found CR-09 named exactly this mismatch as an aggravating factor: an
+ * earlier version of this helper wrote a static re-export, a DIFFERENT shape
+ * from what production actually generates, so `headless-deny.test.ts` (the
+ * one test that exercises the confirm/UI path through a real user-scope
+ * stub) was never actually driving production's own bytes. If a future
+ * change reintroduces a bug in `install_safety_extension`'s own generated
+ * content -- a bad specifier normalisation, say -- this helper producing the
+ * SAME shape gives that class of bug a chance to surface here too, instead
+ * of only in `bootstrap-safety-stub.test.ts`.
  *
  * The module specifier has every backslash replaced with a forward slash:
  * `C:\Users\...` inside a TypeScript string literal is a set of escape
@@ -183,7 +198,13 @@ export function writeUserScopeShim(agentDir: string, name: string, targetAbsPath
 		shim,
 		[
 			"// Generated user-scope shim -- see tests/helpers/session.ts. Lives in a temp dir.",
-			`export { default } from ${JSON.stringify(specifier)};`,
+			"// CR-09: kept in the same shape bin/bootstrap.sh#install_safety_extension",
+			"// actually generates -- an unconditional dynamic import, not a static",
+			"// re-export -- so this shim exercises production's own bytes.",
+			"export default async function (pi) {",
+			`  const mod = await import(${JSON.stringify(specifier)});`,
+			"  await mod.default(pi);",
+			"}",
 			"",
 		].join("\n"),
 		"utf-8",
