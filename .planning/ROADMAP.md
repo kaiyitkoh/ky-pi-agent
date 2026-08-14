@@ -313,8 +313,24 @@ Plans:
   4. A parallel subagent in an isolated git worktree can **build**, not merely check out — untracked files like `.env` and `node_modules` do not travel to a new worktree.
   5. File checkpointing restores the working tree, and a documented smoke-test ritual (one turn per provider, one subagent spawn, one blocked command, one wire dump) passes after a version bump.
 
-**Plans**: TBD
-**Research**: `--research-phase` required — every pin must be re-verified rather than inherited. File checkpointing and provider fallback are explicitly LOW-confidence categories and should be re-surveyed, not installed from the research document.
+**Plans**: 13 plans across 5 waves
+
+Plans:
+- [ ] 07-01-PLAN.md — hardening gate, live pin/license re-verification, `docs/EXTENSIONS.md` provenance record *(Wave 1)*
+- [ ] 07-02-PLAN.md — worktree test helper and the Windows-safe `worktreeSetupHook` script *(Wave 1)*
+- [ ] 07-03-PLAN.md — vendored + hardened `git-checkpoint` (headless restore, untracked capture, persistence) and its proof *(Wave 1)*
+- [ ] 07-04-PLAN.md — `.pi/agents/planner.md` and the no-`model:`-key enforcement (EXT-01) *(Wave 1)*
+- [ ] 07-05-PLAN.md — the decisive worktree BUILD proof — fails before the hook, builds after it *(Wave 2)*
+- [ ] 07-06-PLAN.md — vendor `pi-loop-police` (no LICENSE) and the EXT-10 vendor/depend mutual-exclusion audit *(Wave 2)*
+- [ ] 07-07-PLAN.md — vendor Pi's bundled `plan-mode/`, resolving the `/todos` command collision *(Wave 2)*
+- [ ] 07-08-PLAN.md — vendor bundled `todo.ts` + `questionnaire.ts` and pay the BOOT-10 toll with MEASURED schema costs *(Wave 3)*
+- [ ] 07-09-PLAN.md — `.pi/settings.json` `packages[]` lockfile + subagents config, and the both-directions pin diff *(Wave 2)*
+- [ ] 07-10-PLAN.md — the one `pi install`, gated by a blocking package-legitimacy checkpoint, then `pi list` reconciliation *(Wave 3)*
+- [ ] 07-11-PLAN.md — capability-to-evidence registry (EXT-05/06) and the committed Phase 10 tool-count baseline *(Wave 4)*
+- [ ] 07-12-PLAN.md — EXT-03/EXT-04 mechanism evidence, bound to the pin so a bump invalidates it *(Wave 4)*
+- [ ] 07-13-PLAN.md — `RB-07-01` composed smoke ritual, `PHASE_SEVEN_IDS` guard, REQUIREMENTS.md statuses *(Wave 5)*
+
+**Research**: `--research-phase` required — every pin must be re-verified rather than inherited. File checkpointing and provider fallback are explicitly LOW-confidence categories and should be re-surveyed, not installed from the research document. Done: `07-RESEARCH.md` (+ orchestrator tarball Addendum A1-A6).
 
 ### Phase 8: Quality Gates & Engineering Quality
 
