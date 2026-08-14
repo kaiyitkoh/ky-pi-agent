@@ -104,7 +104,7 @@ import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earen
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { approve, consume, createPending, peek, validate } from "./approvals.ts";
+import { approve, consume, createPending, markHookDeferred, peek, validate } from "./approvals.ts";
 import { pruneAuditLogs, writeAuditRow } from "./audit.ts";
 import { currentBranch } from "./git.ts";
 import { canonicalisePathArg } from "./paths.ts";
@@ -586,19 +586,26 @@ function registerApprovalTool(pi: ExtensionAPI): void {
  * `confirm`:
  *   - if an approval grant ALREADY EXISTS for this exact command (CR-01: the
  *     model re-issuing a command a human just approved via
- *     {@link APPROVE_TOOL_NAME}), the hook returns `undefined` and lets the
- *     call proceed to the wrapped tool's own `execute()`, which performs the
- *     actual one-shot {@link consume} -- see `approvals.ts`'s module
- *     docstring, "THE PROTOCOL THIS STORE IMPLEMENTS", step 4. The hook itself
- *     NEVER consumes: `peek()` is a non-mutating read, so the SAME grant is
- *     still there for the wrapper to actually spend. If the hook consumed
- *     here, the wrapper's own `consume()` on this exact retry would always
- *     find nothing and block the just-approved command forever -- this is the
- *     bug CR-01 fixes: `approve_ky_command` was dead code because nothing
- *     ever reached this branch's now-removed unconditional re-block.
- *   - otherwise, creates a pending approval and blocks with a reason that
- *     embeds the request id and a literal instruction to call
- *     {@link APPROVE_TOOL_NAME}.
+ *     {@link APPROVE_TOOL_NAME}) AND this is the FIRST deferral for that
+ *     grant (WR-12: {@link markHookDeferred} returns `true`), the hook
+ *     returns `undefined` and lets the call proceed to the wrapped tool's own
+ *     `execute()`, which performs the actual one-shot {@link consume} -- see
+ *     `approvals.ts`'s module docstring, "THE PROTOCOL THIS STORE
+ *     IMPLEMENTS", step 4. The hook itself NEVER consumes: `peek()` is a
+ *     non-mutating read, so the SAME grant is still there for the wrapper to
+ *     actually spend. If the hook consumed here, the wrapper's own
+ *     `consume()` on this exact retry would always find nothing and block
+ *     the just-approved command forever -- this is the bug CR-01 fixes:
+ *     `approve_ky_command` was dead code because nothing ever reached this
+ *     branch's now-removed unconditional re-block.
+ *   - otherwise (no grant, OR a grant exists but this extension already
+ *     deferred to it once with no intervening `consume()` -- WR-12: the
+ *     documented T-04-08/CR-06 shapes where the wrapper that would have
+ *     consumed it never actually ran), creates a pending approval and blocks
+ *     with a reason that embeds the request id and a literal instruction to
+ *     call {@link APPROVE_TOOL_NAME}. This is what bounds an unconsumed
+ *     grant's unguarded window to `HOOK_DEFER_TTL_MS` (seconds) instead of
+ *     the grant's own `APPROVAL_TTL_MS` (10 minutes).
  * On `block`, blocks with the classifier's reason. `terminate` is never set
  * -- RESEARCH/CONTEXT both note it applies only to a blocked call and only
  * stops the agent when EVERY finalized result in the batch terminates, so it
@@ -642,7 +649,19 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			// being re-issued) -- defer to the wrapper, which performs the actual
 			// one-shot consume. NEVER consume here; see this function's own
 			// docstring.
-			if (peek(verdict.requestKey)) {
+			//
+			// WR-12: deferral itself is now SELF-LIMITING. markHookDeferred()
+			// returns true only for the FIRST defer attempt for this requestKey;
+			// a SECOND attempt before the wrapper's own consume() has cleared the
+			// marker falls through to the normal mint-a-fresh-pending-request
+			// path below, exactly as if no grant existed. Without this, a grant
+			// left unconsumed because the tool that actually executes is NOT this
+			// extension's own wrapper (T-04-08's tool-name collision, or the
+			// CR-06 case where this extension never registered a wrapper at all)
+			// would let every re-issue of the exact command run UNGUARDED for the
+			// grant's full APPROVAL_TTL_MS lifetime -- strictly worse than the
+			// bug CR-01 fixed. See approvals.ts#markHookDeferred's own docstring.
+			if (peek(verdict.requestKey) && markHookDeferred(verdict.requestKey)) {
 				writeAuditRow(ctx.cwd, {
 					event: HOOK_AUDIT_EVENT,
 					tool: toolName,

@@ -32,7 +32,7 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 
 import { describe, expect, it } from "vitest";
 
-import { createPending, peek } from "../../.pi/extensions/safety/approvals.ts";
+import { approve, createPending, peek } from "../../.pi/extensions/safety/approvals.ts";
 import safety, { APPROVE_TOOL_NAME } from "../../.pi/extensions/safety/index.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
@@ -46,14 +46,18 @@ function stubPi(): {
 	hooks: string[];
 	toolNames: string[];
 	tools: Map<string, ToolDefinition<never, unknown>>;
+	/** WR-12: the real handler function registered for each event, keyed by event name -- lets a test invoke `tool_call` directly. */
+	handlers: Map<string, (...args: unknown[]) => unknown>;
 } {
 	const hooks: string[] = [];
 	const toolNames: string[] = [];
 	const tools = new Map<string, ToolDefinition<never, unknown>>();
+	const handlers = new Map<string, (...args: unknown[]) => unknown>();
 
 	const pi = {
-		on(event: string, _handler: unknown) {
+		on(event: string, handler: (...args: unknown[]) => unknown) {
 			hooks.push(event);
+			handlers.set(event, handler);
 		},
 		registerTool(tool: ToolDefinition<never, unknown>) {
 			toolNames.push(tool.name);
@@ -61,7 +65,7 @@ function stubPi(): {
 		},
 	} as unknown as ExtensionAPI;
 
-	return { pi, hooks, toolNames, tools };
+	return { pi, hooks, toolNames, tools, handlers };
 }
 
 describe("the safety extension's entry point registers exactly what it claims to", () => {
@@ -393,5 +397,96 @@ describe("WR-11 -- approve_ky_command.execute() denies by default on every non-a
 				"out is 'approve unless the choice is exactly Deny', which would wrongly approve here",
 		).toBe(true);
 		expect(grantExistsAfter, "no grant must exist when select() returned undefined").toBe(false);
+	});
+});
+
+/** Extract a `field="<json-quoted string>"` value from the hook's block-reason text, unescaping it via JSON.parse. Mirrors `tests/integration/confirm-approve-reissue.test.ts`'s own helper. */
+function extractQuotedField(text: string, field: string): string {
+	const marker = `${field}=`;
+	const start = text.indexOf(marker);
+	if (start === -1) {
+		throw new Error(`no "${marker}" found in block reason: ${text}`);
+	}
+	let i = start + marker.length;
+	if (text[i] !== '"') {
+		throw new Error(`expected a JSON-quoted string right after "${marker}" in: ${text}`);
+	}
+	let j = i + 1;
+	while (j < text.length && text[j] !== '"') {
+		if (text[j] === "\\") {
+			j += 1;
+		}
+		j += 1;
+	}
+	return JSON.parse(text.slice(i, j + 1)) as string;
+}
+
+/**
+ * WR-12 -- a grant left unconsumed (because the tool that actually executes
+ * is NOT this extension's own wrapper -- T-04-08's tool-name-collision case,
+ * or the CR-06 case where this extension's wrapper was never registered)
+ * must not let an UNBOUNDED number of re-issues through for the grant's
+ * whole `APPROVAL_TTL_MS` (10-minute) lifetime. This block drives the REAL
+ * `tool_call` HOOK function directly (captured via `stubPi()`'s `handlers`
+ * map), with a real grant present and NO wrapper `execute()` ever called in
+ * between -- exactly the failure mode CR-01's own fix introduced and WR-12
+ * closes.
+ */
+describe("WR-12 -- the hook's deferral is self-limiting: a grant left unconsumed blocks on the SECOND re-issue", () => {
+	it("calling the tool_call hook twice for the same grant, with no intervening wrapper consume, blocks the second call", async () => {
+		const { pi, handlers } = stubPi();
+		safety(pi);
+		const toolCallHook = handlers.get("tool_call");
+		expect(toolCallHook, "the tool_call hook must have registered").toBeDefined();
+
+		const command = "terraform apply";
+
+		await withTempLogCwd(async (cwd) => {
+			const fakeCtx = { cwd, hasUI: false } as unknown as ExtensionContext;
+
+			// First issue: no grant yet -- classified confirm, hook mints a
+			// pending request and blocks, embedding request_id/command/reason.
+			const firstResult = (await (toolCallHook as (...args: unknown[]) => Promise<{ block?: boolean; reason?: string } | undefined>)(
+				{ toolName: "bash", input: { command } },
+				fakeCtx,
+			)) as { block?: boolean; reason?: string } | undefined;
+			expect(firstResult?.block, "the first issue must block pending confirmation").toBe(true);
+			const requestId = extractQuotedField(firstResult?.reason ?? "", "request_id");
+			const approvedCommand = extractQuotedField(firstResult?.reason ?? "", "command");
+			const approvedReason = extractQuotedField(firstResult?.reason ?? "", "reason");
+
+			// Approve directly (mirrors confirm-approve-reissue.test.ts -- this
+			// isolates the hook's own deferral logic from approve_ky_command's
+			// separate UI-gating property).
+			const granted = approve(requestId, approvedCommand, approvedReason);
+			expect(granted, "approve() must have succeeded against the pending entry the hook just created").toBe(true);
+
+			// SECOND issue of the SAME command: a grant now exists. THE FIX
+			// ITSELF -- the hook must defer (return undefined) this ONE time...
+			const secondResult = await (toolCallHook as (...args: unknown[]) => Promise<{ block?: boolean; reason?: string } | undefined>)(
+				{ toolName: "bash", input: { command } },
+				fakeCtx,
+			);
+			expect(
+				secondResult,
+				"the hook must defer to the wrapper on the FIRST re-issue with a grant present -- CR-01's own property",
+			).toBeUndefined();
+
+			// THIRD issue of the SAME command, with NO wrapper execute() ever
+			// having run in between (this test never touches the wrapped bash
+			// tool at all) -- the exact WR-12 failure mode: without the fix, the
+			// grant is still present (peek() still true) and the hook would
+			// defer AGAIN, letting an unbounded number of re-issues through.
+			const thirdResult = (await (toolCallHook as (...args: unknown[]) => Promise<{ block?: boolean; reason?: string } | undefined>)(
+				{ toolName: "bash", input: { command } },
+				fakeCtx,
+			)) as { block?: boolean; reason?: string } | undefined;
+			expect(
+				thirdResult?.block,
+				"WR-12: a SECOND deferral for the same requestKey, with no intervening consume(), must " +
+					"BLOCK -- markHookDeferred() must have refused to defer twice. Without the fix this " +
+					"would be undefined (deferred again), which is the unbounded-unguarded-window bug",
+			).toBe(true);
+		});
 	});
 });

@@ -119,6 +119,20 @@ import { randomUUID } from "node:crypto";
  */
 export const APPROVAL_TTL_MS = 10 * 60 * 1000;
 
+/**
+ * WR-12: how long a single "the hook already deferred to the wrapper for
+ * this requestKey" marker survives before this module treats it as stale and
+ * allows one more deferral. Deliberately SHORT -- seconds, not minutes --
+ * unlike {@link APPROVAL_TTL_MS}: the wrapper's own `execute()` is expected
+ * to run essentially immediately after the hook defers, inside the SAME tool
+ * call, so this marker's only job is to bound the maximum UNGUARDED window
+ * if the wrapper never runs at all (the documented T-04-08 tool-name
+ * collision, or the CR-06 double-load-prevention shape where this
+ * extension's own wrapper was never registered), not to model a legitimate
+ * wait. See {@link markHookDeferred}'s own docstring for the mechanism.
+ */
+export const HOOK_DEFER_TTL_MS = 5_000;
+
 /** One `createPending` call's record — everything `validate`/`approve` need to check a re-presented `{id, command, reason}` triple. */
 interface PendingApproval {
 	readonly requestKey: string;
@@ -139,6 +153,8 @@ interface ApprovalsStore {
 	readonly pending: Map<string, PendingApproval>;
 	/** Keyed by `requestKey` -- deliberately NOT the request id. See module docstring. */
 	readonly granted: Map<string, Grant>;
+	/** WR-12: keyed by `requestKey` -- one marker per command, expiring quickly. See {@link markHookDeferred}. */
+	readonly hookDeferred: Map<string, number>;
 }
 
 /**
@@ -158,7 +174,7 @@ function getStore(): ApprovalsStore {
 	if (existing !== undefined) {
 		return existing;
 	}
-	const created: ApprovalsStore = { pending: new Map(), granted: new Map() };
+	const created: ApprovalsStore = { pending: new Map(), granted: new Map(), hookDeferred: new Map() };
 	globalSlot[APPROVALS_STORE_KEY] = created;
 	return created;
 }
@@ -195,6 +211,15 @@ function sweepExpired(store: ApprovalsStore, now: number): void {
 	for (const [key, grant] of store.granted) {
 		if (grant.expiresAt <= now) {
 			store.granted.delete(key);
+		}
+	}
+	// WR-12: hookDeferred markers are short-lived by design (HOOK_DEFER_TTL_MS),
+	// but sweeping them here too means a long session accumulating many
+	// distinct confirm-classified commands never lets this map grow purely
+	// from stale markers either.
+	for (const [key, expiresAt] of store.hookDeferred) {
+		if (expiresAt <= now) {
+			store.hookDeferred.delete(key);
 		}
 	}
 }
@@ -278,9 +303,58 @@ export function peek(requestKey: string, now: number = Date.now()): boolean {
 export function consume(requestKey: string, now: number = Date.now()): boolean {
 	const store = getStore();
 	const grant = store.granted.get(requestKey);
+	// WR-12: a genuine consume -- whether it succeeds or the grant had already
+	// expired -- means the wrapper actually ran for this requestKey, so any
+	// "the hook already deferred once" marker for it is stale information.
+	// Clearing it here is hygiene, not load-bearing for correctness (a future
+	// confirm cycle for the same command recomputes a fresh requestKey path
+	// through createPending, never reaching markHookDeferred with this key
+	// again until a NEW grant exists) -- but leaving it would be exactly the
+	// kind of "the code no longer matches its own docstring" drift this
+	// project's own SAFE-15/Authority sections warn against.
+	store.hookDeferred.delete(requestKey);
 	if (grant === undefined) {
 		return false;
 	}
 	store.granted.delete(requestKey);
 	return grant.expiresAt > now;
+}
+
+/**
+ * WR-12: self-limiting deferral. CR-01's fix made the `tool_call` HOOK
+ * return `undefined` (defer to the wrapper) whenever {@link peek} finds an
+ * unexpired grant for a re-issued command -- but the wrapper is the ONLY
+ * consumer. If the tool that actually executes is not this extension's own
+ * wrapper (the documented T-04-08 tool-name-collision case, or the CR-06
+ * case where this extension's wrapper was never registered at all), nothing
+ * ever calls {@link consume}, `peek()` keeps returning `true` for the whole
+ * {@link APPROVAL_TTL_MS} window, and every re-issue of that exact command
+ * runs UNGUARDED for up to 10 minutes on a single human approval -- strictly
+ * worse than CR-01's own starting point, where one approval could never
+ * unblock anything.
+ *
+ * Call this from the hook, in place of an unconditional defer, whenever
+ * `peek(requestKey)` is `true`:
+ *   - the FIRST call for a given `requestKey` (no unexpired marker present)
+ *     records a marker with a SHORT TTL ({@link HOOK_DEFER_TTL_MS}, seconds
+ *     not minutes) and returns `true` -- the hook may defer.
+ *   - a SECOND call for the SAME `requestKey`, before an intervening
+ *     {@link consume} call has cleared the marker, returns `false` -- the
+ *     hook must NOT defer again; it should fall through to its normal
+ *     confirm-block path (mint a fresh pending request) exactly as if no
+ *     grant existed. This bounds the maximum unguarded window to
+ *     `HOOK_DEFER_TTL_MS` instead of the full grant lifetime.
+ *
+ * A successful {@link consume} clears the marker (see that function's own
+ * comment), so the NORMAL one-approval-one-execution cycle is never
+ * penalised: hook defers once, wrapper consumes once, done.
+ */
+export function markHookDeferred(requestKey: string, now: number = Date.now()): boolean {
+	const store = getStore();
+	const existing = store.hookDeferred.get(requestKey);
+	if (existing !== undefined && existing > now) {
+		return false;
+	}
+	store.hookDeferred.set(requestKey, now + HOOK_DEFER_TTL_MS);
+	return true;
 }

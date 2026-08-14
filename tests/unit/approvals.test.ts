@@ -15,6 +15,8 @@ import {
 	approve,
 	consume,
 	createPending,
+	HOOK_DEFER_TTL_MS,
+	markHookDeferred,
 	peek,
 	validate,
 } from "../../.pi/extensions/safety/approvals.ts";
@@ -187,6 +189,42 @@ describe("CR-01 -- peek(): a non-consuming read of the granted map", () => {
 
 	it("peek returns false for a requestKey with no grant at all", () => {
 		expect(peek("no-such-grant-key", T0)).toBe(false);
+	});
+});
+
+describe("WR-12 -- markHookDeferred(): a self-limiting, single-use-per-grant deferral marker", () => {
+	it("HOOK_DEFER_TTL_MS is short -- seconds, not minutes, and strictly less than APPROVAL_TTL_MS", () => {
+		expect(HOOK_DEFER_TTL_MS).toBeLessThan(APPROVAL_TTL_MS);
+		expect(HOOK_DEFER_TTL_MS).toBeLessThanOrEqual(60_000);
+	});
+
+	it("the FIRST call for a requestKey returns true", () => {
+		expect(markHookDeferred("wr12-key-a", T0)).toBe(true);
+	});
+
+	it("a SECOND call for the SAME requestKey, before it expires and with no consume() in between, returns false", () => {
+		expect(markHookDeferred("wr12-key-b", T0)).toBe(true);
+		expect(markHookDeferred("wr12-key-b", T0 + 1)).toBe(false);
+	});
+
+	it("a call AFTER the marker's own short TTL has elapsed returns true again", () => {
+		expect(markHookDeferred("wr12-key-c", T0)).toBe(true);
+		expect(markHookDeferred("wr12-key-c", T0 + HOOK_DEFER_TTL_MS - 1)).toBe(false);
+		expect(markHookDeferred("wr12-key-c", T0 + HOOK_DEFER_TTL_MS)).toBe(true);
+	});
+
+	it("consume() clears the marker, so a later cycle for the same requestKey can defer again", () => {
+		const id = createPending("wr12-key-d", "terraform apply", "irreversible", T0);
+		expect(approve(id, "terraform apply", "irreversible", T0)).toBe(true);
+
+		expect(markHookDeferred("wr12-key-d", T0)).toBe(true); // hook defers once
+		expect(consume("wr12-key-d", T0)).toBe(true); // wrapper consumes, as the normal cycle does
+
+		// A brand-new confirm cycle for the same requestKey (a fresh grant)
+		// must not be blocked by a stale marker from the PRIOR cycle.
+		const id2 = createPending("wr12-key-d", "terraform apply", "irreversible", T0 + 10);
+		expect(approve(id2, "terraform apply", "irreversible", T0 + 10)).toBe(true);
+		expect(markHookDeferred("wr12-key-d", T0 + 10)).toBe(true);
 	});
 });
 
