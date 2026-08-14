@@ -251,7 +251,7 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 05-07-PLAN.md — `routing/index.ts`: `/cheap`, `/balanced`, `/max` after `waitForIdle`, with every `setModel` failure surfaced (ROUTE-02, ROUTE-05, ROUTE-09)
-- [ ] 05-08-PLAN.md — single-shot roles: nested rows, per-call reasoning effort, no session mutation (ROUTE-04)
+- [x] 05-08-PLAN.md — single-shot roles: nested rows, per-call reasoning effort, no session mutation (ROUTE-04)
 
 **Wave 4** *(blocked on Wave 3 completion)*
 

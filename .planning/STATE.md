@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-07-PLAN.md
-last_updated: "2026-08-14T06:42:26.139Z"
+stopped_at: Completed 05-08-PLAN.md
+last_updated: "2026-08-14T10:15:01.341Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 51
+  completed_plans: 52
   percent: 36
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 8 of 12
+Plan: 2 of 12
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [█████████░] 91%
+Progress: [█████████░] 93%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -114,6 +114,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 05 P05 | ~25min | 2 tasks | 2 files |
 | Phase 05 P06 | 35m | 2 tasks | 2 files |
 | Phase 05 P07 | 50m | 2 tasks | 2 files |
+| Phase 05 P08 | 35m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -276,6 +277,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-07: an explicit /cheap /balanced /max switch clears any sticky /escalate state -- resolveRoute is always called with escalated:false and setEscalated(false) runs alongside setMode on success
 - [Phase 05]: 05-07: a faux provider registered under a real provider id still resolves ModelRuntime#hasConfiguredAuth false -- the working seam is setRuntimeApiKey(providerId,apiKey) plus a POLLED wait, since hasConfiguredAuth reads a cached snapshot that lags the live checkAuth() result by a few ms (measured, not assumed)
 - [Phase 05]: 05-07: ROUTE-09 stays PARTIAL -- only the ky:mode persist half is proven here; the session_start restore hook is explicitly deferred to a later plan per this plan's own read_first note, and the zero-context-tokens wire-capture proof belongs to a separate mode-persistence.test.ts per 05-RESEARCH.md's Wave-0 gap list
+- [Phase 05]: 05-08: single-shot-roles.test.ts obtains its ExtensionContext via session.extensionRunner.createCommandContext() rather than a globalThis-parking probe -- routing/modes.ts is a plain named-export module the test imports directly, never loaded as a Pi extension itself, so nothing needs to observe a context handed to an extension's own hook
+- [Phase 05]: 05-08: the no-mutation assertion is a delta-of-zero across the call, not an absolute-zero before it -- session construction itself writes one model_change entry for the session's own initial model, found by the first run of an absolute-zero assertion failing (expected 1 to be +0)
+- [Phase 05]: 05-08: ROUTE-04 moves from Partial to Complete -- tests/integration/single-shot-roles.test.ts is the [FAUX] session-level proof 05-04-SUMMARY.md deferred, covering nested-row identity, no-session-mutation, per-call reasoning effort on the wire in both directions, and a guard refusal that costs zero requests
 
 ### Pending Todos
 
@@ -323,8 +327,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T06:42:26.129Z
-Stopped at: Completed 05-07-PLAN.md
+Last session: 2026-08-14T10:15:01.331Z
+Stopped at: Completed 05-08-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
