@@ -404,6 +404,59 @@ describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a 
 	});
 });
 
+describe("qoder-delegate -- WR-06: the stream-open step writes its own request/response transcript records", () => {
+	it("the transcript carries qoder.stream.open.request and qoder.stream.open.response(status:200), not just the two prior steps", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				await delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd });
+				expect(loop.received.length).toBeGreaterThan(0);
+			});
+
+			const dir = logDir(cwd);
+			const files = logFilesIn(dir);
+			const qoderFile = files.find((name) => name.startsWith("qoder-"));
+			expect(qoderFile, `no qoder-*.jsonl transcript found under ${dir}`).toBeDefined();
+
+			const { records, unparseable } = readTornSafe(join(dir, qoderFile as string));
+			expect(unparseable).toHaveLength(0);
+			expect(records.length).toBeGreaterThan(0);
+
+			const events = records as { event?: unknown; status?: unknown; url?: unknown }[];
+
+			// RB-05-01 step 4 names "a 401/403 on any of the three requests" as
+			// the failure signal that matters most -- before this fix, the
+			// stream-open step (this one) was the ONE step of the three that
+			// wrote neither half, so this is the paired-presence proof for the
+			// event this fix adds, not merely the two the file already covered.
+			const streamRequest = events.find((e) => e.event === "qoder.stream.open.request");
+			const streamResponse = events.find((e) => e.event === "qoder.stream.open.response");
+			expect(
+				streamRequest,
+				"no qoder.stream.open.request record was written -- the stream-open step's request half " +
+					"is still missing from the transcript",
+			).toBeDefined();
+			expect(String(streamRequest?.url)).toMatch(/\/sessions\/[^/]+\/events\/stream$/);
+			expect(
+				streamResponse,
+				"no qoder.stream.open.response record was written -- the stream-open step's response " +
+					"half is still missing from the transcript",
+			).toBeDefined();
+			expect(
+				streamResponse?.status,
+				"the qoder.stream.open.response record does not carry the HTTP status a 401/403 would show up in",
+			).toBe(200);
+
+			// Paired positive: the two PRIOR steps this file already knew to
+			// write their own request/response pairs -- proving the reader and
+			// the fixture are both live, not that this file's own event names
+			// happen to be absent from an instrument that captures nothing.
+			expect(events.some((e) => e.event === "qoder.session.create.request")).toBe(true);
+			expect(events.some((e) => e.event === "qoder.event.send.request")).toBe(true);
+		});
+	});
+});
+
 describe("qoder-delegate -- this file never dials the real host", () => {
 	it("resolveQoderConfig's own documented default base URL is never used by any case in this file", () => {
 		// Every fixture config in this file supplies QODER_BASE_URL_ENV pointed

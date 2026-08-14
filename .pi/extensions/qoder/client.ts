@@ -598,11 +598,25 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		throw new Error(`Qoder delegate: sending the task failed with HTTP ${eventResponse.status}.`);
 	}
 
+	// WR-06: request/response transcript records for the stream-open step,
+	// mirroring the two steps above. RB-05-01 step 4 tells the operator to read
+	// the transcript for a 401/403 "on any of the three requests" -- before
+	// this fix, the stream open (step 3) wrote NEITHER a request NOR a
+	// response record, so a 401/403 here left the transcript showing two clean
+	// 200s and then nothing, and the operator running the one live check this
+	// phase deliberately leaves OUTSTANDING would be looking at a log that
+	// cannot show the failure the runbook told them to look for.
+	writeQoderTranscript(cwd, {
+		event: "qoder.stream.open.request",
+		url: `${config.baseUrl}/sessions/${sessionId}/events/stream`,
+	});
+
 	const streamResponse = await fetch(`${config.baseUrl}/sessions/${sessionId}/events/stream`, {
 		method: "GET",
 		headers: { Authorization: headers.Authorization },
 		signal,
 	});
+	writeQoderTranscript(cwd, { event: "qoder.stream.open.response", status: streamResponse.status });
 	if (!streamResponse.ok || streamResponse.body === null) {
 		throw new Error(`Qoder delegate: opening the event stream failed with HTTP ${streamResponse.status}.`);
 	}
