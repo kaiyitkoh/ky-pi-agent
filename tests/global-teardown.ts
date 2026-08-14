@@ -105,6 +105,20 @@ export default async function setup(): Promise<() => Promise<void>> {
 		const newlyDirtied = [...after].filter((path) => !before.has(path)).sort();
 
 		if (newlyDirtied.length > 0) {
+			// WR-13: vitest reports a globalSetup teardown throw as an "error
+			// during close" on stderr but does NOT translate it into a non-zero
+			// process exit code -- confirmed by direct execution, twice, on
+			// separate runs (raw exit code 0 both times) with this exact throw
+			// firing. A check that cannot fail the build is not a check: in CI,
+			// and in any `npm test && ...` chain, the tripwire this file exists
+			// to provide would be entirely decorative -- the exact regression it
+			// was written to catch would ship green. Setting `process.exitCode`
+			// survives vitest swallowing the throw into a log line, because
+			// `process.exitCode` is read by Node's own normal exit machinery
+			// independently of whatever vitest did with the error. The throw
+			// itself is kept too, for the human-readable message on stderr --
+			// this line is additive, not a replacement for it.
+			process.exitCode = 1;
 			throw new Error(
 				"tests/global-teardown.ts: the test suite left tracked file(s) modified that " +
 					"were clean before it ran:\n" +
