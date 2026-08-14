@@ -123,6 +123,15 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"size plus a short vendoring-fix comment (see .pi/extensions/loop-police/PROVENANCE.md), " +
 			"measured 1237 raw lines 2026-08-15, rounded up to the next ten",
 	},
+	{
+		file: ".pi/extensions/plan-mode/index.ts",
+		budget: 470,
+		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/index.ts, " +
+			"registers /plan and /plan-todos -- WR-05 widened discovery to catch command surfaces outside " +
+			"workflows/; upstream's own 390 lines plus this plan's vendoring header (the only permitted " +
+			"addition -- code body otherwise unchanged apart from the /todos -> /plan-todos rename), measured " +
+			"460 raw lines 2026-08-15, rounded up to the next ten",
+	},
 ];
 
 /**
@@ -173,6 +182,15 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"1260 raw lines across 2 files 2026-08-15 (index.ts 23 + loop-police.ts 1237, both including " +
 			"short vendoring-fix comments), upstream's own size, not a number this phase reviewed for " +
 			"tightness, rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/plan-mode",
+		budget: 640,
+		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
+			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
+			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
+			"upstream's own 390+168=558 lines plus this plan's vendoring headers, not a number this phase " +
+			"reviewed for tightness), rounded up to the next ten",
 	},
 ];
 
