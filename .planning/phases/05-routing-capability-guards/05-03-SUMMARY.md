@@ -110,3 +110,7 @@ None for this plan. `QODER_PERSONAL_ACCESS_TOKEN`, `QODER_AGENT_ID` and `QODER_E
 ---
 *Phase: 05-routing-capability-guards*
 *Completed: 2026-08-14*
+
+## Self-Check: PASSED
+
+All four created/modified paths found on disk; all four commit hashes (`7f46786`, `19fb24e`, `34500c7`, `d0f643a`) found in `git log --oneline --all`.

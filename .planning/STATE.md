@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-02-PLAN.md
-last_updated: "2026-08-14T05:26:20.152Z"
+stopped_at: Completed 05-03-PLAN.md
+last_updated: "2026-08-14T05:41:06.110Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 46
+  completed_plans: 47
   percent: 36
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [████████░░] 82%
+Progress: [████████░░] 84%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -109,6 +109,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 04 P12 | 25m | 3 tasks | 5 files |
 | Phase 05 P01 | 35m | 2 tasks | 2 files |
 | Phase 05 P02 | ~20min | 2 tasks | 2 files |
+| Phase 05 P03 | ~30m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -257,6 +258,8 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-01: reasoningEffort is a per-role constant (reviewer/advisor: high; others: none), identical across cheap/balanced/max in every case, and KyModeData carries only mode name + escalation bookkeeping since Pi's native model_change session entry already persists the executor model
 - [Phase 05]: 05-02: ROUTE-08's deny-list is scoped by need.usesToolLoop (caller-supplied, from ROLE_MECHANISM), never by a role name -- R1 blocks only when the target role needs a tool loop, so a tool-less role like summariser is not over-blocked
 - [Phase 05]: 05-02: isAnthropicClaudeModel is a local re-implementation of pi-ai's unexported bedrock-converse-stream.js predicate, with a residual-coupling comment matching providers/schema.ts's QUOTA_PATTERN precedent -- behaviour pinned by tests/unit/capability-guard.test.ts, not by Pi's internals
+- [Phase 05]: 05-03: qoder/index.ts is the second TOOL_REGISTRATION_ALLOWLIST entry (after safety/index.ts) -- schema measured at 1315 bytes / 329 tokens via createRequire(package.json)+typebox, per CONTRIBUTING.md's (b) rule
+- [Phase 05]: 05-03: qoder/client.ts refusal is a thrown Error (Pi converts to isError:true), not a returned isError field -- AgentToolResult carries no isError property on this Pi version
 
 ### Pending Todos
 
@@ -304,8 +307,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T05:26:20.142Z
-Stopped at: Completed 05-02-PLAN.md
+Last session: 2026-08-14T05:41:06.099Z
+Stopped at: Completed 05-03-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
