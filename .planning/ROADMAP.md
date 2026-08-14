@@ -332,7 +332,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 07-08-PLAN.md — vendor bundled `todo.ts` + `questionnaire.ts` and pay the BOOT-10 toll with MEASURED schema costs *(Wave 3)*
+- [x] 07-08-PLAN.md — vendor bundled `todo.ts` + `questionnaire.ts` and pay the BOOT-10 toll with MEASURED schema costs *(Wave 3)*
 - [ ] 07-10-PLAN.md — the one `pi install`, gated by a blocking package-legitimacy checkpoint, then `pi list` reconciliation *(Wave 3)*
 
 **Wave 4** *(blocked on Wave 3 completion)*
@@ -451,7 +451,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
-| 7. Composed Extensions, Pinned & Reviewed | 8/13 | In Progress|  |
+| 7. Composed Extensions, Pinned & Reviewed | 9/13 | In Progress|  |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 0/TBD | Not started | - |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |

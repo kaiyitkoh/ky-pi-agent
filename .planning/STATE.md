@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-09-PLAN.md
-last_updated: "2026-08-14T21:08:19.081Z"
+stopped_at: Completed 07-08-PLAN.md
+last_updated: "2026-08-14T21:24:18.574Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 68
+  completed_plans: 69
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 9 of 13
+Plan: 10 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [█████████░] 93%
+Progress: [██████████] 95%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -135,6 +135,7 @@ credentials can do has been done".
 | Phase 07 P06 | 55m | 2 tasks | 6 files |
 | Phase 07 P07 | ~20min | 1 tasks | 3 files |
 | Phase 07 P09 | 55m | 3 tasks | 3 files |
+| Phase 07 P08 | 35m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -347,6 +348,10 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-09: pi-subagents@0.49.0 reads NO configuration from .pi/settings.json -- getConfigPath() resolves to a DEDICATED global file, <agentDir>/extensions/subagent/config.json; .pi/settings.json carries only packages[]
 - [Phase 07]: 07-09: agentScope is not a settings key at any scope in pi-subagents@0.49.0 -- it is a per-invocation subagent-tool parameter defaulting to "both", correcting the stale 07-04 decision that a settings write was required
 - [Phase 07]: 07-09: the worktree setup hook is wired into pi-subagents' real config file via a new bin/bootstrap.sh merge_subagent_config() function (run_full()), not a one-off machine write -- reproducible on a cold machine, absolute REPO_ROOT-based hook path since the config is machine-scope
+- [Phase 07]: 07-08: todo.ts and questionnaire.ts vendored from Pi's own bundled examples, not @juicesharp/rpiv-todo / rpiv-ask-user-question -- both npm alternatives depend on rpiv-config@^2.5.2 and typebox@^1.1.24, unpinnable caret ranges and a second typebox instance
+- [Phase 07]: 07-08: questionnaire.ts chosen over sibling question.ts -- questionnaire.ts is a strict superset (single question renders identically with isMulti=false, multi adds tab-bar navigation over the same rendering), covering both EXT-05 shapes with one tool
+- [Phase 07]: 07-08: todo (383 bytes/96 tokens) and questionnaire (1258 bytes/315 tokens) measured with node --input-type=module one-liners, not createRequire -- both typebox and @earendil-works/pi-ai ship ESM-only exports maps with no CJS entry
+- [Phase 07]: 07-08: workflow-budgets.test.ts's walkOnDisk() threw ENOTDIR on a flat top-level command file (todo.ts resolves to itself under WR-03's slice(0,3) directory rule) -- fixed with a statSync().isDirectory() guard, a real pre-existing bug this plan's flat placement was the first to exercise
 
 ### Pending Todos
 
@@ -394,8 +399,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T21:08:19.069Z
-Stopped at: Completed 07-09-PLAN.md
+Last session: 2026-08-14T21:24:18.564Z
+Stopped at: Completed 07-08-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
