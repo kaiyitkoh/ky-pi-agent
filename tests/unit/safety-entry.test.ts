@@ -32,10 +32,12 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 
 import { describe, expect, it } from "vitest";
 
+import { logPath } from "../../.pi/lib/jsonl.ts";
 import { approve, createPending, peek } from "../../.pi/extensions/safety/approvals.ts";
 import safety, { APPROVE_TOOL_NAME } from "../../.pi/extensions/safety/index.ts";
+import { AUDIT_LOG_BASE, type AuditRow } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { withTempLogCwd } from "../helpers/logs.ts";
+import { readJsonl, withTempLogCwd } from "../helpers/logs.ts";
 
 /** Absolute path of the file under test, read once for the source-order and grep assertions. */
 const ENTRY_PATH = join(repoRoot(), ".pi", "extensions", "safety", "index.ts");
@@ -502,6 +504,50 @@ describe("WR-12 -- the hook's deferral is self-limiting: a grant left unconsumed
 					"again for a genuinely different tool call. Without the fix this would be undefined " +
 					"(deferred again), which is the unbounded-unguarded-window bug",
 			).toBe(true);
+		});
+	});
+});
+
+/**
+ * IN-04 -- `extractCommandOrPath` (the function that fills the audit row's
+ * `command` column) reads `record.path` for every non-`bash` tool. `grep`'s
+ * OWN input shape carries no `path` at all when the block is caused by its
+ * `glob` field instead (`policy.ts#evaluateGrep` checks `path` first, then
+ * `glob` -- EV-53 in `tests/fixtures/evasion-corpus.ts`, `{ pattern: "=",
+ * glob: ".env" }`, is exactly this shape and is asserted `BLOCKED` there).
+ * Before this fix, that blocked row's `command` column was `""` -- the exact
+ * field that caused the block, silently lost from the audit log. Drives the
+ * REAL `tool_call` hook (captured via `stubPi()`'s `handlers` map) against a
+ * real temp `.pi/logs` directory and reads back the real JSONL row `writeAuditRow`
+ * appended, never a mock.
+ */
+describe("IN-04 -- a grep blocked on its glob (no path) still records what caused the block", () => {
+	it("records the glob value in the audit row's command column, not an empty string", async () => {
+		const { pi, handlers } = stubPi();
+		safety(pi);
+		const toolCallHook = handlers.get("tool_call");
+		expect(toolCallHook, "the tool_call hook must have registered").toBeDefined();
+
+		await withTempLogCwd(async (cwd) => {
+			const fakeCtx = { cwd, hasUI: false } as unknown as ExtensionContext;
+
+			// EV-53's own shape: no `path` field at all, blocked on `glob` alone.
+			const result = (await (toolCallHook as (...args: unknown[]) => Promise<{ block?: boolean; reason?: string } | undefined>)(
+				{ toolName: "grep", input: { pattern: "=", glob: ".env" }, toolCallId: "tc-in-04" },
+				fakeCtx,
+			)) as { block?: boolean; reason?: string } | undefined;
+			expect(result?.block, "EV-53's shape must still block -- this test is not about the verdict changing").toBe(true);
+
+			const written = logPath(cwd, AUDIT_LOG_BASE);
+			const rows = readJsonl(written) as AuditRow[];
+			const blockRow = rows.find((r) => r.tool === "grep" && r.verdict === "block");
+			expect(blockRow, "a block row for the grep call must have been written").toBeDefined();
+			expect(
+				blockRow?.command,
+				"the audit row must record the glob value (\".env\") that actually caused the block, not an " +
+					"empty string -- extractCommandOrPath must fall back to `glob` (then `pattern`) for `grep` " +
+					"when `path` is absent",
+			).toBe(".env");
 		});
 	});
 });

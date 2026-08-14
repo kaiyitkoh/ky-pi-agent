@@ -203,7 +203,13 @@ function buildFacts(ctx: ExtensionContext): PolicyFacts {
  * Pull the one field `evaluate()`'s malformed-input check cares about out of
  * a tool call's `input`/`params`, for AUDIT purposes only — never re-parsed,
  * never re-validated, just read for the row. `bash` carries `command`;
- * `read`/`write`/`edit` carry `path`. Malformed input (missing/non-string)
+ * `read`/`write`/`edit`/`find`/`ls` carry `path`. `grep` can be blocked on
+ * its `glob` (or `pattern`) field alone, with NO `path` present at all --
+ * `policy.ts#evaluateGrep` checks `path` first, then `glob` (EV-53,
+ * `{ pattern: "=", glob: ".env" }`, is exactly this shape) -- so `grep` falls
+ * back to `glob`, then `pattern`, when `path` is absent: IN-04, without this
+ * fallback the audit row for that shape recorded `command: ""`, losing the
+ * exact field that caused the block. Malformed input (missing/non-string)
  * yields `""`, which is exactly what `policy.ts#extractStringField` would
  * also call malformed -- `evaluate()` blocks it independently; this function
  * only decides what the audit row's `command` column says.
@@ -218,6 +224,14 @@ function extractCommandOrPath(toolName: string, input: unknown): string {
 	}
 	if (typeof record.path === "string") {
 		return record.path;
+	}
+	if (toolName === "grep") {
+		if (typeof record.glob === "string") {
+			return record.glob;
+		}
+		if (typeof record.pattern === "string") {
+			return record.pattern;
+		}
 	}
 	return "";
 }
