@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 07-06-PLAN.md
-last_updated: "2026-08-14T20:26:15.254Z"
+last_updated: "2026-08-14T20:37:16.024Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 66
+  completed_plans: 67
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 7 of 13
+Plan: 8 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 92%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -133,6 +133,7 @@ credentials can do has been done".
 | Phase 07 P04 | 20m | 2 tasks | 2 files |
 | Phase 07 P05 | ~30min | 2 tasks | 2 files |
 | Phase 07 P06 | 55m | 2 tasks | 6 files |
+| Phase 07 P07 | ~20min | 1 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -339,6 +340,9 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-05: the shipped hook's own fail-closed design meant the falsification (unqualified symlinkSync) turned the hook's own exit-0 assertion red before the positive rebuild step was even reached -- a degraded worktree fails loudly, not silently, per 07-RESEARCH.md Pitfall 2
 - [Phase 07]: 07-06: pi-loop-police@1.14.1's no-LICENSE-file finding re-verified a third time independently (gh api license=null, tar -tf no LICENSE entry); vendored flat under .pi/extensions/loop-police/, model-facing tool count 0 (zero registerTool calls), recorded for Phase 10's baseline
 - [Phase 07]: 07-06: two mechanical, non-behavioral deviations forced on the vendored copy by this repo's own gates -- registerCommand handler made async (Pi 0.84.1's Promise<void> type), and the extension function's export default moved from loop-police.ts to a named export re-exported from index.ts (BOOT-05's nested-index entry-point rule); no logic changed
+- [Phase 07]: [Phase 07]: 07-07: T-07-27 answered by citation, not UNVERIFIED -- plan-mode's pi.setActiveTools gating cannot bypass the Phase 4 safety guard because the guard binds to the TOOL NAME (first-registration-wins) and the tool_call hook fires on event.toolName regardless of activation state; plan-mode never registers a tool itself, only toggles which already-registered implementation is callable
+- [Phase 07]: [Phase 07]: 07-07: /todos renamed to /plan-todos in vendored plan-mode/index.ts to resolve the collision with 07-08's not-yet-vendored todo.ts, which also registers /todos -- the general name stays with todo.ts (EXT-05's own 'todo tracking' capability), resolved deliberately in this commit rather than discovered at runtime
+- [Phase 07]: [Phase 07]: 07-07: no separate PROVENANCE.md was created for .pi/extensions/plan-mode/ -- MUST_BE_VENDORED (tests/unit/vendor-license-audit.test.ts) is scoped to EXT-10 license-driven vendoring with a must-not-also-be-installed invariant; this vendor's reason is EXT-06 (preferred bundled example over an npm alternative never installed), a different requirement with no such invariant to enforce -- full provenance instead lives in index.ts's own header per the plan's explicit file scope
 
 ### Pending Todos
 
@@ -386,7 +390,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T20:26:15.244Z
+Last session: 2026-08-14T20:37:16.015Z
 Stopped at: Completed 07-06-PLAN.md
 Resume file: None
 
