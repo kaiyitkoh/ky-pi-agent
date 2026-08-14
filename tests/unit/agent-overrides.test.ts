@@ -186,6 +186,24 @@ describe("agentOverridesFor -- guard-blocked fixture (ROUTE-08 wired through ROU
 	});
 
 	it("writeAgentOverrides is never reached for a guard-blocked derivation -- no settings file is created", () => {
+		// WR-10: this case is DELIBERATELY SELF-FULFILLING at the unit level --
+		// it derives an ok:false result, chooses not to call writeAgentOverrides,
+		// and then asserts the file it never touched does not exist. That
+		// assertion would hold unchanged even if `applyMode` (the REAL caller,
+		// in `.pi/extensions/routing/index.ts`) unwrapped an ok:false derivation
+		// and wrote `{}` anyway -- this test cannot see that regression because
+		// it never drives the caller at all. The claim this case name states
+		// ("writeAgentOverrides is never REACHED") is actually proven by
+		// `tests/integration/mode-switch.test.ts` case 5, which drives the REAL
+		// `/balanced` command (via `routing/index.ts`'s WR-10 test-only
+		// `agentOverridesFor` seam) against a role map with the SAME guard-
+		// blocked planner candidate used here, and asserts the CALLER's own
+		// observable behaviour: the step-6 notification names the refusal and
+		// the role, and the injected settings.json carries no "subagents" key.
+		// This unit case is kept as a narrower, faster proof of
+		// `agentOverridesFor`'s own derivation (ok:false, naming the role and
+		// reason) -- it is not, on its own, evidence about `writeAgentOverrides`
+		// or any caller.
 		const settingsPath = freshSettingsPath();
 		expect(existsSync(settingsPath), "vacuity guard: the fresh path must not already exist").toBe(false);
 
@@ -204,7 +222,9 @@ describe("agentOverridesFor -- guard-blocked fixture (ROUTE-08 wired through ROU
 		// The caller discipline `writeAgentOverrides`'s own doc comment states:
 		// a caller must not invoke it on an ok:false derivation. This case proves
 		// that discipline by simply never calling it, and asserting the file
-		// still does not exist -- the settings write path was never touched.
+		// still does not exist -- the settings write path was never touched BY
+		// THIS TEST. See this case's own updated comment above for what it does
+		// NOT prove.
 		expect(existsSync(settingsPath)).toBe(false);
 	});
 });

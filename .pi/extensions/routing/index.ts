@@ -213,10 +213,29 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { appendJsonl } from "../../lib/jsonl.ts";
-import { agentOverridesFor, writeAgentOverrides } from "./agent-overrides.ts";
+import { agentOverridesFor, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
+
+/**
+ * WR-10: test-only injection seam, threaded from the default export's own
+ * second (also test-only) parameter down to {@link agentOverridesFor}'s call
+ * site inside {@link applyMode}. Production code (the real `pi install`
+ * entry point, which calls the default export with ONE argument) never
+ * supplies this. It exists so `tests/integration/mode-switch.test.ts` can
+ * drive a REAL `/balanced` through the REAL command handler against a role
+ * map whose `planner` candidate is deliberately guard-blocked, and assert
+ * the CALLER's own observable behaviour (the step-6 notification text, and
+ * the injected settings.json's byte content) -- rather than the test merely
+ * asserting its own choice not to invoke `writeAgentOverrides`, which is
+ * what `tests/unit/agent-overrides.test.ts`'s prior "never reached" case
+ * actually proved (self-fulfilling: true regardless of whether `applyMode`
+ * itself would have unwrapped an `ok:false` derivation).
+ */
+export interface RoutingTestOptions {
+	readonly agentOverridesFor?: AgentOverridesForOptions;
+}
 
 /**
  * The one code path all three commands share, so `/cheap`, `/balanced` and
@@ -224,7 +243,12 @@ import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyMode
  * "THE ORDER BELOW IS THE REQUIREMENT" section for what each step below does
  * and why it is ordered this way.
  */
-async function applyMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, mode: ModeName): Promise<void> {
+async function applyMode(
+	pi: ExtensionAPI,
+	ctx: ExtensionCommandContext,
+	mode: ModeName,
+	testOverrides?: RoutingTestOptions,
+): Promise<void> {
 	// Step 1 — FIRST, before anything is read or written. Removes the race
 	// entirely; see the module docstring.
 	await ctx.waitForIdle();
@@ -307,7 +331,7 @@ async function applyMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, mode: M
 	}
 
 	let overridesNote = "";
-	const overridesResult = agentOverridesFor({ mode });
+	const overridesResult = agentOverridesFor({ mode }, testOverrides?.agentOverridesFor);
 	if (!overridesResult.ok) {
 		overridesNote = ` subagent pins unchanged because ${overridesResult.reason}`;
 	} else {
@@ -598,12 +622,19 @@ export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
 	setEscalated(escalated, escalatedFrom);
 }
 
-export default function (pi: ExtensionAPI): void {
+/**
+ * `testOverrides` is the WR-10 seam (see {@link RoutingTestOptions}'s own doc
+ * comment). Production's real `pi install` entry point calls this with ONE
+ * argument; the second parameter defaults to `undefined`, which
+ * `applyMode`/`agentOverridesFor` already treat identically to "not passed
+ * at all".
+ */
+export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): void {
 	for (const mode of MODES) {
 		pi.registerCommand(mode, {
 			description: `Switch the executor and subagent pins to ${mode}`,
 			handler: async (_args, ctx) => {
-				await applyMode(pi, ctx, mode);
+				await applyMode(pi, ctx, mode, testOverrides);
 			},
 		});
 	}

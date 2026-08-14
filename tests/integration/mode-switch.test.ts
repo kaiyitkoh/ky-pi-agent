@@ -105,6 +105,9 @@ const LOG_KEY = "__kypiModeSwitchOrderLog";
 /** Absolute path of the routing extension entry point this repository ships. */
 const ROUTING_ENTRY = `${repoRoot()}/.pi/extensions/routing/index.ts`;
 
+/** Absolute path of routing/schema.ts, needed by the WR-10 guard-blocked-derivation extension source below. */
+const SCHEMA_ENTRY = `${repoRoot()}/.pi/extensions/routing/schema.ts`;
+
 /**
  * The user-scope extension under test: the real routing entry point, plus a
  * one-line probe that records every `model_select` into the shared log.
@@ -125,6 +128,34 @@ const PROBE_SOURCE = [
 	"\t\tconst log = globalThis[LOG_KEY] ?? (globalThis[LOG_KEY] = []);",
 	"\t\tlog.push(`model_select:${event.model.provider}/${event.model.id}`);",
 	"\t});",
+	"}",
+].join("\n");
+
+/**
+ * WR-10: the user-scope extension for the guard-blocked-derivation case --
+ * the real routing entry point, wired through {@link RoutingTestOptions}'s
+ * own `agentOverridesFor` seam with a role map whose `balanced.planner`
+ * candidate is `amazon-bedrock/us.deepseek.r1-v1:0` (the same no-tool-calling
+ * fixture id `tests/unit/agent-overrides.test.ts`'s own guard-blocked case
+ * uses) -- everything else about `balanced` (crucially, its `executor`
+ * candidate) is left as the REAL `ROLE_MAP.balanced` entry, so the executor
+ * switch itself still succeeds and only the subagent-pin write is blocked.
+ */
+const BLOCKED_PLANNER_SOURCE = [
+	"// Generated for tests/integration/mode-switch.test.ts. Lives in a temp dir.",
+	`import routing from ${JSON.stringify(ROUTING_ENTRY)};`,
+	`import { ROLE_MAP } from ${JSON.stringify(SCHEMA_ENTRY)};`,
+	"",
+	"const blockedRoleMap = {",
+	"\t...ROLE_MAP,",
+	"\tbalanced: {",
+	"\t\t...ROLE_MAP.balanced,",
+	'\t\tplanner: { candidates: [{ provider: "amazon-bedrock", id: "us.deepseek.r1-v1:0" }] },',
+	"\t},",
+	"};",
+	"",
+	"export default function (pi) {",
+	"\trouting(pi, { agentOverridesFor: { roleMap: blockedRoleMap } });",
 	"}",
 ].join("\n");
 
@@ -501,6 +532,81 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 			).toBe(false);
 		});
 	});
+
+	it("case 5 -- WR-10: a guard-blocked planner derivation switches the executor, reports the refusal by name, and writes NO subagents key", async () => {
+		resetOrderLog();
+		const settingsDir = freshTempDir("kypi-mode-switch-settings-blocked-planner-");
+		process.env.PI_CODING_AGENT_DIR = settingsDir;
+
+		await withModeSwitchSession(
+			async ({ session, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey("deepseek", "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, "deepseek");
+
+				const command = session.extensionRunner.getCommand("balanced");
+				expect(command, 'getCommand("balanced") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+				const ctx = session.extensionRunner.createCommandContext();
+				const notifications: Notification[] = [];
+				withCapturedNotify(ctx, notifications);
+
+				await command.handler("", ctx);
+
+				// The EXECUTOR switch itself must still succeed --
+				// BLOCKED_PLANNER_SOURCE only corrupts balanced.planner, leaving
+				// balanced.executor as the REAL (authed, guard-approved) ROLE_MAP
+				// entry. A test that only checked the refusal text could pass
+				// against an implementation that failed the WHOLE switch instead
+				// of carrying the subagent refusal into step 6's message, which is
+				// a materially different (and wrong) behaviour.
+				expect(
+					ctx.model?.provider,
+					`the executor switch itself did not succeed (notifications: ${JSON.stringify(notifications)})`,
+				).toBe("deepseek");
+				expect(ctx.model?.id).toBe("deepseek-v4-flash");
+
+				// THE ASSERTION WR-10 EXISTS FOR: the notification names the
+				// refusal AND the blocked role, driven through the REAL command
+				// path -- not merely a test asserting its own choice not to call
+				// writeAgentOverrides (tests/unit/agent-overrides.test.ts's prior,
+				// self-fulfilling version of this case).
+				expect(notifications.length, "a successful switch must still report an outcome").toBeGreaterThan(0);
+				const text = notifications.at(-1)?.text ?? "";
+				expect(
+					text,
+					'the notification does not say subagent pins were left unchanged ("subagent pins ' +
+						'unchanged because")',
+				).toContain("subagent pins unchanged because");
+				expect(text, 'the notification does not name the blocked role ("planner")').toContain("planner");
+				expect(
+					text.toLowerCase(),
+					"the notification does not carry the guard's own reason (tool calling)",
+				).toContain("tool calling");
+
+				// THE FILE ITSELF: no subagents key at all -- an agentOverridesFor
+				// ok:false derivation must never be unwrapped, coerced to {}, or
+				// written anyway (agent-overrides.ts's own CALLER DISCIPLINE
+				// section).
+				const settingsPath = join(settingsDir, "settings.json");
+				if (existsSync(settingsPath)) {
+					const written = JSON.parse(readFileSync(settingsPath, "utf-8")) as { subagents?: unknown };
+					expect(
+						written.subagents,
+						`settings.json was written but carries a "subagents" key: ${JSON.stringify(written)}`,
+					).toBeUndefined();
+				}
+				// existsSync(settingsPath) === false is ALSO an acceptable pass
+				// here -- applyMode's step 5 only ever writes settings.json when
+				// overridesResult is ok:true, so a guard-blocked derivation should
+				// mean no write occurs at all. Either "no file" or "a file with no
+				// subagents key" proves the same claim; only "a file WITH a
+				// subagents key" would fail it.
+			},
+			BLOCKED_PLANNER_SOURCE,
+		);
+	});
 });
 
 /**
@@ -528,9 +634,12 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
  * between session creation and command invocation INSIDE the callback,
  * which is exactly what a callback shape is for).
  */
-async function withModeSwitchSession<T>(fn: (handle: FauxSessionHandle) => Promise<T>): Promise<T> {
+async function withModeSwitchSession<T>(
+	fn: (handle: FauxSessionHandle) => Promise<T>,
+	extensionSource: string = PROBE_SOURCE,
+): Promise<T> {
 	const handle = await createFauxSession({
-		extensionSource: PROBE_SOURCE,
+		extensionSource,
 	});
 	try {
 		const deepseekFaux = fauxProvider({
