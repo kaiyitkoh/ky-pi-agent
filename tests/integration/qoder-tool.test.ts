@@ -128,7 +128,7 @@ function withStubbedUI(
 	});
 }
 
-describe("qoder_delegate tool -- WR-11: the configuration gate", () => {
+describe("qoder_delegate tool -- WR-11/CR-01: the configuration gate", () => {
 	// MEASURED, NOT ASSUMED: `createFauxSession`'s default `tools: []` passes
 	// an EXPLICIT (though empty) `activeToolNames` array to `createAgentSession`,
 	// which -- per `dist/core/agent-session.js:1995-2014` -- SUPPRESSES Pi's own
@@ -141,25 +141,77 @@ describe("qoder_delegate tool -- WR-11: the configuration gate", () => {
 	// condition a production session's own default would produce (a newly
 	// registered tool starts active), so the fix's `pi.setActiveTools(...
 	// filter(...))` call has something to actually act on.
-	it("is NOT in the active tool list when QODER_PERSONAL_ACCESS_TOKEN/AGENT_ID/ENVIRONMENT_ID are unset", async () => {
+	//
+	// CR-01: `session_start` DOES NOT FIRE from `createFauxSession`'s headless
+	// factory -- MEASURED, not assumed: `tests/integration/call-model.test.ts`'s
+	// own header ("a five-event probe logged nothing before the first prompt")
+	// and `tests/integration/mode-persistence.test.ts`'s own header ("Pi emits
+	// `session_start` from `AgentSession`'s extension-binding step ... which the
+	// headless factory this repository's test helpers use does not reach") both
+	// document this. The configuration gate now lives in a `session_start`
+	// handler (CR-01 -- it MUST, since `pi.getActiveTools()`/`setActiveTools()`
+	// throw "not initialized" if called from the factory instead), so a case
+	// that only calls `createFauxSession` and reads `getActiveToolNames()`
+	// immediately would prove nothing about the handler ever running. Every
+	// case below therefore calls `handle.session.extensionRunner.emit({ type:
+	// "session_start", reason: "startup" })` -- `ExtensionRunner#emit<TEvent
+	// extends RunnerEmitEvent>()` [VERIFIED: pi-coding-agent 0.84.1
+	// `dist/core/extensions/runner.d.ts:146`; `SessionStartEvent` is NOT among
+	// the types `RunnerEmitEvent` excludes at `:22`, so this is a genuinely
+	// public, typed way to fire the same event Pi's own real extension-binding
+	// step fires, deterministically and in-process] -- to invoke every
+	// registered `session_start` handler for real, rather than merely asserting
+	// about the handler's source code. This proves the WIRING (the handler is
+	// really registered and really runs) together with the LOGIC (it really
+	// filters the active list), the same "call the real mechanism, don't just
+	// read the source" discipline `headless-deny.test.ts` uses for SAFE-10.
+	it("is NOT in the active tool list, after session_start fires, when QODER_PERSONAL_ACCESS_TOKEN/AGENT_ID/ENVIRONMENT_ID are unset", async () => {
 		clearQoderEnv();
 		const handle: FauxSessionHandle = await createFauxSession({
 			extensionSource: EXTENSION_SOURCE,
 			tools: ["qoder_delegate"],
 		});
 		try {
+			// CR-01 NON-VACUITY GUARD: the active-list absence assertion below is
+			// satisfied identically by "the configuration gate deactivated it" and
+			// by "the extension's factory threw and Pi discarded the whole
+			// extension, so the tool never existed at all" -- which is exactly
+			// what happened when the configuration gate lived in the factory
+			// (CR-01), and is unaffected by whether session_start ever fires.
+			// Asserting the tool DEFINITION exists FIRST -- BEFORE emitting
+			// session_start -- rules out the second, wrong-for-the-right-reasons
+			// explanation before the absence assertion is allowed to pass.
+			const tool = handle.session.extensionRunner.getToolDefinition("qoder_delegate");
+			expect(
+				tool,
+				"the extension failed to load at all (factory threw and Pi discarded it) -- the " +
+					"active-tool-list absence assertion below would pass for the wrong reason",
+			).toBeDefined();
+
+			// Still active here: registerTool() defaults a newly-registered tool
+			// to active, and the deactivation only happens once session_start
+			// fires -- see this describe block's own header.
+			expect(
+				handle.session.getActiveToolNames(),
+				"qoder_delegate is already inactive BEFORE session_start fired -- something deactivated " +
+					"it too early, which this test cannot explain",
+			).toContain("qoder_delegate");
+
+			await handle.session.extensionRunner.emit({ type: "session_start", reason: "startup" });
+
 			const active = handle.session.getActiveToolNames();
 			expect(
 				active,
-				"qoder_delegate is active despite an unconfigured machine -- it costs its measured ~329 " +
-					"tokens on every provider request for no reason on a machine that can only ever refuse",
+				"qoder_delegate is STILL active after session_start fired, on an unconfigured machine -- " +
+					"it costs its measured ~329 tokens on every provider request for no reason on a machine " +
+					"that can only ever refuse",
 			).not.toContain("qoder_delegate");
 		} finally {
 			await handle.dispose();
 		}
 	});
 
-	it("IS in the active tool list when all three variables are configured", async () => {
+	it("IS in the active tool list, after session_start fires, when all three variables are configured", async () => {
 		clearQoderEnv();
 		setConfiguredQoderEnv(DEFAULT_QODER_BASE_URL);
 		const handle: FauxSessionHandle = await createFauxSession({
@@ -167,6 +219,8 @@ describe("qoder_delegate tool -- WR-11: the configuration gate", () => {
 			tools: ["qoder_delegate"],
 		});
 		try {
+			await handle.session.extensionRunner.emit({ type: "session_start", reason: "startup" });
+
 			const active = handle.session.getActiveToolNames();
 			expect(
 				active,

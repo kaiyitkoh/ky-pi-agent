@@ -170,20 +170,50 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// WR-11: the configuration gate. `registerTool` makes a NEWLY-registered
-	// tool active in the session by default [VERIFIED: pi-coding-agent 0.84.1
-	// `dist/core/agent-session.js:2008-2014` -- every tool name not already in
-	// the previous registry is pushed onto `nextActiveToolNames` when the
-	// session was not constructed with an explicit `activeToolNames`/
-	// `allowedToolNames`/`includeAllExtensionTools` option], so this tool costs
-	// its measured ~329 tokens on EVERY provider request by default, including
-	// on this machine and in CI where `resolveQoderConfig` can only ever
-	// refuse. Immediately deactivating it when unconfigured is CLAUDE.md's own
-	// sanctioned "register everything, activate on demand via
-	// `pi.setActiveTools`" pattern, applied here as an opt-OUT (deactivate when
-	// NOT configured) rather than the more common opt-IN shape, because Pi's
-	// own default is "active unless removed".
-	if (!resolveQoderConfig(process.env).ok) {
-		pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "qoder_delegate"));
-	}
+	// CR-01: the configuration gate must run from a point where the extension
+	// RUNTIME IS BOUND, never from the factory. `pi.getActiveTools()` and
+	// `pi.setActiveTools()` are NOT callable during extension load -- Pi
+	// installs throwing stubs for both until `Runner.bindCore()` runs
+	// [VERIFIED: pi-coding-agent 0.84.1 `dist/core/extensions/loader.js:134-153`,
+	// "Extension runtime not initialized. Action methods cannot be called
+	// during extension loading."], and the factory is awaited strictly BEFORE
+	// that bind (`loadExtensionFromFactory` awaits the factory at
+	// `loader.js:425`; `this._bindExtensionCore(...)` does not run until
+	// `agent-session.js:2041`, after `getExtensions()` at `:2031`). A call from
+	// the factory throws, and Pi then discards the WHOLE extension -- including
+	// the `registerTool` call above that had already succeeded -- exactly the
+	// hazard `safety/index.ts` already documents at its own `:768-769`
+	// ("the runtime's own `getAllTools()`/`getActiveTools()` throw 'not
+	// initialized' during extension loading"). `session_start` is the
+	// sanctioned point [CLAUDE.md's own "register everything, activate on
+	// demand via `pi.setActiveTools`" pattern; `diagnostics/index.ts:502-506`
+	// and `diagnostics/budget.ts:648` both call `getActiveTools()` from inside
+	// a handler, never a factory]: the runtime is bound by then, and
+	// `registerTool()` above already ran during load, so the tool exists to be
+	// filtered. `registerTool` makes a NEWLY-registered tool active in the
+	// session by default [VERIFIED: `dist/core/agent-session.js:2008-2014` --
+	// every tool name not already in the previous registry is pushed onto
+	// `nextActiveToolNames` when the session was not constructed with an
+	// explicit `activeToolNames`/`allowedToolNames`/`includeAllExtensionTools`
+	// option], so this tool costs its measured ~329 tokens on EVERY provider
+	// request by default, including on this machine and in CI where
+	// `resolveQoderConfig` can only ever refuse. Deactivating it when
+	// unconfigured is applied here as an opt-OUT (deactivate when NOT
+	// configured) rather than the more common opt-IN shape, because Pi's own
+	// default is "active unless removed". Best-effort, mirroring
+	// `safety/index.ts`'s and `routing/index.ts`'s own `session_start` hooks
+	// (`safety/index.ts:832-838`, `routing/index.ts:673-679`): a failure here
+	// must never stop the session itself from starting -- on an unexpected
+	// error the tool stays active and `execute()`'s own `resolveQoderConfig`
+	// check still refuses actionably at call time, which is strictly better
+	// than a crashed session.
+	pi.on("session_start", () => {
+		try {
+			if (!resolveQoderConfig(process.env).ok) {
+				pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "qoder_delegate"));
+			}
+		} catch {
+			// Swallowed deliberately -- see the comment above.
+		}
+	});
 }
