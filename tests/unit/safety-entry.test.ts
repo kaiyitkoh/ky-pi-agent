@@ -431,9 +431,21 @@ function extractQuotedField(text: string, field: string): string {
  * map), with a real grant present and NO wrapper `execute()` ever called in
  * between -- exactly the failure mode CR-01's own fix introduced and WR-12
  * closes.
+ *
+ * CR-11: each issue below models a SEPARATE real tool call (the first issue,
+ * then two genuine RE-ISSUES of the identical command), so each gets its OWN
+ * `toolCallId` -- exactly what Pi assigns a fresh tool call
+ * [`ToolCallEventBase.toolCallId`, `dist/core/extensions/types.d.ts:648-651`].
+ * This is deliberately DIFFERENT from the CR-11 case in
+ * `bootstrap-safety-stub.test.ts`, which drives multiple hooks sharing the
+ * SAME `toolCallId` (modelling a WR-07/CR-09 double load, where several
+ * loaded copies' hooks all fire for ONE tool call) -- the two tests together
+ * are the full proof: same toolCallId defers every time (CR-11's fix),
+ * different toolCallId with no intervening consume() still blocks (WR-12's
+ * original bound, preserved).
  */
 describe("WR-12 -- the hook's deferral is self-limiting: a grant left unconsumed blocks on the SECOND re-issue", () => {
-	it("calling the tool_call hook twice for the same grant, with no intervening wrapper consume, blocks the second call", async () => {
+	it("calling the tool_call hook for three SEPARATE re-issues of the same grant, with no intervening wrapper consume, blocks the second re-issue", async () => {
 		const { pi, handlers } = stubPi();
 		safety(pi);
 		const toolCallHook = handlers.get("tool_call");
@@ -447,7 +459,7 @@ describe("WR-12 -- the hook's deferral is self-limiting: a grant left unconsumed
 			// First issue: no grant yet -- classified confirm, hook mints a
 			// pending request and blocks, embedding request_id/command/reason.
 			const firstResult = (await (toolCallHook as (...args: unknown[]) => Promise<{ block?: boolean; reason?: string } | undefined>)(
-				{ toolName: "bash", input: { command } },
+				{ toolName: "bash", input: { command }, toolCallId: "tc-1" },
 				fakeCtx,
 			)) as { block?: boolean; reason?: string } | undefined;
 			expect(firstResult?.block, "the first issue must block pending confirmation").toBe(true);
@@ -461,10 +473,11 @@ describe("WR-12 -- the hook's deferral is self-limiting: a grant left unconsumed
 			const granted = approve(requestId, approvedCommand, approvedReason);
 			expect(granted, "approve() must have succeeded against the pending entry the hook just created").toBe(true);
 
-			// SECOND issue of the SAME command: a grant now exists. THE FIX
-			// ITSELF -- the hook must defer (return undefined) this ONE time...
+			// SECOND issue of the SAME command -- a genuine RE-ISSUE, a NEW tool
+			// call, so a NEW toolCallId. A grant now exists. THE FIX ITSELF --
+			// the hook must defer (return undefined) this ONE time...
 			const secondResult = await (toolCallHook as (...args: unknown[]) => Promise<{ block?: boolean; reason?: string } | undefined>)(
-				{ toolName: "bash", input: { command } },
+				{ toolName: "bash", input: { command }, toolCallId: "tc-2" },
 				fakeCtx,
 			);
 			expect(
@@ -472,20 +485,22 @@ describe("WR-12 -- the hook's deferral is self-limiting: a grant left unconsumed
 				"the hook must defer to the wrapper on the FIRST re-issue with a grant present -- CR-01's own property",
 			).toBeUndefined();
 
-			// THIRD issue of the SAME command, with NO wrapper execute() ever
-			// having run in between (this test never touches the wrapped bash
-			// tool at all) -- the exact WR-12 failure mode: without the fix, the
-			// grant is still present (peek() still true) and the hook would
-			// defer AGAIN, letting an unbounded number of re-issues through.
+			// THIRD issue of the SAME command -- ANOTHER genuine re-issue (a
+			// THIRD distinct toolCallId), with NO wrapper execute() ever having
+			// run in between (this test never touches the wrapped bash tool at
+			// all) -- the exact WR-12 failure mode: without the fix, the grant
+			// is still present (peek() still true) and the hook would defer
+			// AGAIN, letting an unbounded number of re-issues through.
 			const thirdResult = (await (toolCallHook as (...args: unknown[]) => Promise<{ block?: boolean; reason?: string } | undefined>)(
-				{ toolName: "bash", input: { command } },
+				{ toolName: "bash", input: { command }, toolCallId: "tc-3" },
 				fakeCtx,
 			)) as { block?: boolean; reason?: string } | undefined;
 			expect(
 				thirdResult?.block,
-				"WR-12: a SECOND deferral for the same requestKey, with no intervening consume(), must " +
-					"BLOCK -- markHookDeferred() must have refused to defer twice. Without the fix this " +
-					"would be undefined (deferred again), which is the unbounded-unguarded-window bug",
+				"WR-12: a SECOND deferral attempt for the same requestKey under a DIFFERENT toolCallId, with " +
+					"no intervening consume(), must BLOCK -- markHookDeferred() must have refused to defer " +
+					"again for a genuinely different tool call. Without the fix this would be undefined " +
+					"(deferred again), which is the unbounded-unguarded-window bug",
 			).toBe(true);
 		});
 	});

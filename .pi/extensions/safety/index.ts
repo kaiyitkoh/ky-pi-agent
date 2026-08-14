@@ -586,26 +586,34 @@ function registerApprovalTool(pi: ExtensionAPI): void {
  * `confirm`:
  *   - if an approval grant ALREADY EXISTS for this exact command (CR-01: the
  *     model re-issuing a command a human just approved via
- *     {@link APPROVE_TOOL_NAME}) AND this is the FIRST deferral for that
- *     grant (WR-12: {@link markHookDeferred} returns `true`), the hook
- *     returns `undefined` and lets the call proceed to the wrapped tool's own
- *     `execute()`, which performs the actual one-shot {@link consume} -- see
- *     `approvals.ts`'s module docstring, "THE PROTOCOL THIS STORE
- *     IMPLEMENTS", step 4. The hook itself NEVER consumes: `peek()` is a
- *     non-mutating read, so the SAME grant is still there for the wrapper to
- *     actually spend. If the hook consumed here, the wrapper's own
- *     `consume()` on this exact retry would always find nothing and block
- *     the just-approved command forever -- this is the bug CR-01 fixes:
- *     `approve_ky_command` was dead code because nothing ever reached this
- *     branch's now-removed unconditional re-block.
- *   - otherwise (no grant, OR a grant exists but this extension already
- *     deferred to it once with no intervening `consume()` -- WR-12: the
- *     documented T-04-08/CR-06 shapes where the wrapper that would have
- *     consumed it never actually ran), creates a pending approval and blocks
- *     with a reason that embeds the request id and a literal instruction to
- *     call {@link APPROVE_TOOL_NAME}. This is what bounds an unconsumed
- *     grant's unguarded window to `HOOK_DEFER_TTL_MS` (seconds) instead of
- *     the grant's own `APPROVAL_TTL_MS` (10 minutes).
+ *     {@link APPROVE_TOOL_NAME}) AND this is a deferral belonging to the SAME
+ *     tool call as the first one (WR-12/CR-11: {@link markHookDeferred},
+ *     keyed on BOTH `requestKey` and `event.toolCallId`, returns `true`), the
+ *     hook returns `undefined` and lets the call proceed to the wrapped
+ *     tool's own `execute()`, which performs the actual one-shot
+ *     {@link consume} -- see `approvals.ts`'s module docstring, "THE PROTOCOL
+ *     THIS STORE IMPLEMENTS", step 4. The hook itself NEVER consumes:
+ *     `peek()` is a non-mutating read, so the SAME grant is still there for
+ *     the wrapper to actually spend. If the hook consumed here, the
+ *     wrapper's own `consume()` on this exact retry would always find
+ *     nothing and block the just-approved command forever -- this is the bug
+ *     CR-01 fixes: `approve_ky_command` was dead code because nothing ever
+ *     reached this branch's now-removed unconditional re-block. CR-11: under
+ *     WR-07/CR-09's accepted double load, EVERY loaded copy's hook fires for
+ *     this SAME tool call and MUST be able to defer here -- keying purely on
+ *     `requestKey` (the original WR-12 shape) let only the first copy defer
+ *     and made the second one block, permanently defeating this protocol the
+ *     moment a second copy loaded; see `docs/SAFETY.md`'s "Load order is
+ *     part of this" section.
+ *   - otherwise (no grant, OR a grant exists but a DIFFERENT tool call --
+ *     i.e. a genuine re-issue -- already deferred to it once with no
+ *     intervening `consume()` -- WR-12: the documented T-04-08/CR-06 shapes
+ *     where the wrapper that would have consumed it never actually ran),
+ *     creates a pending approval and blocks with a reason that embeds the
+ *     request id and a literal instruction to call {@link APPROVE_TOOL_NAME}.
+ *     This is what bounds an unconsumed grant's unguarded window to
+ *     `HOOK_DEFER_TTL_MS` (seconds) instead of the grant's own
+ *     `APPROVAL_TTL_MS` (10 minutes).
  * On `block`, blocks with the classifier's reason. `terminate` is never set
  * -- RESEARCH/CONTEXT both note it applies only to a blocked call and only
  * stops the agent when EVERY finalized result in the batch terminates, so it
@@ -650,18 +658,26 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			// one-shot consume. NEVER consume here; see this function's own
 			// docstring.
 			//
-			// WR-12: deferral itself is now SELF-LIMITING. markHookDeferred()
-			// returns true only for the FIRST defer attempt for this requestKey;
-			// a SECOND attempt before the wrapper's own consume() has cleared the
-			// marker falls through to the normal mint-a-fresh-pending-request
-			// path below, exactly as if no grant existed. Without this, a grant
-			// left unconsumed because the tool that actually executes is NOT this
-			// extension's own wrapper (T-04-08's tool-name collision, or the
-			// CR-06 case where this extension never registered a wrapper at all)
-			// would let every re-issue of the exact command run UNGUARDED for the
-			// grant's full APPROVAL_TTL_MS lifetime -- strictly worse than the
-			// bug CR-01 fixed. See approvals.ts#markHookDeferred's own docstring.
-			if (peek(verdict.requestKey) && markHookDeferred(verdict.requestKey)) {
+			// WR-12/CR-11: deferral itself is now SELF-LIMITING, scoped to ONE
+			// tool call. markHookDeferred() returns true for every hook
+			// invocation that shares the SAME event.toolCallId as the first
+			// defer for this requestKey -- which is exactly what happens when
+			// this extension is loaded more than once in one process (WR-07/
+			// CR-09's accepted double load): Pi drives every loaded copy's
+			// tool_call hook for the SAME tool call, so all of them must be able
+			// to defer, because only the single first-registered wrapper ever
+			// actually consumes the grant. A DIFFERENT toolCallId -- a genuine
+			// re-issue, a new tool call, while the marker is still live and
+			// nothing consumed the grant -- returns false and falls through to
+			// the normal mint-a-fresh-pending-request path below, exactly as if
+			// no grant existed. CR-11: the earlier requestKey-only version of
+			// this marker made the SECOND hook of the SAME double-loaded tool
+			// call fail this check and block, which permanently defeated the
+			// confirm -> approve -> re-issue protocol under a double load --
+			// see approvals.ts#markHookDeferred's own docstring for the full
+			// citation trail and `docs/SAFETY.md`'s "Load order is part of
+			// this" section for the published account of the double-load trade.
+			if (peek(verdict.requestKey) && markHookDeferred(verdict.requestKey, event.toolCallId)) {
 				writeAuditRow(ctx.cwd, {
 					event: HOOK_AUDIT_EVENT,
 					tool: toolName,
@@ -760,13 +776,31 @@ function registerToolCallHook(pi: ExtensionAPI): void {
  * unconditionally imports and calls this file's default export, every time.
  * The residual double-load WR-07 named is therefore accepted rather than
  * "solved" -- see `bin/bootstrap.sh`'s own CR-09 docstring section and
- * `docs/SAFETY.md`'s WR-07 note for why a duplicate `tool_call` hook
- * (duplicate audit rows, at worst a duplicate block) is the strictly lesser
- * problem next to a guaranteed missed block. This file's own default export
- * is therefore UNCONDITIONALLY idempotent-per-call: it always fully
- * registers, every single time it runs, which is exactly the property
- * `/reload` needs AND exactly what a stub with no dedupe of its own now
- * relies on.
+ * `docs/SAFETY.md`'s "Load order is part of this" section for the full,
+ * published account. This file's own default export is therefore
+ * UNCONDITIONALLY idempotent-per-call: it always fully registers, every
+ * single time it runs, which is exactly the property `/reload` needs AND
+ * exactly what a stub with no dedupe of its own now relies on.
+ *
+ * CR-11 -- an earlier draft of this section claimed a duplicate `tool_call`
+ * hook costs "at worst a duplicate block, never a missed one." Executed and
+ * found FALSE: `approvals.ts#markHookDeferred` (WR-12) was keyed on
+ * `requestKey` alone, which cannot tell "a second hook of the SAME tool call"
+ * (harmless -- both must defer, only one wrapper ever consumes) from "a
+ * second RE-ISSUE that never consumed its grant" (the case WR-12 exists to
+ * bound). Under a real double load, the SECOND hook of every re-issue found
+ * the marker already claimed and blocked -- so `approve_ky_command`'s grant
+ * was never consumable and the confirm -> approve -> re-issue protocol
+ * (SAFE-10) never completed, for any command, in exactly the double-loaded
+ * configuration this trade creates. `markHookDeferred` is now ALSO keyed on
+ * `event.toolCallId` (stable across every hook of one tool call, distinct
+ * for a genuine re-issue), so every hook belonging to the SAME tool call may
+ * defer, and only a DIFFERENT tool call re-using an unconsumed grant is
+ * refused -- see `approvals.ts#markHookDeferred`'s own docstring for the
+ * full mechanism and citation trail, and
+ * `tests/integration/bootstrap-safety-stub.test.ts`'s CR-11 case for the
+ * executed, single-process, two-independent-loads proof that block -> approve
+ * -> re-issue now succeeds EXACTLY ONCE under a genuine double load.
  */
 export default function (pi: ExtensionAPI): void {
 	// Tool registrations FIRST -- see the module docstring's REGISTRATION

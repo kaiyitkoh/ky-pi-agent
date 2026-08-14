@@ -473,20 +473,161 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 		TIMEOUT_MS,
 	);
 
+	/**
+	 * Extract a `field="<json-quoted string>"` value from the hook's
+	 * block-reason text, unescaping it via `JSON.parse`. Mirrors
+	 * `tests/unit/safety-entry.test.ts`'s own `extractQuotedField` helper --
+	 * duplicated inline here because this driver runs as its own spawned
+	 * `node` subprocess, with no access to this test file's own imports.
+	 */
+	const EXTRACT_QUOTED_FIELD_SOURCE = [
+		"function extractQuotedField(text, field) {",
+		'  const marker = field + "=";',
+		"  const start = text.indexOf(marker);",
+		'  if (start === -1) throw new Error("no " + marker + " found in: " + text);',
+		"  let i = start + marker.length;",
+		'  if (text[i] !== \'"\') throw new Error("expected quote after " + marker);',
+		"  let j = i + 1;",
+		'  while (j < text.length && text[j] !== \'"\') {',
+		'    if (text[j] === "\\\\") j += 1;',
+		"    j += 1;",
+		"  }",
+		"  return JSON.parse(text.slice(i, j + 1));",
+		"}",
+	].join("\n");
+
+	/**
+	 * CR-11 -- a driver that loads the real generated stub TWICE, into two
+	 * fresh `pi` objects, IN ONE PROCESS (unlike `runDriverAt`'s tool-name
+	 * proof above, which spawns a SEPARATE process per call and therefore
+	 * cannot observe any property that depends on shared process state).
+	 * Drives both recorded `tool_call` hooks through block -> approve ->
+	 * re-issue -> (simulated wrapper) consume -> re-issue, exactly the way
+	 * Pi's own `emitToolCall` drives every loaded extension's hook for one
+	 * tool call, and prints the outcome of each round as JSON.
+	 *
+	 * `approve()`/`consume()`/`APPROVALS_STORE_KEY` are pulled directly from
+	 * the real `approvals.ts` sibling module (derived from the stub's own
+	 * embedded specifier) rather than routed through `approve_ky_command`'s
+	 * UI-gated `execute()` -- this isolates the CR-11 property (does the
+	 * DEFERRAL MARKER survive a double load) from `approve_ky_command`'s own,
+	 * separately-tested UI-gating property (T-04-03,
+	 * `tests/unit/safety-entry.test.ts`'s WR-11 cases). Reading
+	 * `globalThis[APPROVALS_STORE_KEY].granted` directly (the same pattern
+	 * the review's own CR-11 investigation and this project's `approvals.ts`
+	 * module docstring both use) is what proves the grant is genuinely
+	 * shared, not merely that both loads happen to behave the same way.
+	 */
+	function cr11DriverSource(stubSpecifier: string, approvalsSpecifier: string): string {
+		return [
+			`import { createJiti } from ${JSON.stringify(JITI_ENTRY)};`,
+			EXTRACT_QUOTED_FIELD_SOURCE,
+			"function makeRecordingPi() {",
+			"  const handlers = {};",
+			"  return { pi: { on: (name, fn) => { handlers[name] = fn; }, registerTool: () => {} }, handlers };",
+			"}",
+			"const jiti = createJiti(import.meta.url, { moduleCache: false });",
+			"",
+			"const a = makeRecordingPi();",
+			`const modA = await jiti.import(${JSON.stringify(stubSpecifier)}, { default: true });`,
+			"await modA(a.pi);",
+			"",
+			"const b = makeRecordingPi();",
+			`const modB = await jiti.import(${JSON.stringify(stubSpecifier)}, { default: true });`,
+			"await modB(b.pi);",
+			"",
+			`const approvalsMod = await jiti.import(${JSON.stringify(approvalsSpecifier)}, { default: false });`,
+			"",
+			'const hookA = a.handlers["tool_call"];',
+			'const hookB = b.handlers["tool_call"];',
+			"if (!hookA || !hookB) {",
+			'  throw new Error("both independent loads must register their own tool_call hook -- got " + JSON.stringify({ hookA: !!hookA, hookB: !!hookB }));',
+			"}",
+			"",
+			"const fakeCtx = { cwd: process.cwd(), hasUI: false };",
+			'const command = "terraform apply";',
+			"",
+			"async function driveRound(toolCallId) {",
+			'  const event = { toolName: "bash", input: { command }, toolCallId };',
+			"  const resA = await hookA(event, fakeCtx);",
+			"  if (resA && resA.block) return { blockedBy: 'A', result: resA };",
+			"  const resB = await hookB(event, fakeCtx);",
+			"  if (resB && resB.block) return { blockedBy: 'B', result: resB };",
+			"  return { blockedBy: null, result: resA ?? resB ?? null };",
+			"}",
+			"",
+			'const round1 = await driveRound("tool-call-1");',
+			"if (!round1.result || !round1.result.block) {",
+			'  throw new Error("round1 must block pending confirmation, got: " + JSON.stringify(round1));',
+			"}",
+			'const requestId = extractQuotedField(round1.result.reason, "request_id");',
+			'const approvedCommand = extractQuotedField(round1.result.reason, "command");',
+			'const approvedReason = extractQuotedField(round1.result.reason, "reason");',
+			"",
+			"const approved = approvalsMod.approve(requestId, approvedCommand, approvedReason);",
+			"",
+			'const round2 = await driveRound("tool-call-2");',
+			"",
+			"const store = globalThis[approvalsMod.APPROVALS_STORE_KEY];",
+			"const grantedKeysAfterRound2 = [...store.granted.keys()];",
+			"const consumedOk = grantedKeysAfterRound2.length === 1 ? approvalsMod.consume(grantedKeysAfterRound2[0]) : false;",
+			"",
+			'const round3 = await driveRound("tool-call-3");',
+			"",
+			"process.stdout.write(JSON.stringify({",
+			"  round1: { blockedBy: round1.blockedBy, blocked: !!(round1.result && round1.result.block) },",
+			"  approved,",
+			"  round2: { blockedBy: round2.blockedBy, blocked: !!(round2.result && round2.result.block) },",
+			"  grantedCountAfterRound2: grantedKeysAfterRound2.length,",
+			"  consumedOk,",
+			"  round3: { blockedBy: round3.blockedBy, blocked: !!(round3.result && round3.result.block) },",
+			"}));",
+			"",
+		].join("\n");
+	}
+
+	interface Cr11Outcome {
+		round1: { blockedBy: "A" | "B" | null; blocked: boolean };
+		approved: boolean;
+		round2: { blockedBy: "A" | "B" | null; blocked: boolean };
+		grantedCountAfterRound2: number;
+		consumedOk: boolean;
+		round3: { blockedBy: "A" | "B" | null; blocked: boolean };
+	}
+
+	function runCr11DriverAt(cwd: string, stubSpecifier: string, approvalsSpecifier: string): Cr11Outcome {
+		const driverPath = join(tempDir("kypi-cr11-driver-"), "driver.mjs");
+		writeFileSync(driverPath, cr11DriverSource(stubSpecifier, approvalsSpecifier), "utf-8");
+		const result = spawnSync("node", [driverPath], {
+			cwd,
+			encoding: "utf-8",
+			timeout: TIMEOUT_MS,
+			windowsHide: true,
+		});
+		if (result.status !== 0) {
+			throw new Error(
+				`CR-11 driver subprocess failed (status ${result.status}):\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+			);
+		}
+		return JSON.parse(result.stdout) as Cr11Outcome;
+	}
+
 	it(
-		"case 8 (CR-09) -- project-scoped copy PRESENT at cwd AND this call site's own real safety extension both load: registering twice is the accepted trade, never a missed block",
+		"case 8 (CR-11, supersedes the CR-09 version of this case) -- project-scoped copy PRESENT at cwd AND this call site's own real safety extension both load: block -> approve -> re-issue lets the command through EXACTLY ONCE, never permanently",
 		() => {
-			// The other half of CR-09's own trade-off, stated as an executed
-			// assertion rather than only prose: when BOTH the user-scope stub and
-			// a second, independent load of the real safety extension run in the
-			// same process (modelling the one scenario where the project really
-			// IS trusted and this repository really is the session's own cwd),
-			// each one registers its own full tool set independently -- a
-			// duplicate `tool_call` hook, never a missing one. `index.ts`'s
-			// default export has no idempotency guard of its own (see that
-			// file's CR-06/CR-09 docstring), so this is true by construction; this
-			// case pins it as an executed fact rather than leaving it as an
-			// unverified consequence of the fix above.
+			// WR-18: the PRIOR shape of this case called `runDriverAt` TWICE --
+			// two SEPARATE node subprocesses, sharing no globalThis, no
+			// approvals store and no hook list. "The same full tool set comes
+			// back twice" was true by construction and would have stayed true
+			// no matter how badly the IN-PROCESS double load actually behaved --
+			// structurally incapable of observing the CR-11 property it claimed
+			// to pin. This case drives BOTH independent loads' hooks in ONE
+			// process instead, through the full block -> approve -> re-issue ->
+			// consume -> re-issue cycle, which is the only oracle that can tell
+			// "duplicate block" (harmless) apart from "permanently blocked" (the
+			// real CR-11 bug, reproduced by direct execution while diagnosing
+			// this finding: reverting only CR-11's `event.toolCallId` keying
+			// makes round2 below come back BLOCKED, forever, for every re-issue).
 			const agentDir = tempDir("kypi-agentdir-");
 			const logDir = tempDir("kypi-log-");
 			const log = join(logDir, "npm.log").replace(/\\/g, "/");
@@ -500,18 +641,34 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 			);
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
-			const stub = stubPath(agentDir).replace(/\\/g, "/");
-			// Two independent driver runs model two independent runner-build
-			// loads (the stub's own load, and Pi's separate auto-discovery of the
-			// project-scoped copy) -- each one gets its own fresh `pi` object in
-			// the real runtime, exactly like the two separate jiti module
-			// instances index.ts's own docstring describes.
-			const first = runDriverAt(cwdWithCopy, stub);
-			const second = runDriverAt(cwdWithCopy, stub);
-			expect(first.length, "the stub's own load must register the full tool set").toBeGreaterThan(0);
-			expect(second, "a second, independent load must register the SAME full tool set again -- duplicate, not missing").toEqual(
-				first,
+			const stubFile = stubPath(agentDir);
+			const stub = stubFile.replace(/\\/g, "/");
+			// The stub's OWN embedded specifier points at the real index.ts;
+			// approvals.ts is its sibling module -- same directory, same
+			// globalThis-keyed store (see approvals.ts's own module docstring).
+			const indexSpecifier = extractSpecifier(readFileSync(stubFile, "utf-8"));
+			const approvalsSpecifier = indexSpecifier.replace(/index\.ts$/, "approvals.ts");
+
+			const outcome = runCr11DriverAt(cwdWithCopy, stub, approvalsSpecifier);
+
+			expect(outcome.round1.blocked, "round1 (fresh, no grant) must block pending confirmation").toBe(true);
+			expect(outcome.approved, "approve() must have succeeded against the pending entry round1 created").toBe(true);
+			expect(
+				outcome.round2.blocked,
+				"CR-11: round2 (the re-issue, under a double load) must NOT be blocked -- both independent " +
+					"loads' hooks must be able to defer to the wrapper for the SAME tool call. Without the " +
+					"fix, the second hook's markHookDeferred() call finds the marker already claimed by the " +
+					"first and blocks, permanently defeating the confirm -> approve -> re-issue protocol.",
+			).toBe(false);
+			expect(outcome.grantedCountAfterRound2, "the grant must still be present after round2 -- the hook layer never consumes it").toBe(
+				1,
 			);
+			expect(outcome.consumedOk, "the simulated wrapper consume() must succeed exactly once").toBe(true);
+			expect(
+				outcome.round3.blocked,
+				"round3 (a further re-issue, AFTER the grant was consumed) must block again -- proving the " +
+					"approved command was let through EXACTLY ONCE, not permanently unguarded",
+			).toBe(true);
 		},
 		TIMEOUT_MS,
 	);

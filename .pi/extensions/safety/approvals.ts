@@ -148,13 +148,23 @@ interface Grant {
 	readonly expiresAt: number;
 }
 
+/**
+ * CR-11: a deferral marker now pins WHICH tool call it was issued for, not
+ * just when it expires. See {@link markHookDeferred}'s own docstring for why
+ * this is load-bearing under a double load of this extension.
+ */
+interface HookDeferredMarker {
+	readonly toolCallId: string;
+	readonly expiresAt: number;
+}
+
 interface ApprovalsStore {
 	/** Keyed by request id (the value {@link createPending} returns). */
 	readonly pending: Map<string, PendingApproval>;
 	/** Keyed by `requestKey` -- deliberately NOT the request id. See module docstring. */
 	readonly granted: Map<string, Grant>;
-	/** WR-12: keyed by `requestKey` -- one marker per command, expiring quickly. See {@link markHookDeferred}. */
-	readonly hookDeferred: Map<string, number>;
+	/** WR-12/CR-11: keyed by `requestKey` -- one marker per command, expiring quickly. See {@link markHookDeferred}. */
+	readonly hookDeferred: Map<string, HookDeferredMarker>;
 }
 
 /**
@@ -217,8 +227,8 @@ function sweepExpired(store: ApprovalsStore, now: number): void {
 	// but sweeping them here too means a long session accumulating many
 	// distinct confirm-classified commands never lets this map grow purely
 	// from stale markers either.
-	for (const [key, expiresAt] of store.hookDeferred) {
-		if (expiresAt <= now) {
+	for (const [key, marker] of store.hookDeferred) {
+		if (marker.expiresAt <= now) {
 			store.hookDeferred.delete(key);
 		}
 	}
@@ -321,40 +331,63 @@ export function consume(requestKey: string, now: number = Date.now()): boolean {
 }
 
 /**
- * WR-12: self-limiting deferral. CR-01's fix made the `tool_call` HOOK
- * return `undefined` (defer to the wrapper) whenever {@link peek} finds an
- * unexpired grant for a re-issued command -- but the wrapper is the ONLY
- * consumer. If the tool that actually executes is not this extension's own
- * wrapper (the documented T-04-08 tool-name-collision case, or the CR-06
- * case where this extension's wrapper was never registered at all), nothing
- * ever calls {@link consume}, `peek()` keeps returning `true` for the whole
+ * WR-12/CR-11: self-limiting deferral, keyed by requestKey AND scoped to
+ * ONE tool call. CR-01's fix made the `tool_call` HOOK return `undefined`
+ * (defer to the wrapper) whenever {@link peek} finds an unexpired grant for
+ * a re-issued command -- but the wrapper is the ONLY consumer. If the tool
+ * that actually executes is not this extension's own wrapper (the
+ * documented T-04-08 tool-name-collision case, or the CR-06 case where this
+ * extension's wrapper was never registered at all), nothing ever calls
+ * {@link consume}, `peek()` keeps returning `true` for the whole
  * {@link APPROVAL_TTL_MS} window, and every re-issue of that exact command
  * runs UNGUARDED for up to 10 minutes on a single human approval -- strictly
  * worse than CR-01's own starting point, where one approval could never
  * unblock anything.
  *
- * Call this from the hook, in place of an unconditional defer, whenever
- * `peek(requestKey)` is `true`:
+ * CR-11: WR-07/CR-09 accept that this extension may load MORE THAN ONCE in
+ * one process (a project-scoped copy plus the user-scope stub, both
+ * trusted). Pi runs every loaded extension's OWN `tool_call` handler, in
+ * load order, for the SAME tool call [`dist/core/extensions/runner.js
+ * #emitToolCall`] -- so a re-issued command that has a grant sees N
+ * independent hook invocations, all sharing this ONE `requestKey`, but all
+ * describing the SAME `event.toolCallId`. The original (WR-12) version of
+ * this function keyed purely on `requestKey` and let only the FIRST caller
+ * defer -- which meant hook #2 of that SAME tool call always found the
+ * marker already set and fell through to minting a fresh pending request
+ * and BLOCKING, permanently defeating the confirm -> approve -> re-issue
+ * protocol the moment a second copy of this extension is loaded (the
+ * fixer's own "at worst a duplicate block, never a missed one" justification
+ * for accepting the double load was executed and found FALSE -- see
+ * `docs/SAFETY.md`'s "Load order is part of this" section). The fix: pin
+ * the marker to the `toolCallId` it was first issued for.
  *   - the FIRST call for a given `requestKey` (no unexpired marker present)
- *     records a marker with a SHORT TTL ({@link HOOK_DEFER_TTL_MS}, seconds
- *     not minutes) and returns `true` -- the hook may defer.
- *   - a SECOND call for the SAME `requestKey`, before an intervening
- *     {@link consume} call has cleared the marker, returns `false` -- the
- *     hook must NOT defer again; it should fall through to its normal
- *     confirm-block path (mint a fresh pending request) exactly as if no
- *     grant existed. This bounds the maximum unguarded window to
- *     `HOOK_DEFER_TTL_MS` instead of the full grant lifetime.
+ *     records `{ toolCallId, expiresAt: now + HOOK_DEFER_TTL_MS }` and
+ *     returns `true` -- this hook may defer.
+ *   - a call for the SAME `requestKey` AND THE SAME `toolCallId`, before the
+ *     marker expires, ALSO returns `true` -- every hook belonging to the
+ *     SAME tool call (i.e. every load of this extension, in one process)
+ *     must be able to defer, because only one of them (the first-registered
+ *     wrapper) will ever actually consume the grant.
+ *   - a call for the SAME `requestKey` but a DIFFERENT `toolCallId` -- a
+ *     genuine re-issue, a NEW tool call, while the previous marker is still
+ *     live and nothing has consumed the grant -- returns `false`. The hook
+ *     must NOT defer; it falls through to its normal confirm-block path
+ *     (mint a fresh pending request) exactly as if no grant existed. This is
+ *     WR-12's original bound, now correctly scoped: it fires on a genuine
+ *     unconsumed re-issue, never on a sibling hook invocation of the SAME
+ *     re-issue.
  *
- * A successful {@link consume} clears the marker (see that function's own
- * comment), so the NORMAL one-approval-one-execution cycle is never
- * penalised: hook defers once, wrapper consumes once, done.
+ * A successful {@link consume} clears the marker outright (see that
+ * function's own comment), so the NORMAL one-approval-one-execution cycle is
+ * never penalised: every hook of one tool call defers, the (single,
+ * first-registered) wrapper consumes once, done.
  */
-export function markHookDeferred(requestKey: string, now: number = Date.now()): boolean {
+export function markHookDeferred(requestKey: string, toolCallId: string, now: number = Date.now()): boolean {
 	const store = getStore();
 	const existing = store.hookDeferred.get(requestKey);
-	if (existing !== undefined && existing > now) {
-		return false;
+	if (existing !== undefined && existing.expiresAt > now) {
+		return existing.toolCallId === toolCallId;
 	}
-	store.hookDeferred.set(requestKey, now + HOOK_DEFER_TTL_MS);
+	store.hookDeferred.set(requestKey, { toolCallId, expiresAt: now + HOOK_DEFER_TTL_MS });
 	return true;
 }

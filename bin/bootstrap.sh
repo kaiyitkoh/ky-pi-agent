@@ -890,16 +890,23 @@ console.log("  auth.json provider entries added: " + added.join(", "));
 # unconditionally, with no existence check of any kind. The double-load
 # hazard the existence check was trying to prevent (both copies genuinely
 # loading, in the one case where the project IS trusted and this repository
-# is also the session's own cwd) is real but strictly the LESSER problem: a
-# duplicate `tool_call` hook produces duplicate audit rows and, at worst, a
-# duplicate block -- never a missed one. Trading a guaranteed missed block
-# (every untrusted headless run) for occasional duplicate audit rows (one
-# interactive, trusted session inside this repo) is not a fair trade, and the
-# existence check made exactly that trade backwards. See
-# `.pi/extensions/safety/index.ts`'s own CR-06/CR-09 docstring section for the
-# other half of this (why the dedupe cannot instead live inside the extension
-# itself), and `docs/SAFETY.md`'s WR-07 note for how this residual duplicate
-# load is published rather than hidden.
+# is also the session's own cwd) is real and is accepted rather than
+# "solved" -- a duplicate `tool_call` hook produces duplicate audit rows.
+# CR-11: an earlier version of this comment claimed that was "at worst a
+# duplicate block, never a missed one" -- executed and found FALSE. Both
+# copies' hooks fire for the SAME tool call, and the deferral marker that
+# lets an APPROVED command's re-issue through
+# (`.pi/extensions/safety/approvals.ts#markHookDeferred`, WR-12) used to be
+# keyed on the command alone, so the SECOND copy's hook always saw the marker
+# already claimed and blocked -- permanently defeating the confirm -> approve
+# -> re-issue protocol (SAFE-10) the moment a second copy loaded. That is
+# fixed: the marker is now ALSO keyed on `event.toolCallId`, so every hook of
+# the SAME tool call can defer and only a genuinely different, unconsumed
+# re-issue is refused. See `.pi/extensions/safety/index.ts`'s own CR-06/
+# CR-09/CR-11 docstring section for the other half of this (why the dedupe
+# cannot instead live inside the extension itself, and the full citation
+# trail for the CR-11 fix), and `docs/SAFETY.md`'s "Load order is part of
+# this" section for the published account of the accepted double load.
 install_safety_extension() {
 	_safety_src="$REPO_ROOT/.pi/extensions/safety/index.ts"
 	if [ ! -f "$_safety_src" ]; then
@@ -944,9 +951,13 @@ const out = [
   "// proof and the full citation trail. Removing the guard means BOTH copies",
   "// genuinely load when the project IS trusted and this repository is also",
   "// the session own cwd -- a duplicate tool_call hook, duplicate audit",
-  "// rows, at worst a duplicate block. Never a missed one. That is the",
-  "// deliberate, documented trade (see docs/SAFETY.md, the WR-07 note): a",
-  "// double block is still a block.",
+  "// rows. That double load is the deliberate, published trade (see",
+  "// docs/SAFETY.md, Load order is part of this): the confirm -> approve ->",
+  "// re-issue protocol (SAFE-10) is proven to survive it -- see",
+  "// .pi/extensions/safety/approvals.ts#markHookDeferred (CR-11), which",
+  "// keys the deferral marker on event.toolCallId so every loaded hook can",
+  "// defer for the SAME tool call while a genuinely unconsumed re-issue",
+  "// still blocks.",
   "export default async function (pi) {",
   "  const mod = await import(" + JSON.stringify(specifier) + ");",
   "  await mod.default(pi);",

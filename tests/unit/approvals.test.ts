@@ -192,39 +192,54 @@ describe("CR-01 -- peek(): a non-consuming read of the granted map", () => {
 	});
 });
 
-describe("WR-12 -- markHookDeferred(): a self-limiting, single-use-per-grant deferral marker", () => {
+describe("WR-12/CR-11 -- markHookDeferred(): a self-limiting deferral marker, scoped to ONE tool call", () => {
 	it("HOOK_DEFER_TTL_MS is short -- seconds, not minutes, and strictly less than APPROVAL_TTL_MS", () => {
 		expect(HOOK_DEFER_TTL_MS).toBeLessThan(APPROVAL_TTL_MS);
 		expect(HOOK_DEFER_TTL_MS).toBeLessThanOrEqual(60_000);
 	});
 
 	it("the FIRST call for a requestKey returns true", () => {
-		expect(markHookDeferred("wr12-key-a", T0)).toBe(true);
+		expect(markHookDeferred("wr12-key-a", "tc-a1", T0)).toBe(true);
 	});
 
-	it("a SECOND call for the SAME requestKey, before it expires and with no consume() in between, returns false", () => {
-		expect(markHookDeferred("wr12-key-b", T0)).toBe(true);
-		expect(markHookDeferred("wr12-key-b", T0 + 1)).toBe(false);
+	it("a SECOND call for the SAME requestKey but a DIFFERENT toolCallId (a genuine re-issue), before it expires and with no consume() in between, returns false", () => {
+		expect(markHookDeferred("wr12-key-b", "tc-b1", T0)).toBe(true);
+		expect(markHookDeferred("wr12-key-b", "tc-b2", T0 + 1)).toBe(false);
 	});
 
-	it("a call AFTER the marker's own short TTL has elapsed returns true again", () => {
-		expect(markHookDeferred("wr12-key-c", T0)).toBe(true);
-		expect(markHookDeferred("wr12-key-c", T0 + HOOK_DEFER_TTL_MS - 1)).toBe(false);
-		expect(markHookDeferred("wr12-key-c", T0 + HOOK_DEFER_TTL_MS)).toBe(true);
+	it("CR-11: a SECOND call for the SAME requestKey AND THE SAME toolCallId, before it expires, ALSO returns true -- every hook belonging to one tool call (a WR-07/CR-09 double load) must be able to defer", () => {
+		expect(markHookDeferred("cr11-key-a", "tc-shared", T0)).toBe(true);
+		expect(markHookDeferred("cr11-key-a", "tc-shared", T0 + 1)).toBe(true);
+		// A third hook (modelling a THIRD independent load) for the identical
+		// tool call still defers too -- the property generalises past two.
+		expect(markHookDeferred("cr11-key-a", "tc-shared", T0 + 2)).toBe(true);
+	});
+
+	it("CR-11: after two SAME-toolCallId defers succeed, a DIFFERENT toolCallId (a genuine re-issue with nothing consumed yet) still returns false", () => {
+		expect(markHookDeferred("cr11-key-b", "tc-shared", T0)).toBe(true);
+		expect(markHookDeferred("cr11-key-b", "tc-shared", T0 + 1)).toBe(true);
+		expect(markHookDeferred("cr11-key-b", "tc-different", T0 + 2)).toBe(false);
+	});
+
+	it("a call AFTER the marker's own short TTL has elapsed returns true again, even for a different toolCallId", () => {
+		expect(markHookDeferred("wr12-key-c", "tc-c1", T0)).toBe(true);
+		expect(markHookDeferred("wr12-key-c", "tc-c2", T0 + HOOK_DEFER_TTL_MS - 1)).toBe(false);
+		expect(markHookDeferred("wr12-key-c", "tc-c2", T0 + HOOK_DEFER_TTL_MS)).toBe(true);
 	});
 
 	it("consume() clears the marker, so a later cycle for the same requestKey can defer again", () => {
 		const id = createPending("wr12-key-d", "terraform apply", "irreversible", T0);
 		expect(approve(id, "terraform apply", "irreversible", T0)).toBe(true);
 
-		expect(markHookDeferred("wr12-key-d", T0)).toBe(true); // hook defers once
+		expect(markHookDeferred("wr12-key-d", "tc-d1", T0)).toBe(true); // hook defers once
 		expect(consume("wr12-key-d", T0)).toBe(true); // wrapper consumes, as the normal cycle does
 
 		// A brand-new confirm cycle for the same requestKey (a fresh grant)
-		// must not be blocked by a stale marker from the PRIOR cycle.
+		// must not be blocked by a stale marker from the PRIOR cycle, even
+		// under a brand-new toolCallId.
 		const id2 = createPending("wr12-key-d", "terraform apply", "irreversible", T0 + 10);
 		expect(approve(id2, "terraform apply", "irreversible", T0 + 10)).toBe(true);
-		expect(markHookDeferred("wr12-key-d", T0 + 10)).toBe(true);
+		expect(markHookDeferred("wr12-key-d", "tc-d2", T0 + 10)).toBe(true);
 	});
 });
 

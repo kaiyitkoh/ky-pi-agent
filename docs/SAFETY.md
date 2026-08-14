@@ -190,6 +190,37 @@ inside.
   extension is installed in the tool-execution path per `CLAUDE.md`'s
   "What NOT to Use"), but nothing in Pi's own extension model enforces that
   going forward.
+- **This extension may load MORE THAN ONCE in one process — accepted, not
+  solved.** `bin/bootstrap.sh` installs a user-scope stub
+  (`~/.pi/agent/extensions/ky-safety/index.ts`) that unconditionally imports
+  and calls this file's own default export, with no existence check or
+  dedup of any kind (CR-09). When the project is TRUSTED and this
+  repository is also the session's own `cwd`, Pi *also* auto-discovers the
+  project-scoped copy at `.pi/extensions/safety/index.ts`
+  (`dist/core/package-manager.js:1980`) — both copies genuinely load, each
+  registering its own `tool_call` hook, in the same process. An earlier
+  version of this trade was accepted on the claim that the cost is "at
+  worst a duplicate block, never a missed one." **That claim was executed
+  and found FALSE (CR-11):** the deferral marker that lets an APPROVED
+  command's re-issue through (`approvals.ts#markHookDeferred`, WR-12) used
+  to be keyed on the command alone, so the SECOND loaded copy's hook always
+  found the marker already claimed by the first and blocked — permanently
+  defeating the confirm → approve → re-issue protocol (SAFE-10) the moment
+  a second copy loaded, which is exactly the trusted-project, session-
+  rooted-in-this-repo configuration a developer's own interactive daily
+  driver sits in. **Fixed:** the marker is now ALSO keyed on
+  `event.toolCallId` (stable across every hook invocation of ONE tool call,
+  distinct for a genuine re-issue), so every loaded copy's hook can defer
+  for the SAME tool call — because only the single first-registered wrapper
+  ever actually consumes the grant — while a genuinely unconsumed re-issue
+  (a different tool call, before any consume) still blocks, preserving
+  WR-12's own bound. Proven by execution, in one process, with two
+  independent loads of this file, driving both hooks through block →
+  approve → re-issue and confirming the re-issue succeeds EXACTLY ONCE:
+  `tests/integration/bootstrap-safety-stub.test.ts`'s CR-11 case. The
+  residual cost of the double load is therefore exactly what the original
+  claim said and no more: duplicate audit rows, never a missed or
+  permanently-stuck block.
 
 ## Authority
 
