@@ -328,7 +328,7 @@ Plans:
 - [x] 07-05-PLAN.md — the decisive worktree BUILD proof — fails before the hook, builds after it *(Wave 2)*
 - [x] 07-06-PLAN.md — vendor `pi-loop-police` (no LICENSE) and the EXT-10 vendor/depend mutual-exclusion audit *(Wave 2)*
 - [x] 07-07-PLAN.md — vendor Pi's bundled `plan-mode/`, resolving the `/todos` command collision *(Wave 2)*
-- [ ] 07-09-PLAN.md — `.pi/settings.json` `packages[]` lockfile + subagents config, and the both-directions pin diff *(Wave 2)*
+- [x] 07-09-PLAN.md — `.pi/settings.json` `packages[]` lockfile + subagents config, and the both-directions pin diff *(Wave 2)*
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -451,7 +451,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
 | 5. Routing & Capability Guards | 0/TBD | Not started | - |
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
-| 7. Composed Extensions, Pinned & Reviewed | 7/13 | In Progress|  |
+| 7. Composed Extensions, Pinned & Reviewed | 8/13 | In Progress|  |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 0/TBD | Not started | - |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
