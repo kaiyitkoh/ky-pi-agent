@@ -120,6 +120,12 @@ export default function (pi: ExtensionAPI): void {
 			// touches the environment.
 			const configResult = resolveQoderConfig(process.env);
 			if (!configResult.ok) {
+				// WR-02 (iteration 3): this is the documented defence-in-depth path
+				// (docs/ROUTING.md's "two gates, not one") -- a record here is the
+				// only way to observe the session_start deactivation hook having
+				// failed (it is best-effort; see this file's own comment on that
+				// hook below). Before this fix this branch left no trace anywhere.
+				writeQoderTranscript(ctx.cwd, { event: "qoder.delegate.refused", cause: "unconfigured" });
 				// Actionable, never opaque -- see this file's own docstring
 				// section on the refusal path.
 				throw new Error(configResult.message);
@@ -140,6 +146,15 @@ export default function (pi: ExtensionAPI): void {
 			// select` is ever called, closes both.
 			const task = params.task.trim();
 			if (task.length === 0 || task.length > MAX_TASK_CHARS) {
+				// WR-02 (iteration 3): this is the branch an adversarial or looping
+				// model hits repeatedly, and before this fix it left ZERO trace --
+				// no transcript record, nothing in `.pi/logs/qoder-*.jsonl` for the
+				// operator RB-05-01 step 4 sends there. Never the task text itself.
+				writeQoderTranscript(ctx.cwd, {
+					event: "qoder.delegate.refused",
+					cause: "task-length",
+					taskChars: task.length,
+				});
 				throw new Error(
 					`Qoder delegate refused: task must be 1..${MAX_TASK_CHARS} characters after trimming ` +
 						`(got ${task.length}).`,

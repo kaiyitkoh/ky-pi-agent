@@ -79,6 +79,22 @@ function readConfirmRecords(agentCwd: string): { event?: unknown; hasUI?: unknow
 	return (records as { event?: unknown }[]).filter((r) => r.event === "qoder.delegate.confirm");
 }
 
+/**
+ * WR-02 (iteration 3): the two silent refusal branches (unconfigured,
+ * task-length) write `qoder.delegate.refused` records through the same
+ * writer and file as `readConfirmRecords` above -- never the task text.
+ */
+function readRefusedRecords(agentCwd: string): { event?: unknown; cause?: unknown; taskChars?: unknown }[] {
+	const dir = logDir(agentCwd);
+	const files = logFilesIn(dir);
+	const qoderFile = files.find((name) => name.startsWith("qoder-"));
+	if (qoderFile === undefined) {
+		return [];
+	}
+	const { records } = readTornSafe(join(dir, qoderFile));
+	return (records as { event?: unknown }[]).filter((r) => r.event === "qoder.delegate.refused");
+}
+
 /** Absolute path of the Qoder tool entry point this repository ships. */
 const QODER_ENTRY = `${repoRoot()}/.pi/extensions/qoder/index.ts`;
 
@@ -491,6 +507,85 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 					).toHaveLength(1);
 					expect(confirmRecords[0]?.approved).toBe(true);
 					expect(confirmRecords[0]?.hasUI).toBe(true);
+				} finally {
+					await handle.dispose();
+				}
+			});
+		});
+	});
+});
+
+describe("qoder_delegate tool -- WR-02: the two previously-silent refusal branches now write a record", () => {
+	it("writes a qoder.delegate.refused record (cause: unconfigured) when the config gate refuses at call time", async () => {
+		await withTempLogCwd(async (cwd) => {
+			clearQoderEnv(); // deliberately unconfigured
+
+			const handle = await createFauxSession({
+				extensionSource: EXTENSION_SOURCE,
+				responses: [fauxAssistantMessage("unused", { stopReason: "stop" })],
+			});
+			try {
+				const tool = handle.session.extensionRunner.getToolDefinition("qoder_delegate");
+				expect(tool).toBeDefined();
+				if (tool === undefined) {
+					return;
+				}
+
+				const ctx = handle.session.extensionRunner.createCommandContext();
+				withStubbedUI(ctx, { hasUI: true });
+
+				await expect(
+					tool.execute("call-1", { task: "summarise the open PRs" }, undefined, undefined, ctx),
+				).rejects.toThrow(); // resolveQoderConfig's own actionable message
+
+				// Before WR-02 this branch left ZERO trace anywhere.
+				const refused = readRefusedRecords(handle.cwd);
+				expect(
+					refused,
+					"no qoder.delegate.refused record was written for the unconfigured refusal",
+				).toHaveLength(1);
+				expect(refused[0]?.cause).toBe("unconfigured");
+			} finally {
+				await handle.dispose();
+			}
+		});
+	});
+
+	it("writes a qoder.delegate.refused record (cause: task-length) for an over-limit task, before the confirmation prompt", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({}, async (loop) => {
+				clearQoderEnv();
+				setConfiguredQoderEnv(loop.baseUrl);
+
+				const handle = await createFauxSession({
+					extensionSource: EXTENSION_SOURCE,
+					responses: [fauxAssistantMessage("unused", { stopReason: "stop" })],
+				});
+				try {
+					const tool = handle.session.extensionRunner.getToolDefinition("qoder_delegate");
+					expect(tool).toBeDefined();
+					if (tool === undefined) {
+						return;
+					}
+
+					const ctx = handle.session.extensionRunner.createCommandContext();
+					withStubbedUI(ctx, { hasUI: true });
+
+					const overLimitTask = "x".repeat(MAX_TASK_CHARS + 1);
+					await expect(
+						tool.execute("call-1", { task: overLimitTask }, undefined, undefined, ctx),
+					).rejects.toThrow(new RegExp(`1\\.\\.${MAX_TASK_CHARS} characters`));
+
+					// Before WR-02 this branch -- the one an adversarial or looping
+					// model hits repeatedly -- left ZERO trace anywhere.
+					const refused = readRefusedRecords(handle.cwd);
+					expect(
+						refused,
+						"no qoder.delegate.refused record was written for the task-length refusal",
+					).toHaveLength(1);
+					expect(refused[0]?.cause).toBe("task-length");
+					expect(refused[0]?.taskChars).toBe(overLimitTask.length);
+					expect(loop.received).toHaveLength(0);
 				} finally {
 					await handle.dispose();
 				}
