@@ -38,11 +38,16 @@
 // that file's own comment block for the full (a)/(b)/(c) justification and
 // the exact measurement command.
 //
-// MEASURED SCHEMA COST: recorded by Task 2 of this plan once the real
-// `Buffer.byteLength(JSON.stringify(payload), "utf8")` command has actually
-// run — see `tests/unit/contributing-boundary.test.ts`'s
-// `TOOL_REGISTRATION_ALLOWLIST` entry for this file for the exact command and
-// the resulting byte/token numbers.
+// MEASURED SCHEMA COST: 1258 bytes, `Math.ceil(1258 / 4) = 315` tokens — the
+// exact `{type:"function",function:{name,description,parameters}}` payload
+// (`openai-completions.ts:1337-1372`'s own shape) run through
+// `Buffer.byteLength(JSON.stringify(payload), "utf8")`, computed with a
+// `node --input-type=module -e '...'` one-liner executed from this repo's
+// own root (so the bare-specifier ESM import of `typebox` resolves through
+// this repo's real `node_modules`) — see
+// `tests/unit/contributing-boundary.test.ts`'s `TOOL_REGISTRATION_ALLOWLIST`
+// entry for this file for the full (a)/(b)/(c) justification, and
+// `07-08-SUMMARY.md` for the exact command run.
 //
 // `promptSnippet`/`promptGuidelines` grep: NEITHER appears anywhere in this
 // file — confirmed by `grep -n 'promptSnippet\|promptGuidelines'

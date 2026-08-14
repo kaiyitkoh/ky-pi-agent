@@ -138,10 +138,85 @@ const COMMAND_REGISTRATION = "registerCommand";
  *     credential is absent (`client.ts#resolveQoderConfig`). This needs a
  *     structured network round trip through code the model cannot see or
  *     alter, not a procedure the model follows on its own word.
+ *
+ * `.pi/extensions/todo.ts` (Phase 7, plan 08, EXT-05/EXT-06, vendored from
+ * Pi's own bundled `examples/extensions/todo.ts`) is the third entry:
+ *
+ * (a) The model must call `todo` MID-TURN -- it is the mechanism the model
+ *     uses to maintain its own working list of steps WHILE it works, adding,
+ *     toggling and clearing items as its own plan changes over the course of
+ *     a turn. `/todos` (the command this same file also registers) is a
+ *     read-only VIEWER for a human, and runs BETWEEN turns like every other
+ *     command; it has no path back into the model's own reasoning.
+ * (b) MEASURED, not estimated: serialised as the exact
+ *     `{type:"function",function:{name,description,parameters}}` shape
+ *     `openai-completions.ts:1337-1372` sends, this tool's schema is 383
+ *     bytes. `Math.ceil(383 / 4) = 96` tokens by this project's own estimator
+ *     (`diagnostics/budget.ts:223-224`). Computed with the same method as the
+ *     two entries above: `Buffer.byteLength(JSON.stringify(payload), "utf8")`
+ *     over `{type:"function",function:{name:"todo",description:"Manage a
+ *     todo list. Actions: list, add (text), toggle (id), clear",
+ *     parameters:TodoParams}}`, where `TodoParams` is the tool's own real
+ *     `typebox` schema (including the `StringEnum` import from
+ *     `@earendil-works/pi-ai`, which the tool itself uses), loaded via a
+ *     `node --input-type=module` script run from this repo's own root so
+ *     bare-specifier ESM resolution (`typebox`, `@earendil-works/pi-ai`)
+ *     goes through this repo's own `node_modules` -- recorded verbatim in
+ *     `07-08-SUMMARY.md`.
+ * (c) A skill cannot carry this because a skill is text the MODEL reads and
+ *     interprets -- it has no mechanism to hold branch-scoped state across
+ *     turns (`todo.ts#reconstructState` replays session entries keyed on
+ *     `msg.toolName === "todo"` so a `/tree` branch sees the todo state that
+ *     was actually true at that point in history) and no mechanism to render
+ *     a live `/todos` overlay a human can open between turns. A skill's
+ *     "procedure" has no server-side memory at all; this needs one.
+ *
+ * `.pi/extensions/questionnaire.ts` (Phase 7, plan 08, EXT-05/EXT-06,
+ * vendored from Pi's own bundled `examples/extensions/questionnaire.ts`) is
+ * the fourth entry:
+ *
+ * (a) The model must invoke `questionnaire` MID-TURN -- the model reaches a
+ *     decision point where it genuinely does not know the answer (scope,
+ *     preference, which of several valid approaches) and must stop and ask
+ *     BEFORE continuing the same turn's work. There is no user-initiated
+ *     entry point that could hand a structured multi-question answer back
+ *     into a turn already in progress; a command runs between turns and
+ *     cannot originate from inside the model's own reasoning.
+ * (b) MEASURED, not estimated: serialised as the exact
+ *     `{type:"function",function:{name,description,parameters}}` shape
+ *     `openai-completions.ts:1337-1372` sends, this tool's schema is 1258
+ *     bytes. `Math.ceil(1258 / 4) = 315` tokens by this project's own
+ *     estimator (`diagnostics/budget.ts:223-224`). Computed with the same
+ *     method as the three entries above, over the tool's own real
+ *     `QuestionnaireParams` typebox schema and its real description text,
+ *     via the same `node --input-type=module` script run from this repo's
+ *     own root -- recorded verbatim in `07-08-SUMMARY.md`.
+ * (c) A skill cannot carry this because a skill is text the model reads and
+ *     interprets -- it has no mechanism to block a turn awaiting genuine
+ *     real-time user input (`ctx.ui.custom<QuestionnaireResult>` suspends
+ *     `execute()` until the user answers or cancels), no mechanism to render
+ *     a tab-bar selection overlay with keyboard navigation, and no mechanism
+ *     to return a STRUCTURED answer (`{id,value,label,wasCustom,index}` per
+ *     question) the model can branch on afterward. A skill can only ask the
+ *     model to write a question as ordinary text; it cannot suspend the turn
+ *     for a real human to answer it.
+ *
+ * PHASE 7'S OWN HONESTY ABOUT WHAT THIS COSTS. `todo` and `questionnaire` are
+ * the FIRST two tools this phase adds to the per-turn schema bill (`safety`
+ * and `qoder` predate Phase 7). Phase 2 measured a ~1,850 tok/turn floor for
+ * a 7-tool session; these two entries alone add 96 + 315 = 411 tokens on top
+ * of that, on every turn, whether or not either tool is ever called. Phase 10
+ * -- not Phase 7 -- owns deciding whether that is acceptable and cutting it
+ * if not (`pi.setActiveTools()`/dynamic loading per `docs/EXTENSIONS.md`).
+ * `tests/unit/tool-count-baseline.test.ts` (plan 07-11, not yet written at
+ * the time this entry was added) is the registry Phase 10 will measure the
+ * cut against -- this comment is Phase 7's own count showing its work.
  */
 const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [
 	".pi/extensions/safety/index.ts",
 	".pi/extensions/qoder/index.ts",
+	".pi/extensions/todo.ts",
+	".pi/extensions/questionnaire.ts",
 ];
 
 /** Tracked text sources under `.pi/extensions/`, read from the index's view. */

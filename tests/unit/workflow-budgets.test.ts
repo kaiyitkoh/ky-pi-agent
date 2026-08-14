@@ -63,7 +63,7 @@
  * maps to `p.split("/").slice(0, 3).join("/")`, the subsystem root, not the
  * immediate parent.
  */
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
@@ -132,6 +132,15 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"addition -- code body otherwise unchanged apart from the /todos -> /plan-todos rename), measured " +
 			"460 raw lines 2026-08-15, rounded up to the next ten",
 	},
+	{
+		file: ".pi/extensions/todo.ts",
+		budget: 360,
+		why: "Phase 7 plan 08 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/todo.ts, " +
+			"registers the `todo` tool and /todos -- WR-05 widened discovery to catch command surfaces outside " +
+			"workflows/; upstream's own 297 lines plus this plan's vendoring header (the only permitted " +
+			"addition -- code body otherwise unchanged), measured 352 raw lines 2026-08-15, rounded up to the " +
+			"next ten",
+	},
 ];
 
 /**
@@ -192,6 +201,18 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"upstream's own 390+168=558 lines plus this plan's vendoring headers, not a number this phase " +
 			"reviewed for tightness), rounded up to the next ten",
 	},
+	{
+		dir: ".pi/extensions/todo.ts",
+		budget: 10,
+		why: "Phase 7 plan 08's vendored todo.ts is a FLAT top-level file (`.pi/extensions/todo.ts`, not a " +
+			"nested `<subsystem>/index.ts`), so its own 3-segment path already IS what " +
+			"`p.split('/').slice(0,3).join('/')` resolves to -- commandDirs names the file itself as its own " +
+			"'directory'. filesInDir(this literal string) looks for paths starting with " +
+			"'.pi/extensions/todo.ts/', which cannot exist for a file, so the total is structurally always 0; " +
+			"this entry exists only to satisfy the completeness check for that edge case, not because any " +
+			"sibling file could ever be hidden beside it -- todo.ts has no siblings by construction (it is a " +
+			"flat file, not a directory)",
+	},
 ];
 
 /** Raw line count, no stripping of any kind -- decision D-1 above. */
@@ -199,10 +220,21 @@ function countRawLines(relPath: string): number {
 	return readFileSync(join(repoRoot(), relPath), "utf-8").split("\n").length;
 }
 
-/** Every file beneath `rel` on disk, as repo-relative forward-slash paths. */
+/**
+ * Every file beneath `rel` on disk, as repo-relative forward-slash paths.
+ *
+ * `rel` is not always a directory: `commandDirs`' `slice(0, 3)` resolves a
+ * FLAT top-level command file (`.pi/extensions/todo.ts`, a 3-segment path)
+ * to itself, so `filesInDir` can be called with a literal file path standing
+ * in for a "directory" that has no children by construction. `existsSync`
+ * alone does not distinguish a file from a directory -- `readdirSync` on a
+ * file throws `ENOTDIR` -- so this checks `isDirectory()` explicitly and
+ * returns no children for a non-directory path, which is exactly the correct
+ * answer: a flat file cannot have a sibling hidden "beneath" it.
+ */
 function walkOnDisk(rel: string): string[] {
 	const abs = join(repoRoot(), rel);
-	if (!existsSync(abs)) {
+	if (!existsSync(abs) || !statSync(abs).isDirectory()) {
 		return [];
 	}
 	const out: string[] = [];
