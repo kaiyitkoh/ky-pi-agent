@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-04-PLAN.md -- planner subagent definition (EXT-01)
-last_updated: "2026-08-14T19:57:27.789Z"
+stopped_at: Completed 07-05-PLAN.md -- worktree build proof (EXT-02, ROADMAP criterion 4)
+last_updated: "2026-08-14T20:08:56.356Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 6
   total_plans: 73
-  completed_plans: 64
+  completed_plans: 65
   percent: 55
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 5 of 13
+Plan: 6 of 13
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 89%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -131,6 +131,7 @@ credentials can do has been done".
 | Phase 07 P02 | 10m | 2 tasks | 2 files |
 | Phase 07 P03 | ~25min | 2 tasks | 5 files |
 | Phase 07 P04 | 20m | 2 tasks | 2 files |
+| Phase 07 P05 | ~30min | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -332,6 +333,9 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-04: thinking: high is a real pi-subagents frontmatter key (agents.ts:1644) absent from Pi's bundled subagent sample -- the fact that justifies depending on pi-subagents rather than vendoring the bundled example
 - [Phase 07]: 07-04: .pi/agents/planner.md ships no model: or fallbackModels: key -- pi-subagents agents.ts:1155 makes settings.subagents.agentOverrides inert for an agent whose own frontmatter declares model, silently defeating Phase 5's /cheap /balanced /max /escalate; proven live against inline fixtures and by falsification
 - [Phase 07]: 07-04: agentScope must be set to project or both by plan 07-09 or .pi/agents/*.md is never loaded (default is user-level only) -- this plan deliberately does not touch .pi/settings.json
+- [Phase 07]: 07-05: the ten-step Pattern C sequence is ONE test on ONE fixture, not split -- splitting would let a later step run against a differently-shaped fixture, reintroducing the vacuity risk the plan calls out
+- [Phase 07]: 07-05: the unqualified-symlink outcome is measured and logged, never asserted -- 07-VALIDATION.md forbids asserting EPERM universally since it would fail the suite on a correctly-configured (Developer Mode/elevated/POSIX) machine
+- [Phase 07]: 07-05: the shipped hook's own fail-closed design meant the falsification (unqualified symlinkSync) turned the hook's own exit-0 assertion red before the positive rebuild step was even reached -- a degraded worktree fails loudly, not silently, per 07-RESEARCH.md Pitfall 2
 
 ### Pending Todos
 
@@ -379,8 +383,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T19:57:27.779Z
-Stopped at: Completed 07-04-PLAN.md -- planner subagent definition (EXT-01)
+Last session: 2026-08-14T20:08:56.347Z
+Stopped at: Completed 07-05-PLAN.md -- worktree build proof (EXT-02, ROADMAP criterion 4)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
