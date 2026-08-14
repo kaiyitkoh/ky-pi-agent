@@ -206,7 +206,17 @@ const cfg: typeof DEFAULTS & Record<string, number | string> = (() => {
   return merged;
 })();
 
-export default function (pi: ExtensionAPI) {
+// VENDORING FIX (07-06, structural): upstream declares this function
+// `export default`. This repo's tests/unit/extension-layout.test.ts (BOOT-05)
+// requires the auto-discovered entry point of a nested-index extension to be
+// index.ts itself, and treats ANY file carrying its own top-level
+// `export default` as something Pi would try to load directly -- which this
+// file, at .pi/extensions/loop-police/loop-police.ts, is not (Pi only
+// auto-discovers .pi/extensions/<name>.ts or .pi/extensions/<dir>/index.ts).
+// Renamed to a named export; index.ts now imports it and re-exports it as
+// the single default at the auto-discovered path. No logic below this line
+// changed. See PROVENANCE.md.
+export function loopPolice(pi: ExtensionAPI) {
   let streamAborted = false;
   let cleanStreamPrefix: string | null = null;
   let lastCheckedLen = 0;

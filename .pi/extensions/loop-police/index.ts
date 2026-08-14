@@ -13,4 +13,10 @@
 // Do not edit the exported logic here or in ./loop-police.ts beyond what a
 // future re-vendor of a newer upstream version would also change — a
 // hand-edited vendored file cannot be diffed against its origin.
-export { default } from "./loop-police.ts";
+//
+// Upstream exports the extension function as `export default` directly from
+// loop-police.ts. Renamed there to the named export `loopPolice` and
+// re-exported as default from here instead, so only THIS file — the actual
+// auto-discovered nested-index entry point — carries a top-level default
+// export; see PROVENANCE.md's "Deviation from a byte-for-byte copy" section.
+export { loopPolice as default } from "./loop-police.ts";

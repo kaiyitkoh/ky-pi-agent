@@ -155,3 +155,15 @@ scratch/
 .pi/git/
 !/.npmrc
 !/.pi/npm/.npmrc
+
+# ---------------------------------------------------------------------------
+# Vendored-extension runtime state (never committed, machine/session-local)
+#
+# pi-loop-police (07-06, EXT-05/EXT-10) auto-creates loop-police.json next to
+# itself on first import -- `dirname(fileURLToPath(import.meta.url))` in
+# .pi/extensions/loop-police/loop-police.ts -- to persist detector-threshold
+# overrides made via `/loop-police set` + `/loop-police save`. It is
+# per-machine runtime config, not source; committing it would let one
+# developer's tuned thresholds silently become every clone's defaults.
+# ---------------------------------------------------------------------------
+.pi/extensions/loop-police/loop-police.json

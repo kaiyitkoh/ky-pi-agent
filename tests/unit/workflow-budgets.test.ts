@@ -115,6 +115,14 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 		why: "Phase 7 plan 03 (EXT-07)'s /checkpoint-restore command -- WR-05 widened discovery to catch " +
 			"command surfaces outside workflows/; measured 161 raw lines 2026-08-15, rounded up to the next ten",
 	},
+	{
+		file: ".pi/extensions/loop-police/loop-police.ts",
+		budget: 1240,
+		why: "Phase 7 plan 06 (EXT-05/EXT-10)'s vendored pi-loop-police@1.14.1, registers /loop-police -- " +
+			"WR-05 widened discovery to catch command surfaces outside workflows/; this is upstream's own " +
+			"size plus a short vendoring-fix comment (see .pi/extensions/loop-police/PROVENANCE.md), " +
+			"measured 1237 raw lines 2026-08-15, rounded up to the next ten",
+	},
 ];
 
 /**
@@ -156,6 +164,15 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
 			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
 			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/loop-police",
+		budget: 1270,
+		why: "Phase 7 plan 06 (EXT-05/EXT-10)'s vendored pi-loop-police@1.14.1 -- index.ts never spells " +
+			"registerCommand( itself (a named re-export) but counts toward this total per WR-03; measured " +
+			"1260 raw lines across 2 files 2026-08-15 (index.ts 23 + loop-police.ts 1237, both including " +
+			"short vendoring-fix comments), upstream's own size, not a number this phase reviewed for " +
+			"tightness, rounded up to the next ten",
 	},
 ];
 

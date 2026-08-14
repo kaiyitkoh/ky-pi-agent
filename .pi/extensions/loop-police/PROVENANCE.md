@@ -121,17 +121,50 @@ zero).
 
 ## Deviation from a byte-for-byte copy
 
-One token was changed. Upstream's `pi.registerCommand("loop-police", {...})`
-handler is declared synchronous: `handler: (args, ctx) => { ... }`. Pi
-0.84.1's `registerCommand` handler type is
-`(args, ctx) => Promise<void>` — this repo's `npx tsc --noEmit` failed on the
-unmodified upstream form (`loop-police.ts:728`, `TS2322`). The handler body
-returns no value on any path (bare `return;` only, confirmed by the full
+Two mechanical changes, both forced by this repo's own structural rules, not
+by taste — everything else matches the tarball copy byte-for-byte (verified
+with `diff` before either fix was applied).
+
+**1. `registerCommand` handler made `async`.** Upstream's
+`pi.registerCommand("loop-police", {...})` handler is declared synchronous:
+`handler: (args, ctx) => { ... }`. Pi 0.84.1's `registerCommand` handler type
+is `(args, ctx) => Promise<void>` — this repo's `npx tsc --noEmit` failed on
+the unmodified upstream form (`loop-police.ts:728`, `TS2322`). The handler
+body returns no value on any path (bare `return;` only, confirmed by the full
 read above), so changing the declaration to `handler: async (args, ctx) => {`
 is behaviorally identical — it only satisfies the pinned type. Marked inline
-at the call site with a comment pointing back here. Every other line matches
-the tarball copy byte-for-byte (verified with `diff` before the fix was
-applied).
+at the call site.
+
+**2. The extension function's `export default` moved from `loop-police.ts`
+to `index.ts`.** Upstream's `extensions/loop-police.ts` declares
+`export default function (pi: ExtensionAPI) { ... }` directly. This repo's
+`tests/unit/extension-layout.test.ts` (BOOT-05) requires that the ONLY file
+carrying a top-level `export default` inside a nested-index extension
+directory be `index.ts` itself — the path Pi actually auto-discovers
+(`.pi/extensions/<dir>/index.ts`); any other file with its own default
+export is treated as an ambiguous second entry point and rejected, since Pi
+never auto-discovers `.pi/extensions/<dir>/<other-name>.ts` at all. Renamed
+the function to the named export `loopPolice` in `loop-police.ts`, and
+`index.ts` now does `export { loopPolice as default } from "./loop-police.ts";`
+instead of the upstream `export { default } from "./loop-police.ts";`. No
+line of the function's body changed — only its own declaration line and the
+one-line re-export in `index.ts`. Marked inline at both call sites.
+
+Both fixes were forced, in the sense that the plan's own acceptance criteria
+(`npx vitest run tests/unit/extension-layout.test.ts ... && npx tsc --noEmit`
+exits 0) fail without them on the unmodified upstream form — recorded as
+Deviations in `07-06-SUMMARY.md`.
+
+## Runtime artifact, gitignored
+
+`loop-police.ts` auto-creates `loop-police.json` next to itself
+(`dirname(fileURLToPath(import.meta.url))`) the first time it is imported —
+even by a test harness that merely loads the module without ever invoking
+the extension function, since the config-merge logic runs at module-evaluate
+time (`const cfg = (() => { ... })();`, top-level). This is per-machine
+runtime state, not source: `.pi/extensions/loop-police/loop-police.json` is
+listed in `.gitignore` under "Vendored-extension runtime state" and must
+never be committed.
 
 ## What was not vendored
 
