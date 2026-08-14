@@ -492,6 +492,55 @@ export function classifyPathRead(canonicalPath: string, facts: PathPolicyFacts):
 }
 
 /**
+ * CR-07: directory segment names conventionally holding credential material
+ * directly under a user's home directory. Distinct from
+ * {@link SENSITIVE_READ_PATTERNS} (which matches a specific FILE's basename
+ * plus its immediate parent segment) — this matches a recursive SEARCH ROOT
+ * that IS one of these directories, or sits below one, the shape
+ * `grep`/`find`/`ls`'s own `path` parameter actually is. Kept lower-case;
+ * compared case-insensitively via {@link rootedSegmentsOf}'s own segments,
+ * matching every other segment comparison in this module.
+ */
+const SENSITIVE_SEARCH_ROOT_SEGMENTS = new Set([".aws", ".kube", ".ssh", ".gnupg"]);
+
+/**
+ * CR-07: true when `canonicalPath`, used as a recursive SEARCH ROOT (never a
+ * single-file target), would reach a sensitive location. `evaluateGrep`
+ * (`policy.ts`) canonicalises `path`/`glob` and ran them through
+ * {@link classifyPathRead} alone, whose patterns match on basename + parent
+ * segment — a DIRECTORY (`~/.aws`, or the directory's own trailing-slash
+ * spelling) never matches a basename+parent-segment pattern, while `grep`
+ * happily recurses into it and returns file CONTENTS. Executed end to end
+ * against the real `createGrepTool`: `grep { path: "~/.aws" }` returned a
+ * real credential line with a bare `classifyPathRead` check returning
+ * `allow`.
+ *
+ * Two independent ways a search root reaches a sensitive location:
+ *   1. the root itself IS one of {@link SENSITIVE_SEARCH_ROOT_SEGMENTS}, or a
+ *      descendant of one (searching a subdirectory OF `.aws` still walks
+ *      credential files) — checked by segment membership, not a substring
+ *      test, matching every other rule in this module.
+ *   2. the root is `facts.home` itself, or an ANCESTOR of it. Every one of
+ *      this project's conventional per-user secret directories lives
+ *      directly under `$HOME`, so a search root that reaches `$HOME` reaches
+ *      all of them without this module having to enumerate every possible
+ *      sensitive subdirectory individually (`isWithinRoot(facts.home,
+ *      canonicalPath)`: is `$HOME` at or below the search root).
+ *
+ * NOT covered: a caller-supplied `kubeconfigEnv` pointing OUTSIDE `$HOME`
+ * entirely, and any glob WILDCARD shape (`.env*`) — both are residual,
+ * PUBLISHED gaps (`docs/SAFETY.md`'s Known bypasses table), never silently
+ * claimed as closed by this function.
+ */
+export function isSensitiveSearchRoot(canonicalPath: string, facts: PathPolicyFacts): boolean {
+	const { parts } = rootedSegmentsOf(canonicalPath);
+	if (parts.some((part) => SENSITIVE_SEARCH_ROOT_SEGMENTS.has(part.toLowerCase()))) {
+		return true;
+	}
+	return isWithinRoot(facts.home, canonicalPath);
+}
+
+/**
  * SAFE-13 first (detonation targets block regardless of project-root
  * containment — a hook OUTSIDE the project is just as dangerous as one
  * inside it), then SAFE-08 (containment). The default for anything not

@@ -152,7 +152,7 @@
 import type { CanonicalInvocation } from "./shell.ts";
 import { canonicalise, normaliseExecutable } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
-import { canonicalisePathArg, classifyPathRead, classifyPathWrite } from "./paths.ts";
+import { canonicalisePathArg, classifyPathRead, classifyPathWrite, isSensitiveSearchRoot } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
 import { classifyGitInvocation, classifyGlabInvocation } from "./git.ts";
 import type { InfraVerdict } from "./infra.ts";
@@ -442,31 +442,98 @@ function evaluateWrite(input: unknown, facts: PolicyFacts): Verdict {
 	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
 }
 
+/** {@link extractOptionalStringField}'s three-way result -- see that function's own docstring. */
+type OptionalFieldExtraction =
+	| { readonly kind: "absent" }
+	| { readonly kind: "ok"; readonly value: string }
+	| { readonly kind: "malformed"; readonly reason: string };
+
 /**
- * CR-04: read an OPTIONAL path-shaped field ("path" on `grep`/`find`/`ls`,
- * "glob" on `grep`) -- all three default to the tool's own cwd/every file
- * when the field is omitted, so an ABSENT field is not malformed input the
- * way a missing "command"/"path" is for `bash`/`read`/`write`/`edit`.
- * `undefined` for anything but a non-empty string, so callers can skip
- * classification entirely rather than misread "search the whole project" as
- * a sensitive-read match.
+ * CR-04/CR-07: read an OPTIONAL path-shaped field ("path" on `grep`/`find`/
+ * `ls`, "glob" on `grep`) -- all three default to the tool's own cwd/every
+ * file when the field is omitted, so an ABSENT field is not malformed input
+ * the way a missing "command"/"path" is for `bash`/`read`/`write`/`edit`.
+ * Distinguishes three shapes the prior version of this function collapsed
+ * into two:
+ *   - ABSENT: the key is missing, `undefined`, or an empty string -- the
+ *     tool's own default applies (cwd for `path`, every file for `glob`).
+ *   - a non-empty STRING: `ok`.
+ *   - present but NOT a string (an array, a number, `null`, ...): CR-07 --
+ *     the prior version treated this identically to ABSENT, so
+ *     `grep { path: ["~/.aws/credentials"] }` reached execution with no
+ *     verdict at all ("non-string path silently ignored", the reviewer's own
+ *     executed evidence). Now `malformed`, matching `extractStringField`'s
+ *     posture for the mandatory `read`/`write` field: deny by construction on
+ *     a shape this module cannot interpret, never silently skip it.
  */
-function extractOptionalStringField(input: Readonly<Record<string, unknown>>, field: string): string | undefined {
+function extractOptionalStringField(input: Readonly<Record<string, unknown>>, field: string): OptionalFieldExtraction {
 	const value = input[field];
-	return typeof value === "string" && value.length > 0 ? value : undefined;
+	if (value === undefined || value === "") {
+		return { kind: "absent" };
+	}
+	if (typeof value !== "string") {
+		return { kind: "malformed", reason: `"${field}" is present but not a string (received ${describeShape(value)})` };
+	}
+	return { kind: "ok", value };
 }
 
 /**
- * CR-04: classify one path-shaped field against the SAME sensitive-read table
- * SAFE-06 already uses for the `read` tool. `undefined` (field absent)
- * allows -- see {@link extractOptionalStringField}.
+ * CR-04/CR-07: classify a `grep`/`find`/`ls` "path" field -- a recursive
+ * SEARCH ROOT, not a single-file target. Checks BOTH the sensitive-read FILE
+ * table {@link classifyPathRead} already uses for `read` (catches
+ * `path: "~/.aws/credentials"`, the file itself) AND
+ * {@link isSensitiveSearchRoot} (catches `path: "~/.aws"`, the DIRECTORY --
+ * the actual gap CR-07 names: a directory never matches a basename+parent-
+ * segment pattern, while `grep`/`find`/`ls` happily recurse into it).
+ *
+ * CR-07: an ABSENT path is evaluated against `facts.projectRoot` -- "treat a
+ * missing path as the project root", the same rule `grep { path: "." }`
+ * would go through -- rather than skipped outright as an unconditional
+ * allow. `facts.projectRoot` is already canonical (see `PolicyFacts`'s own
+ * docstring), so it is used as-is, with no second `canonicalisePathArg` pass.
  */
-function evaluatePathReadIfPresent(rawPath: string | undefined, facts: PolicyFacts): Verdict {
-	if (rawPath === undefined) {
+function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: PolicyFacts, fieldLabel: string): Verdict {
+	if (extraction.kind === "malformed") {
+		return { kind: "block", reason: `${fieldLabel} is malformed: ${extraction.reason}` };
+	}
+	const canonicalPath =
+		extraction.kind === "ok"
+			? canonicalisePathArg({ text: extraction.value, value: extraction.value }, { cwd: facts.cwd, home: facts.home })
+			: facts.projectRoot;
+	const pathFacts: PathPolicyFacts = { projectRoot: facts.projectRoot, home: facts.home, kubeconfigEnv: facts.kubeconfigEnv };
+	const fileVerdict = classifyPathRead(canonicalPath, pathFacts);
+	if (fileVerdict.kind === "block") {
+		return { kind: "block", reason: fileVerdict.reason };
+	}
+	if (isSensitiveSearchRoot(canonicalPath, pathFacts)) {
+		return {
+			kind: "block",
+			reason: `"${canonicalPath}" is at or above a sensitive location -- a recursive search rooted here would expose its contents`,
+		};
+	}
+	return { kind: "allow" };
+}
+
+/**
+ * CR-04: classify a `grep` "glob" field. Deliberately NOT search-root-aware
+ * -- {@link isSensitiveSearchRoot} has no well-defined meaning for a filename
+ * PATTERN, only for a directory to recurse from -- so this stays narrower
+ * than {@link evaluateSearchRootField}. `glob` is checked against the SAME
+ * sensitive-read file table via its own basename, which catches this
+ * finding's own worked example (`glob: ".env"`) but not a WILDCARD shape
+ * (`glob: ".env*"`); CR-07's own fix scopes that specifically as a residual,
+ * PUBLISHED gap (`docs/SAFETY.md`'s Known bypasses table), not silently
+ * claimed as covered.
+ */
+function evaluateGlobField(extraction: OptionalFieldExtraction, facts: PolicyFacts): Verdict {
+	if (extraction.kind === "malformed") {
+		return { kind: "block", reason: `grep "glob" is malformed: ${extraction.reason}` };
+	}
+	if (extraction.kind === "absent") {
 		return { kind: "allow" };
 	}
 	const canonicalPath = canonicalisePathArg(
-		{ text: rawPath, value: rawPath },
+		{ text: extraction.value, value: extraction.value },
 		{ cwd: facts.cwd, home: facts.home },
 	);
 	const verdict = classifyPathRead(canonicalPath, {
@@ -474,20 +541,18 @@ function evaluatePathReadIfPresent(rawPath: string | undefined, facts: PolicyFac
 		home: facts.home,
 		kubeconfigEnv: facts.kubeconfigEnv,
 	});
-	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
+	return verdict.kind === "block" ? { kind: "block", reason: `grep glob refers to a sensitive file: ${verdict.reason}` } : { kind: "allow" };
 }
 
 /**
- * CR-04: `grep`'s own schema is `{ pattern, path?, glob?, ignoreCase?,
+ * CR-04/CR-07: `grep`'s own schema is `{ pattern, path?, glob?, ignoreCase?,
  * literal?, context?, limit? }` and it returns matching LINES OF FILE
- * CONTENT -- `grep { pattern: ".", path: "~/.aws/credentials" }` (or
- * `grep { pattern: "=", glob: ".env" }`) previously reached execution with no
- * verdict and no audit row at all, reachable with no shell involved. Both
- * `path` and `glob` are checked against the same sensitive-read table; `glob`
- * is not a real filesystem path, but resolving it exactly like one and
- * checking its basename is enough to catch this finding's own worked
- * examples. `pattern` itself is never inspected -- SAFE-06's contract is
- * about WHICH FILE is read, not what text is searched for.
+ * CONTENT -- previously reached execution with no verdict and no audit row
+ * at all for a wide range of shapes reachable with no shell involved
+ * (a bare `path`, a directory `path`, a missing `path`, a non-string `path`
+ * -- see this finding's own executed evidence). `pattern` itself is never
+ * inspected -- SAFE-06's contract is about WHICH FILE is read, not what text
+ * is searched for.
  */
 function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 	if (input === null || typeof input !== "object" || Array.isArray(input)) {
@@ -497,23 +562,20 @@ function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 		};
 	}
 	const record = input as Record<string, unknown>;
-	const pathVerdict = evaluatePathReadIfPresent(extractOptionalStringField(record, "path"), facts);
+	const pathVerdict = evaluateSearchRootField(extractOptionalStringField(record, "path"), facts, `grep "path"`);
 	if (pathVerdict.kind === "block") {
 		return pathVerdict;
 	}
-	const globVerdict = evaluatePathReadIfPresent(extractOptionalStringField(record, "glob"), facts);
-	if (globVerdict.kind === "block") {
-		return { kind: "block", reason: `grep glob refers to a sensitive file: ${globVerdict.reason}` };
-	}
-	return { kind: "allow" };
+	return evaluateGlobField(extractOptionalStringField(record, "glob"), facts);
 }
 
 /**
- * CR-04: `find`/`ls` both carry an optional `path`; both leak file/directory
- * NAMES rather than CONTENTS, but a name under a sensitive directory (e.g.
- * every filename inside `~/.aws`) is still worth denying rather than
- * silently allowing -- defense in depth, cheap to apply since the same table
- * already exists.
+ * CR-04/CR-07: `find`/`ls` both carry an optional `path`, evaluated as a
+ * recursive search root exactly like `grep`'s own `path` -- both leak
+ * file/directory NAMES rather than CONTENTS, but a name under a sensitive
+ * directory (e.g. every filename inside `~/.aws`) is still worth denying
+ * rather than silently allowing -- defense in depth, cheap to apply since the
+ * same containment check already exists.
  */
 function evaluateFindOrLs(input: unknown, facts: PolicyFacts): Verdict {
 	if (input === null || typeof input !== "object" || Array.isArray(input)) {
@@ -522,7 +584,7 @@ function evaluateFindOrLs(input: unknown, facts: PolicyFacts): Verdict {
 			reason: `find/ls input is malformed: input is not an object (received ${describeShape(input)})`,
 		};
 	}
-	return evaluatePathReadIfPresent(extractOptionalStringField(input as Record<string, unknown>, "path"), facts);
+	return evaluateSearchRootField(extractOptionalStringField(input as Record<string, unknown>, "path"), facts, `find/ls "path"`);
 }
 
 // ---------------------------------------------------------------------------
