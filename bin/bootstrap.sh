@@ -834,6 +834,78 @@ console.log("  auth.json provider entries added: " + added.join(", "));
 }
 
 # ---------------------------------------------------------------------------
+# Wire the worktree setup hook into pi-subagents' OWN config file (EXT-02/EXT-08)
+# ---------------------------------------------------------------------------
+# pi-subagents@0.49.0 reads NO configuration from `.pi/settings.json` at all --
+# `getConfigPath()` [pi-subagents src/extension/config.ts:90-92] resolves to
+# `join(getAgentDir(), "extensions", "subagent", "config.json")`, a DEDICATED
+# global file this repo does not track (07-09-SUMMARY.md Task 1). Key-namespaced
+# merge, same discipline as merge_settings/merge_models_json above: only the two
+# `worktreeSetupHook*` keys are ever replaced; every other key a user or a later
+# `pi-subagents` `/agent-config` write puts in this file survives untouched.
+#
+# ABSOLUTE PATH, ON PURPOSE. `resolveWorktreeSetupHook`
+# [pi-subagents src/runs/shared/worktree.ts:264-295] resolves a repo-relative
+# hook path against WHATEVER `repoRoot` a session's cwd happens to be in, not
+# against this repository. This config file is written at USER (machine) scope
+# and therefore applies to every repo the operator ever runs Pi in on this
+# machine -- an absolute path is the only form that keeps working outside a
+# ky-pi-agent checkout, and the hook script itself is already repo-agnostic (it
+# reads `repoRoot`/`worktreePath` from the JSON payload pi-subagents gives it on
+# stdin, never from its own location).
+#
+# `agentScope` is deliberately NOT written anywhere by this function. Task 1 of
+# 07-09 read pi-subagents' `ExtensionConfig` interface in full
+# [pi-subagents src/shared/types.ts:1902-1966] and found no `agentScope` config
+# key exists at any scope -- `agentScope` is a PER-INVOCATION parameter on the
+# `subagent` tool's own schema [pi-subagents src/extension/schemas.ts:333],
+# resolved by `resolveExecutionAgentScope()`
+# [pi-subagents src/agents/agent-scope.ts:3-6] to `"both"` whenever a caller
+# (the model) omits it. `.pi/agents/planner.md` is therefore already discovered
+# by default with no configuration write required. See 07-09-SUMMARY.md for the
+# full citation trail and the corrected record against the stale 07-04 decision.
+merge_subagent_config() {
+	ensure_agent_dir
+	_subagent_config_dir="$PI_AGENT_DIR/extensions/subagent"
+	mkdir -p "$_subagent_config_dir"
+	KYPI_SUBAGENT_CONFIG="$_subagent_config_dir/config.json" \
+		KYPI_WORKTREE_HOOK="$REPO_ROOT/.pi/scripts/worktree-setup-hook.mjs" \
+		node -e '
+const fs = require("node:fs");
+const p = process.env.KYPI_SUBAGENT_CONFIG;
+// Normalised here, not by the shell: mirrors install_safety_extension below --
+// a native (non-MSYS) child such as this one receives an auto-converted
+// backslash form for a Windows absolute path argument.
+const hookPath = process.env.KYPI_WORKTREE_HOOK.replace(/\\/g, "/");
+const timeoutMs = 30000;
+
+let raw = "{}";
+if (fs.existsSync(p)) { raw = fs.readFileSync(p, "utf8").trim() || "{}"; }
+let obj;
+try { obj = JSON.parse(raw); } catch (e) {
+  console.error("FATAL: " + p + " is not valid JSON (" + e.message + "). Refusing to touch it.");
+  process.exit(1);
+}
+if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+  console.error("FATAL: " + p + " is not a JSON object. Refusing to touch it.");
+  process.exit(1);
+}
+if (obj.worktreeSetupHook === hookPath && obj.worktreeSetupHookTimeoutMs === timeoutMs) {
+  console.log("  subagent config.json worktreeSetupHook already current - unchanged");
+  process.exit(0);
+}
+obj.worktreeSetupHook = hookPath;
+obj.worktreeSetupHookTimeoutMs = timeoutMs;
+// Tab indent, matching pi-subagents own saveConfig()
+// [pi-subagents src/extension/config.ts:104-107] byte-for-byte, so a later
+// in-app config write (e.g. a future `/agent-config` command) is not the first
+// thing to ever reformat this file.
+fs.writeFileSync(p, JSON.stringify(obj, null, "\t") + "\n", "utf8");
+console.log("  subagent config.json worktreeSetupHook key merged: " + p);
+'
+}
+
+# ---------------------------------------------------------------------------
 # Install the safety extension at USER scope, idempotently (SAFE-11)
 # ---------------------------------------------------------------------------
 # Project-scoped extensions never load without an interactive trust grant
@@ -1018,10 +1090,11 @@ Modes:
   (no arguments)      Full run. Probes tools, verifies the pinned Pi version is
                       still published, hardens and VERIFIES every npm scope,
                       then installs Pi, merges settings, writes .env.example,
-                      installs the models.json / auth.json templates, and
-                      installs the safety extension at user scope (SAFE-11) into
-                      the agent directory. Safe to re-run: every step is
-                      idempotent.
+                      installs the models.json / auth.json templates, installs
+                      the safety extension at user scope (SAFE-11), and wires
+                      the worktree setup hook into pi-subagents' own config
+                      file (EXT-02/EXT-08) into the agent directory. Safe to
+                      re-run: every step is idempotent.
   --check-only        Every probe and every repo-side assertion; mutates
                       nothing. Exits 0 on a clean CI runner. Deterministic
                       output, so two consecutive runs are byte-identical.
@@ -1105,6 +1178,7 @@ run_full() {
 	merge_models_json
 	merge_auth_json
 	install_safety_extension
+	merge_subagent_config
 
 	printf 'Summary:\n'
 	printf '  repo root          %s\n' "$REPO_ROOT"
