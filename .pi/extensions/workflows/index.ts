@@ -37,6 +37,7 @@ export default function (pi: ExtensionAPI): void {
 					ctx.ui.notify(verdict.reason, "error");
 					return;
 				}
+				if (isRunArmed()) return void ctx.ui.notify("quick: a run is already in flight -- wait for its verdict", "error");
 				startRun(ctx.cwd, currentSha(ctx.cwd));
 				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
 			} catch (err) {

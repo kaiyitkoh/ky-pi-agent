@@ -730,4 +730,78 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 			},
 		);
 	});
+
+	it("WR-01 regression -- a second /quick while a run is in flight is refused, and does not steal the first run's buffer", async () => {
+		const candidate = flashExecutorCandidate();
+
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+				responses: [
+					fauxAssistantMessage(
+						[fauxToolCall("bash", { command: 'git commit --allow-empty -m "quick: run one"' })],
+						{ stopReason: "toolUse" },
+					),
+					fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+				gitInit(cwd, "work");
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+				expect(plan.ok, "the executor route did not become servable -- this case needs a servable route").toBe(true);
+				if (!plan.ok) {
+					return;
+				}
+
+				const command = session.extensionRunner.getCommand("quick");
+				expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+				if (command === undefined) {
+					return;
+				}
+
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					// Run 1's handler arms the run and fires the turn in the background
+					// (pi.sendUserMessage is fire-and-forget) -- the handler itself
+					// returns before agent_end. Run 2's handler call races run 1's turn.
+					await command.handler("first task", ctx);
+					await command.handler("second task", ctx);
+
+					expect(
+						notifications.length,
+						"the second /quick call must report exactly one refusal, synchronously, before run 1's turn settles",
+					).toBe(1);
+					expect(notifications[0]?.text, "WR-01's own refusal text").toContain("already in flight");
+					expect(notifications[0]?.level, "a refusal is an error, not an info message").toBe("error");
+
+					// Let run 1 actually finish, proving the refusal never touched its buffer.
+					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
+					await waitFor(
+						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
+						5000,
+						"run 1's evidence row",
+					);
+					const rows = readEvidence(cwd);
+					expect(
+						rows.length,
+						"exactly one evidence row for the one run that was ever actually armed -- a stolen buffer " +
+							"would leave BOTH runs' work attributed to a single row, or none at all",
+					).toBe(1);
+					expect(rows[0]?.verdict, `run 1's own commit must still be accepted, got: ${JSON.stringify(rows[0])}`).toBe(
+						"accept",
+					);
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
 });
