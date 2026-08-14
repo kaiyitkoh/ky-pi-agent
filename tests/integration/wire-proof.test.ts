@@ -205,6 +205,14 @@ interface Run {
 	nestedTurnRow: TurnsRow | undefined;
 	nestedWireRecords: WireRow[];
 
+	// WR-01: cheap's own leg -- see TASK 3 below.
+	advisorRef: { provider: string; id: string };
+	executorModelAtAdvisorCall: { provider: string | undefined; id: string | undefined };
+	turnsAfterAdvisor: TurnsRow[];
+	wireAfterAdvisor: WireRow[];
+	advisorTurnRow: TurnsRow | undefined;
+	advisorWireRecords: WireRow[];
+
 	fullTurnsRaw: string;
 	fullWireRaw: string;
 }
@@ -341,6 +349,67 @@ async function runFixture(): Promise<Run> {
 			.find((row) => row.kind === "nested" && row.role === "reviewer");
 		const nestedWireRecords = nestedTurnRow === undefined ? [] : wireAfterNested.filter((record) => record.corr === nestedTurnRow.corr);
 
+		// =====================================================================
+		// TASK 3 — WR-01: cheap.advisor, closing the "cheap leg is unproven"
+		// adjudication gap. `max.reviewer` above (Task 2) proves the single-
+		// shot MECHANISM; it says nothing about `cheap`'s OWN role map, and
+		// nothing anywhere else in this file ever serves a turn in cheap mode
+		// at all. `ROLE_MAP.cheap.advisor`'s first candidate
+		// (deepseek/deepseek-v4-pro) is deliberately NOT a `CHAIN` member
+		// (CHAIN only knows deepseek-v4-FLASH) and is distinct from
+		// `balanced.advisor`'s Bedrock Claude -- so this is a route no other
+		// case in this file can be mistaken for.
+		// =====================================================================
+
+		// Switch back to balanced FIRST, purely so the session's own executor
+		// sits on the FLASH tier (deepseek-v4-flash) -- a different id than
+		// cheap.advisor's PRO-tier candidate (deepseek-v4-pro), which happens
+		// to be byte-identical to max's OWN executor candidate. Without this,
+		// "the advisor route differs from the session's own executor" would be
+		// comparing deepseek-v4-pro against deepseek-v4-pro and would be
+		// vacuously true for the wrong reason.
+		await balancedCommand.handler("", ctx);
+		// The routing module's OWN state, set directly (not via the /cheap
+		// command) so this task exercises cheap's role map without a second
+		// settings.json write or a second model_select event to reason about --
+		// ROADMAP criterion 1's claim under test here is "cheap's role map
+		// resolves and dispatches correctly", not "the /cheap command also
+		// switches the executor", which Task 1's own two cases already prove
+		// for balanced/max.
+		setMode("cheap");
+		setEscalated(false);
+
+		const advisorRef = ROLE_MAP.cheap.advisor.candidates[0];
+		if (advisorRef === undefined) {
+			throw new Error("ROLE_MAP.cheap.advisor has no first candidate -- this fixture's own assumption failed");
+		}
+
+		const executorModelAtAdvisorCall = { provider: ctx.model?.provider, id: ctx.model?.id };
+
+		// cheap.advisor's resolved candidate (deepseek/deepseek-v4-pro) is
+		// byte-identical to maxExecutor's ModelRef, so it already resolves
+		// against executorFaux's own registered "deepseek" native provider and
+		// its already-granted auth -- no new provider registration needed, only
+		// a third scripted response appended to the SAME queue Task 1's two
+		// switches already consumed two entries from.
+		executorFaux.appendResponses([fauxAssistantMessage("advisor-nested-reply", { stopReason: "stop" })]);
+
+		const turnsCountBeforeAdvisor = readRows<TurnsRow>(turnsFile).length;
+
+		await runSingleShotRole(ctx, {
+			role: "advisor",
+			messages: [{ role: "user", content: "please advise on this change", timestamp: Date.now() }],
+			need: {},
+		});
+
+		const turnsAfterAdvisor = readRows<TurnsRow>(turnsFile);
+		const wireAfterAdvisor = readRows<WireRow>(wireFile);
+		const advisorTurnRow = turnsAfterAdvisor
+			.slice(turnsCountBeforeAdvisor)
+			.find((row) => row.kind === "nested" && row.role === "advisor");
+		const advisorWireRecords =
+			advisorTurnRow === undefined ? [] : wireAfterAdvisor.filter((record) => record.corr === advisorTurnRow.corr);
+
 		return {
 			balancedExecutor,
 			maxExecutor,
@@ -357,8 +426,14 @@ async function runFixture(): Promise<Run> {
 			mainLoopWireRecords,
 			nestedTurnRow,
 			nestedWireRecords,
-			fullTurnsRaw: JSON.stringify(turnsAfterNested),
-			fullWireRaw: JSON.stringify(wireAfterNested),
+			advisorRef,
+			executorModelAtAdvisorCall,
+			turnsAfterAdvisor,
+			wireAfterAdvisor,
+			advisorTurnRow,
+			advisorWireRecords,
+			fullTurnsRaw: JSON.stringify(turnsAfterAdvisor),
+			fullWireRaw: JSON.stringify(wireAfterAdvisor),
 		};
 	} finally {
 		await handle.dispose();
@@ -595,5 +670,75 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 			"a model that WAS routed in this fixture (max's executor) is absent from one of the logs -- " +
 				"the negative control above would be passing over a reader that finds nothing at all",
 		).toBe(true);
+	});
+
+	// -------------------------------------------------------------------------
+	// Task 3 -- WR-01: cheap's own leg, closed
+	// -------------------------------------------------------------------------
+
+	it('case 10 -- cheap.advisor leaves exactly one nested turn row naming cheap\'s OWN route, not a CHAIN member and not the session\'s executor', () => {
+		// Non-vacuity FIRST.
+		expect(
+			run.turnsAfterAdvisor.length,
+			"no rows were captured after the advisor call at all, so the lookup below is searching nothing",
+		).toBeGreaterThan(0);
+
+		expect(
+			run.advisorTurnRow,
+			'no kind:"nested" row with role "advisor" appeared after runSingleShotRole -- either the call ' +
+				"never dispatched or the row never reached disk",
+		).toBeDefined();
+		expect(
+			run.advisorTurnRow?.provider,
+			"the nested advisor row's provider does not name cheap.advisor's own resolved candidate",
+		).toBe(run.advisorRef.provider);
+		expect(
+			run.advisorTurnRow?.model,
+			"cheap's advisor route did not serve the turn -- the nested row's model does not name " +
+				"cheap.advisor's own resolved candidate",
+		).toBe(run.advisorRef.id);
+
+		// Paired distinctness (WR-01's own requirement): this is ROUTING, not
+		// the session's own executor model leaking through. The fixture
+		// deliberately switched the executor back to balanced's flash-tier
+		// model before this call so the two ids cannot coincide by construction
+		// (see runFixture's own TASK 3 comment for why that switch is needed).
+		expect(
+			run.advisorTurnRow?.model,
+			"the nested advisor row's model is the SAME as the session's own executor model at the time " +
+				"of the call -- a nested row naming the right model would prove nothing about cheap's OWN " +
+				"role map if the two were never distinct",
+		).not.toBe(run.executorModelAtAdvisorCall.id);
+
+		// CR-02's own concern, restated as a positive here: cheap.advisor's
+		// candidate is NOT a CHAIN member (CHAIN only knows deepseek-v4-flash),
+		// so this proof is NOT running through callWithFallback's
+		// restart-at-CHAIN[0] path -- it is impossible for this assertion to
+		// pass on the strength of a hardcoded chain head, unlike the reviewer
+		// route WR-01 originally flagged.
+		expect(run.advisorRef.id).not.toBe("deepseek-v4-flash");
+	});
+
+	it("case 11 -- the advisor call's nested.request wire record, joined by corr, independently names the same model", () => {
+		expect(
+			run.advisorWireRecords.length,
+			"no wire records share the advisor turn row's correlation id -- the join by corr found nothing",
+		).toBeGreaterThan(0);
+
+		const advisorRequest = run.advisorWireRecords.find((record) => record.kind === "nested.request");
+		expect(advisorRequest, "no nested.request record was found among the corr-joined wire records").toBeDefined();
+		expect(
+			advisorRequest?.payload?.model,
+			"the nested.request payload does not name cheap.advisor's own resolved candidate -- the two " +
+				"independently-written records disagree",
+		).toBe(run.advisorRef.id);
+
+		for (const record of run.advisorWireRecords) {
+			expect(
+				record.role,
+				`a nested wire record joined by corr carried role ${JSON.stringify(record.role)} instead of ` +
+					'"advisor"',
+			).toBe("advisor");
+		}
 	});
 });
