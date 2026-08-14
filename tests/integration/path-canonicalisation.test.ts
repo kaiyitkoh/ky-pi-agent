@@ -55,7 +55,6 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 
 import { describe, expect, it } from "vitest";
 
-import { resetSafetyInstalledForTests } from "../../.pi/extensions/safety/index.ts";
 import { logPath } from "../../.pi/lib/jsonl.ts";
 import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
@@ -100,7 +99,6 @@ function capturing(into: Context[], reply: AssistantMessage): FauxResponseStep {
 
 describe("CR-02 -- a write inside the project root is allowed on a native-backslash cwd", () => {
 	it("write({ path: 'relative-file.txt' }) inside the session's own (backslash-native) cwd is ALLOWED, not blocked as 'outside the project root'", async () => {
-		resetSafetyInstalledForTests();
 		const outgoing: Context[] = [];
 
 		await withFauxSession(

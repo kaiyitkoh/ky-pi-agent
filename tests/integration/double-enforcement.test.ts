@@ -70,7 +70,6 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { describe, expect, it } from "vitest";
 
 import { logPath } from "../../.pi/lib/jsonl.ts";
-import { resetSafetyInstalledForTests } from "../../.pi/extensions/safety/index.ts";
 import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readJsonl } from "../helpers/logs.ts";
@@ -184,11 +183,10 @@ function scriptedTurn(command: string, outgoing: Context[]): FauxResponseStep[] 
 
 describe("SAFE-09 -- a blocked command stays blocked even after a later handler mutates it", () => {
 	it("case 1: the hook catches an outright-blocked command directly, with no mutation involved", async () => {
-		// WR-07: this file loads the real safety extension's default export
-		// in-process, in more than one it() below -- reset the idempotency
-		// guard so each case's own session genuinely registers, rather than
-		// reusing whatever a previous case already installed into this process.
-		resetSafetyInstalledForTests();
+		// CR-06: the safety extension's default export has no process-wide
+		// idempotency guard any more -- this file loads it in-process, in more
+		// than one it() below, and each load fully re-registers with no reset
+		// call needed.
 		const outgoing: Context[] = [];
 
 		await withFauxSession(
@@ -226,7 +224,6 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 	});
 
 	it("case 2: a later handler mutates a hook-allowed command into a blocked one -- the wrapper still stops it", async () => {
-		resetSafetyInstalledForTests();
 		const outgoing: Context[] = [];
 
 		await withFauxSession(
@@ -290,7 +287,6 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 	});
 
 	it("case 3 (negative control): the same mechanism mutating to another BENIGN command executes normally", async () => {
-		resetSafetyInstalledForTests();
 		const outgoing: Context[] = [];
 
 		await withFauxSession(

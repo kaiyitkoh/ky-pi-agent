@@ -52,7 +52,6 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { describe, expect, it } from "vitest";
 
 import { approve } from "../../.pi/extensions/safety/approvals.ts";
-import { resetSafetyInstalledForTests } from "../../.pi/extensions/safety/index.ts";
 import { logPath } from "../../.pi/lib/jsonl.ts";
 import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
@@ -156,7 +155,6 @@ function scriptedApprovalFlow(command: string, outgoing: Context[]): FauxRespons
 
 describe("CR-01 -- confirm -> approve -> re-issue actually unblocks the retry, exactly once", () => {
 	it("a confirm-classified command, approved, then re-issued identically, reaches the wrapped tool's execute()", async () => {
-		resetSafetyInstalledForTests();
 		const outgoing: Context[] = [];
 
 		await withFauxSession(

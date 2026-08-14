@@ -861,6 +861,20 @@ console.log("  auth.json provider entries added: " + added.join(", "));
 # merge_settings/write_env_template/merge_models_json/merge_auth_json -- this
 # function configures Pi, it does not gate the BOOT-01 hardening ordering, so
 # it must never move above install_pi.
+#
+# CR-06: the stub this function writes GUARDS ITSELF BY EXISTENCE, not by
+# re-exporting the safety extension's default export unconditionally. When
+# this repository is the trusted project, Pi ALSO auto-discovers the
+# project-scoped copy at `.pi/extensions/safety/index.ts` -- both would
+# otherwise load, registering the `tool_call` hook TWICE. Putting the dedupe
+# inside `.pi/extensions/safety/index.ts` itself (the iteration-1 WR-07 fix)
+# broke `/reload`: a `globalThis`-keyed flag cannot tell "two paths
+# registering in one runner build" apart from "one path registering again
+# after /reload" (see that file's own CR-06 docstring section). The stub
+# below checks for the project-scoped copy's existence at the SESSION's own
+# `process.cwd()` -- re-evaluated fresh on every factory invocation,
+# including every `/reload` -- and only imports+calls the real safety
+# extension when that copy is absent.
 install_safety_extension() {
 	_safety_src="$REPO_ROOT/.pi/extensions/safety/index.ts"
 	if [ ! -f "$_safety_src" ]; then
@@ -889,7 +903,26 @@ const out = [
   "// Re-exports the safety extension entry point at USER SCOPE so it loads",
   "// regardless of project trust (SAFE-11) -- project-scoped extensions never",
   "// load in a headless subagent, which has no UI to grant trust with.",
-  "export { default } from " + JSON.stringify(specifier) + ";",
+  "//",
+  "// CR-06: guarded by existence, not a globalThis flag inside the extension",
+  "// itself -- see the module docstring in .pi/extensions/safety/index.ts",
+  "// for why the extension cannot safely self-dedupe against a Pi /reload.",
+  "// When THIS repository is the trusted project, Pi ALSO auto-discovers the",
+  "// project-scoped copy at .pi/extensions/safety/index.ts, which registers",
+  "// first; this stub then finds that file already present at the current",
+  "// session cwd and returns without registering a second time. Nothing",
+  "// here is module-global state, so a reload (which rebuilds this stub as",
+  "// a fresh extension instance) re-evaluates the check fresh every time,",
+  "// with no residue left over from a previous load.",
+  "import { existsSync } from \"node:fs\";",
+  "import { join } from \"node:path\";",
+  "export default async function (pi) {",
+  "  if (existsSync(join(process.cwd(), \".pi\", \"extensions\", \"safety\", \"index.ts\"))) {",
+  "    return;",
+  "  }",
+  "  const mod = await import(" + JSON.stringify(specifier) + ");",
+  "  await mod.default(pi);",
+  "}",
   "",
 ].join("\n");
 if (fs.existsSync(dst) && fs.readFileSync(dst, "utf8") === out) {
@@ -917,9 +950,9 @@ report_safety_extension() {
 const fs = require("node:fs");
 const stub = process.env.KYPI_SAFETY_STUB;
 const text = fs.readFileSync(stub, "utf8");
-const m = text.match(/export \{ default \} from "([^"]+)";/);
+const m = text.match(/await import\("([^"]+)"\)/);
 if (!m) {
-  console.error("FATAL: " + stub + " does not contain the expected re-export line. Refusing to trust it.");
+  console.error("FATAL: " + stub + " does not contain the expected dynamic-import line. Refusing to trust it.");
   process.exit(1);
 }
 if (!fs.existsSync(m[1])) {

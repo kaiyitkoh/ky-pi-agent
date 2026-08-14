@@ -690,54 +690,44 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 // ---------------------------------------------------------------------------
 
 /**
- * `globalThis` slot name guarding WR-07's double-registration hazard --
- * `bin/bootstrap.sh#install_safety_extension` writes a user-scope stub that
- * re-exports this file's default export, and Pi ALSO auto-discovers the
- * project-scoped copy at `.pi/extensions/safety/index.ts` when running inside
- * this trusted repository. Both default exports would otherwise run: harmless
- * for `pi.registerTool` (first-registration-wins silently discards the
- * second set), but NOT harmless for `pi.on("tool_call", ...)` -- Pi calls
- * EVERY registered handler for a given event, so a second `registerToolCallHook`
- * call registers a SECOND independent handler, producing two audit rows per
- * tool call and, worse, two `pending` entries minted per `confirm` block
- * (compounding WR-05). Exported so a test can assert against the real key
- * rather than retyping the literal, matching the house rule
- * `approvals.ts#APPROVALS_STORE_KEY` already follows for the identical
- * cross-instance hazard.
+ * CR-06 -- there is DELIBERATELY no idempotency guard here anymore. The
+ * WR-07 fix (iteration 1) added a `globalThis`-keyed "already installed"
+ * flag that made this file a permanent PROCESS-WIDE no-op after its first
+ * load. That broke `/reload`: `AgentSession#reload`
+ * (`dist/core/agent-session.js:2052`) builds a brand-new `ExtensionRunner`
+ * and tool registry, then calls `await factory(api)` again with a FRESH
+ * `api`, in the SAME process -- `globalThis` is shared across every jiti
+ * module instance in that process regardless of which runner build asked, so
+ * the flag could not tell "two paths registering in one runner build" (the
+ * real WR-07 hazard) apart from "one path registering again after
+ * `/reload`" (a normal, expected re-registration). Executed, against the
+ * real entry point: load #1 registered `["bash","read","write","edit",
+ * "approve_ky_command"]` tools and `["tool_call","session_start"]` hooks;
+ * load #2 (modelling `/reload`) registered `[]` and `[]` -- after any
+ * `/reload` the session ran with Pi's UNWRAPPED built-in tools and no
+ * `tool_call` hook at all, strictly worse than the duplicate audit rows
+ * WR-07 set out to fix.
+ *
+ * The double-load hazard WR-07 named is real (`bin/bootstrap.sh`'s
+ * user-scope stub re-exporting this file's default export, PLUS Pi
+ * auto-discovering the project-scoped copy when this repository is the
+ * trusted project) -- but it cannot be solved from INSIDE this file, because
+ * both load paths execute the IDENTICAL `index.ts` as separate jiti module
+ * instances (jiti's `moduleCache: false`) with no reference to `ExtensionAPI`
+ * usable during factory execution to distinguish "a sibling extension in
+ * this runner build already registered" from "a fresh runner build" (the
+ * runtime's own `getAllTools()`/`getActiveTools()` throw "not initialized"
+ * during extension loading -- `dist/core/extensions/loader.js:151-152`).
+ * The fix lives one level up, in the STUB `bin/bootstrap.sh` generates: the
+ * stub checks whether the trusted project's OWN `.pi/extensions/safety/
+ * index.ts` exists on disk before importing and calling this file's default
+ * export, so at most one of the two paths ever registers anything, in EVERY
+ * runner build, including after `/reload` (see `install_safety_extension`'s
+ * own docstring). This file's own default export is therefore
+ * UNCONDITIONALLY idempotent-per-call: it always fully registers, every
+ * single time it runs, which is exactly the property `/reload` needs.
  */
-export const SAFETY_INSTALLED_KEY = "__kyPiSafetyExtensionInstalled";
-
-/**
- * Test-only: forget that the safety extension has already installed itself
- * into this process. A real `pi` process is one session, so production code
- * never calls this -- but a single vitest WORKER process legitimately
- * simulates several independent sessions in a row within one process
- * (`tests/unit/safety-entry.test.ts` and
- * `tests/integration/double-enforcement.test.ts` both invoke this file's
- * default export more than once), and the WR-07 guard below would otherwise
- * make every session after the first a silent no-op in exactly those tests.
- * Mirrors `.pi/lib/jsonl.ts#resetProducedPaths`'s own "exported for tests"
- * pattern for the identical class of hazard.
- */
-export function resetSafetyInstalledForTests(): void {
-	const globalSlot = globalThis as unknown as Record<string, boolean | undefined>;
-	delete globalSlot[SAFETY_INSTALLED_KEY];
-}
-
 export default function (pi: ExtensionAPI): void {
-	// WR-07: idempotent across the double-load this project's own bootstrap
-	// deliberately causes (project-scope auto-discovery + user-scope stub).
-	// `globalThis` is shared across every jiti module instance in one process
-	// -- the same pattern `approvals.ts#getStore` already uses for the
-	// identical class of hazard -- so the SECOND invocation, regardless of
-	// which load path reached it, sees the flag and returns before
-	// registering anything a second time.
-	const globalSlot = globalThis as unknown as Record<string, boolean | undefined>;
-	if (globalSlot[SAFETY_INSTALLED_KEY] === true) {
-		return;
-	}
-	globalSlot[SAFETY_INSTALLED_KEY] = true;
-
 	// Tool registrations FIRST -- see the module docstring's REGISTRATION
 	// ORDER section. tests/unit/safety-entry.test.ts pins this source order.
 	registerWrappedTools(pi);

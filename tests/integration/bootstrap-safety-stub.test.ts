@@ -31,8 +31,10 @@ import {
 	statSync,
 	writeFileSync,
 } from "node:fs";
+import { createRequire } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -109,11 +111,17 @@ function stubPath(agentDir: string): string {
 	return join(agentDir, "extensions", "ky-safety", "index.ts");
 }
 
-/** Pull the re-exported specifier out of a stub's content, or throw with the content shown. */
+/**
+ * Pull the dynamically-imported specifier out of a stub's content, or throw
+ * with the content shown. CR-06: the stub is no longer a plain
+ * `export { default } from "...";` re-export -- it is a function that
+ * checks for the project-scoped copy's existence before dynamically
+ * importing and calling the real safety extension's default export.
+ */
 function extractSpecifier(content: string): string {
-	const m = /export \{ default \} from "([^"]+)";/.exec(content);
+	const m = /await import\("([^"]+)"\)/.exec(content);
 	if (m === null) {
-		throw new Error(`stub content does not contain the expected re-export line:\n${content}`);
+		throw new Error(`stub content does not contain the expected dynamic-import line:\n${content}`);
 	}
 	return m[1] as string;
 }
@@ -240,9 +248,22 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 		const agentDir = tempDir("kypi-agentdir-");
 		const dir = join(agentDir, "extensions", "ky-safety");
 		mkdirSync(dir, { recursive: true });
+		// CR-06 shape: a dynamic import, not a static re-export -- matches what
+		// install_safety_extension() actually writes now.
 		writeFileSync(
 			join(dir, "index.ts"),
-			'export { default } from "C:/definitely/does/not/exist/index.ts";\n',
+			[
+				"import { existsSync } from \"node:fs\";",
+				"import { join } from \"node:path\";",
+				"export default async function (pi) {",
+				'  if (existsSync(join(process.cwd(), ".pi", "extensions", "safety", "index.ts"))) {',
+				"    return;",
+				"  }",
+				'  const mod = await import("C:/definitely/does/not/exist/index.ts");',
+				"  await mod.default(pi);",
+				"}",
+				"",
+			].join("\n"),
 			"utf-8",
 		);
 
@@ -254,4 +275,162 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 		).not.toBe(0);
 		expect(run.stderr).toMatch(/does not exist/);
 	}, TIMEOUT_MS);
+});
+
+/**
+ * CR-06 -- the generated stub's OWN runtime dedup behaviour: does it
+ * actually skip registering when a project-scoped copy exists, and actually
+ * register when one does not? `bootstrap-safety-stub.test.ts`'s cases above
+ * only prove the shell script writes the right BYTES; this describe block
+ * runs the real generated stub in a REAL, SEPARATE `node` subprocess, with a
+ * REAL `cwd` set at process-spawn time, so it is the direct regression test
+ * for the mechanism CR-06's fix actually relies on (as opposed to
+ * `tests/unit/safety-entry.test.ts`'s CR-06 case, which proves the
+ * UNDERLYING extension itself has no globalThis guard any more).
+ *
+ * A SUBPROCESS, not `process.chdir()` inside this vitest worker: `process.
+ * chdir()` inside a vitest/Vite SSR-executed test was measured, by direct
+ * execution while authoring this test, to NOT reliably propagate into a
+ * nested dynamic `import()`'s own execution context (the imported module's
+ * `process.cwd()` observed the vitest WORKER's own root cwd, not the chdir
+ * target), which would make a chdir-based version of this test either
+ * silently pass vacuously or fail for a reason unrelated to the fix under
+ * test. A real child process has no such ambiguity: `cwd` is an OS-level
+ * property of the process itself.
+ *
+ * THROUGH JITI, NOT PLAIN NODE ESM: the stub (like the pre-CR-06 shape it
+ * replaces) is loaded with a RAW, scheme-less absolute path specifier
+ * (`await import("C:/Users/.../index.ts")`), which is exactly what Pi's own
+ * `loadExtensionModule` does [`dist/core/extensions/loader.js:358-369`] --
+ * that only works because Pi resolves every extension through **jiti**, not
+ * plain Node ESM (`node --experimental-strip-types`'s own loader rejects a
+ * bare Windows path with `ERR_UNSUPPORTED_ESM_URL_SCHEME`, confirmed by
+ * direct execution while authoring this test). The driver below resolves
+ * jiti from `@earendil-works/pi-coding-agent`'s own `node_modules` (the
+ * exact copy Pi itself uses) and drives the stub through
+ * `jiti.import(path, { default: true })`, mirroring `loadExtensionModule`
+ * exactly, so this test exercises the REAL production loading mechanism
+ * rather than a Node ESM shape Pi never actually uses for this file.
+ */
+describe("CR-06 -- the generated stub skips registering only when a project-scoped copy exists at cwd", () => {
+	afterEach(() => {
+		for (const dir of scratch) {
+			try {
+				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+			} catch {
+				// A leftover temp dir is noise, not a failure.
+			}
+		}
+		scratch = [];
+	});
+
+	/**
+	 * The exact jiti entry point Pi itself resolves and uses --
+	 * `node_modules/@earendil-works/pi-coding-agent`'s own copy, as a
+	 * `file://` URL: this ONE import is plain Node ESM (jiti is not loaded
+	 * yet at this point to resolve it any other way), and plain Node ESM
+	 * rejects a bare Windows drive-letter path as an unsupported URL scheme.
+	 */
+	const JITI_ENTRY = (() => {
+		const requireFromRepo = createRequire(join(repoRoot(), "package.json"));
+		const jitiCjs = requireFromRepo.resolve("jiti", {
+			paths: [join(repoRoot(), "node_modules", "@earendil-works", "pi-coding-agent")],
+		});
+		return pathToFileURL(join(jitiCjs, "..", "jiti.mjs")).href;
+	})();
+
+	/**
+	 * A driver script, spawned with `cwd` set to the case under test. Loads
+	 * the real generated stub through jiti (see this describe block's own
+	 * docstring for why plain Node ESM cannot be used here), drives it with a
+	 * recording fake `pi`, and prints the registered tool names as one JSON
+	 * array on stdout -- the ONLY output this driver produces, so the test
+	 * can parse it directly.
+	 */
+	function driverSource(stubSpecifier: string): string {
+		return [
+			`import { createJiti } from ${JSON.stringify(JITI_ENTRY)};`,
+			"const toolNames = [];",
+			"const pi = { on: () => {}, registerTool: (tool) => { toolNames.push(tool.name); } };",
+			`const jiti = createJiti(import.meta.url, { moduleCache: false });`,
+			`const mod = await jiti.import(${JSON.stringify(stubSpecifier)}, { default: true });`,
+			"await mod(pi);",
+			"process.stdout.write(JSON.stringify(toolNames));",
+			"",
+		].join("\n");
+	}
+
+	/** Run the driver as a real child process with `cwd` set, and parse its stdout as the registered tool-name array. */
+	function runDriverAt(cwd: string, stubSpecifier: string): string[] {
+		const driverPath = join(tempDir("kypi-cr06-driver-"), "driver.mjs");
+		writeFileSync(driverPath, driverSource(stubSpecifier), "utf-8");
+		const result = spawnSync("node", [driverPath], {
+			cwd,
+			encoding: "utf-8",
+			timeout: TIMEOUT_MS,
+			windowsHide: true,
+		});
+		if (result.status !== 0) {
+			throw new Error(
+				`driver subprocess failed (status ${result.status}):\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+			);
+		}
+		return JSON.parse(result.stdout) as string[];
+	}
+
+	it(
+		"case 6 -- project-scoped copy ABSENT at cwd: the stub imports and calls the real safety extension",
+		() => {
+			const agentDir = tempDir("kypi-agentdir-");
+			const logDir = tempDir("kypi-log-");
+			const log = join(logDir, "npm.log").replace(/\\/g, "/");
+			const cwdWithoutCopy = tempDir("kypi-cwd-no-copy-");
+
+			const run = withStubBin({ npm: npmStub(log) }, (env) =>
+				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" } }),
+			);
+			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+			const stub = stubPath(agentDir).replace(/\\/g, "/");
+			const toolNames = runDriverAt(cwdWithoutCopy, stub);
+
+			expect(
+				toolNames.length,
+				"with no project-scoped copy at cwd, the stub must have imported and called the real " +
+					"safety extension, which registers bash/read/write/edit/approve_ky_command",
+			).toBeGreaterThan(0);
+		},
+		TIMEOUT_MS,
+	);
+
+	it(
+		"case 7 -- project-scoped copy PRESENT at cwd: the stub returns without registering anything",
+		() => {
+			const agentDir = tempDir("kypi-agentdir-");
+			const logDir = tempDir("kypi-log-");
+			const log = join(logDir, "npm.log").replace(/\\/g, "/");
+			const cwdWithCopy = tempDir("kypi-cwd-with-copy-");
+			mkdirSync(join(cwdWithCopy, ".pi", "extensions", "safety"), { recursive: true });
+			// Content is irrelevant -- the stub only checks existsSync, it never
+			// imports this file.
+			writeFileSync(join(cwdWithCopy, ".pi", "extensions", "safety", "index.ts"), "export default function () {}\n", "utf-8");
+
+			const run = withStubBin({ npm: npmStub(log) }, (env) =>
+				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" } }),
+			);
+			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+			const stub = stubPath(agentDir).replace(/\\/g, "/");
+			const toolNames = runDriverAt(cwdWithCopy, stub);
+
+			expect(
+				toolNames,
+				"CR-06: with a project-scoped copy present at cwd (the trusted-project double-load " +
+					"shape), the stub must return WITHOUT ever calling the real safety extension -- " +
+					"registering nothing here is what prevents the tool_call hook from being registered " +
+					"twice in the same runner build",
+			).toEqual([]);
+		},
+		TIMEOUT_MS,
+	);
 });

@@ -32,7 +32,7 @@ import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-w
 
 import { describe, expect, it } from "vitest";
 
-import safety, { APPROVE_TOOL_NAME, resetSafetyInstalledForTests } from "../../.pi/extensions/safety/index.ts";
+import safety, { APPROVE_TOOL_NAME } from "../../.pi/extensions/safety/index.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
 
@@ -64,11 +64,9 @@ function stubPi(): {
 }
 
 describe("the safety extension's entry point registers exactly what it claims to", () => {
-	// WR-07: this file invokes the default export more than once in one
-	// process (this describe block, and the "never delegates" describe below)
-	// -- reset the idempotency guard first so each simulated "session" here
-	// actually registers, rather than the second one being a silent no-op.
-	resetSafetyInstalledForTests();
+	// CR-06: the default export has no process-wide idempotency guard --
+	// every invocation, against a fresh pi stub, fully registers. No reset
+	// call is needed between describe blocks in this file any more.
 	const { pi, hooks, toolNames, tools } = stubPi();
 	safety(pi);
 
@@ -239,7 +237,6 @@ describe("the safety extension's source order matches its own documented guarant
  */
 describe("a wrapped tool never delegates to the real implementation on a non-allow verdict", () => {
 	it("throws instead of running the real bash tool when the command field is malformed", async () => {
-		resetSafetyInstalledForTests();
 		const { pi, tools } = stubPi();
 		safety(pi);
 
@@ -266,19 +263,26 @@ describe("a wrapped tool never delegates to the real implementation on a non-all
 });
 
 /**
- * WR-07 -- `bin/bootstrap.sh#install_safety_extension` writes a user-scope
- * stub that re-exports this file's default export, and Pi ALSO auto-
- * discovers the project-scoped copy when running inside this trusted
- * repository. Both defaults would otherwise run, registering the `tool_call`
- * hook TWICE -- Pi calls every registered handler for an event, so this is
- * two audit rows per call and two `pending` entries minted per `confirm`
- * block, unlike `registerTool`'s own first-registration-wins collision
- * handling, which stays silently correct either way.
+ * CR-06 -- models Pi's own `/reload`: `AgentSession#reload` builds a
+ * brand-new `ExtensionRunner` and tool registry, then calls the SAME
+ * extension's factory again with a FRESH `api` object, in the SAME process
+ * [VERIFIED: `dist/core/agent-session.js:2052`,
+ * `dist/core/extensions/loader.js:409`]. The iteration-1 WR-07 fix put a
+ * `globalThis`-keyed "already installed" flag on the default export, which
+ * made this second invocation a silent no-op -- after any `/reload` the
+ * session ran with Pi's UNWRAPPED built-in tools and no `tool_call` hook at
+ * all. This test proves the regression is gone: TWO invocations against TWO
+ * fresh `pi` objects, with nothing reset in between (there is no reset
+ * function to call any more), must BOTH fully register. The actual
+ * double-load hazard WR-07 named (project-scope auto-discovery + the
+ * user-scope stub both loading in the SAME runner build) is now prevented
+ * one level up, by `bin/bootstrap.sh`'s generated stub checking for the
+ * project-scoped copy's existence before it ever calls this file's default
+ * export -- see `tests/integration/bootstrap-safety-stub.test.ts`'s own
+ * CR-06 case for that half.
  */
-describe("WR-07 -- the entry point is idempotent across more than one invocation in one process", () => {
-	it("a second invocation of the default export, against a FRESH pi object, registers nothing", () => {
-		resetSafetyInstalledForTests();
-
+describe("CR-06 -- the entry point has no process-wide idempotency guard: it re-registers fully on every invocation (models /reload)", () => {
+	it("two invocations of the default export, against two FRESH pi objects, BOTH fully register", () => {
 		const first = stubPi();
 		safety(first.pi);
 		expect(
@@ -290,24 +294,19 @@ describe("WR-07 -- the entry point is idempotent across more than one invocation
 			"the first invocation must have registered its hooks, or this test proves nothing",
 		).toBeGreaterThan(0);
 
-		// A SECOND, entirely fresh pi/stub -- exactly what Pi hands the SECOND
-		// extension load (project scope vs. the user-scope stub re-exporting
-		// the same file) -- each load gets its OWN api object
-		// [VERIFIED: `dist/core/extensions/loader.js#createExtensionAPI` is
-		// called once per extension, closing over that extension's own `tools`/
-		// `handlers` collections]. The globalThis-keyed guard must still catch
-		// this as "already installed" because it is process-wide, not
-		// pi-object-scoped.
+		// A SECOND, entirely fresh pi/stub -- exactly what Pi hands a SECOND
+		// factory invocation, whether that is `/reload`'s fresh runner build or
+		// (pre-CR-06 fix) the double-load WR-07 named. Both invocations here
+		// MUST fully register: a process-wide flag cannot tell the two hazards
+		// apart, so the fix must not reintroduce one.
 		const second = stubPi();
 		safety(second.pi);
 		expect(
 			second.toolNames,
-			"a second invocation in the SAME process must register NOTHING -- registering a second " +
-				"time would silently duplicate the tool_call hook and mint two pending approvals per " +
-				"confirm block (this is the CR-01-adjacent WR-05 compounding effect WR-07 names)",
-		).toEqual([]);
-		expect(second.hooks, "the second invocation's own hooks array must stay empty too").toEqual([]);
-
-		resetSafetyInstalledForTests();
+			"CR-06: a second invocation in the SAME process, against a fresh pi object, must register " +
+				"the FULL tool set -- this is what /reload needs. A globalThis-keyed 'already installed' " +
+				"flag would make this array empty, which is the exact regression this test catches",
+		).toEqual(first.toolNames);
+		expect(second.hooks, "the second invocation's own hooks array must also fully register").toEqual(first.hooks);
 	});
 });
