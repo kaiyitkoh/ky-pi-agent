@@ -92,8 +92,29 @@ const PHASE_THREE_IDS = ["RB-03-01", "RB-03-02", "RB-03-03", "RB-03-04", "RB-03-
  */
 const PHASE_FOUR_IDS = ["RB-04-01"] as const;
 
+/**
+ * The Phase 5 entry this file governs.
+ *
+ * ROUTE-11 needs the work laptop specifically: this machine has no
+ * `QODER_PERSONAL_ACCESS_TOKEN`, no pre-configured agent or environment, and
+ * no network egress to `api.qoder.com`, so whether a real personal access
+ * token authenticates and a real delegation completes is a fact about a
+ * service this machine cannot reach. `tests/integration/qoder-delegate.test.ts`
+ * proves the harness constructs the right requests and parses a response
+ * shaped like Qoder's documented envelope, against a real local
+ * `127.0.0.1` HTTP+SSE fixture — and that proof is not this check, which is
+ * exactly why the array exists rather than a `[x]` in a requirements file.
+ */
+const PHASE_FIVE_IDS = ["RB-05-01"] as const;
+
 /** Every governed entry, in phase order. A later phase appends its array here. */
-const ALL_IDS = [...PHASE_ONE_IDS, ...PHASE_TWO_IDS, ...PHASE_THREE_IDS, ...PHASE_FOUR_IDS] as const;
+const ALL_IDS = [
+	...PHASE_ONE_IDS,
+	...PHASE_TWO_IDS,
+	...PHASE_THREE_IDS,
+	...PHASE_FOUR_IDS,
+	...PHASE_FIVE_IDS,
+] as const;
 
 /**
  * Matches any runbook entry id, of any phase.
@@ -368,6 +389,18 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		`echo "RB-04-01 push-protection check $(date -u +%FT%TZ)" >> RB-04-01-CHECK.md && git add RB-04-01-CHECK.md && git commit -m "RB-04-01: protected-branch push check (not meant to land)"`,
 		"git push origin main",
 		"git reset --hard HEAD~1",
+	],
+
+	// PHASE 5 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phases 3-4.
+	// The credential/id exports are pinned whole because a placeholder-only
+	// half (naming the env var but not the export line) is not something an
+	// operator can copy-paste, and the transcript-read command is the only
+	// step that surfaces the pass/fail signal without a live PAT to inspect
+	// interactively.
+	"RB-05-01": [
+		"export QODER_PERSONAL_ACCESS_TOKEN=pt-<paste the token from qoder.com/account/integrations>",
+		"export QODER_AGENT_ID=<agent-id> QODER_ENVIRONMENT_ID=<environment-id>",
+		`cat .pi/logs/qoder-$(date +%F).jsonl | tail -n 5`,
 	],
 };
 

@@ -910,3 +910,76 @@ non-fast-forward rejection, produced by genuinely diverging two clones — and
 asserts they classify differently. It proves the harness reads and classifies
 a server-side rejection correctly. It proves nothing at all about whether
 GitLab is actually configured on the work laptop, which is this entry.
+
+---
+
+## Phase 5 — Routing & Capability Guards
+
+Phase 5 built the router: an explicit role→model map covering six roles
+across three modes, a capability guard that refuses four impossible routes
+before dispatch, zero-context-token mode persistence proven on the wire, and
+a `qoder_delegate` tool that hands a whole task to a foreign agent and folds
+the result back. Ten of its eleven ROUTE requirements are fully verifiable
+offline with `fauxProvider` and a real loopback HTTP+SSE server, and are
+complete. The one check below is the residue — whether a real Qoder personal
+access token against a real agent and environment actually completes a
+delegation, which no fixture this repository wrote can answer.
+
+`tests/unit/docs-policy.test.ts` guards this status exactly as it guards the
+Phase 1, 2, 3 and 4 ones: it parses both the summary-table row and the
+`**Status:**` line of every `RB-<phase>-<n>` entry, and a disagreement between
+the two is reported as `INCONSISTENT`, which is never an acceptable status.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-05-01 | Qoder delegates a task and folds the result back through the Cloud Agents API | OUTSTANDING |
+
+### RB-05-01 — Qoder delegates a task and folds the result back
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** There is no `QODER_PERSONAL_ACCESS_TOKEN`,
+no pre-configured agent or environment, and no network egress to
+`api.qoder.com` from this machine. `tests/integration/qoder-delegate.test.ts`
+drives the real client (`.pi/extensions/qoder/client.ts`) against a
+`127.0.0.1` loopback server shaped like Qoder's own documented Cloud Agents
+envelope — but the server on the other end of that loopback is one this
+repository wrote, and it accepts whatever it is scripted to accept. Whether a
+real personal access token against a real agent and environment authenticates
+and completes a delegation is a fact about Qoder's own service.
+
+**Procedure, on the work laptop:**
+
+1. Generate a personal access token once at
+   `qoder.com/account/integrations` (shown only once), and create (or reuse)
+   an agent and an environment via the Qoder console/API — a one-time setup,
+   never repeated per task:
+   `export QODER_PERSONAL_ACCESS_TOKEN=pt-<paste the token from qoder.com/account/integrations>`
+2. Export the pre-configured agent and environment ids:
+   `export QODER_AGENT_ID=<agent-id> QODER_ENVIRONMENT_ID=<environment-id>`
+3. Start `pi` in this repository and ask the model to delegate a small,
+   low-risk task through `qoder_delegate` — for example, "Use qoder_delegate
+   to ask Qoder to reply with the single word OK."
+4. Read the redacted transcript this repository wrote for the run:
+   `cat .pi/logs/qoder-$(date +%F).jsonl | tail -n 5`
+
+**Expected output.** The tool's own return value — what the model sees — is
+a non-empty folded `agent.message` result returned as tool content. The
+transcript's `qoder.delegate.result` record shows `done: true`, and the
+stream terminated because a `session.status_idle` frame arrived with
+`stop_reason.type === "end_turn"`. **The failure signal that matters most:**
+a `401` or `403` on any of the three requests (visible in the transcript's
+`*.response` records, by HTTP status) means the personal access token is
+wrong, expired, or the agent/environment ids belong to a different account —
+not a transient failure, and not something a retry fixes.
+
+**Offline proxy:** `tests/integration/qoder-delegate.test.ts` — drives
+`delegateTask` against a real `127.0.0.1` HTTP+SSE fixture shaped for the
+Cloud Agents envelope (`tests/helpers/qoder-loopback.ts`), proving the exact
+three-request sequence, the folded-result thinking/message separation, a
+genuine cross-socket split-frame case, the non-2xx and missing-PAT failure
+paths, and the redacted transcript. It proves the harness constructs the
+right requests and parses a response shaped like Qoder's documented envelope
+correctly. It says nothing about whether a real personal access token
+reaches `api.qoder.com` or what a real delegation returns, which is this
+entry and cannot be substituted.
