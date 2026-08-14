@@ -150,3 +150,204 @@ None — all 13 in-scope findings (5 blockers, 8 warnings) were fixed.
 _Fixed: 2026-08-14_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 1_
+
+---
+---
+
+# Phase 4: Code Review Fix Report — Iteration 2
+
+**Fixed at:** 2026-08-14
+**Source review:** .planning/phases/04-safety-deployment-guardrails/04-REVIEW.md (iteration 2 — re-review after `--fix`)
+**Iteration:** 2
+
+**Summary:**
+- Findings in scope (`fix_scope: critical_warning`): 7 (3 blockers, 4 warnings)
+- Fixed: 7
+- Skipped: 0
+
+**Suite:** 1152 tests / 66 files, all green (baseline for this run: 1124 tests /
+66 files — iteration 1's own ending count). `tsc --noEmit` clean. Every fix
+below was verified red (with the fix reverted, its regression test observed
+to fail) and green (with the fix restored) before being committed. Ran
+entirely in the main repository on branch `main` — no worktree was created,
+per this run's explicit process rule; `git worktree list` showed exactly one
+entry throughout.
+
+Working-tree note: `.env.example` was found already modified at the start of
+this run (pre-existing, unrelated to any finding here — a leftover artifact
+from an earlier, unrelated test run). It was restored via
+`git checkout -- .env.example` before the first commit and re-restored twice
+more when a full `vitest run` regenerated the same corruption via
+`bootstrap-safety-stub.test.ts`'s real-subprocess bootstrap runs (an
+existing, out-of-scope flakiness in that test's environment isolation, not
+touched by this fix pass). It is not part of any commit below.
+
+## Fixed Issues
+
+### CR-08: `shell.ts`'s own two bare-verb gates were not routed through `normaliseExecutable`
+
+**Files modified:** `.pi/extensions/safety/shell.ts`, `tests/unit/shell-parse.test.ts`, `tests/fixtures/evasion-corpus.ts`
+**Commit:** `e725605`
+**Applied fix:** `findShellRunnerDenial` and `extractGitCwdOverride` (both in `shell.ts`) compared `invocation.executable`/`executable` via a bare `.toLowerCase()` instead of going through `normaliseExecutable` — the exact contract `normaliseExecutable`'s own docstring states every bare-verb gate must follow, and the one CR-03 (iteration 1) fixed everywhere else (`policy.ts`, `infra.ts`) but missed inside `shell.ts` itself. Both now call `normaliseExecutable`.
+**Before/after verdict:** Reproduced the reviewer's exact evidence: `bash.exe -c "git push"`, `/bin/sh -c "git push"`, `sh.exe -c "git push"` and `/usr/bin/xargs git push` all `allow` pre-fix, `refused`/`block` post-fix, while their bare-name spellings (already correct) are unaffected. `git.exe -C /other/repo push` recovers its `cwdOverride` post-fix (previously silently dropped, which would have asked the `HEAD` oracle about the wrong repository).
+**Regression test:** `tests/unit/shell-parse.test.ts`'s `SHELL_RUNNER_TABLE` gains the three positive rows plus a `sh.exe -c "ls"` paired negative (proving the fix doesn't degenerate into "any `.exe`-suffixed runner is denied"), and its `WRAPPER_TABLE` gains a `git.exe -C ...` row asserting the recovered `cwdOverride`. `tests/fixtures/evasion-corpus.ts` gains EV-58/59/60 (`BLOCKED`), driven through the real `evaluate()`. The pre-existing "every resolved executable in the refused shell-runner rows is a member of SHELL_RUNNERS" assertion was itself updated to normalise before checking, or it would have failed against the new rows for the wrong reason. Verified red (8 failures) with `shell.ts` reverted; green restored.
+
+### CR-07: `grep`/`find`/`ls` were containment-unaware — a directory search root, a missing path, and a non-string path all reached execution unclassified
+
+**Files modified:** `.pi/extensions/safety/paths.ts`, `.pi/extensions/safety/policy.ts`, `docs/SAFETY.md`, `tests/fixtures/evasion-corpus.ts`
+**Commit:** `bb9a2b6`
+**Applied fix:** Iteration 1's CR-04 fix checked `grep`'s `path`/`glob` against `classifyPathRead`'s basename+parent-segment table alone, which a DIRECTORY never matches. `paths.ts` gains `isSensitiveSearchRoot(canonicalPath, facts)`: sensitive if the canonical path IS or sits below one of `.aws`/`.kube`/`.ssh`/`.gnupg`, OR if it reaches `$HOME` itself (`isWithinRoot(facts.home, canonicalPath)`) — every conventional per-user secret directory lives directly under `$HOME`. `policy.ts#evaluateSearchRootField` wires this in for `grep`/`find`/`ls`'s `path` field, on top of the existing file-basename check; a MISSING path is now evaluated against `facts.projectRoot` (the same rule `path: "."` would go through) instead of an unconditional allow; a non-string `path`/`glob` (an array, for instance) now blocks as malformed instead of being silently treated as absent. `grep`'s `glob` field stays basename-only by design — a wildcard glob (`.env*`) is a residual, published gap (EV-65), not silently claimed as closed.
+**Before/after verdict:** Reproduced the reviewer's exact evidence: `grep { pattern: "aws_secret_access_key", path: "~/.aws" }` (the DIRECTORY, not the credentials file) `allow` pre-fix with the secret in the tool's own output, `block` post-fix. `ls { path: "~/.aws" }`, `grep { path: "C:/Users/tester" }` (home itself), and `grep { path: ["~/.aws/credentials"] }` (non-string) all `allow` pre-fix, `block` post-fix.
+**Regression test:** `tests/fixtures/evasion-corpus.ts` EV-61..65, driven through the real `evaluate()`. Verified red (4 failures) with `policy.ts`/`paths.ts` reverted; green restored.
+
+### WR-09: the CR-04 fix activated three tools Pi does not activate by default, at a real per-turn token cost
+
+**Files modified:** `.pi/extensions/safety/index.ts`, `tests/unit/safety-entry.test.ts`, `docs/SAFETY.md`
+**Commit:** `d18b359`
+**Applied fix:** Per the review's own DECISION (implemented, not re-litigated): `registerWrappedTools` no longer registers `grep`/`find`/`ls` as extension tools. Pi's default active tool set is `["read","bash","edit","write"]` (`dist/core/sdk.js:132,136`); this repository's `.pi/settings.json` is `{}`, so registering `grep`/`find`/`ls` as extension tools was what ACTIVATED them (`_refreshToolRegistry`'s `includeAllExtensionTools: true`), handing the model three new callable tools purely in order to guard them, at a measured 532 tokens/turn. `registerToolCallHook`'s own filter still names all seven tool names, so a call to any of the three is still audited/denied at zero schema cost if some other extension or a future Pi default ever activates them — a deliberately narrower, hook-only guarantee (no wrapper re-check) for a surface the model cannot reach today.
+**Before/after verdict:** `safety-entry.test.ts`'s registration-order test: `["bash","read","write","edit","grep","find","ls","approve_ky_command"]` pre-fix, `["bash","read","write","edit","approve_ky_command"]` post-fix. `tests/unit/contributing-boundary.test.ts`'s BOOT-10 (b) justification ("the four wrapped tools add ZERO net schema cost... `approve_ky_command`'s 275 tokens is the entire per-turn cost") is true again without any edit, since it no longer overlaps with the now-reverted grep/find/ls registration.
+**Regression test:** `tests/unit/safety-entry.test.ts`'s toolNames assertion, narrowed back to five tools. Verified red (grep/find/ls present in the array) with `index.ts` reverted; green restored. `docs/SAFETY.md` gains a "What this guard does not register (WR-09)" section stating the trade-off explicitly.
+
+### CR-06: the WR-07 idempotency guard silently disabled the entire safety extension after `/reload`
+
+**Files modified:** `.pi/extensions/safety/index.ts`, `bin/bootstrap.sh`, `tests/unit/safety-entry.test.ts`, `tests/integration/bootstrap-safety-stub.test.ts`, `tests/integration/confirm-approve-reissue.test.ts`, `tests/integration/double-enforcement.test.ts`, `tests/integration/path-canonicalisation.test.ts`
+**Commit:** `c3f5d2c`
+**Applied fix:** Removed the `globalThis`-keyed "already installed" flag and `resetSafetyInstalledForTests()` entirely from `index.ts` — its default export is now unconditionally idempotent-per-call (always fully registers). The double-load hazard WR-07 named (project-scope auto-discovery + the user-scope stub both loading in one runner build) is solved one level up: `bin/bootstrap.sh#install_safety_extension`'s generated stub now checks `existsSync(join(process.cwd(), ".pi", "extensions", "safety", "index.ts"))` before dynamically importing and calling the real safety extension's default export — re-evaluated fresh on every factory invocation, including every `/reload`, with no process-global state. This is Option 1 from the review's own Fix section.
+**Before/after verdict:** Reproduced the reviewer's exact evidence: two invocations of `index.ts`'s default export against two fresh `pi` objects (modelling `/reload`) — load #2 registered `[]` tools/`[]` hooks pre-fix, the full set post-fix. The generated stub, driven through **jiti** (the real loader Pi itself uses — a plain Node ESM `import()` cannot load this stub's raw-path specifier at all, confirmed by execution) with a real subprocess `cwd`: registers nothing when a project-scoped copy is present at cwd, registers the full set when absent.
+**Regression test:** `tests/unit/safety-entry.test.ts`'s CR-06 case (two fresh `pi` objects, both must fully register). `tests/integration/bootstrap-safety-stub.test.ts`'s new cases 6/7 drive the real generated stub through jiti with a real subprocess cwd. Verified red (2 `safety-entry` failures; 3 `bootstrap-safety-stub` failures — cases 1/5 on the byte format, case 7 on the runtime behaviour) with `index.ts`/`bootstrap.sh` reverted; green restored. `resetSafetyInstalledForTests()` calls removed from every test file that used it (`double-enforcement.test.ts`, `confirm-approve-reissue.test.ts`, `path-canonicalisation.test.ts`) — no longer needed since every invocation now fully registers unconditionally.
+
+### WR-10: CR-02's fail-open half had no test, and the claim that it did was false
+
+**Files modified:** `tests/unit/path-policy.test.ts`, `tests/integration/path-canonicalisation.test.ts`
+**Commit:** `37ce3fb`
+**Applied fix:** `path-canonicalisation.test.ts`'s own docstring claimed the fail-open half of CR-02 "is proven at the paths.ts/policy.ts unit level instead" in `path-policy.test.ts` and `policy-compose.test.ts` — neither file carried a backslash-rooted `HOME`/`PROJECT_ROOT` fixture, and neither distinguished "the bashrc detonation rule fired" from "the containment rule matched by accident, for the wrong reason" (both produce `kind === "block"`, so a kind-only assertion cannot tell them apart — exactly CR-02's own bug shape). `path-policy.test.ts` gains a WR-10 describe block: a genuinely backslash-rooted home/project-root pair built with the file's own `BS`/`winPath` helpers, run through the same `canonicalisePathArg` pipeline `index.ts#toCanonicalRoot` uses, asserting on the block REASON specifically.
+**Before/after verdict:** N/A (this finding is a coverage/honesty gap, not a live code bug — the underlying CR-02 fix in `index.ts` was already correct, verified in iteration 1).
+**Regression test:** The new WR-10 describe block. Verified red (2 failures: the `DETONATION_TARGETS` liveness check and the new reason assertion) by temporarily disabling the bashrc rule's `match` predicate in `paths.ts`; green restored. `path-canonicalisation.test.ts`'s docstring corrected to name the file that actually carries this coverage now.
+
+### WR-11: `approve_ky_command.execute()` had zero test coverage, and `headless-deny.test.ts`'s false coverage claim was unchanged
+
+**Files modified:** `tests/unit/safety-entry.test.ts`, `tests/integration/headless-deny.test.ts`
+**Commit:** `646606e`
+**Applied fix:** `headless-deny.test.ts`'s docstring claimed the confirm/`approve_ky_command` path "is unit-proven in `tests/unit/safety-entry.test.ts` and `tests/integration/double-enforcement.test.ts`" — confirmed false by grepping the whole suite (neither file ever invoked `approve_ky_command`'s `execute()`). `safety-entry.test.ts` gains a WR-11 describe block driving the REGISTERED tool's own `execute()` for the three deny-by-default branches T-04-03 names (`hasUI: false`, an explicit "Deny" selection, `ctx.ui.select()` returning `undefined`), each seeding a real pending approval via `approvals.ts#createPending` so `validate()` succeeds and execution reaches the UI-gating branch under test.
+**Before/after verdict:** All three branches, executed directly: `hasUI=false` → threw, no grant created; `hasUI=true, select→"Deny"` → threw, no grant; `hasUI=true, select→undefined` → threw, no grant. Matches the reviewer's own executed evidence (the code was already correct; only the coverage was missing).
+**Regression test:** The three new WR-11 cases. Verified red (all 3) by temporarily inverting the approval condition in `index.ts` (`choice === APPROVE_CHOICE` instead of `!==`) — exactly the T-04-03 inversion this test guards against; green restored. `headless-deny.test.ts`'s docstring corrected to name the file that actually carries this coverage now.
+
+### WR-12: the hook's grant deferral was not self-limiting — an unconsumed grant could unblock an unbounded number of executions
+
+**Files modified:** `.pi/extensions/safety/approvals.ts`, `.pi/extensions/safety/index.ts`, `tests/unit/approvals.test.ts`, `tests/unit/safety-entry.test.ts`
+**Commit:** `e972e0a`
+**Applied fix:** CR-01's fix made the `tool_call` hook return `undefined` (defer to the wrapper) whenever `peek()` finds an unexpired grant. If the tool that actually executes is not this extension's own wrapper (T-04-08's tool-name collision, or the CR-06 case where the wrapper is never registered), nothing ever calls `consume()`, and every re-issue of that command would run unguarded for the grant's full 10-minute `APPROVAL_TTL_MS`. `approvals.ts` gains a second, short-lived map (`hookDeferred`, keyed by `requestKey`) and `markHookDeferred()`: the first deferral attempt succeeds and stamps a marker with a TTL of seconds (`HOOK_DEFER_TTL_MS`), not minutes; a second attempt before an intervening `consume()` clears the marker returns `false`. The hook now defers only when `peek()` AND `markHookDeferred()` both agree; otherwise it falls through to its normal mint-a-fresh-pending-request path.
+**Before/after verdict:** Drove the real `tool_call` hook three times for the same command with a real grant present and no wrapper `execute()` ever called: issue 1 → block (mints pending); approve directly; issue 2 → defer (`undefined`, CR-01's own property, unaffected); issue 3 → BLOCK post-fix (was `undefined`/deferred-again pre-fix, the unbounded-window bug).
+**Regression test:** `tests/unit/approvals.test.ts` covers `markHookDeferred()` directly (first-call/second-call/TTL-expiry/consume-clears-it). `tests/unit/safety-entry.test.ts`'s WR-12 case drives the real hook three times as described above. Verified red (both files) with `approvals.ts`/`index.ts` reverted; green restored.
+
+## Skipped Issues
+
+None — all 7 in-scope findings (3 blockers, 4 warnings) were fixed. `fix_scope: critical_warning` excluded IN-01..IN-05 (info-tier), and `RB-04-01` in `docs/RUNBOOK.md` was deliberately left untouched (per this run's explicit process rule) — still `OUTSTANDING` in both the summary table and the detail subsection, unchanged.
+
+---
+
+_Fixed: 2026-08-14_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: 2_
+
+---
+---
+
+# Phase 4: Code Review Fix Report — Ad-hoc bug fix (post-iteration-2)
+
+**Fixed at:** 2026-08-14
+**Source:** direct bug report (not a `04-REVIEW.md` finding ID) — "running the
+test suite MUTATES the tracked, committed file `.env.example`", reproduced
+from a clean tree: `git checkout -- .env.example && npx vitest run &&
+git status --porcelain -- .env.example` printed ` M .env.example`.
+**Scope:** one confirmed bug, fixed in the main repo on branch `main`, no
+worktree, per this run's explicit process rule.
+
+**Summary:** 1 bug fixed, 0 skipped.
+
+## Fixed Issues
+
+### BUG-01: the test suite mutated the tracked, committed `.env.example`
+
+**Files modified:** `tests/helpers/bootstrap-repo.ts` (new), `tests/global-teardown.ts` (new), `vitest.config.ts`, `tests/integration/templates-install.test.ts`, `tests/integration/bootstrap-safety-stub.test.ts`, `tests/integration/bootstrap-check-only.test.ts`, `tests/integration/npmrc-ordering.test.ts`
+**Commit:** `aaa4b06`
+
+**Root cause, confirmed and widened beyond the two files named in the bug
+report.** `bin/bootstrap.sh` derives `REPO_ROOT` from its own script location
+(`SCRIPT_DIR/..`, `bin/bootstrap.sh:60-61`) and a full run's
+`write_env_template` (`:533-534`) writes `$REPO_ROOT/.env.example`. The bug
+report named two offending files
+(`tests/integration/templates-install.test.ts`,
+`tests/integration/bootstrap-safety-stub.test.ts`); auditing every
+`join(repoRoot(), "bin", "bootstrap.sh")` call site found **two more** doing
+the exact same thing — `tests/integration/bootstrap-check-only.test.ts` case
+4 and `tests/integration/npmrc-ordering.test.ts` case 3, both full runs
+against `cwd: repoRoot()` with the identical snapshot/restore-around-the-real-file
+pattern. Fixing only the two named files would have left the race (and, worse,
+`bootstrap-safety-stub.test.ts` cases 6/7 had **no restore at all** — a
+full run against the real repo with nothing to undo it, a strictly worse bug
+than the race). All four call sites are fixed identically.
+
+**Applied fix:** `tests/helpers/bootstrap-repo.ts` (`makeBootstrapRepoCopy`)
+copies every `$REPO_ROOT`-relative input `bin/bootstrap.sh` reads (`bin/`,
+`.pi/templates/{env.example,models-template.json,auth-template.json}`,
+`.pi/extensions/safety/` and `.pi/lib/jsonl.ts` — the safety extension's full
+source tree, needed because `bootstrap-safety-stub.test.ts`'s CR-06 cases
+dynamically import the stub's embedded absolute path and expect the real
+extension to load) into a fresh directory nested under this repo's own
+gitignored `tmp/`. Nesting *inside* the repo (rather than under
+`os.tmpdir()`) is load-bearing: Node's module resolution walks up ANCESTOR
+directories only, so a copy outside the repo tree would break the safety
+extension's own npm imports (`@earendil-works/pi-ai`, `unbash`, …); nesting
+under `<repoRoot>/tmp/<unique>/` keeps the real `node_modules` an ancestor of
+every copied file. Every full-bootstrap-run test now spawns `sh
+<copy>/bin/bootstrap.sh` with `cwd: <copy root>` instead of the real repo, so
+`SCRIPT_DIR/..` resolves to the throwaway copy and `.env.example` writes land
+there. `--check-only`/`--assert-hardening` runs (which never call
+`write_env_template`) are left pointed at the real repo — no copy needed,
+confirmed by reading `run_check_only`/`run_assert_hardening` in
+`bin/bootstrap.sh`. The now-dead snapshot/restore scaffolding (`ENV_EXAMPLE`
+constants, `withEnvExampleRestored`, the describe-level `envBefore`/`afterEach`
+pair) was deleted from all four files rather than left inert.
+
+**Regression guard:** `tests/global-teardown.ts`, wired via
+`vitest.config.ts`'s `globalSetup`. Snapshots which tracked files
+`git status --porcelain` reports as modified once, before any test file
+runs; the returned teardown re-snapshots after the whole suite finishes and
+fails if any path is modified at teardown that was clean at setup (a diff,
+not a bare "must be empty" — a developer's own in-progress uncommitted edit
+must never trip this). `??` (untracked) entries are excluded on both sides:
+the throwaway copies above land under gitignored `tmp/` and are irrelevant
+here; a *committed* file silently changing content is the failure mode this
+guard exists for.
+
+**Proof it is not tautological:** temporarily added a throwaway test that
+appended a byte to `CLAUDE.md` (a real tracked file) and an empty string to
+`package.json` (no actual content change). `npx vitest run
+tests/unit/zzz-proof-dirty.test.ts` passed its own assertion but the run's
+`error during close` failed on global teardown, reporting exactly
+`CLAUDE.md` as newly dirtied and correctly saying nothing about
+`package.json` (whose content never actually changed, so `git status`
+never listed it). Removed the throwaway test and ran `git checkout --
+CLAUDE.md` to restore before continuing.
+
+**Verification run (all four proof requirements):**
+- `git checkout -- .env.example && npx vitest run && git status --porcelain`
+  → clean: only this fix's own modified/new files listed, `.env.example`
+  absent from the output.
+- Ran the full suite **four** times consecutively in this session (the
+  race needs more than one clean run to disprove): every run green, every
+  run's `git status --porcelain` identical and free of `.env.example`.
+- Every run: **1152 tests / 66 files**, matching the stated baseline exactly
+  (no test count drift). `npm run typecheck` clean on every check.
+- Regression guard added and proven non-vacuous (see above).
+
+## Skipped Issues
+
+None.
+
+---
+
+_Fixed: 2026-08-14_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: ad-hoc (post-2)_
