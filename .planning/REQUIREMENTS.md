@@ -73,7 +73,7 @@
 ### Routing
 
 - [x] **ROUTE-01**: An explicit role→model map covers executor, planner, reviewer, advisor, vision, and summariser — no auto-classification
-- [ ] **ROUTE-02**: `/cheap`, `/balanced`, `/max` swap the whole role→model map via `pi.setModel()` from a command after `await ctx.waitForIdle()`, which removes the race **[FAUX]**
+- [x] **ROUTE-02**: `/cheap`, `/balanced`, `/max` swap the whole role→model map via `pi.setModel()` from a command after `await ctx.waitForIdle()`, which removes the race **[FAUX]**
 - [ ] **ROUTE-03**: `/escalate` pulls a stronger model for one invocation, and the elevated state is visible and sticky until cleared **[FAUX]**
 - [~] **ROUTE-04**: Single-shot roles (review, advisor, vision, summarise) run through `callModel()` → `ctx.modelRegistry.complete()` with per-call reasoning effort, not by mutating session state **[FAUX]** — *the pure plan/dispatch pipeline (`resolveRoute`, `pickConfiguredCandidate`, `planRoleCall`, `runSingleShotRole`) is built and proven at the unit level (`tests/unit/routing-dispatch.test.ts`, plan 05-04): dispatch through `callModel()`/`callWithFallback()`, per-call reasoning effort, no session mutation on the code path. The `[FAUX]` session-level proof — a faux session actually driving `runSingleShotRole` and reading back the wire/turns records — is `tests/integration/single-shot-roles.test.ts`, deferred to plan 06 by 05-04's own plan text*
 - [x] **ROUTE-05**: Roles needing a tool loop run as subagents **[FAUX]**
@@ -274,7 +274,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-16 | Phase 1 | Pending — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING — `gh auth logout` has not been run on the work laptop. Not completable from this machine |
 | SAFE-17 | Phase 4 | Complete — plan 04-11 |
 | ROUTE-01 | Phase 5 | Complete |
-| ROUTE-02 | Phase 5 | Pending |
+| ROUTE-02 | Phase 5 | Complete |
 | ROUTE-03 | Phase 5 | Pending |
 | ROUTE-04 | Phase 5 | Partial — plan pipeline complete (05-04); [FAUX] session proof deferred to plan 06 |
 | ROUTE-05 | Phase 5 | Complete |
