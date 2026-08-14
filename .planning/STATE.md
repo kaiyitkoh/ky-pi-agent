@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-05-PLAN.md
-last_updated: "2026-08-14T06:07:57.671Z"
+stopped_at: Completed 05-06-PLAN.md
+last_updated: "2026-08-14T06:19:24.475Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 49
+  completed_plans: 50
   percent: 36
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 6 of 12
+Plan: 7 of 12
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 89%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -112,6 +112,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 05 P03 | ~30m | 3 tasks | 4 files |
 | Phase 05 P04 | ~15min | 2 tasks | 2 files |
 | Phase 05 P05 | ~25min | 2 tasks | 2 files |
+| Phase 05 P06 | 35m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -268,6 +269,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-05: the write target is the GLOBAL getAgentDir()/settings.json, never the project-scoped git-tracked .pi/settings.json -- resolves 05-RESEARCH.md Assumption A1 per the standing policy
 - [Phase 05]: 05-05: agentOverridesFor builds a structural Model<Api> fixture from a candidate's {provider,id} rather than a registry lookup -- sound because the only need field ever set is usesToolLoop:true, so only guardRoute's ROUTE-08 deny-list block can fire through this call path
 - [Phase 05]: 05-05: agentOverridesFor gained an injectable AgentOverridesForOptions seam (production never passes it) so the guard-blocked fixture test could avoid mutating the shared ROLE_MAP module singleton other routing tests also import
+- [Phase 05]: 05-06: qoder-loopback.ts is a purpose-built sibling to loopback.ts, not a reuse -- Qoder's id:/event:/data: envelope is a different shape from OpenAI-completions SSE
+- [Phase 05]: 05-06: the split-frame proof forces a genuine two-read arrival via a 20ms delay between two res.write() calls on a real socket, not a synthetic string split
+- [Phase 05]: 05-06: the session id threaded through steps 2/3 is read back from the client's own outgoing URL, never from the request body of step 1 -- the request body is what the client sent, not what the server's response contained
 
 ### Pending Todos
 
@@ -315,8 +319,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T06:07:57.660Z
-Stopped at: Completed 05-05-PLAN.md
+Last session: 2026-08-14T06:19:24.464Z
+Stopped at: Completed 05-06-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

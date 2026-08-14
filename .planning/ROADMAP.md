@@ -246,7 +246,7 @@ Plans:
 
 - [x] 05-04-PLAN.md — `routing/modes.ts`: state, candidate resolution, guard precedence and single-shot dispatch through the chokepoint (ROUTE-01, ROUTE-04)
 - [x] 05-05-PLAN.md — `routing/agent-overrides.ts`: the validated `settings.subagents.agentOverrides` read-modify-write (ROUTE-05)
-- [ ] 05-06-PLAN.md — the Qoder loopback HTTP+SSE fixture and ROUTE-11's offline proxy test (ROUTE-11)
+- [x] 05-06-PLAN.md — the Qoder loopback HTTP+SSE fixture and ROUTE-11's offline proxy test (ROUTE-11)
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
