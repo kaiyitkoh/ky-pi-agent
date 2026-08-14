@@ -264,3 +264,62 @@ advanced from `2026-08-14T17:20:03Z` at context-generation time to
 `2026-08-14T19:08:02Z` at this plan's execution time — under two hours
 later). Do not re-cite a download count as evidence of anything in this
 repository.
+
+---
+
+## Subagent capability evidence
+
+EXT-03 (background execution without blocking) and EXT-04 (mid-run steering
+without killing) are claims about **third-party runtime behaviour**. Nothing
+in this section was executed — no `pi install`, no credentials, no spawned
+process. Every row below is a citation read directly from the unpacked
+`pi-subagents@0.49.0` tarball (`npm pack pi-subagents@0.49.0` + `tar -xf`,
+under this session's scratchpad, tarball removed after reading), re-read in
+this session rather than carried over from `07-RESEARCH.md`. `tests/unit/subagent-capabilities.test.ts`
+binds every `pi-subagents` row's Version cell to whatever `.pi/settings.json`'s
+`packages[]` currently pins — the row goes stale, not silently correct, the
+moment that pin moves without a re-read.
+
+**A correction, stated plainly.** This plan's own premise, as originally
+drafted, read "an agent file exists, `agentScope` loads it" — implying
+`agentScope` is a `.pi/settings.json` key this repo must configure. Plan
+07-09 read the real `pi-subagents@0.49.0` source and found that is false:
+`agentScope` is not a settings key anywhere in `ExtensionConfig`
+(`src/shared/types.ts:1902-1966`, every field enumerated) — it exists only as
+a per-tool-call parameter on the `subagent` tool's own schema
+(`src/extension/schemas.ts:333`), resolved by `resolveExecutionAgentScope()`
+(`src/agents/agent-scope.ts:3-6`) to `"both"` whenever a caller omits it.
+`.pi/agents/planner.md` (shipped by plan 07-04, tracked, carries no `model:`
+key per that plan's own enforced rule) is therefore already discovered by
+`pi-subagents`' own per-call default — no `.pi/settings.json` write exists to
+make, and none was made. What follows binds the third-party mechanism to the
+pin; the repo's own half (the tracked agent file, and the pinned `packages[]`
+entry) is asserted separately by `tests/unit/subagent-capabilities.test.ts`'s
+Binding 4, never conflated with the citations below.
+
+| Requirement | Mechanism | Package | Version | Evidence | What this proves | What this does NOT prove |
+|---|---|---|---|---|---|---|
+| EXT-01 | Agent frontmatter's `thinking` key is read into the resolved per-agent run config | pi-subagents | 0.49.0 | src/agents/agents.ts:1644 | The `thinking: high` line in `.pi/agents/planner.md` is a real, parsed frontmatter field, not inert prose | This mechanism was read from source and never executed; nothing here shows the planner subagent actually receives `thinking:"high"` on a real run. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-01 | `agentOverrides.model` (settings-level routing) only fills in a model when the agent's own frontmatter declares none | pi-subagents | 0.49.0 | src/agents/agents.ts:1155 | Confirms why `.pi/agents/planner.md` deliberately carries no `model:` key: Phase 5's `/cheap`/`/balanced`/`/max`/`/escalate` routing would otherwise be silently permanently overridden by a frontmatter pin | This mechanism was read from source and never executed; nothing here shows a live `agentOverrides` write actually reaches the planner subagent's resolved model at runtime. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-01 | `subagent`, `subagent_wait`, `contact_supervisor` and `intercom` are registered unconditionally at extension init / `session_start` — no config key gates any of the four | pi-subagents | 0.49.0 | src/intercom/native-supervisor-channel.ts:769 | The tool-count baseline (below) is not reducible by configuration — these four are always present the moment `pi-subagents` loads | This mechanism was read from source and never executed; nothing here shows these four tools actually appear in a real model's active tool list at runtime. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-03 | `async` is an optional boolean on the `subagent` tool's own parameter schema | pi-subagents | 0.49.0 | src/extension/schemas.ts:327 | The tool accepts a request to run in the background rather than block the calling turn | This mechanism was read from source and never executed; nothing here shows a real model ever sets `async:true` or that doing so behaves as described. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-03 | A dedicated `subagent_wait` tool is registered unconditionally alongside `subagent`, giving the model a separate call to block on background completion later | pi-subagents | 0.49.0 | src/extension/index.ts:623 | Background execution and collecting its result are two distinct tool calls, not one tool that silently blocks internally | This mechanism was read from source and never executed; nothing here shows `subagent_wait` is ever actually invoked or that it blocks as documented. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-03 | An async dispatch launches a **detached** Node child process (`spawn(..., { detached: true })`), which itself execs a real `pi --mode json -p` child process | pi-subagents | 0.49.0 | src/runs/background/async-execution.ts:496 | "Does not block" is not a description, it is a process-tree fact: the spawning call does not `await` the child, and the child is detached from the parent's own event loop. `src/runs/background/subagent-runner.ts:1340` (`baseArgs: ["--mode","json","-p"]`) is the concrete real-`pi`-process evidence this spawns | This mechanism was read from source and never executed; nothing here shows a detached process actually survives, actually runs a real model turn, or actually writes a usable result on this or any machine. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-03 | The async call's own `AgentToolResult` is returned (with `runId`/`asyncId` in `details`) before the spawned work finishes; the actual output is written to `DIRS.results/<id>.json` and collected later | pi-subagents | 0.49.0 | src/runs/background/async-execution.ts:1657 | This is the concrete mechanics of "non-blocking": the calling turn receives a start acknowledgement immediately, not the child's eventual output; `subagent_wait` (or the result watcher registered at `src/extension/index.ts:444-455`) is the separate later read | This mechanism was read from source and never executed; nothing here shows the calling turn actually continues productively, or that the eventual result actually arrives, on a real run. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-04 | The `steer` action's `mode` parameter (`steer`/`follow_up`/`auto`) is documented as interrupting execution "at the next safe point", named as a distinct delivery timing from `follow_up`/`auto`, and is a wholly separate action from `interrupt`/`stop` | pi-subagents | 0.49.0 | src/extension/schemas.ts:284 | The package's own schema states the property this requirement needs: a steer is a scheduled, safe-point message delivery, not a kill signal | This mechanism was read from source and never executed; nothing here shows a real running child actually receives and acts on a steer message rather than, say, silently ignoring it. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-04 | The file-based control inbox defines `{ type: "steer" }` as a request shape structurally disjoint from `{ type: "interrupt" }` / `{ type: "stop" }` / `{ type: "timeout" }` | pi-subagents | 0.49.0 | src/runs/background/control-channel.ts:69 | Steering and termination are not two names for the same code path — they are different message types carried through the same portable inbox (added specifically because Windows cannot deliver `SIGUSR2`/`SIGBREAK` cross-process; the inbox's own header comment names this) | This mechanism was read from source and never executed; nothing here shows the running child process actually distinguishes these message types correctly at runtime. The live check is `RB-07-01` (OUTSTANDING). |
+| EXT-04 | `deliverSteerRequest` only enqueues a steer message into a step's own inbox (`enqueueStepSteer`) when that step's status is **already `"running"`**; a step that is not running gets a `"failed"` steering target, and the run's own status is never flipped to a terminal state as a side effect of delivering a steer | pi-subagents | 0.49.0 | src/runs/background/subagent-runner.ts:2679 | This is what distinguishes steering from abort at the code level: the success path for delivery requires the child to still be running and leaves it running; `interrupt`/`stop` are separate request types (see the row above) that this code path never invokes | This mechanism was read from source and never executed; nothing here shows a real child actually keeps running and actually incorporates a delivered steer message into its next turn. The live check is `RB-07-01` (OUTSTANDING). |
+
+**The boundary, stated once more in plain words.** The ten rows above
+establish two things and nothing further: (1) the cited mechanisms exist in
+`pi-subagents@0.49.0`'s own source, read in this session, and (2) this
+repository's own composition (`.pi/agents/planner.md`, tracked, no `model:`
+key; `.pi/settings.json`'s `packages[]` pinning `pi-subagents@0.49.0`) is real
+and machine-asserted. They establish **nothing** about what actually happens
+when a real model calls the `subagent` tool with `async:true` against a real
+provider, or sends a real `steer` action at a real running child — that is
+runtime behaviour, and runtime behaviour was not observed anywhere in this
+plan. The live check for all of it is `RB-07-01` (written by plan 07-13,
+OUTSTANDING), which composes this evidence with the existing `RB-02-01` and
+`RB-03-0x` legs into the one end-to-end smoke ritual this project's standing
+policy requires before any of this is claimed to work.
