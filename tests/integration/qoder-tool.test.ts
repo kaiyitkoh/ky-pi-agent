@@ -46,6 +46,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import {
 	DEFAULT_QODER_BASE_URL,
+	MAX_TASK_CHARS,
 	QODER_AGENT_ID_ENV,
 	QODER_BASE_URL_ENV,
 	QODER_ENVIRONMENT_ID_ENV,
@@ -300,6 +301,54 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						tool.execute("call-1", { task: "summarise the open PRs" }, undefined, undefined, ctx),
 					).rejects.toThrow(/no UI bound/);
 
+					expect(loop.received).toHaveLength(0);
+				} finally {
+					await handle.dispose();
+				}
+			});
+		});
+	});
+
+	it("WR-04: refuses an over-limit task BEFORE the confirmation prompt -- ctx.ui.select is never called", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({}, async (loop) => {
+				clearQoderEnv();
+				setConfiguredQoderEnv(loop.baseUrl);
+
+				const handle = await createFauxSession({
+					extensionSource: EXTENSION_SOURCE,
+					responses: [fauxAssistantMessage("unused", { stopReason: "stop" })],
+				});
+				try {
+					const tool = handle.session.extensionRunner.getToolDefinition("qoder_delegate");
+					expect(tool).toBeDefined();
+					if (tool === undefined) {
+						return;
+					}
+
+					const ctx = handle.session.extensionRunner.createCommandContext();
+					let selectCallCount = 0;
+					withStubbedUI(ctx, {
+						hasUI: true,
+						select: async () => {
+							selectCallCount += 1;
+							return "Delegate to Qoder";
+						},
+					});
+
+					const overLimitTask = "x".repeat(MAX_TASK_CHARS + 1);
+					await expect(
+						tool.execute("call-1", { task: overLimitTask }, undefined, undefined, ctx),
+					).rejects.toThrow(new RegExp(`1\\.\\.${MAX_TASK_CHARS} characters`));
+
+					// THE LOAD-BEARING ASSERTION: WR-04's whole point is that the
+					// validation now runs BEFORE the human decision -- an unbounded
+					// task must never even reach ctx.ui.select, let alone the network.
+					expect(
+						selectCallCount,
+						"ctx.ui.select was called for an over-limit task -- WR-04's validation must run " +
+							"BEFORE the confirmation prompt, not after",
+					).toBe(0);
 					expect(loop.received).toHaveLength(0);
 				} finally {
 					await handle.dispose();

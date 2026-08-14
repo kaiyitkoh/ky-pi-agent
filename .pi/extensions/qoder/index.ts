@@ -64,7 +64,10 @@
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { delegateTask, resolveQoderConfig } from "./client.ts";
+import { delegateTask, MAX_TASK_CHARS, resolveQoderConfig } from "./client.ts";
+
+/** How much of `task` is ever shown inside the confirmation dialog. See WR-04. */
+const CONFIRM_EXCERPT_CHARS = 500;
 
 /**
  * `task` is the only required parameter. Every added field is per-request
@@ -122,6 +125,31 @@ export default function (pi: ExtensionAPI): void {
 				throw new Error(configResult.message);
 			}
 
+			// WR-04: ASVS V5 input validation, moved to the TOOL BOUNDARY -- BEFORE
+			// the confirmation prompt below. `client.ts#delegateTask` already
+			// enforces this same bound, but it used to run AFTER the human
+			// decision, so an unbounded, model-controlled `task` was interpolated
+			// into `ctx.ui.select`'s title first. Two consequences that made the
+			// human decision -- the more security-relevant of the two checks --
+			// LESS safe than the network call behind it: (1) a megabyte-long or
+			// newline-stuffed task floods the dialog, pushing the bypass warning
+			// below out of view, so the user approves a prompt whose warning they
+			// never saw; (2) the length bound was documented as protecting
+			// "before sending anything", which stopped being true of the human
+			// decision the moment WR-11 added it. Refusing here, before `ctx.ui.
+			// select` is ever called, closes both.
+			const task = params.task.trim();
+			if (task.length === 0 || task.length > MAX_TASK_CHARS) {
+				throw new Error(
+					`Qoder delegate refused: task must be 1..${MAX_TASK_CHARS} characters after trimming ` +
+						`(got ${task.length}).`,
+				);
+			}
+			const excerpt =
+				task.length > CONFIRM_EXCERPT_CHARS
+					? `${task.slice(0, CONFIRM_EXCERPT_CHARS)}… (${task.length} chars total)`
+					: task;
+
 			// WR-11: a human in the loop, mirroring `safety/index.ts#
 			// registerApprovalTool`'s exact deny-by-default shape. This tool's
 			// OWN description already states it bypasses Pi's own tools, this
@@ -132,13 +160,15 @@ export default function (pi: ExtensionAPI): void {
 			// failure mode this harness exists to prevent. `undefined` (no UI
 			// bound -- headless/`-p`) and `hasUI === false` both refuse via the
 			// SAME branch below, never via a separately-written headless
-			// allow-path.
+			// allow-path. WR-04: the bypass warning comes FIRST and the (now
+			// bounded) task excerpt LAST, so a long task can push only its own
+			// tail out of view, never the warning the user needs to read first.
 			const choice = ctx.hasUI
 				? await ctx.ui.select(
-						`Delegate this task to Qoder's own hosted agent loop?\n\n  ${params.task}\n\n` +
-							"This bypasses Pi's own tools, this project's AGENTS.md and system prompt, the " +
-							"Phase 4 safety guard and the Phase 2 wire inspector -- Qoder's own agent runs " +
-							"unsupervised inside its own container with its own file/shell tools.",
+						"Delegate this task to Qoder's own hosted agent loop? This bypasses Pi's own tools, " +
+							"this project's AGENTS.md and system prompt, the Phase 4 safety guard and the " +
+							"Phase 2 wire inspector -- Qoder's own agent runs unsupervised inside its own " +
+							`container with its own file/shell tools.\n\nTask:\n  ${excerpt}`,
 						[DELEGATE_CHOICE, CANCEL_CHOICE],
 					)
 				: undefined;
@@ -153,7 +183,7 @@ export default function (pi: ExtensionAPI): void {
 
 			const result = await delegateTask({
 				config: configResult.config,
-				task: params.task,
+				task,
 				cwd: ctx.cwd,
 				signal,
 				onThinking: onUpdate
