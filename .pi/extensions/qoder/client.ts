@@ -636,6 +636,14 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	// this file cannot validate is an id this file should refuse to use, not
 	// merely escape and hope the peer's own routing tolerates.
 	if (!/^[A-Za-z0-9._-]{1,128}$/.test(sessionId)) {
+		// WR-06: a terminal transcript record before this throw, the same gap
+		// WR-06 originally closed for the stream-open step. Without it the
+		// transcript ends at "qoder.session.create.response: 200" with nothing
+		// following, and the operator following RB-05-01 step 4 has no record of
+		// WHY the sequence stopped. The offending id is untrusted network input
+		// and is never echoed here -- the thrown Error (surfaced to the model)
+		// already carries it for the caller that needs it.
+		writeQoderTranscript(cwd, { event: "qoder.delegate.failed", cause: "malformed-session-id" });
 		throw new Error(
 			`Qoder delegate: session create returned a session id that does not look like one ` +
 				`(${JSON.stringify(sessionId)}) -- refusing to splice it into a request path.`,
@@ -702,6 +710,16 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 			const remaining = inactivityTimeoutMs - (Date.now() - lastProgressAt);
 			if (remaining <= 0) {
 				await cancelReaderQuietly(reader, "inactivity timeout");
+				// WR-06: a terminal transcript record before this throw -- see the
+				// malformed-session-id branch above for why this gap matters.
+				// Without it the transcript ends at "qoder.stream.open.response: 200"
+				// with nothing following a stall.
+				writeQoderTranscript(cwd, {
+					event: "qoder.delegate.failed",
+					cause: "inactivity-timeout",
+					afterMs: inactivityTimeoutMs,
+					textChars: folded.text.length,
+				});
 				throw new Error(
 					`Qoder delegate: the event stream produced no bytes for ${inactivityTimeoutMs}ms -- ` +
 						"treating the connection as stalled rather than hanging indefinitely.",
@@ -730,6 +748,13 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 				// progress"), which would mask this actionable error behind a
 				// confusing second one. cancel() unblocks that pending read.
 				await cancelReaderQuietly(reader, "inactivity timeout");
+				// WR-06: same terminal record as the pre-loop timeout check above.
+				writeQoderTranscript(cwd, {
+					event: "qoder.delegate.failed",
+					cause: "inactivity-timeout",
+					afterMs: inactivityTimeoutMs,
+					textChars: folded.text.length,
+				});
 				throw new Error(
 					`Qoder delegate: the event stream produced no bytes for ${inactivityTimeoutMs}ms -- ` +
 						"treating the connection as stalled rather than hanging indefinitely.",

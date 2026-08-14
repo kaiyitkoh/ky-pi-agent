@@ -549,6 +549,24 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 					).toBeLessThan(splitDelayMs);
 				},
 			);
+
+			// WR-06: a terminal transcript record for the inactivity-timeout path.
+			// Before this fix, the transcript ended at
+			// "qoder.stream.open.response: 200" with nothing following a stall --
+			// the same gap WR-06 originally closed for the stream-open step itself.
+			const dir = logDir(cwd);
+			const files = logFilesIn(dir);
+			const qoderFile = files.find((name) => name.startsWith("qoder-"));
+			expect(qoderFile, `no qoder-*.jsonl transcript found under ${dir}`).toBeDefined();
+			const { records } = readTornSafe(join(dir, qoderFile as string));
+			const failedRecords = (records as { event?: unknown; cause?: unknown }[]).filter(
+				(r) => r.event === "qoder.delegate.failed",
+			);
+			expect(
+				failedRecords,
+				"no qoder.delegate.failed record was written for the inactivity-timeout path",
+			).toHaveLength(1);
+			expect(failedRecords[0]?.cause).toBe("inactivity-timeout");
 		});
 	});
 
@@ -606,6 +624,30 @@ describe("qoder-delegate -- WR-08: a malformed server-supplied session id is ref
 				expect(loop.received).toHaveLength(1);
 				expect(loop.received[0]?.url).toBe("/sessions");
 			});
+
+			// WR-06: a terminal transcript record for the malformed-session-id
+			// path -- the same gap WR-06 originally closed for the stream-open
+			// step. Before this fix the transcript ended at
+			// "qoder.session.create.response: 200" with nothing following.
+			const dir = logDir(cwd);
+			const files = logFilesIn(dir);
+			const qoderFile = files.find((name) => name.startsWith("qoder-"));
+			expect(qoderFile, `no qoder-*.jsonl transcript found under ${dir}`).toBeDefined();
+			const { records } = readTornSafe(join(dir, qoderFile as string));
+			const failedRecords = (records as { event?: unknown; cause?: unknown }[]).filter(
+				(r) => r.event === "qoder.delegate.failed",
+			);
+			expect(
+				failedRecords,
+				"no qoder.delegate.failed record was written for the malformed-session-id path",
+			).toHaveLength(1);
+			expect(failedRecords[0]?.cause).toBe("malformed-session-id");
+			// Never the offending id verbatim, even in the failure record -- it is
+			// untrusted network input and this file's own module docstring holds
+			// the transcript to the "never the token, never Authorization" bar;
+			// WR-06 extends the same discipline to this new record.
+			const serialized = JSON.stringify(records);
+			expect(serialized).not.toContain(maliciousId);
 		});
 	});
 
