@@ -201,6 +201,11 @@ export function isRunArmed(): boolean {
 	return runSlot() !== undefined;
 }
 
+/** The cwd the armed run was armed against (WR-03), or `undefined` when no run is armed. */
+export function armedCwd(): string | undefined {
+	return runSlot()?.cwd;
+}
+
 /**
  * Compute the verdict for the armed run, write exactly one evidence row,
  * disarm, and return the verdict. Returns `undefined` when no run is armed.

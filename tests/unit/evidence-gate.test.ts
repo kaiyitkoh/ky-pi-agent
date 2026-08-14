@@ -26,7 +26,14 @@ import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { currentSha } from "../../.pi/extensions/safety/git.ts";
-import { gateCompletion, type EvidenceRecord } from "../../.pi/extensions/workflows/evidence.ts";
+import {
+	armedCwd,
+	endRun,
+	gateCompletion,
+	recordToolResult,
+	startRun,
+	type EvidenceRecord,
+} from "../../.pi/extensions/workflows/evidence.ts";
 import { commitFile, headSha, makeTempRepo } from "../helpers/git.ts";
 
 const tempDirs: string[] = [];
@@ -157,6 +164,22 @@ describe("GATE-07 -- gateCompletion", () => {
 		// The fixture itself really does contain the string the reason must not echo,
 		// so the negative assertion above is meaningful rather than vacuous.
 		expect(FABRICATED_TRANSCRIPT).toContain("exit 0");
+	});
+});
+
+describe("WR-03: armedCwd() reports the cwd the run was armed against", () => {
+	it("returns undefined before any startRun(), the exact armed cwd once armed, and undefined again once disarmed", () => {
+		expect(armedCwd(), "no run armed yet").toBeUndefined();
+
+		startRun(repo, shaA);
+		expect(
+			armedCwd(),
+			"armedCwd() must return the exact cwd startRun() was called with, not some other ambient cwd",
+		).toBe(repo);
+
+		recordToolResult({ ts: Date.now(), toolName: "bash", command: "echo hi", isError: false, sha: shaB });
+		endRun(shaB);
+		expect(armedCwd(), "endRun() disarms -- armedCwd() must go back to undefined").toBeUndefined();
 	});
 });
 

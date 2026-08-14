@@ -56,17 +56,17 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
 		budget: 300,
-		why: "CR-01 fix: gateCompletion gained a baseSha param and a new branch rejecting a run in which HEAD " +
-			"never moved (no commit landed) -- measured 293 raw lines 2026-08-14 (up from 279), rounded up to the next ten",
+		why: "CR-01 fix (baseSha param + no-commit branch) plus WR-03's armedCwd() export -- measured 298 " +
+			"raw lines 2026-08-14 (up from 279), rounded up to the next ten",
 	},
 ];
 
 /**
  * D-11's ratchet: measured total of `.pi/extensions/workflows/**\/*.ts` was
- * 367 raw lines on 2026-08-14 (74 + 293, by `countRawLines`) after CR-01's
- * fix, rounded up to the next multiple of ten.
+ * 375 raw lines on 2026-08-14 (77 + 298, by `countRawLines`) after CR-01/
+ * WR-01/WR-02/WR-03, rounded up to the next multiple of ten.
  */
-const WORKFLOWS_DIR_TOTAL_BUDGET = 370;
+const WORKFLOWS_DIR_TOTAL_BUDGET = 380;
 
 /** Raw line count, no stripping of any kind -- decision D-1 above. */
 function countRawLines(relPath: string): number {

@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { endRun, isRunArmed, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
+import { armedCwd, endRun, isRunArmed, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
 
 export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("quick", {
@@ -56,7 +56,7 @@ export default function (pi: ExtensionAPI): void {
 					toolName: event.toolName,
 					toolInput: event.input,
 					isError: event.isError,
-					sha: currentSha(ctx.cwd),
+					sha: currentSha(armedCwd() ?? ctx.cwd),
 				}),
 			);
 		} catch {
@@ -66,7 +66,7 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.on("agent_end", (_event, ctx) => {
 		try {
-			const verdict = endRun(currentSha(ctx.cwd));
+			const verdict = endRun(currentSha(armedCwd() ?? ctx.cwd));
 			if (verdict === undefined) return;
 			ctx.ui.notify(verdict.ok ? `quick: evidence accepted at ${verdict.sha}` : verdict.reason, verdict.ok ? "info" : "error");
 		} catch {
