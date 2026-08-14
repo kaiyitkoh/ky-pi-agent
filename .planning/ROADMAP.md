@@ -285,8 +285,16 @@ Plans:
 **Plans**: 4 plans in 3 waves
 
 Plans:
+**Wave 1**
+
 - [ ] 06-01-PLAN.md — GATE-07 core: currentSha(), the pure evidence-gate predicate, run state, real-SHA unit tests
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 06-02-PLAN.md — FLOW-01: /quick in <=80 raw lines, plus docs/WORKFLOWS.md
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 06-03-PLAN.md — FLOW-11: the workflow line-budget registry, enforced both directions with a directory aggregate
 - [ ] 06-04-PLAN.md — the seam proof: break Phase 5, break Phase 4, reject fabricated evidence, accept a real guarded commit
 

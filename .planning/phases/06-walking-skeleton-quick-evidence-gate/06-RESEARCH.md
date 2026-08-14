@@ -180,9 +180,9 @@ No seam was found to be genuinely disconnected — every composed piece (routing
 
 **Confirmed, not assumed:** the `runSingleShotRole` executor restriction, the `isError` structural field, the `RoutingTestOptions` scope, the missing SHA reader, and the prompt-template-vs-command distinction were all read directly from source, not inferred.
 
-## Open Questions
+## Open Questions (RESOLVED)
 
-1. **Does `/quick` need a nested `callModel` call at all, or does it end with the ordinary agent turn?**
+1. **RESOLVED — see `06-02-PLAN.md` decision D-4.** `/quick` uses `planRoleCall` as a *pre-flight* and hands the work turn to the ordinary session prompt loop via `pi.sendUserMessage`; it makes no nested `callModel` call. **Does `/quick` need a nested `callModel` call at all, or does it end with the ordinary agent turn?**
    - What we know: `runSingleShotRole` cannot serve `executor`; the four single-shot roles are reviewer/advisor/vision/summariser.
    - What's unclear: whether the walking-skeleton's own definition of "trivial task, prompt to atomic commit" implies `/quick` itself prompts the model (needing no nested call — the surrounding session already has a prompt loop) or merely sets up state and lets the user's next message do the work.
    - Recommendation: the plan should state explicitly which of these `/quick` is, since it changes whether `callModel`/diagnostics logging is even reached by this command directly.
