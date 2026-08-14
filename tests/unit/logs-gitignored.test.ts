@@ -35,6 +35,7 @@ import {
 } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { TURNS_LOG_BASE, WIRE_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
 import { writeAuditRow } from "../../.pi/extensions/safety/audit.ts";
+import { writeEvidenceRow } from "../../.pi/extensions/workflows/evidence.ts";
 import { isIgnored } from "../helpers/git.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
 
@@ -58,6 +59,9 @@ const MUST_BE_IGNORED = [
 	// declared-rules table does not notice a stream nobody typed in.
 	".pi/logs/audit-2026-08-14.jsonl",
 	".pi/logs/audit-2026-08-14.1.jsonl",
+	// GATE-07 (WR-06) — same reasoning, for the evidence stream Phase 6 added.
+	".pi/logs/evidence-2026-08-14.jsonl",
+	".pi/logs/evidence-2026-08-14.1.jsonl",
 ] as const;
 
 describe("DIAG-07 — the declared log paths are not committable", () => {
@@ -113,6 +117,20 @@ describe("DIAG-07 / SAFE-14 — the paths the writer ACTUALLY produced are ignor
 					cwd,
 					verdict: i % 2 === 0 ? "allow" : "block",
 					reason: filler,
+				});
+				// GATE-07 (WR-06) — the evidence stream shares the same producedPaths()
+				// set (same globalThis-keyed writer), same reasoning as the audit row
+				// above. Not a real SHA on purpose (repo policy: no 40-hex fixture
+				// literal in any test file) -- writeEvidenceRow's own fields are plain
+				// strings and this test asserts on the PATH written, never on the row's
+				// own SHA content.
+				writeEvidenceRow(cwd, {
+					verdict: i % 2 === 0 ? "accept" : "reject",
+					reason: filler,
+					baseSha: "not-a-real-sha-base",
+					headSha: "not-a-real-sha-head",
+					recordCount: 1,
+					tools: ["bash"],
 				});
 			}
 

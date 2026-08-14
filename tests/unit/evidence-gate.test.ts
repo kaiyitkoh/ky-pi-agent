@@ -30,6 +30,8 @@ import {
 	armedCwd,
 	endRun,
 	gateCompletion,
+	isRunArmed,
+	recordFromToolResult,
 	recordToolResult,
 	startRun,
 	type EvidenceRecord,
@@ -180,6 +182,62 @@ describe("WR-03: armedCwd() reports the cwd the run was armed against", () => {
 		recordToolResult({ ts: Date.now(), toolName: "bash", command: "echo hi", isError: false, sha: shaB });
 		endRun(shaB);
 		expect(armedCwd(), "endRun() disarms -- armedCwd() must go back to undefined").toBeUndefined();
+	});
+});
+
+describe("WR-06 -- recordFromToolResult never copies a value body, and redacts what it does copy", () => {
+	it("copies only `command`/`path`, never any other field on toolInput (e.g. a file body)", () => {
+		const SECRET_BODY = "AKIAABCDEFGHIJKLMNOP and the rest of a file nobody should see";
+		const record = recordFromToolResult({
+			toolName: "write",
+			toolInput: { path: "x.ts", content: SECRET_BODY },
+			isError: false,
+			sha: shaB,
+		});
+		expect(record.command).toBe("x.ts");
+		expect(JSON.stringify(record)).not.toContain(SECRET_BODY);
+		expect(JSON.stringify(record)).not.toContain("AKIAABCDEFGHIJKLMNOP");
+	});
+
+	it("redacts a secret-shaped command before it is ever stored", () => {
+		const record = recordFromToolResult({
+			toolName: "bash",
+			toolInput: { command: "curl -H 'Authorization: Bearer sk-abcdefghijklmnopqrstuvwx' https://x" },
+			isError: false,
+			sha: shaB,
+		});
+		expect(record.command).not.toContain("sk-abcdefghijklmnopqrstuvwx");
+		expect(record.command).toContain("[redacted:");
+	});
+});
+
+describe("WR-06 -- run-state machinery (startRun / recordToolResult / isRunArmed / endRun)", () => {
+	it("isRunArmed() is false, and recordToolResult()/endRun() are no-ops, before any startRun()", () => {
+		expect(isRunArmed()).toBe(false);
+		recordToolResult(record("bash", shaB, false)); // must not throw, must record nothing observable
+		expect(endRun(shaB)).toBeUndefined();
+	});
+
+	it("a second startRun() discards the first buffer entirely (WR-01's pinned behaviour)", () => {
+		startRun(repo, shaA);
+		recordToolResult(record("bash", shaA, false));
+		expect(isRunArmed()).toBe(true);
+
+		startRun(repo, shaB); // re-arms; the first run's one record must not survive
+		expect(isRunArmed()).toBe(true);
+		const verdict = endRun(shaB);
+		expect(verdict?.ok).toBe(false);
+		if (verdict?.ok === false) {
+			expect(verdict.reason).toContain("structured");
+		}
+		expect(isRunArmed()).toBe(false);
+	});
+
+	it("endRun() disarms: a second endRun() call with no intervening startRun() returns undefined", () => {
+		startRun(repo, shaA);
+		recordToolResult(record("bash", shaB, false));
+		expect(endRun(shaB)?.ok).toBe(true);
+		expect(endRun(shaB)).toBeUndefined();
 	});
 });
 
