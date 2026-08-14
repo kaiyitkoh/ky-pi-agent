@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 05-12-PLAN.md -- Phase 5 complete
-last_updated: "2026-08-14T11:25:07.059Z"
+status: ready_to_plan
+stopped_at: Phase 05 complete (12/12) — ready to discuss Phase 6
+last_updated: 2026-08-14T11:33:16.087Z
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 5
   total_plans: 56
   completed_plans: 56
-  percent: 100
+  percent: 45
 ---
 
 # Project State
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 05 — routing-capability-guards
+**Current focus:** Phase 6 — walking skeleton — `/quick` & the evidence gate
 
 ## Current Position
 
-Phase: 05 (routing-capability-guards) — COMPLETE (12/12 plans)
-Plan: 12 of 12
-Status: Phase complete — ready for verification
+Phase: 6
+Plan: Not started
+Status: Ready to plan
 Last activity: 2026-08-14
 
 Progress: [██████████] 100%
@@ -46,7 +46,7 @@ credentials can do has been done".
 
 **Velocity:**
 
-- Total plans completed: 44
+- Total plans completed: 56
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -58,6 +58,7 @@ credentials can do has been done".
 | 02 | 11 | - | - |
 | 03 | 11 | - | - |
 | 04 | 12 | - | - |
+| 05 | 12 | - | - |
 
 **Recent Trend:**
 
