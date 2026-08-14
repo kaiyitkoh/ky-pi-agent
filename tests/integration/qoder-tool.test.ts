@@ -390,6 +390,60 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 		});
 	});
 
+	it("WR-01: flattens a newline-stuffed task to one line before it reaches the confirmation dialog", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({}, async (loop) => {
+				clearQoderEnv();
+				setConfiguredQoderEnv(loop.baseUrl);
+
+				const handle = await createFauxSession({
+					extensionSource: EXTENSION_SOURCE,
+					responses: [fauxAssistantMessage("unused", { stopReason: "stop" })],
+				});
+				try {
+					const tool = handle.session.extensionRunner.getToolDefinition("qoder_delegate");
+					expect(tool).toBeDefined();
+					if (tool === undefined) {
+						return;
+					}
+
+					const ctx = handle.session.extensionRunner.createCommandContext();
+					let capturedTitle: string | undefined;
+					withStubbedUI(ctx, {
+						hasUI: true,
+						select: async (message) => {
+							capturedTitle = message;
+							return "Cancel"; // decline -- this case only proves the DIALOG SHAPE
+						},
+					});
+
+					// Newlines placed in the MIDDLE (never leading/trailing, so
+					// `task.trim()` cannot remove them) used to add one dialog line
+					// each -- see this file's own module header and WR-01 in
+					// `.pi/extensions/qoder/index.ts`. Kept under
+					// CONFIRM_EXCERPT_CHARS so truncation never hides the tail.
+					const newlineStuffedTask = `${"a".repeat(50)}${"\n".repeat(100)}walk the dog`;
+					await expect(
+						tool.execute("call-1", { task: newlineStuffedTask }, undefined, undefined, ctx),
+					).rejects.toThrow(/declined by the user/);
+
+					expect(capturedTitle, "select() was never called").toBeDefined();
+					const titleLineCount = (capturedTitle ?? "").split("\n").length;
+					expect(
+						titleLineCount,
+						"the confirmation dialog title grew past a handful of lines for a " +
+							"newline-stuffed task -- WR-01's flattening did not run",
+					).toBeLessThanOrEqual(10);
+					// The flattened excerpt must still be present so the user can read
+					// what they are approving.
+					expect(capturedTitle).toContain("walk the dog");
+				} finally {
+					await handle.dispose();
+				}
+			});
+		});
+	});
+
 	it("proceeds to delegateTask (a real request reaches the loopback) when the user selects the delegate choice", async () => {
 		await withTempLogCwd(async (cwd) => {
 			await withQoderLoopback({}, async (loop) => {

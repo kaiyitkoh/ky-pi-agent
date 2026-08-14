@@ -145,10 +145,33 @@ export default function (pi: ExtensionAPI): void {
 						`(got ${task.length}).`,
 				);
 			}
+			// WR-01 (iteration 3): the excerpt below used to be bounded by
+			// CHARACTERS only, so a task made of e.g. "\n".repeat(500) still
+			// produced a ~500-line confirmation dialog title --
+			// `ExtensionSelectorComponent` renders the title as a single,
+			// untruncated, un-line-capped `Text` child and adds the option list
+			// AFTER it [VERIFIED: pi-coding-agent 0.84.1
+			// `dist/modes/interactive/components/extension-selector.js:29,35-36`],
+			// and `selectedIndex` defaults to `0` (`:12`) -- the pre-highlighted
+			// option this file passes as `[DELEGATE_CHOICE, CANCEL_CHOICE]` is the
+			// APPROVE choice. So a model-controlled `task` could change the
+			// dialog's HEIGHT and push the choices, or the bypass warning above
+			// them, out of view. Fix: replace every C0/C1 control character
+			// (newlines included) with a space, collapse runs, THEN bound the
+			// length -- a model-controlled string can change the excerpt's
+			// CONTENT but never the dialog's SHAPE.
+			const flattened = Array.from(task)
+				.map((ch) => {
+					const cp = ch.codePointAt(0) ?? 0;
+					return cp < 0x20 || (cp >= 0x7f && cp <= 0x9f) ? " " : ch;
+				})
+				.join("")
+				.replace(/ {2,}/g, " ")
+				.trim();
 			const excerpt =
-				task.length > CONFIRM_EXCERPT_CHARS
-					? `${task.slice(0, CONFIRM_EXCERPT_CHARS)}… (${task.length} chars total)`
-					: task;
+				flattened.length > CONFIRM_EXCERPT_CHARS
+					? `${flattened.slice(0, CONFIRM_EXCERPT_CHARS)}… (${task.length} chars total)`
+					: flattened;
 
 			// WR-11: a human in the loop, mirroring `safety/index.ts#
 			// registerApprovalTool`'s exact deny-by-default shape. This tool's
@@ -160,9 +183,11 @@ export default function (pi: ExtensionAPI): void {
 			// failure mode this harness exists to prevent. `undefined` (no UI
 			// bound -- headless/`-p`) and `hasUI === false` both refuse via the
 			// SAME branch below, never via a separately-written headless
-			// allow-path. WR-04: the bypass warning comes FIRST and the (now
-			// bounded) task excerpt LAST, so a long task can push only its own
-			// tail out of view, never the warning the user needs to read first.
+			// allow-path. WR-04/WR-01: the bypass warning comes FIRST and the
+			// (now length- AND line-bounded) task excerpt LAST. The excerpt is
+			// flattened to one line before it ever reaches this string, so task
+			// content cannot change the dialog's height at all -- it cannot push
+			// the warning above it, or the choices below it, out of view.
 			const choice = ctx.hasUI
 				? await ctx.ui.select(
 						"Delegate this task to Qoder's own hosted agent loop? This bypasses Pi's own tools, " +
