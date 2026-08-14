@@ -1,108 +1,37 @@
 // VENDORED — Pi's own bundled example, `examples/extensions/plan-mode/utils.ts`
 // (Pi 0.84.1, this repo's pinned `@earendil-works/pi-coding-agent` devDependency).
-// Unmodified apart from this header — see ./index.ts for the full vendoring
-// record (why, the three permitted changes, and the grep verification).
+// See ./index.ts for the full vendoring record (why, the permitted changes, and
+// the grep verification).
+//
+// DEVIATION 4 (CR-03) — the ONE behavioural change here, and why this file is
+// no longer "unmodified apart from this header". Upstream's `isSafeCommand` was
+// two regex lists with the SAFE patterns anchored at `^\s*`, so the first word
+// decided admissibility; the Phase 7 review defeated it six ways. Both arrays
+// (DESTRUCTIVE_PATTERNS, SAFE_PATTERNS) are DELETED rather than bypassed —
+// leaving them would be dead code implying a protection that has moved — and
+// `isSafeCommand` now delegates to `./read-only.ts`. Full record in
+// ./index.ts's DEVIATION 4. Everything else here (cleanStepText,
+// extractTodoItems, extractDoneSteps, markCompletedSteps, TodoItem) is
+// byte-for-byte upstream and still diffable against a newer bundled example.
 
 /**
  * Pure utility functions for plan mode.
  * Extracted for testability.
  */
 
-// Destructive commands blocked in plan mode
-const DESTRUCTIVE_PATTERNS = [
-	/\brm\b/i,
-	/\brmdir\b/i,
-	/\bmv\b/i,
-	/\bcp\b/i,
-	/\bmkdir\b/i,
-	/\btouch\b/i,
-	/\bchmod\b/i,
-	/\bchown\b/i,
-	/\bchgrp\b/i,
-	/\bln\b/i,
-	/\btee\b/i,
-	/\btruncate\b/i,
-	/\bdd\b/i,
-	/\bshred\b/i,
-	/(^|[^<])>(?!>)/,
-	/>>/,
-	/\bnpm\s+(install|uninstall|update|ci|link|publish)/i,
-	/\byarn\s+(add|remove|install|publish)/i,
-	/\bpnpm\s+(add|remove|install|publish)/i,
-	/\bpip\s+(install|uninstall)/i,
-	/\bapt(-get)?\s+(install|remove|purge|update|upgrade)/i,
-	/\bbrew\s+(install|uninstall|upgrade)/i,
-	/\bgit\s+(add|commit|push|pull|merge|rebase|reset|checkout|branch\s+-[dD]|stash|cherry-pick|revert|tag|init|clone)/i,
-	/\bsudo\b/i,
-	/\bsu\b/i,
-	/\bkill\b/i,
-	/\bpkill\b/i,
-	/\bkillall\b/i,
-	/\breboot\b/i,
-	/\bshutdown\b/i,
-	/\bsystemctl\s+(start|stop|restart|enable|disable)/i,
-	/\bservice\s+\S+\s+(start|stop|restart)/i,
-	/\b(vim?|nano|emacs|code|subl)\b/i,
-];
+import { classifyPlanModeCommand } from "./read-only.ts";
 
-// Safe read-only commands allowed in plan mode
-const SAFE_PATTERNS = [
-	/^\s*cat\b/,
-	/^\s*head\b/,
-	/^\s*tail\b/,
-	/^\s*less\b/,
-	/^\s*more\b/,
-	/^\s*grep\b/,
-	/^\s*find\b/,
-	/^\s*ls\b/,
-	/^\s*pwd\b/,
-	/^\s*echo\b/,
-	/^\s*printf\b/,
-	/^\s*wc\b/,
-	/^\s*sort\b/,
-	/^\s*uniq\b/,
-	/^\s*diff\b/,
-	/^\s*file\b/,
-	/^\s*stat\b/,
-	/^\s*du\b/,
-	/^\s*df\b/,
-	/^\s*tree\b/,
-	/^\s*which\b/,
-	/^\s*whereis\b/,
-	/^\s*type\b/,
-	/^\s*env\b/,
-	/^\s*printenv\b/,
-	/^\s*uname\b/,
-	/^\s*whoami\b/,
-	/^\s*id\b/,
-	/^\s*date\b/,
-	/^\s*cal\b/,
-	/^\s*uptime\b/,
-	/^\s*ps\b/,
-	/^\s*top\b/,
-	/^\s*htop\b/,
-	/^\s*free\b/,
-	/^\s*git\s+(status|log|diff|show|branch|remote|config\s+--get)/i,
-	/^\s*git\s+ls-/i,
-	/^\s*npm\s+(list|ls|view|info|search|outdated|audit)/i,
-	/^\s*yarn\s+(list|info|why|audit)/i,
-	/^\s*node\s+--version/i,
-	/^\s*python\s+--version/i,
-	/^\s*curl\s/i,
-	/^\s*wget\s+-O\s*-/i,
-	/^\s*jq\b/,
-	/^\s*sed\s+-n/i,
-	/^\s*awk\b/,
-	/^\s*rg\b/,
-	/^\s*fd\b/,
-	/^\s*bat\b/,
-	/^\s*eza\b/,
-];
-
+/**
+ * Is `command` admissible under plan mode's read-only boundary?
+ *
+ * The boolean face of {@link classifyPlanModeCommand}, kept because it is this
+ * vendored file's published surface and what upstream's own callers use. Both
+ * go through ONE implementation, so they cannot disagree —
+ * `tests/unit/plan-mode-read-only.test.ts` asserts that agreement on every
+ * corpus row rather than trusting it.
+ */
 export function isSafeCommand(command: string): boolean {
-	const isDestructive = DESTRUCTIVE_PATTERNS.some((p) => p.test(command));
-	const isSafe = SAFE_PATTERNS.some((p) => p.test(command));
-	return !isDestructive && isSafe;
+	return classifyPlanModeCommand(command).kind === "allow";
 }
 
 export interface TodoItem {

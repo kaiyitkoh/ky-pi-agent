@@ -307,7 +307,29 @@ export interface CanonicalInvocation {
 
 export type ShellVerdict =
 	| { readonly kind: "refused"; readonly cause: ShellRefusalCause; readonly detail: string }
-	| { readonly kind: "ok"; readonly invocations: readonly CanonicalInvocation[] };
+	| {
+			readonly kind: "ok";
+			readonly invocations: readonly CanonicalInvocation[];
+			/**
+			 * Every distinct `Redirect.operator` value found anywhere in the parsed
+			 * script, in walk order.
+			 *
+			 * ADDITIVE, added by the CR-03 fix pass and read by
+			 * `.pi/extensions/plan-mode/read-only.ts`. This module's own SAFE-03
+			 * predicate refuses heredocs outright and is deliberately indifferent to
+			 * ordinary output redirection — `git status > out.txt` is not a
+			 * protected-branch push and this layer has no opinion on it. Plan mode
+			 * DOES have an opinion, because it promises the model a read-only
+			 * boundary and `foo > file` writes a file.
+			 *
+			 * Exposed here rather than re-walked there so there is exactly one AST
+			 * walk in this repository and one notion of "every redirect in this
+			 * command" — CLAUDE.md's rule is `unbash`, parse to AST, match resolved
+			 * nodes, and a second walker is how two answers to the same question
+			 * start to differ.
+			 */
+			readonly redirectOperators: readonly string[];
+	  };
 
 /**
  * CR-03: reduce `CanonicalInvocation.executable` to the verb `policy.ts`/
@@ -775,5 +797,8 @@ export function canonicalise(command: string): ShellVerdict {
 		return { kind: "refused", cause: "shell-runner", detail: describeCause("shell-runner", command) };
 	}
 
-	return { kind: "ok", invocations };
+	const redirects = new Set<string>();
+	collectRedirectOperators(script, redirects);
+
+	return { kind: "ok", invocations, redirectOperators: [...redirects] };
 }

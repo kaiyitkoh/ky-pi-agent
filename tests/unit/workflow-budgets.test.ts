@@ -125,12 +125,17 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/plan-mode/index.ts",
-		budget: 470,
+		budget: 500,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/index.ts, " +
 			"registers /plan and /plan-todos -- WR-05 widened discovery to catch command surfaces outside " +
 			"workflows/; upstream's own 390 lines plus this plan's vendoring header (the only permitted " +
 			"addition -- code body otherwise unchanged apart from the /todos -> /plan-todos rename), measured " +
-			"460 raw lines 2026-08-15, rounded up to the next ten",
+			"460 raw lines 2026-08-15, rounded up to the next ten. RAISED 470 -> 500 by the Phase 7 " +
+			"code-review fix pass: CR-03 found the bash gate here called a first-word regex predicate that " +
+			"the review defeated six ways, including an exfiltration of ~/.aws/credentials. The gate now " +
+			"calls ./read-only.ts and the file carries DEVIATION 4, the vendoring record for the only " +
+			"BEHAVIOURAL change ever made to this copy -- a deviation a future Pi bump must see. " +
+			"Re-measured 492 raw lines 2026-08-15, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/todo.ts",
@@ -202,12 +207,22 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 640,
+		budget: 970,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
 			"upstream's own 390+168=558 lines plus this plan's vendoring headers, not a number this phase " +
-			"reviewed for tightness), rounded up to the next ten",
+			"reviewed for tightness), rounded up to the next ten. RAISED 640 -> 970 by the Phase 7 " +
+			"code-review fix pass (CR-03). This is the largest single raise in this registry and it is " +
+			"deliberate: the third file, read-only.ts, is the AST-based replacement for utils.ts's regex " +
+			"predicate, and it is mostly TABLE -- an allowlist of read-only verbs plus per-verb argument " +
+			"rules for the ones with an exec-or-write escape (find -exec, git subcommands, node -e, " +
+			"curl -T, wget's default write). A table is what makes the boundary auditable; compressing it " +
+			"into cleverness to satisfy a line budget is the wrong trade for a file in the tool-execution " +
+			"path. This raise is the anti-offloading control working AS DESIGNED -- utils.ts shrank 174 -> " +
+			"102 and the lines did not vanish, they moved, and the directory total is what says so. " +
+			"Re-measured 960 raw lines across 3 files 2026-08-15 (index.ts 492 + read-only.ts 366 + " +
+			"utils.ts 102), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
