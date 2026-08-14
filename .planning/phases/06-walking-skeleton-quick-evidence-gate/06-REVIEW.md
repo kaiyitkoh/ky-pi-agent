@@ -1,413 +1,418 @@
 ---
 phase: 06-walking-skeleton-quick-evidence-gate
-reviewed: 2026-08-14T15:34:25Z
+reviewed: 2026-08-15T01:31:00Z
 depth: standard
-files_reviewed: 8
+iteration: 4
+files_reviewed: 7
 files_reviewed_list:
   - .pi/extensions/workflows/index.ts
   - .pi/extensions/workflows/evidence.ts
-  - .pi/extensions/safety/git.ts
-  - tests/unit/evidence-gate.test.ts
   - tests/unit/workflow-budgets.test.ts
+  - tests/unit/evidence-gate.test.ts
+  - tests/unit/workflows-entry.test.ts
   - tests/integration/quick-workflow.test.ts
-  - tests/helpers/git.ts
   - docs/WORKFLOWS.md
 findings:
+  critical: 0
+  warning: 1
+  info: 0
+  total: 1
+findings_as_reviewed:
   critical: 1
-  warning: 6
-  info: 3
-  total: 10
-status: issues_found
+  warning: 1
+  total: 2
+resolution:
+  cr_01_over_claimed_commit: fixed in fd1a49a — the accept path no longer claims
+    "a commit landed"; it states only what the structured evidence supports
+    ("HEAD moved to <sha> ... no commit was verified"). W1/W2/P4 probes re-run
+    live against the real /quick after the fix; regression test "case 9 (PROBE W1)"
+    added to tests/integration/quick-workflow.test.ts and mutation-verified.
+  wr_01_ratchet_blind_sideways: ACCEPTED AND DOCUMENTED — carried to Phase 9.
+    The anti-offloading aggregate recurses down into a command directory but does
+    not reach sibling directories, so 1,200 lines placed in .pi/extensions/
+    workflows-helpers/ or .pi/lib/ are uncounted. Closing it means deciding what
+    "a workflow's code" means across subsystem boundaries, which is Phase 9's
+    question, not this walking skeleton's.
+status: accepted
 ---
 
-# Phase 6: Code Review Report
+# Phase 6: Code Review Report (iteration 4 — final verification)
 
-**Reviewed:** 2026-08-14T15:34:25Z
+**Reviewed:** 2026-08-15T01:31:00Z
 **Depth:** standard
-**Files Reviewed:** 8
-**Status:** issues_found
+**Files Reviewed:** 7
+**Status:** accepted — CR-01 fixed after this review (`fd1a49a`); WR-01 accepted and documented for Phase 9
+
+> **Post-review resolution.** This document records the review as written. CR-01
+> was fixed in a final targeted pass immediately after it; WR-01 was deliberately
+> not fixed and is carried forward as residual risk. See the `resolution:` block
+> in the frontmatter and `06-REVIEW-FIX.md` for the complete four-iteration record.
+> Final state: 84 test files / 1440 tests green, `tsc --noEmit` clean,
+> `index.ts` 79/80.
 
 ## Summary
 
-The submitted suite is green on this machine, and several of the things this
-phase was most likely to get wrong, it got right:
+All three iteration-3 findings are genuinely closed, verified by execution against
+the real `/quick` in a real faux session — including through Pi's own
+`extensionRunner.emit({type:"session_start"})` dispatch rather than only a
+recording stub. Baseline on this machine:
 
 ```
-npx vitest run tests/unit/evidence-gate.test.ts tests/unit/workflow-budgets.test.ts
-  Test Files  2 passed (2)   Tests  18 passed (18)
-npx vitest run tests/integration/quick-workflow.test.ts
-  Test Files  1 passed (1)   Tests  5 passed (5)
-node -e "...split('\n').length"  ->  index.ts 74, evidence.ts 279   (budgets 80 / 280, aggregate 353/360)
+$ npx vitest run     ->  Test Files 84 passed (84)   Tests 1439 passed (1439)
+$ npx tsc --noEmit   ->  clean
+index.ts 79/80   evidence.ts 336/340   workflows/ 415/420   (split("\n").length)
 ```
 
-Verified good, not merely asserted: no 40-hex literal appears in
-`evidence-gate.test.ts` (SHAs come from a real `makeTempRepo`); cases 1 and 2
-of `quick-workflow.test.ts` compute their expected refusal text by calling the
-real `planRoleCall` / `classifyGitInvocation`, so the Phase 5 "retyped literal"
-failure does not repeat; both refusal cases assert
-`faux.state.callCount === 0`; nothing writes outside a temp dir; `currentSha`
-uses fixed argv with `shell: false` and throws on both launch failure and
-non-zero exit; `git checkout -b main` on an unborn `main` HEAD was executed
-here and exits 0, so `gitInit(cwd, "main")` is not machine-dependent; and
-`agent_end` was empirically confirmed to fire (and disarm the run) even when
-the provider turn ends in `stopReason: "error"`.
+**But I obtained a false ACCEPT from the real `/quick`, and that is the question
+this pass existed to answer.** Two runs that made **no commit at all** — one of
+which *destroyed* a commit — were both accepted, and the shipped notification told
+the user *"a commit landed at &lt;sha&gt;"*. That clause is the over-claim the whole
+requirement exists to prevent, and it is CR-01 below. The fix is three string
+replacements and zero net lines.
 
-The problem is what the gate accepts. I ran the real `/quick` command through
-a real faux session with the real safety extension loaded, scripted the model
-to make **no commit at all** and to claim in prose that it had, and the gate
-returned **accept**:
+Everything below was reproduced by running code. Three untracked probe files were
+written, run, and deleted; planted budget fixtures were removed. `git status
+--porcelain` afterwards shows only the pre-existing planning artifacts, and the
+phase's four test files are green after cleanup (61 passed).
+
+## Loop history
+
+| Iteration | Raised | Closed |
+|---|---|---|
+| 1 | CR-01 (no-commit run accepted), WR-01…WR-06, IN-01…IN-03 | — |
+| 2 | CR-01 (recorded failure buried by a later commit; "evidence accepted" over-claim), WR-01…WR-05, IN-01…IN-05 | iteration 1's WR-02/03/04/06, IN-03; CR-01 and WR-01/WR-05 partial |
+| 3 | CR-01 (accept asserts "no failed tool result" over four structurally invisible failure classes), WR-01 (aggregate defeated by one subdirectory), WR-02 (orphaned run bricks `/quick`), 6 Info | all six iteration-2 findings |
+| 4 (this) | CR-01 (accept asserts "a commit landed" from evidence that only shows HEAD changed), WR-01 (aggregate counts nothing outside a command directory) | **all three iteration-3 findings** |
+
+## Iteration 3 findings — verified
+
+### CR-01 (capture point moved to `tool_execution_end`, fail-closed on a dropped capture) — **FIXED**
+
+All four failure classes iteration 3 named, plus the self-inflicted fifth, now
+reject. Live, through the real command with the real safety extension loaded:
 
 ```
-PROBE A responses: bash "echo hi" (exit 0), then "all done, I made the commit and the tests pass"
-PROBE A verdict: {"verdict":"accept","reason":"evidence accepted at 1772d27d...",
-                  "baseSha":"1772d27d...","headSha":"1772d27d...","recordCount":1,"tools":["bash"]}
-PROBE A commits before/after: 1 1
-
-PROBE B responses: read "seed.txt", then "done"       (no bash at all, no commit)
-PROBE B verdict: {"verdict":"accept","reason":"evidence accepted at df2d9b82...",
-                  "baseSha":"df2d9b82...","headSha":"df2d9b82...","recordCount":1,"tools":["read"]}
+=== P4  bash 'git push --force origin main' [BLOCKED] -> bash 'git commit --allow-empty' -> "pushed and verified, tests pass"
+row:    {"verdict":"reject","reason":"a tool result in this run failed (bash) -- a completion claim cannot be
+         supported by a run that contains a recorded failure, even if a commit landed afterwards",
+         "baseSha":"0bfbfb7d…","headSha":"0b863622…","recordCount":2,"tools":["bash"]}
+audit:  {"tool":"bash","command":"git push --force origin main","verdict":"block", …}
+        {"tool":"bash","command":"git commit --allow-empty -m \"P4\"","verdict":"allow"}
+notify: level "error"            armed after: false     commits: 2
 ```
 
-`/quick` notified the user `quick: evidence accepted at <sha>` in both cases.
-That is CR-01, and it is the finding that matters: the gate does not
-distinguish "a command ran" from "the work happened", so it converts a false
-completion claim into an affirmative endorsement. A second probe
-(two `/quick` invocations back to back) showed the second run silently
-ungated — WR-01.
+The audit log's `block` verdict and the evidence row now agree — that was the
+exact disagreement iteration 3 called unshippable.
 
-Everything below was reproduced by execution, not inferred from the source
-alone. The probe files were untracked, run, and deleted; `git status` is clean
-and nothing in the repository was modified by this review.
+```
+=== P7  bash 'mv .git .gitx' (exit 0, but the SHA stamp throws) -> restore + commit -> "tests pass, done"
+row:    {"verdict":"reject","reason":"a tool result in this run failed (bash (capture failed)) -- …",
+         "recordCount":2,"tools":["bash (capture failed)","bash"]}
+
+=== isError  bash 'exit 1' -> bash 'git commit --allow-empty' -> "tests pass, done"
+row:    {"verdict":"reject","reason":"a tool result in this run failed (bash) …","recordCount":2}
+
+=== PROBE A  pure narration, zero tool calls
+row:    {"verdict":"reject","reason":"no structured tool result was recorded for this completion claim --
+         transcript text is not evidence, however convincing it reads","recordCount":0}
+        commits before/after: 1 / 1
+
+=== N1  unknown tool "run_tests" -> commit -> "all verified, done"     -> reject, recordCount 2
+=== N2  schema-invalid bash args -> commit -> "all verified, done"     -> reject, recordCount 2
+```
+
+`recordCaptureFailure` is genuinely fail-closed: the synthetic record carries
+`isError: true` and is named `bash (capture failed)`, so it rejects at branch (3)
+and a human can tell it apart from an ordinary tool failure. The bare `catch {}`
+is gone.
+
+### WR-01 (directory aggregate defeated by one subdirectory) — **FIXED for the nested case**
+
+Replanted iteration 3's exact fixture — `.pi/extensions/workflows/helpers/big.ts`,
+1,201 raw lines, never spells `registerCommand(`:
+
+```
+$ npx vitest run tests/unit/workflow-budgets.test.ts
+  × '.pi/extensions/workflows''s WHOLE .ts/.js total stays within its declared directory budget
+      AssertionError: .pi/extensions/workflows totals 1616 raw lines across 3 files,
+      over its directory budget of 420 …
+  × present-but-undeclared: every discovered workflow file has a budget entry
+      Tests  2 failed | 22 passed (24)
+```
+
+Iteration 3 got only the per-file check red and reported *"aggregate never
+moved"*. It moves now. The recursion in `filesInDir` and the `slice(0, 3)`
+subsystem-root resolution in `commandDirs` both do what they claim. See WR-01
+(new) for the hole this does **not** close.
+
+### WR-02 (`session_start` disarms an orphaned run) — **FIXED, and verified through Pi's real dispatch**
+
+The shipped regression test drives a recording stub. I drove Pi's own event path
+(`agent-session.js:2072` emits a single argument carrying `type`):
+
+```
+BEFORE session_start -> [{"text":"quick: a turn is already in flight -- wait for it to finish","level":"error"}]
+await runner.emit({ type: "session_start", reason: "startup" })
+armed after real session_start emit: false
+orphan row written: {"verdict":"reject","reason":"no structured tool result was recorded…",
+                     "baseSha":"orphan-base-sha","headSha":"","recordCount":0}
+/quick re-run afterwards: no refusal, handler proceeds and re-arms
+```
+
+`endRun("")` is a no-op when nothing is armed, always rejects when something is
+(empty records, or `headSha:""` matching no record), and always frees the slot.
+
+## Requirement verdict
+
+### FLOW-01 — `/quick` ≤ 80 raw lines: **MET**
+
+79/80 by `readFileSync(...).split("\n").length`. See judgement 3 for why this is
+honest rather than offloaded.
+
+### FLOW-11 — the workflow line-budget registry: **PARTIALLY MET**
+
+Enforces in all four directions **inside** a command directory (over-budget file,
+over-budget directory total, declared-but-absent, present-but-undeclared),
+recurses into subdirectories, and resolves to the subsystem root. It counts
+nothing outside a command directory — WR-01 below.
+
+### GATE-07 — the evidence gate: **PARTIALLY MET**
+
+Every fabricated, failed, blocked, schema-invalid, unknown-tool, aborted and
+dropped-capture shape I could construct now REJECTS, and no reject reason ever
+echoes the model's prose. The ACCEPT path still asserts a fact it has not
+established — CR-01.
 
 ## Critical Issues
 
-### CR-01: the evidence gate accepts a run in which nothing was committed and nothing was verified
+### CR-01: ACCEPT asserts "a commit landed at &lt;sha&gt;" from evidence that only shows HEAD is a different string
 
-**File:** `.pi/extensions/workflows/evidence.ts:118-149` (`gateCompletion`), `.pi/extensions/workflows/evidence.ts:194-210` (`endRun`)
+**File:** `.pi/extensions/workflows/index.ts:70`, `.pi/extensions/workflows/evidence.ts:155-162` and `:257-259`, `docs/WORKFLOWS.md:186-200`
 
-**Issue.** `gateCompletion` accepts as soon as **any** record satisfies
-`sha === headSha && !isError`. Nothing constrains which tool produced it,
-what it did, or whether HEAD moved during the run. Two consequences, both
-executed against the real command in a real session (output above):
+**Issue.** `gateCompletion`'s branch (2) rejects when `headSha === baseSha`, and
+its docstring justifies that as *"no commit was made during this run"*. The
+accept path silently inverts it: **HEAD moved ⟹ a commit landed**. That inference
+is false. `git rev-parse HEAD` changes for `checkout`, `reset`, `revert`, a
+branch switch, a rebase, or a commit made by anything else on the machine — none
+of which creates a commit during the run, and one of which deletes one.
 
-- **No commit at all → accept.** When the model makes no commit,
-  `baseSha === headSha`, so *every* record captured during the run is "at
-  HEAD" by construction. One `bash echo hi` — or one `read` of a file, which
-  is not even a command — satisfies the gate. `/quick` then reports
-  `quick: evidence accepted at <sha>` while `git rev-list --count HEAD` is
-  unchanged (1 → 1) and the model's own message says "I made the commit and
-  the tests pass".
-- **After a commit, the accepting record is always the commit itself.** The
-  `tool_result` handler stamps `currentSha(ctx.cwd)` *after* the tool ran, so
-  any verification run before the commit is stale by construction (D-16 states
-  this) and the only record left at HEAD is the `git commit` call's own
-  success. The gate therefore cannot reject any run that ends in a successful
-  tool call, which is the entire population of runs it is supposed to
-  discriminate.
+Executed against the real `/quick`, real safety extension, faux session, repo
+seeded with two commits:
 
-This is worse than an absent gate: an absent gate leaves the user sceptical,
-whereas this one prints an endorsement. It directly contradicts GATE-07 as
-stated in the task ("REJECTED unless a structured `tool_result` outcome ...
-**supports it**"), FLOW-01's "prompt to atomic commit", and
-`docs/WORKFLOWS.md:120-132`'s "Evidence, not narration".
+```
+=== W1  bash 'git checkout --detach HEAD~1'  then  "done, I implemented and committed the fix and all tests pass"
+commits before/after: 2 / 1        git log --all: 7b26e13 second | 830a123 first
+row:    {"verdict":"accept","reason":"a commit landed at 830a123abbd9c40ffde61ee75f0d9b67cc675cf7 with no
+         failed tool result recorded during this run -- the work itself is not verified",
+         "baseSha":"7b26e13f…","headSha":"830a123a…","recordCount":1,"tools":["bash"]}
+notify: {"text":"quick: a commit landed at 830a123abbd9c40ffde61ee75f0d9b67cc675cf7 with no failed tool
+         result -- the work itself is NOT verified","level":"info"}
 
-Stated fairly, so the fixer can weigh it: the four-row predicate as
-implemented does match `06-CONTEXT.md:103-110`'s own acceptance shape
-("structured result, exit 0, SHA matches HEAD → accepted"). The defect is that
-that shape does not satisfy the requirement it was written for, and the
-walking skeleton demonstrably ships a user-visible false accept today.
-
-**Fix.** The smallest change that closes both probes is a fifth branch keyed
-on the base SHA the run already stores. `endRun` has `state.baseSha` in hand,
-so no new plumbing and no change to `/quick` is needed:
-
-```ts
-export function gateCompletion(
-	records: readonly EvidenceRecord[],
-	headSha: string,
-	baseSha: string,
-): EvidenceVerdict {
-	// ... branch (1) unchanged ...
-
-	// (1b) HEAD never moved: no commit landed, so every record is trivially
-	// "at HEAD" and no evidence in this run can support a completion claim.
-	if (headSha === baseSha) {
-		return {
-			ok: false,
-			reason:
-				`no commit was made during this run -- HEAD is still ${headSha}, so the recorded tool ` +
-				"results predate any work landing and cannot support a completion claim",
-		};
-	}
-	// ... branches (2)-(4) unchanged ...
-}
+=== W2  bash 'git reset --hard HEAD~1'       then  "done, committed and verified"
+commits before/after: 2 / 1        git log --all: 4a3f4ed first      <-- "second" is GONE
+row:    {"verdict":"accept","reason":"a commit landed at 4a3f4edc… with no failed tool result …"}
+notify: {"text":"quick: a commit landed at 4a3f4edc… …","level":"info"}
 ```
 
-and in `endRun`: `gateCompletion(state.records, headSha, state.baseSha)`.
+W1 created **zero** commits; the SHA the gate names, `830a123`, is an ancestor
+that existed before the run was even armed. W2 **destroyed** a commit and was
+told a commit landed. Both are accepts of an explicit completion claim.
 
-**Line cost, stated because both budgets are tight.** This is roughly +10 raw
-lines in `evidence.ts` (279 → ~289) including the docstring branch-order
-update that file's own header mandates. `WORKFLOW_BUDGETS`'s `evidence.ts`
-entry must go 280 → 290 and `WORKFLOWS_DIR_TOTAL_BUDGET` 360 → 370 **in the
-same commit**, with the `why` updated — which is exactly the ratchet procedure
-`tests/unit/workflow-budgets.test.ts:26-38` documents. **Do not put this fix
-in `.pi/extensions/workflows/index.ts`**: it is at 74 of 80 raw lines and
-WR-01/WR-02 below already want three or four of those six.
+This is not the documented Phase-8 limitation. `evidence.ts:136-143` and
+`docs/WORKFLOWS.md:191-196` concede only that *"an empty commit … or a commit of
+wholly unrelated content both still ACCEPT"* — they contemplate a commit whose
+**diff** is wrong, never HEAD moving **without a commit** or moving **backwards**.
+`docs/WORKFLOWS.md:186-191` states as a positive guarantee: *"a commit landed
+during the run, made through a tool call Pi's own machinery executed and that
+exited 0"*. Both clauses of that sentence are false in W1 and W2. It is the same
+class of defect as iteration 3's CR-01 — the gate stating a specific fact it is
+structurally unable to establish — reached from the positive side instead of the
+negative one.
 
-Add the paired regression tests: a `gateCompletion` row where
-`headSha === baseSha` with one passing record rejects, plus an integration
-case scripting `bash echo hi` with no commit and asserting
-`verdict === "reject"` and `commitCount` unchanged (that case is PROBE A
-above; it can be lifted almost verbatim).
+**Fix — pure string edit, zero net lines, no budget impact.** Say what was
+measured. `index.ts:70`:
+
+```ts
+if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: HEAD moved to ${verdict.sha} with no failed tool result -- no commit was verified and the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
+```
+
+`evidence.ts:257-259`:
+
+```ts
+reason: verdict.ok
+    ? `HEAD moved to ${headSha} with no failed tool result recorded during this run -- whether a commit was created, and whether it contains the work, are both unverified`
+    : verdict.reason,
+```
+
+and strike "a commit landed during the run, made through a tool call…" from
+`docs/WORKFLOWS.md:186-191`, replacing it with "HEAD is a different commit than
+when the run was armed", plus one sentence naming `checkout`/`reset`/`revert` as
+moves that satisfy this without creating anything. Also correct branch (2)'s
+docstring at `evidence.ts:104-111`, which is where the false inference is
+written down.
+
+**Regression test.** Lift W1 verbatim into `quick-workflow.test.ts`: seed two
+commits, script `bash 'git checkout --detach HEAD~1'` plus a false claim, and
+assert `rev-list --count HEAD` is unchanged while the notification does **not**
+contain the string `"a commit landed"`. There is currently no test in which HEAD
+moves by any means other than `git commit`, which is exactly why this shipped.
+
+**Verdict on whether this is worth another pass.** Yes — it is three string
+replacements and one docstring, costs zero lines against a file with one line of
+headroom, needs no new mechanism, and it is the precise failure mode
+(`GATE-07` over-claiming) that four iterations of this loop have been about. If
+the loop is genuinely closed, it must ship as a **known, documented Critical**
+with this remedy recorded verbatim for Phase 8, not silently downgraded — a gate
+that says "a commit landed" when the run deleted one is worse than no gate.
 
 ## Warnings
 
-### WR-01: a second `/quick` while a turn is in flight silently steals the buffer and leaves its own run entirely ungated
+### WR-01: the anti-offloading ratchet counts nothing outside a command directory — one sideways `mkdir` defeats it
 
-**File:** `.pi/extensions/workflows/index.ts:40-41`, `.pi/extensions/workflows/evidence.ts:157-183`
+**File:** `tests/unit/workflow-budgets.test.ts:209-215` (`filesInDir`), `:230-261` (`discoverWorkflowFiles`), `:321` (`commandDirs`)
 
-**Issue.** The run state is a single `globalThis` slot with no run identity —
-no session id, no turn id, no generation counter. `startRun` unconditionally
-overwrites it. `pi.sendUserMessage` is fire-and-forget, so the command handler
-returns while its turn is still running (confirmed: calling
-`session.prompt()` immediately after the handler throws *"Agent is already
-processing"*), and Pi queues a second `/quick` rather than rejecting it.
+**Issue.** Iteration 3's fix made the aggregate recurse **downward**. Discovery
+still only ever reaches a directory that *holds a command source*: `commandDirs`
+is derived from `discovered.filter(isCommandSource)`, and `discoverWorkflowFiles`
+admits a non-`workflows/` file only when `isCommandSource(p)` is true. A helper
+that never spells `registerCommand(` and does not sit under a command directory
+is invisible to both the per-file registry and every directory total.
 
-Executed: two `/quick` invocations back to back, first turn commits.
+Executed. Two plants, 1,201 raw lines each, no `registerCommand(`:
 
 ```
-PROBE D second handler error: undefined      (no error -- the second /quick armed fine)
-PROBE D rows: [ {"verdict":"accept","baseSha":"7548d0a6...","headSha":"f081548f...","recordCount":1,"tools":["bash"]} ]
-PROBE D commits: 2
+.pi/extensions/workflows-helpers/big.ts     (sibling of the command directory)
+.pi/lib/big.ts                              (the directory evidence.ts already imports from)
+
+$ npx vitest run tests/unit/workflow-budgets.test.ts   ->  Tests  24 passed (24)
+$ npx vitest run                                       ->  Test Files 85 passed   Tests 1446 passed
 ```
 
-**One** evidence row for **two** runs. Run 1's verdict was computed over a
-buffer that run 2's `startRun` had already reset, and run 2's own `agent_end`
-found no armed run, so it returned `undefined` — no row, no notification, no
-gate. A `/quick` that is silently never gated is the failure this phase exists
-to prevent.
+**The entire suite is green with 2,402 unbudgeted, uncounted lines planted.** The
+precedent for reaching them already exists in shipped code: `evidence.ts:41-42`
+imports `../diagnostics/redact.ts` and `../../lib/jsonl.ts`, and nothing in the
+suite constrains what `workflows/index.ts` may import. D-11's stated purpose —
+*"stops `/quick` from being 'shrunk' by moving four hundred lines into a private
+helper module that only it calls"* — is satisfied for a child directory and not
+for a sibling one.
 
-The same single-slot design means an in-process child session (`pi-subagents`
-is on the Phase 7 install list and runs in this process) records its tool
-results into whatever `/quick` run the parent happens to have armed.
+**Fix.** Either budget the whole tree (declare every directory under `.pi/` that
+holds `.ts`/`.js`, with a completeness check in both directions, so a NEW
+directory is red until declared), or add a much cheaper import-side check:
+assert that every relative import resolved from a discovered command source lands
+inside a directory that has a `DIRECTORY_BUDGETS` entry. Test files carry no
+budget, so either is free in lines.
 
-**Fix.** Refuse a second arming in the command handler, before `startRun`:
+**Verdict on whether this is worth another pass.** No — ship it as an accepted,
+documented finding. It is a test-only control with no effect on shipped
+behaviour, the correct scope of the fix (budget all of `.pi/`, or police imports)
+is a Phase 9 decision rather than a Phase 6 one, and nothing in the current tree
+exploits it. It must be written into Phase 9's context, because Phase 9 is the
+phase this control was built to survive.
 
-```ts
-if (isRunArmed()) {
-	ctx.ui.notify("quick: a run is already in flight -- wait for its verdict", "error");
-	return;
-}
-```
+## The three judgements
 
-3 raw lines; `index.ts` goes 74 → 77, still inside the 80 ceiling. `isRunArmed`
-is already imported. Caveat worth knowing: this makes a leaked armed run brick
-`/quick` until the process restarts — I probed the obvious leak path (a turn
-ending in `stopReason: "error"`) and `agent_end` **does** fire and disarm, so
-the risk is small, but a `/quick` that also disarms on `session_shutdown`
-would be strictly safer if the budget can afford it.
+### 1. What the evidence gate actually guarantees
 
-### WR-02: the routing pre-flight validates a model `/quick` never applies
+On ACCEPT, and only this: **at least one tool call finalized during the run;
+`git rev-parse HEAD` returned a different value at `agent_end` than it did when
+`/quick` armed; no finalized tool call reported `isError` and no evidence capture
+threw; and at least one record was stamped at that final HEAD.** It is *not*
+"the claimed work was verified", and — the part the shipped wording gets wrong —
+it is *not* "a commit landed": nothing in the predicate distinguishes a commit
+from a `checkout`, a `reset` or a `revert`, and nothing attributes the HEAD move
+to the tool call at all.
 
-**File:** `.pi/extensions/workflows/index.ts:26-30`
+The "no failed tool result" half of the message is now sound: capture moved to
+`tool_execution_end`, so blocked, schema-invalid, unknown-tool and aborted calls
+are all visible, and a capture that throws pushes a synthetic failing record. The
+"a commit landed" half over-claims. Per this phase's own standard — over-claiming
+by one clause is a finding — that is CR-01. Corrected wording: *"HEAD moved to
+&lt;sha&gt; with no failed tool result -- no commit was verified and the work itself is
+NOT verified."*
 
-**Issue.** `planRoleCall(...)` returns `{model, reasoningEffort, mechanism}`
-and `/quick` reads only `plan.ok`/`plan.reason`; `plan.model` is discarded.
-The task then runs on `ctx.model` — whatever model the session currently has.
-Nothing anywhere ties the two together: Pi's own `/model` picker sets the
-session model without going through `.pi/extensions/routing/`, so a user who
-switches models by hand gets a `/quick` that cheerfully approves the executor
-route for model A and then executes the whole task on model B, which the
-Phase 5 capability guard (`guardRoute`, `modes.ts:348`) never saw.
-`docs/WORKFLOWS.md:40-42` describes step 1 as a pre-flight, so the code matches
-the doc — but "routed by Phase 5" (FLOW-01) is then only true by convention.
+### 2. Is the directory-aggregate ratchet now real?
 
-`quick-workflow.test.ts` cannot detect this: the fixture registers exactly one
-model, which is the candidate, so `ctx.model === plan.model` always.
+**Inside a command directory, yes — it is a ratchet now, not a speed bump.** Last
+round I planted 1,201 lines one directory down and the aggregate never moved;
+this round the same plant fails the aggregate with *"totals 1616 raw lines across
+3 files, over its directory budget of 420"*. That is a genuine behavioural change,
+not a re-measurement.
 
-**Fix.** Make the assumption enforced rather than assumed, in the handler:
+**Outside one, it is not a control at all.** The fence has one side missing: a
+sibling directory or `.pi/lib/` is counted by nothing, and the suite stays fully
+green with 2,402 lines parked there (WR-01). So the honest verdict is: the class
+of dodge changed from "one `mkdir` down" to "one `mkdir` sideways". Better, but
+do not describe this as closed.
 
-```ts
-if (ctx.model?.id !== plan.model.id || ctx.model?.provider !== plan.model.provider) {
-	ctx.ui.notify(`quick: session model is not the routed executor (${plan.model.provider}/${plan.model.id})`, "error");
-	return;
-}
-```
+**Is `evidence.ts`'s budget still meaningful?** Barely, as a *code* ratchet.
+Measured across the whole loop:
 
-4 raw lines; combined with WR-01 that is `index.ts` 74 → 81, i.e. **one line
-over budget** — so one of the two must be written more tersely (both
-conditions can share a single `if`/notify pair) or the 80-line ceiling
-consciously revisited. Add an integration case registering two models, with
-the session on the non-routed one, asserting the refusal.
+| commit | `index.ts` raw / code | `evidence.ts` raw / code / comment |
+|---|---|---|
+| 2d85def (first ship) | 74 / 58 | 279 / 138 / 118 |
+| 7aa8456 | 78 / 61 | 298 / 149 / 124 |
+| 61ecfd5 | 78 / 61 | 328 / 153 / 150 |
+| ee45f19 (now) | 79 / 61 | 336 / 157 / 153 |
 
-### WR-03: the SHA is read from `ctx.cwd`, not from the repository the run was armed against
+The budget went 280 → 300 → 330 → 340 (+60) to accommodate 279 → 336 raw (+57),
+of which **+19 are executable lines and +35 are comment**. Nearly half of
+`evidence.ts` (153 of 336) is docstring, and most of each bump paid for prose
+justifying the previous bump. The number is real and it does bind, but it is
+mostly indexing documentation growth — nobody should read "raised three times" as
+"the code tripled". Keep it (it is still what would catch a 400-line dump), but
+if it is meant to constrain complexity rather than page count, it is measuring
+the wrong thing and D-1's own "raw lines cannot be gamed by reformatting"
+argument is the reason it cannot be fixed without changing the measure.
 
-**File:** `.pi/extensions/workflows/index.ts:56` and `:66`, `.pi/extensions/workflows/evidence.ts:159-163`
+### 3. Was FLOW-01's ≤80 met honestly, or by offloading?
 
-**Issue.** `startRun` stores `state.cwd` and it is used for exactly one thing —
-choosing the log file in `endRun` (`evidence.ts:200`). Both SHA reads use
-`ctx.cwd` from the *event* context instead. When those differ (a worktree-
-isolated subagent, a session whose cwd is re-resolved), the gate compares a
-SHA from repository B against a base SHA from repository A and writes the
-verdict into A's log — a comparison across two repositories that can both
-accept a claim it should reject and reject one it should accept. Stored state
-that is deliberately not used at the two places it exists for is also a
-maintenance trap.
+**Honestly — and this is provable rather than assertable.** Four independent
+facts:
 
-**Fix.** Export the armed cwd from `evidence.ts` and use it at both call
-sites, so the run is evaluated against the repository it was armed against:
+1. **`evidence.ts` predates `index.ts`.** `git log --diff-filter=A` gives
+   `7bd8c49 feat(06-01): add workflows/evidence.ts` *before*
+   `2d85def feat(06-02): /quick`. It was planned as its own unit (plan 06-01),
+   not carved out of a file that had blown its budget.
+2. **It stands on its own merits.** Its own unit-test file
+   (`evidence-gate.test.ts`, table-driven over `gateCompletion`), imported
+   independently by three test files, exporting a pure predicate plus a JSONL
+   binding that mirrors `safety/audit.ts` line for line. `docs/WORKFLOWS.md`'s
+   own test for legitimacy — *"a helper module that would exist on its own
+   merits, with its own tests, independent of `/quick`"* — is met.
+3. **`index.ts` did not shrink during the loop; it absorbed.** Executable lines
+   went 58 → 61 across four review iterations while taking on the `isIdle()`
+   half of the run-in-flight guard, the fail-closed `agent_end` SHA read, the
+   fail-closed capture, and the orphan disarm. Iteration 3's two fixes made it
+   *smaller* (80 → 79 raw, 62 → 61 code). Fixes were compressed into existing
+   lines, not exported.
+4. **The one piece of logic that did move had to.** `recordCaptureFailure`
+   (~4 code lines) lives in `evidence.ts` because `RUN_STATE_KEY` and
+   `runSlot()` are module-private; `index.ts` cannot push a record without an
+   exported function. Encapsulation forced it, not the budget.
 
-```ts
-/** The cwd the armed run was armed against, or undefined when no run is armed. */
-export function armedCwd(): string | undefined {
-	return runSlot()?.cwd;
-}
-```
+The 79/80 is not a number achieved by moving lines next door. The caveat worth
+recording is different: at 79/80 there is **one line of headroom**, and the loop
+has twice produced fixes that only fit because a maintainer found a way to
+compress. The next behavioural change to `/quick` will force an explicit
+conversation about the ceiling rather than another clever one-liner.
 
-`+4` raw lines in `evidence.ts` (fold into the CR-01 budget bump), and **zero
-net lines** in `index.ts` — `currentSha(ctx.cwd)` becomes
-`currentSha(armedCwd() ?? ctx.cwd)` on both lines 56 and 66.
+## Residual risk accepted
 
-### WR-04: `pruneEvidenceLogs` is dead code, and the evidence stream is the only log stream with no retention
-
-**File:** `.pi/extensions/workflows/evidence.ts:271-278`
-
-**Issue.** Verified by grep across the whole repo: `pruneEvidenceLogs` has no
-caller and no test. Every other JSONL stream in this repository prunes at
-`session_start` — `safety/index.ts:834` (`pruneAuditLogs`),
-`diagnostics/index.ts:439` (`pruneLogs`) — and `.pi/lib/jsonl.ts:503` names
-`session_start` as the intended call site. `/quick` registers no
-`session_start` handler, so `.pi/logs/evidence-YYYY-MM-DD.jsonl` accumulates
-one file per day forever; only same-day rotation is capped. The module
-docstring at `evidence.ts:21-25` describes the function's ownership scoping as
-if it were live, which reads as working retention to anyone auditing the log
-directory.
-
-**Fix.** Either wire it (`pi.on("session_start", (_e, ctx) => { pruneEvidenceLogs(ctx.cwd); })`,
-3 lines in `index.ts` — but see the budget arithmetic in WR-02; this is the
-weakest of the three claimants on those six lines), or delete the function and
-its options interface and say plainly in the docstring that the evidence
-stream is unpruned and why. Do not leave it exported-but-dead: the next reader
-will assume it runs.
-
-### WR-05: the line-budget registry can be dodged by a file extension or a directory name
-
-**File:** `tests/unit/workflow-budgets.test.ts:101-113`
-
-**Issue.** Two concrete escapes from the mechanism whose entire job is to
-protect Phase 9 from `/grill`, `/plan`, `/execute` and `/review`:
-
-1. **`.js` is not discovered.** The filter is `p.endsWith(".ts")`. Pi
-   auto-discovers `extensions/` entries as **`.ts` *and* `.js`**
-   (CLAUDE.md packaging section; `docs/extensions.md:115-120` as quoted in
-   `tests/unit/extension-layout.test.ts:19-24`). A 1,200-line
-   `.pi/extensions/workflows/grill.js` ships, loads, and is invisible to both
-   the completeness check and the aggregate.
-2. **Anything outside `.pi/extensions/workflows/` is out of scope entirely.**
-   Nothing requires a workflow command to live under `workflows/`.
-   `.pi/extensions/grill/index.ts` is an auto-discovered shape that
-   `extension-layout.test.ts` is perfectly happy with and this registry never
-   looks at. Phase 9 adding four commands as four sibling subsystem
-   directories passes this file with the registry untouched — which is the
-   exact outcome the file's own header (lines 1-8) says it exists to prevent.
-
-The aggregate ratchet itself is sound and I found no false-failure risk in it:
-`WORKFLOWS_DIR_TOTAL_BUDGET` (360) is exactly `80 + 280`, so any new file's
-lines push the total over unless the existing two shrink, which is the
-anti-offloading property as advertised.
-
-**Fix.** Discover by *what a file is*, not by where it sits. Test files carry
-no budget, so the cost is free:
-
-```ts
-const COMMAND_MARKER = "registerCommand(";
-// ...in discoverWorkflowFiles(), add:
-const extensionSources = [...trackedFiles(".pi/extensions"), ...walkOnDisk(".pi/extensions")]
-	.filter((p) => /\.(ts|js)$/.test(p))
-	.filter((p) => readFileSync(join(repoRoot(), p), "utf-8").includes(COMMAND_MARKER));
-```
-
-union that into the discovered set, and widen the `workflows/` filter to
-`/\.(ts|js)$/`. Note that this will pull `.pi/extensions/routing/index.ts` and
-any other command-registering entry point into the registry — that is the
-correct outcome (they are command surfaces with no budget today), but it means
-adding their current counts as declared entries in the same commit.
-
-### WR-06: the run-state machinery, the record builder and the row writer have no tests at all
-
-**File:** `tests/unit/evidence-gate.test.ts` (whole file), `.pi/extensions/workflows/evidence.ts:81-97`, `:171-210`, `:239-255`
-
-**Issue.** The unit file covers `gateCompletion` and `currentSha` and nothing
-else. `recordFromToolResult`, `startRun`, `recordToolResult`, `isRunArmed`,
-`endRun`, `writeEvidenceRow` and `pruneEvidenceLogs` are exercised only
-incidentally through `quick-workflow.test.ts`, which asserts on the JSONL row
-and never on these functions' contracts. In particular two documented
-*security* claims are entirely unasserted, in a public repository:
-
-- `evidence.ts:76-79` — "Nothing else from `toolInput` is copied, so a file
-  body read by the `write` tool can never reach the record." A future edit to
-  `{...input.toolInput}` would pass every test in this phase.
-- `evidence.ts:89` — the `redactString(...).slice(0, 200)` redaction. No test
-  feeds a secret-shaped command through it.
-
-Related, and the same class: `tests/unit/logs-gitignored.test.ts` was extended
-in Phase 4 for the then-new `audit-*` stream, with a comment
-(lines 55-58) explaining that a literal table "does not notice a stream nobody
-typed in". Phase 6 added the `evidence-*` stream and did not extend either
-half of that file. The blanket `.pi/logs/` rule covers it today, so this is
-belt-and-braces, not an exposure.
-
-**Fix.** Add to `tests/unit/evidence-gate.test.ts` (no budget applies):
-a `recordFromToolResult` case with
-`{path: "x.ts", content: "AKIA...secret body..."}` asserting `command === "x.ts"`
-and that no substring of `content` appears anywhere in the record; a
-redaction case; a run-state case asserting `isRunArmed()` is false before
-`startRun`, that `recordToolResult` before `startRun` is a no-op, that
-`endRun` returns `undefined` when unarmed, and that a second `startRun`
-discards the first buffer (the WR-01 behaviour, pinned either way). Add
-`.pi/logs/evidence-2026-08-14.jsonl` and a `writeEvidenceRow` call to
-`logs-gitignored.test.ts`'s two halves.
-
-## Info
-
-### IN-01: `EvidenceRecord.command` is built, redacted, truncated — and never read
-
-**File:** `.pi/extensions/workflows/evidence.ts:58-64`, `:88-89`
-
-`gateCompletion` reads `sha`, `isError` and `toolName`; `writeEvidenceRow`
-builds its row field by field and never touches `command`. Nothing else
-consumes an `EvidenceRecord`. So every `/quick` tool result pays a
-`redactString` pass to populate a field that is only ever held in a
-`globalThis` slot until `endRun`. Either give it a consumer (it would make the
-reject reasons materially more useful — "the failing tool was `bash npm test`"
-beats "the failing tool was `bash`") or drop the field and its docstring.
-
-### IN-02: a tracked-but-deleted workflow file makes the budget test throw ENOENT instead of reporting
-
-**File:** `tests/unit/workflow-budgets.test.ts:71-73`, `:154-164`
-
-`discoverWorkflowFiles()` unions the git index with the working tree, so a
-file that is still in the index but deleted on disk (`git rm --cached`, or a
-delete not yet staged) is discovered, and `countRawLines` then throws a raw
-`ENOENT` from inside the aggregate test — a stack trace instead of the
-carefully written registry message. Filter the discovered list through
-`existsSync(join(repoRoot(), p))` before summing, or catch and re-throw with
-the path and the remedy.
-
-### IN-03: no test asserts that HEAD actually moved during an accepted run
-
-**File:** `tests/integration/quick-workflow.test.ts:594-618`
-
-Case 4 asserts `row.headSha` equals a `git rev-parse HEAD` the test reads
-itself, and separately that the commit count went up by one — but never that
-`row.baseSha !== row.headSha`. That one line is the cheapest possible
-statement of "the SHA compared at claim time is not the one captured at arm
-time", and asserting it in case 4 plus its negation in a no-commit case is
-precisely what would have surfaced CR-01 during authoring. Add it alongside
-the CR-01 regression test.
+- **CR-01 ships as a known Critical if there is no further pass** — ACCEPT says "a commit landed at &lt;sha&gt;" when it has only established that HEAD changed; `git checkout`/`reset`/`revert` produce a false accept (proved: W1 made zero commits, W2 deleted one). Remedy is three string edits, recorded above verbatim.
+- **WR-01 ships as a known Warning** — the line-budget ratchet counts nothing in a sibling directory or `.pi/lib/`; 2,402 planted lines leave the full suite green. Phase 9 inherits this.
+- A failure hidden inside a single shell command accepts: `bash 'false; git commit --allow-empty -m N3'` → `accept`, because the gate's granularity is a tool call, not a command; the "work itself is NOT verified" clause is what covers this.
+- An empty commit or a commit of wholly unrelated content still accepts — needs a diff or tree hash, explicitly Phase 8's job, and documented in `docs/WORKFLOWS.md` §4.
+- The `session_start` orphan disarm writes a `verdict:"reject"` row into the orphan's cwd that is indistinguishable from a genuine gate rejection except by `headSha:""` — harmless, but a log reader will not know it was housekeeping.
+- `EvidenceRecord.command` is built, redacted, truncated and never read; `tool_execution_end` supplies `toolInput: {}`, so it is now always the empty string and reject reasons name the tool but never the command.
+- `index.ts` sits at 79/80 — one raw line of headroom, and no ceiling debate has been had.
+- WR-03's divergent-cwd path (`armedCwd()`) is correct by construction at both call sites but not proven load-bearing at session level; no divergent-cwd session is constructible until `pi-subagents` lands in Phase 7.
+- `agent_end` still spawns a `git rev-parse HEAD` on every turn of every session the extension is loaded into, armed or not (`index.ts:64-66` has no `isRunArmed()` short-circuit).
+- Architectural invariants re-confirmed clean: `evidence.ts` imports only `../diagnostics/redact.ts` and `../../lib/jsonl.ts` — nothing from `../safety/` (CONTEXT.md decision 8); no 40-hex SHA literal in any Phase 6 test file (the three repo-wide hits are legitimate fixtures in `ci-pinning.test.ts` and `redact.test.ts`); no Phase 6 test references `homedir()`, `USERPROFILE` or `.pi/agent`, and every write lands in an `mkdtemp` directory.
 
 ---
 
-_Reviewed: 2026-08-14T15:34:25Z_
+_Reviewed: 2026-08-15T01:31:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+_Iteration: 4 (final verification)_
