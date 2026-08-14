@@ -452,3 +452,118 @@ or moved to appear caught.
 _Fixed: 2026-08-14T02:51:26Z_
 _Fixer: Claude (gsd-code-fixer)_
 _Iteration: 4 (final fix pass)_
+
+---
+---
+
+# Phase 4: Code Review Fix Report — Iteration 5 (final fix pass)
+
+**Fixed at:** 2026-08-14T11:29:00Z
+**Source review:** .planning/phases/04-safety-deployment-guardrails/04-REVIEW.md (iteration 4 — FINAL verification)
+**Iteration:** 5 (final fix pass — no further pass will run)
+
+**Summary:**
+- Findings in scope: 5 (1 blocker, 4 warnings)
+- Fixed: 5
+- Skipped: 0
+
+**Suite:** 1179 tests / 67 files, all green (baseline for this run: 1175
+tests / 67 files — iteration 4's own ending count; the increase is this
+pass's own regression tests: 2 new `evasion-corpus.ts` rows [EV-73/EV-74,
+WR-16], 2 new `approvals.test.ts` cases [CR-11's same-toolCallId /
+different-toolCallId markHookDeferred properties], 1 rewritten
+`policy-compose.test.ts` case [WR-17], 1 rewritten `bootstrap-safety-stub.
+test.ts` case 8 [CR-11/WR-18], and the WR-12 hook-driving case in
+`safety-entry.test.ts` gained distinct `toolCallId`s per round without
+changing its own count). `npm run typecheck` clean after every commit. Ran
+entirely in the main repository on branch `main` — no worktree was
+created, per this run's explicit process rule; `git worktree list` showed
+exactly one entry throughout, before and after. Every fix below was
+verified red (with the fix reverted, its regression test observed to fail
+for the exact reason the finding names) and green (with the fix restored)
+before being committed.
+
+## Fixed Issues
+
+### CR-11: the accepted double-load permanently broke the confirm → approve → re-issue protocol — the "at worst a duplicate block" justification was false
+
+**Files modified:** `.pi/extensions/safety/approvals.ts`, `.pi/extensions/safety/index.ts`, `bin/bootstrap.sh`, `docs/SAFETY.md`, `tests/integration/bootstrap-safety-stub.test.ts`, `tests/unit/approvals.test.ts`, `tests/unit/safety-entry.test.ts`
+**Commit:** `80f53b1` (bundled with WR-15 — see note below)
+**Applied fix:** Chose the review's preferred option — make the deferral/consume bookkeeping tolerate N hook invocations per tool call, rather than trying to make the stub detect the project copy will load (which iteration 4's own CR-09 fix already proved is not a valid proxy and reintroduces the fail-open). `approvals.ts#markHookDeferred` now takes an `event.toolCallId` parameter and stores `{ toolCallId, expiresAt }` per `requestKey` instead of a bare timestamp: a call for the SAME `requestKey` AND THE SAME `toolCallId` as an existing unexpired marker ALSO returns `true` (every hook belonging to one tool call — i.e. every loaded copy of this extension — may defer), while a call for the SAME `requestKey` but a DIFFERENT `toolCallId` (a genuine re-issue, a new tool call, with nothing consumed yet) returns `false` and falls through to the normal mint-a-fresh-pending path, preserving WR-12's original bound. `index.ts`'s hook now calls `markHookDeferred(verdict.requestKey, event.toolCallId)`.
+**Before/after verdict:** Reproduced the reviewer's exact evidence with a single-process driver that loads two independent module instances of the real extension via jiti (`moduleCache: false`) and drives both recorded `tool_call` hooks in the order `emitToolCall` uses: round 1 (fresh) → hook A blocks, mints pending; `approve()` succeeds; round 2 (re-issue, new `toolCallId`) — **pre-fix:** hook A defers, hook B finds the requestKey-only marker already claimed and BLOCKS (mints a second pending), reproducing the reviewer's "the approved command is never allowed through, in any round" finding exactly. **Post-fix:** both hook A and hook B defer (`undefined`), the re-issue proceeds to the wrapper. Round 3, after directly calling `consume()` on the one granted key (simulating the wrapper's own one-shot spend) to prove exactly-once: blocks again, minting a fresh pending — the command was let through exactly once, not permanently unguarded.
+**Regression test:** `tests/integration/bootstrap-safety-stub.test.ts`'s CR-11 case (WR-18's replacement for the old, structurally-unfailable case 8 — see WR-18 below) is the primary proof, driving the REAL generated stub twice in one process. `tests/unit/approvals.test.ts` gained two direct unit cases on `markHookDeferred` itself (same-toolCallId returns true twice; same-requestKey-different-toolCallId returns false), and `tests/unit/safety-entry.test.ts`'s existing WR-12 hook-driving case was updated to give each of its three simulated re-issues a DISTINCT `toolCallId` (matching what Pi actually assigns per real tool call), which is what lets that test continue to prove WR-12's original bound (a genuinely different tool call with no intervening consume still blocks) without being defeated by CR-11's own same-toolCallId exemption. Verified red: with only the `event.toolCallId` keying reverted (`git stash push --keep-index` on `approvals.ts`/`index.ts`), the CR-11 bootstrap-safety-stub case failed with "round2 must NOT be blocked: expected true to be false" — the exact bug reproduced; restored, green. `tests/unit/policy-compose.test.ts` and the WR-12 unit/integration cases were also confirmed to still pass; acceptance criteria (i)–(iv) all hold: (i) headless-in-this-repo stub registration is unaffected (already fixed by CR-09, untouched here); (ii) block → approve → re-issue lets the command through exactly once under a genuine double load; (iii) SAFE-09 mutation still blocks (unaffected — `double-enforcement.test.ts` untouched and still green); (iv) `granted.size === 1` after round 2, `consume()` succeeds exactly once, a further re-issue after consume blocks again.
+
+### WR-15: the accepted double-load was published nowhere — two source files cited a `docs/SAFETY.md` "WR-07 note" that did not exist
+
+**Files modified:** `bin/bootstrap.sh`, `.pi/extensions/safety/index.ts`, `docs/SAFETY.md`
+**Commit:** `80f53b1` (bundled with CR-11 — the two findings' fixes are the same prose: correcting the false "at worst a duplicate block" claim IS writing the section that publishes what the trade now actually costs after CR-11, and the dangling citation and the false claim were the same sentences in both source files)
+**Applied fix:** Added a new bullet, "This extension may load MORE THAN ONCE in one process — accepted, not solved", to `docs/SAFETY.md`'s existing "Load order is part of this" section: states what the double load costs, that the "at worst a duplicate block" claim was executed and found false, and that CR-11's fix makes the approval protocol survive it — citing `tests/integration/bootstrap-safety-stub.test.ts`'s CR-11 case as the executed proof. `bin/bootstrap.sh`'s own shell-comment docstring and its generated stub's embedded comment text (the actual bytes written to `~/.pi/agent/extensions/ky-safety/index.ts`) both had the false claim and the dangling `docs/SAFETY.md, the WR-07 note` citation corrected to point at the real "Load order is part of this" section and describe the CR-11 mechanism. `.pi/extensions/safety/index.ts`'s own entry-point docstring gained a new CR-11 paragraph correcting the same false claim and pointing at the same real section.
+**Before/after verdict:** `grep -rn "WR-07 note" docs/ .pi/extensions/safety/index.ts bin/bootstrap.sh` returned nothing both before verification and after the fix (the citation text itself was removed, not merely made to resolve); `grep -rn "Load order is part of this"` now finds the real section in `docs/SAFETY.md` and both citing files pointing at it.
+**Regression test:** No dedicated test — this is a documentation-honesty fix. Verified by direct `grep` (above) and by `tests/unit/evasion-corpus.test.ts`'s Group B, which asserts `docs/SAFETY.md` still contains the "Load order is part of this" heading and its pre-existing source citations (`types.d.ts:687-688`, `runner.js:280-291`, `T-04-08`) — unaffected by the new bullet, confirming the section grew rather than lost its existing content. A stray apostrophe introduced mid-edit in `bin/bootstrap.sh`'s generated-stub text (`"every loaded copy's hook can defer"`) broke the shell script's own single-quoted `node -e '...'` heredoc, caught immediately by the `bootstrap-safety-stub.test.ts` suite failing with a shell syntax error on every case that runs a full bootstrap; fixed by rephrasing to avoid the apostrophe, then re-verified green.
+
+### WR-16: WR-14's `$HOME` anchoring narrowed a UNC alias and a different profile's own credentials directory out of the search-root check — published rather than closed
+
+**Files modified:** `tests/fixtures/evasion-corpus.ts`, `docs/SAFETY.md`
+**Commit:** `c940907`
+**Disposition:** Documented as an accepted, published limitation rather than closed. The review's own offered fix (compare tail segments against `$HOME`'s own trailing segments) was evaluated and found NOT to actually close the reviewer's own "different profile" example (`C:/Users/otheruser/.aws` shares neither `facts.home`'s root NOR its trailing segments, so no tail-segment comparison against `$HOME` can ever match it) — attempting it would have closed only the UNC-alias-to-the-SAME-directory case while leaving the other case's own docstring claiming a fix that doesn't fully apply, which is exactly the false-claim pattern this phase has already been caught on four times. Published instead: two new evasion-corpus rows (`EV-73`: a UNC alias of the fixture home's own `~/.aws`; `EV-74`: a different profile's own `.aws` directory), both confirmed by direct execution against the real `evaluate()` with the corpus's own fixed `FACTS`, plus two matching `docs/SAFETY.md` "Known bypasses" table rows and a cross-reference from the existing sensitive-reads bullet.
+**Verification:** `tests/unit/evasion-corpus.test.ts`'s Group A' independently asserts both new rows genuinely return `allow` through the real `evaluate()` (so this published limit cannot silently go stale), and Group B's doc/corpus cross-check passes in both directions (row count and identities derived from the corpus, never hand-typed) — full suite run confirmed 91/91 passing in that file, up from 89.
+
+### WR-17: a bare `grep`/`find`/`ls` with no `path` argument recursively searched `$HOME` when the session was rooted there — closed
+
+**Files modified:** `.pi/extensions/safety/policy.ts`, `tests/unit/policy-compose.test.ts`, `docs/SAFETY.md`
+**Commit:** `c5884c7`
+**Applied fix:** Removed `evaluateSearchRootField`'s exemption that returned `allow` outright whenever `extraction.kind === "absent" && facts.projectRoot === facts.home`. That exemption (WR-14's own fix) was evaluated against what the exempted tools actually do — recurse from the search root — and found to reopen exactly the SAFE-06 leak CR-07 exists to close, in precisely the case where the danger is highest (a session opened directly in `$HOME`). There is no principled difference between the absent-path default and an explicit `path: "."` from the same session, which correctly still blocks; the removed exemption is not replaced with a narrower one, since `grep`/`find`/`ls` are not registered as active tools today (WR-09), so this closes the gap with zero practical UX cost while it stays unregistered. `sameCanonicalPath`'s now-unused import was removed from `policy.ts`.
+**Before/after verdict:** Executed with `home = projectRoot = C:/Users/tester`: `grep { pattern: "aws_secret_access_key" }` (no `path`), `find {}`, `ls {}` all returned `allow` pre-fix and `block` post-fix; the paired negative (`grep { pattern: "x", path: "C:/Users/tester" }`, an EXPLICIT path) stayed `block` throughout, proving the fix does not change behaviour for an already-explicit path — it only removes the absent-path special case.
+**Regression test:** `tests/unit/policy-compose.test.ts`'s WR-14 describe block was renamed to "WR-14/WR-17" and its "a bare grep/find/ls ... is allowed" case was rewritten to assert the opposite ("now BLOCKS"), plus a new assertion that the explicit-`path`-equal-to-`$HOME` case now blocks IDENTICALLY to the absent-path default (WR-17 removed the difference between them). The CR-07 RE-RUN cases in the same describe block (EV-61..EV-64 reproduced directly against `evaluate()`) were left unchanged and continue to pass, proving this fix does not reopen CR-07 or the OTHER half of WR-14 (the `$HOME`-anchored segment check for in-project paths merely containing a `.aws`/`.kube`/`.ssh`/`.gnupg` segment, which is untouched). Verified red (the rewritten WR-17 case failed with "expected block, got allow": `AssertionError: a bare grep from a session rooted at $HOME must block, not silently walk ~/.aws`) with the exemption temporarily restored in a scratch edit; green after removing it for real. `docs/SAFETY.md`'s sensitive-reads bullet gained a sentence stating the absent-path default is now evaluated the same way as an explicit path.
+
+### WR-18: `bootstrap-safety-stub.test.ts` case 8 pinned the double-load trade with an oracle that structurally could not observe it
+
+**Files modified:** `tests/integration/bootstrap-safety-stub.test.ts`
+**Commit:** `80f53b1` (bundled with CR-11 — the replacement case IS the CR-11 regression test; there is no independent WR-18-only diff to separate)
+**Applied fix:** Replaced the two-subprocess shape (`runDriverAt(cwd, stub)` called twice, each spawning its own `node` process sharing no `globalThis`, no approvals store and no hook list) with a single driver process that loads the real generated stub TWICE, into two fresh `pi` objects, via jiti with `moduleCache: false` (empirically confirmed, before writing the real test, that this gives two independent module instances all the way down while still sharing the real process `globalThis` — exactly the property `approvals.ts`'s own module docstring describes). The new driver drives both recorded `tool_call` hooks in the order `emitToolCall` uses (stop at the first `block`), through block → `approve()` (called directly against `approvals.ts`'s own exports, isolating this property from `approve_ky_command`'s separately-tested UI-gating property) → re-issue → a directly-invoked `consume()` (simulating the one first-registered wrapper's own one-shot spend, read via `globalThis[APPROVALS_STORE_KEY].granted` the same way the module's own docstring says to) → a further re-issue, and asserts the re-issue after approval is NOT blocked while the re-issue after consumption IS — the property the old case claimed to prove but could not, and the only oracle that can distinguish "duplicate block" from "permanently blocked".
+**Before/after verdict:** The OLD case would have passed (returned the same tool-name array from two independent subprocess calls) regardless of whether the in-process double load behaved correctly or not — confirmed by inspection, not merely asserted, since the two subprocess calls share no state by construction. The NEW case, run against the pre-CR-11 code (`event.toolCallId` keying reverted), fails with `round2 (the re-issue, under a double load) must NOT be blocked ... expected true to be false` — a real, non-vacuous failure for the real reason.
+**Regression test:** This case IS the regression test (for CR-11). Verified red/green as described under CR-11 above — reverting only the `toolCallId` change (not the case itself) makes it fail; restoring the fix makes it pass. `runDriverAt` (the tool-name-only driver used by cases 6/7) is unchanged and still in use for those cases, which are unaffected by this fix.
+
+## Skipped Issues
+
+None — all 5 in-scope findings (1 blocker, 4 warnings) were addressed: CR-11, WR-15 and WR-18 fixed (WR-18's own test IS the CR-11 proof, so the two commits above cover all three); WR-17 closed; WR-16 documented per its own offered fallback, after the review's suggested close was evaluated and found not to actually close one of its own two worked examples. `IN-01`..`IN-06` (info-tier) were out of `fix_scope: critical_warning` and were not touched; `RB-04-01` in `docs/RUNBOOK.md` was deliberately left untouched, still `OUTSTANDING` in both the summary table (`:862`) and the detail subsection (`:866`).
+
+## Final evasion-corpus numbers (executed, post-fix)
+
+```
+total corpus cases          : 74   (was 72 at iteration 4; +2 from WR-16's EV-73/EV-74)
+blocked by real evaluate()  : 60   (unchanged -- WR-17's fix affects a shape not in the corpus: bare
+                                     grep/find/ls with no path, which cannot be expressed against the
+                                     corpus's fixed FACTS where projectRoot != home)
+NOT blocked (allow)         : 14   (was 12; +2)
+not-blocked ids             : EV-09 EV-27 EV-35 EV-36 EV-38 EV-39 EV-40 EV-41 EV-42 EV-56 EV-57 EV-65 EV-73 EV-74
+mismatches                  : none
+```
+
+`docs/SAFETY.md`'s "Known bypasses" table lists **exactly** this same
+14-id set, cross-checked in **both** directions by `evasion-corpus.test.ts`'s
+Group B (89 → 91 tests in that file after this pass), no row re-bucketed or
+softened. WR-17's own fix (bare `grep`/`find`/`ls` from a `$HOME`-rooted
+session) is proven separately in `tests/unit/policy-compose.test.ts`, since
+the corpus's fixed `FACTS` (`projectRoot: "C:/repo" != home: "C:/Users/
+tester"`) structurally cannot express "session rooted at `$HOME`" — the
+same reason WR-14's own iteration-3 regression tests lived in
+`policy-compose.test.ts` rather than the corpus.
+
+## Suite state after this pass
+
+- **1179 tests / 67 files**, all green. `npm run typecheck` clean.
+- Tree clean after a full `npx vitest run` (the WR-13 fix's own
+  global-teardown guard, still in force, would fail the build if this
+  were not true).
+- One worktree throughout (`git worktree list`), branch `main`, no
+  `git worktree add`/`remove` at any point in this run.
+- `RB-04-01` in `docs/RUNBOOK.md` remains `OUTSTANDING` in both the summary
+  table (`:862`) and the detail subsection (`:866`) — untouched, per this
+  run's explicit process rule.
+
+---
+
+_Fixed: 2026-08-14T11:29:00Z_
+_Fixer: Claude (gsd-code-fixer)_
+_Iteration: 5 (final fix pass)_
