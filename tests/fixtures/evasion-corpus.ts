@@ -54,12 +54,13 @@
  * ---------------------------------------------------------------------------
  * WHY `tool` IS A PLAIN STRING, NOT A FOUR-WAY UNION
  * ---------------------------------------------------------------------------
- * Every row but one uses `"bash"` / `"read"` / `"write"` / `"edit"` — the
- * four tool names `evaluate()` actually governs. EV-42 deliberately uses a
- * fifth, made-up name (`"custom_extension_tool"`) to exercise the ONE case
- * `evaluate()` allows by design: a tool name it does not recognise at all
- * (see `policy.ts`'s own "WHY UNKNOWN TOOL NAMES ARE ALLOWED" docstring
- * section). A strict union would make that row inexpressible.
+ * Every row but one uses one of the seven tool names `evaluate()` actually
+ * governs (`"bash"` / `"read"` / `"write"` / `"edit"` / `"grep"` / `"find"` /
+ * `"ls"`). EV-42 deliberately uses an eighth, made-up name
+ * (`"custom_extension_tool"`) to exercise the ONE case `evaluate()` allows by
+ * design: a tool name it does not recognise at all (see `policy.ts`'s own
+ * "WHY UNKNOWN TOOL NAMES ARE ALLOWED" docstring section). A strict union
+ * would make that row inexpressible.
  */
 
 export type EvasionExpectation = "BLOCKED" | "OUT-OF-SCOPE";
@@ -69,7 +70,7 @@ export interface EvasionCase {
 	readonly id: string;
 	/** The PITFALLS.md bypass class this row exercises. */
 	readonly class: string;
-	/** The tool name passed to `evaluate()` — one of `bash`/`read`/`write`/`edit` for every row except EV-42. */
+	/** The tool name passed to `evaluate()` — one of `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` for every row except EV-42. */
 	readonly tool: string;
 	/** The literal tool input, exactly as `evaluate()` receives it. */
 	readonly input: Readonly<Record<string, unknown>>;
@@ -643,7 +644,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "custom_extension_tool",
 		input: { anything: "goes" },
 		expect: "OUT-OF-SCOPE",
-		why: "evaluate() governs exactly bash/read/write/edit by name -- a fifth tool name it does not recognise is allowed by construction (see policy.ts's own 'WHY UNKNOWN TOOL NAMES ARE ALLOWED' docstring section), and any extension-registered tool that shells out internally is exactly this case.",
+		why: "evaluate() governs exactly bash/read/write/edit/grep/find/ls by name -- an eighth tool name it does not recognise is allowed by construction (see policy.ts's own 'WHY UNKNOWN TOOL NAMES ARE ALLOWED' docstring section), and any extension-registered tool that shells out internally is exactly this case.",
 		reference: "PITFALLS.md:469 (custom tool, listed separately from the 14-row table); policy.ts evaluate() default arm; T-04-41",
 	},
 
