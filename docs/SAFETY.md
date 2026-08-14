@@ -221,6 +221,21 @@ inside.
   residual cost of the double load is therefore exactly what the original
   claim said and no more: duplicate audit rows, never a missed or
   permanently-stuck block.
+- **WR-19: the CR-11 fix removes `HOOK_DEFER_TTL_MS`'s bound entirely for a
+  REPLAYED `toolCallId` — narrow, and not reachable in this repository
+  today.** `event.toolCallId` is the *provider's* id, passed straight
+  through with no harness-side generation
+  (`pi-agent-core/dist/agent-loop.js:268,301,337,462`), so a model can
+  present the SAME id more than once. Every hook invocation sharing that id
+  may defer for as long as the marker keeps getting renewed — measured: 1000
+  deferrals granted in 1000 consecutive ms for a replayed id, versus 1 for
+  distinct ids. This only bites when ALL of: (a) the wrapper that would
+  `consume()` the grant never runs at all (the T-04-08 collision above), (b)
+  a human already approved that exact command, and (c) the id is replayed.
+  Not present in this repository today (`grep`/`find`/`ls` cannot produce a
+  `confirm` verdict at all, so T-04-08 has no live second route here), and
+  command-bound even when it is. Tracked, not fixed, in `approvals.ts`'s own
+  `HOOK_DEFER_TTL_MS` docstring.
 
 ## Authority
 

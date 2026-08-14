@@ -125,11 +125,28 @@ export const APPROVAL_TTL_MS = 10 * 60 * 1000;
  * allows one more deferral. Deliberately SHORT -- seconds, not minutes --
  * unlike {@link APPROVAL_TTL_MS}: the wrapper's own `execute()` is expected
  * to run essentially immediately after the hook defers, inside the SAME tool
- * call, so this marker's only job is to bound the maximum UNGUARDED window
- * if the wrapper never runs at all (the documented T-04-08 tool-name
- * collision, or the CR-06 double-load-prevention shape where this
- * extension's own wrapper was never registered), not to model a legitimate
- * wait. See {@link markHookDeferred}'s own docstring for the mechanism.
+ * call, so this window is what bounds the wait for a DISTINCT re-issue (a
+ * NEW `toolCallId`) whose grant nothing ever consumes -- the documented
+ * T-04-08 tool-name collision, or the CR-06 double-load-prevention shape
+ * where this extension's own wrapper was never registered. See
+ * {@link markHookDeferred}'s own docstring for the mechanism.
+ *
+ * WR-19: this bound does NOT apply to a REPLAYED `toolCallId`. Every hook
+ * invocation presenting the SAME `toolCallId` as the marker's own is allowed
+ * to defer for as long as the marker keeps getting renewed (CR-11's fix,
+ * required so that N loaded copies' hooks can all defer for the SAME tool
+ * call) -- there is no cap on how many times one id may replay, and
+ * `toolCallId` is the PROVIDER's id, passed straight through
+ * (`pi-agent-core/dist/agent-loop.js:268,301,337,462`, never
+ * harness-generated), so a model can replay it. Measured against the real
+ * function: 1000 deferrals granted in 1000 consecutive ms for a replayed id,
+ * versus 1 for distinct ids. Reachable only when ALL of: (a) the wrapper
+ * that would `consume()` the grant never runs at all (T-04-08, above --
+ * not reachable in this repository today), (b) a human has already approved
+ * that EXACT command (grants are command-bound -- only the approved command
+ * benefits), and (c) the model/provider replays the id. See
+ * `docs/SAFETY.md`'s "Load order is part of this" section for the published
+ * account of this residual.
  */
 export const HOOK_DEFER_TTL_MS = 5_000;
 
