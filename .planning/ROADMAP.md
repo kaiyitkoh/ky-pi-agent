@@ -259,7 +259,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 05-10-PLAN.md — the `session_start` restore and the zero-context-token absence proof (ROUTE-09)
+- [x] 05-10-PLAN.md — the `session_start` restore and the zero-context-token absence proof (ROUTE-09)
 
 **Wave 6** *(blocked on Wave 5 completion)*
 

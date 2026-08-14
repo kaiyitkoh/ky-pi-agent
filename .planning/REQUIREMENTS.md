@@ -80,7 +80,7 @@
 - [x] **ROUTE-06**: Capability guards hard-block impossible routes: image → text-only model; oversized context → small-window model **[FAUX]**
 - [x] **ROUTE-07**: A capability guard hard-blocks Bedrock non-Claude models with thinking enabled — `buildAdditionalModelRequestFields` silently drops it while the UI still offers the setting **[FAUX]**
 - [x] **ROUTE-08**: A capability guard hard-blocks Bedrock DeepSeek R1 as an executor — it supports no tool calling at all **[FAUX]**
-- [ ] **ROUTE-09**: Mode selection persists across restarts via `pi.appendEntry`, costing zero context tokens **[FAUX]**
+- [x] **ROUTE-09**: Mode selection persists across restarts via `pi.appendEntry`, costing zero context tokens **[FAUX]**
 - [ ] **ROUTE-10**: Every mode switch produces a wire dump proving the intended model was actually used **[FAUX]**
 - [~] **ROUTE-11**: Qoder is available as a delegate tool that hands off a whole task and folds the result back — explicitly a foreign agent that bypasses the harness's tools, safety hooks, and wire inspector, and documented as such **[RUNBOOK]** — *the delegate tool is built and registered (`.pi/extensions/qoder/{client,index}.ts`, plan 05-03): a pure config refusal, a tolerant incremental SSE parser and the three-step Cloud Agents HTTP sequence, proven offline (`tests/unit/qoder-client.test.ts`) with no PAT and no network egress on this machine. Whether a real PAT against a real `agent_id`/`environment_id` actually reaches `api.qoder.com` and folds a result back is `RB-05-01`, to be appended to `docs/RUNBOOK.md` by a later plan, and will stay **OUTSTANDING***
 
@@ -281,7 +281,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | ROUTE-06 | Phase 5 | Complete |
 | ROUTE-07 | Phase 5 | Complete |
 | ROUTE-08 | Phase 5 | Complete |
-| ROUTE-09 | Phase 5 | Pending |
+| ROUTE-09 | Phase 5 | Complete |
 | ROUTE-10 | Phase 5 | Pending |
 | ROUTE-11 | Phase 5 | Partial — the delegate tool is built, registered and proven offline (config refusal, SSE parser, `tests/unit/qoder-client.test.ts`, plan 05-03); the live check against a real PAT is `RB-05-01` (a later plan appends it to `docs/RUNBOOK.md`), **OUTSTANDING**. Not complete |
 | EXT-01 | Phase 7 | Pending |

@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 05-09-PLAN.md
-last_updated: "2026-08-14T10:35:28.358Z"
+stopped_at: Completed 05-10-PLAN.md
+last_updated: "2026-08-14T10:47:03.277Z"
 last_activity: 2026-08-14
 progress:
   total_phases: 11
   completed_phases: 4
   total_plans: 56
-  completed_plans: 53
+  completed_plans: 54
   percent: 36
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 05 (routing-capability-guards) — EXECUTING
-Plan: 3 of 12
+Plan: 4 of 12
 Status: Ready to execute
 Last activity: 2026-08-14
 
-Progress: [██████████] 95%
+Progress: [██████████] 96%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11 and
@@ -116,6 +116,7 @@ means "everything a machine without credentials can do has been done".
 | Phase 05 P07 | 50m | 2 tasks | 2 files |
 | Phase 05 P08 | 35m | 2 tasks | 1 files |
 | Phase 05 P09 | 20min | 2 tasks | 2 files |
+| Phase 05 P10 | 25m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -283,6 +284,9 @@ Recent decisions affecting current work:
 - [Phase 05]: 05-08: ROUTE-04 moves from Partial to Complete -- tests/integration/single-shot-roles.test.ts is the [FAUX] session-level proof 05-04-SUMMARY.md deferred, covering nested-row identity, no-session-mutation, per-call reasoning effort on the wire in both directions, and a guard refusal that costs zero requests
 - [Phase 05]: 05-09: applyEscalate is a separate function from applyMode, sharing the pre-flight->guard->setModel->persist order but never calling setMode -- escalation lifts only the executor and the escalation flag, never the mode itself — Folding both into one function would need caller-intent threaded through every step, the implicit-branching shape guard.ts/policy.ts's house style avoids
 - [Phase 05]: 05-09: the escalated flag is set (setEscalated) strictly after pi.setModel returns true -- a refused escalation cannot leave getModeState().escalated claiming a switch that never took effect (T-05-33) — Falsification confirmed: reachable only through the ordering discipline itself, since the candidate/auth failure path returns before setEscalated is ever called
+- [Phase 05]: 05-10: restoreModeFromBranch is a plain function of the branch entry array, exported so it can be tested directly without waiting for session_start, which is measured not to fire in a headless createAgentSession
+- [Phase 05]: 05-10: the zero-context-token proof plants MODE_ENTRY_TYPE (ky:mode) as the marker and pairs the absence assertion with a positive control -- the same marker sent as ordinary user-message content must be found by the same captured-payload instrument
+- [Phase 05]: 05-10: ROUTE-09 is now complete in both halves (write via 05-07, restore via this plan) -- Pi's own session_start event dispatch itself remains unexercised by this repository's headless test harness, stated plainly rather than implied as covered
 
 ### Pending Todos
 
@@ -330,8 +334,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T10:35:28.348Z
-Stopped at: Completed 05-09-PLAN.md
+Last session: 2026-08-14T10:47:03.268Z
+Stopped at: Completed 05-10-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
