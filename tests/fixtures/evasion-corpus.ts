@@ -96,6 +96,8 @@ const WIN_READ_AWS_CREDS = String.raw`C:\Users\Admin\.aws\credentials`;
 const WIN_DIFFERENT_REPO = "git -C " + String.raw`C:\other\repo` + " push";
 /** A real backslash-then-newline line continuation, not an escaped literal. */
 const LINE_CONTINUATION = "git \\\npush";
+/** WR-16: a UNC path aliasing the fixture home's OWN ~/.aws directory via a `localhost` share instead of the drive-letter root. */
+const UNC_OWN_AWS_DIR = String.raw`\\localhost\C$\Users\tester\.aws`;
 
 export const EVASION_CORPUS: readonly EvasionCase[] = [
 	// -------------------------------------------------------------------------
@@ -825,6 +827,36 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		expect: "OUT-OF-SCOPE",
 		why: "confirmed by execution: a glob WILDCARD defeats the basename-exact isDotEnvFile check ('.env*' is not '.env' and does not start with the '.env.' prefix that check requires) -- a genuine residual gap CR-07 deliberately does not attempt to close (a false-positive-prone pattern match over glob syntax), published here rather than silently unpublished.",
 		reference: "CR-07; policy.ts#evaluateGlobField",
+	},
+
+	// -------------------------------------------------------------------------
+	// WR-16: WR-14's own $HOME-anchoring fix (isSensitiveSearchRoot's segment
+	// check now requires isWithinRoot(canonicalPath, facts.home) -- SAME root
+	// as home -- before it looks at segments at all) closed a false positive
+	// but reopened a narrower one: a search root naming the SAME real
+	// directory, or a DIFFERENT user's equivalent directory, through a path
+	// spelling that does not share home's own root, is no longer caught at
+	// all. Both confirmed by execution against the real evaluate(); both
+	// dormant today because grep/find/ls are not registered as active tools
+	// (WR-09) -- published here rather than silently narrowed away.
+	// -------------------------------------------------------------------------
+	{
+		id: "EV-73",
+		class: "sensitive-read",
+		tool: "grep",
+		input: { pattern: "x", path: UNC_OWN_AWS_DIR },
+		expect: "OUT-OF-SCOPE",
+		why: "confirmed by execution: a UNC path (\\\\localhost\\C$\\Users\\tester\\.aws, and identically its forward-slash spelling //localhost/C$/Users/tester/.aws) names the fixture home's OWN ~/.aws directory, but isWithinRoot() compares rootedSegmentsOf().root FIRST -- a UNC root ('\\\\localhost/C$') never equals a drive-letter root ('C:'), so the home-anchored segment check fails outright even though the UNC path resolves to the identical real directory on disk. The single-FILE rule (classifyPathRead, e.g. the .../.aws/credentials file itself) is unaffected and still blocks.",
+		reference: "WR-16; paths.ts#isSensitiveSearchRoot; a narrowing introduced by WR-14's own $HOME-anchoring fix",
+	},
+	{
+		id: "EV-74",
+		class: "sensitive-read",
+		tool: "grep",
+		input: { pattern: "x", path: "C:/Users/otheruser/.aws" },
+		expect: "OUT-OF-SCOPE",
+		why: "confirmed by execution: before WR-14's anchoring fix, isSensitiveSearchRoot matched a '.aws'/'.kube'/'.ssh'/'.gnupg' segment ANYWHERE in the path, unanchored, so a DIFFERENT user profile's own credentials directory (not under the fixture home at all) blocked incidentally. WR-14 anchored the segment check to the fixture home specifically to fix a real false positive (an in-project path merely containing one of those segment names); the side effect is that a genuinely different profile's own .aws/.kube/.ssh/.gnupg directory, which never shares the fixture home's root OR its segments, is no longer caught.",
+		reference: "WR-16; paths.ts#isSensitiveSearchRoot; a narrowing introduced by WR-14's own $HOME-anchoring fix",
 	},
 
 	// -------------------------------------------------------------------------
