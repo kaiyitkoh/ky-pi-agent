@@ -394,6 +394,44 @@ describe("CR-03 -- plan mode's read-only bash boundary is decided over an unbash
 		).toEqual([]);
 	});
 
+	describe("WR2-02 -- a non-string command DENIES, it does not throw", () => {
+		// A throw out of a `tool_call` handler is FAIL-OPEN: the handler never
+		// returns `{ block: true }`, so the call is not blocked. Before this fix
+		// `classifyPlanModeCommand` took `command: string` and went straight to
+		// `command.trim()`, while `index.ts` handed it `event.input.command as
+		// string` -- an unchecked assertion over a field Pi documents as mutable in
+		// place, with no re-validation, by any earlier-loaded handler. Executed:
+		//
+		//   undefined -> TypeError Cannot read properties of undefined (reading 'trim')
+		//   null      -> TypeError Cannot read properties of null (reading 'trim')
+		//   123       -> TypeError command.trim is not a function
+		//   {"a":1}   -> TypeError command.trim is not a function
+		//
+		// It was also a regression against the vendored original, whose
+		// `RegExp.test(command)` coerces and never throws.
+		const NON_STRINGS: readonly { label: string; value: unknown }[] = [
+			{ label: "undefined", value: undefined },
+			{ label: "null", value: null },
+			{ label: "a number", value: 123 },
+			{ label: "an object", value: { a: 1 } },
+			{ label: "an array", value: ["cat", "x"] },
+			{ label: "a boolean", value: true },
+			{ label: "a String object", value: new String("cat x") },
+		];
+		for (const { label, value } of NON_STRINGS) {
+			it(`${label} denies rather than throwing`, () => {
+				let verdict: ReturnType<typeof classifyPlanModeCommand> | undefined;
+				expect(() => {
+					verdict = classifyPlanModeCommand(value);
+				}, `${label}: a guard that THROWS is worse than no guard -- the tool_call handler never reaches its return, so the command is not blocked`).not.toThrow();
+				expect(verdict?.kind, `${label}: the only fail-closed answer is deny`).toBe("deny");
+				// The boolean face must agree, or the two drift apart exactly where
+				// it matters most.
+				expect(isSafeCommand(value), `${label}: isSafeCommand must be false too`).toBe(false);
+			});
+		}
+	});
+
 	it("Direction 5 -- iteration 2's bypasses (CR2-01, CR2-02) are still in the corpus, by id", () => {
 		// Same reasoning as Direction 4, for the second round of bypasses. These are
 		// the rows that were ALLOWED by the predicate the FIRST fix pass shipped.

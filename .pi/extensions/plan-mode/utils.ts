@@ -30,7 +30,7 @@ import { classifyPlanModeCommand } from "./read-only.ts";
  * `tests/unit/plan-mode-read-only.test.ts` asserts that agreement on every
  * corpus row rather than trusting it.
  */
-export function isSafeCommand(command: string): boolean {
+export function isSafeCommand(command: unknown): boolean {
 	return classifyPlanModeCommand(command).kind === "allow";
 }
 

@@ -504,9 +504,19 @@ const READ_ONLY_VERBS = new Set<string>([...ALWAYS_READ_ONLY, ...Object.keys(ARG
  * Fail-closed at every step: an unparseable command, a command whose resolved
  * invocation list is empty, and a verb nobody listed are all denials.
  */
-export function classifyPlanModeCommand(command: string): PlanModeVerdict {
-	if (command.trim() === "") {
-		return { kind: "deny", reason: "empty command" };
+export function classifyPlanModeCommand(command: unknown): PlanModeVerdict {
+	// WR2-02. This took `command: string` and went straight to `command.trim()`,
+	// while `index.ts` handed it `event.input.command as string` -- an unchecked
+	// assertion. Executed: `undefined`, `null`, `123` and `{"a":1}` all THREW a
+	// TypeError out of the `tool_call` handler. That is FAIL-OPEN in a
+	// fail-closed gate: a handler that throws does not return `{ block: true }`,
+	// so the call is not blocked. It was also a REGRESSION -- upstream's
+	// `isSafeCommand` used `RegExp.test(command)`, which coerces and never
+	// throws. Pi documents `event.input` as mutable in place with no
+	// re-validation (CLAUDE.md's tool_call row), so an earlier-loaded handler can
+	// put a non-string there.
+	if (typeof command !== "string" || command.trim() === "") {
+		return { kind: "deny", reason: `empty or non-string command (${typeof command})` };
 	}
 
 	const verdict = canonicalise(command);

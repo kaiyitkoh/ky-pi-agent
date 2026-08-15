@@ -247,7 +247,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 1180,
+		budget: 1200,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
@@ -276,7 +276,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"`remote add`/`reflog delete` mutate. The 115 added lines are a global-option ALLOWLIST plus three " +
 			"per-subcommand narrowings, each carrying the executed proof that motivated it -- the proof is the " +
 			"part a budget would otherwise pressure out of a file in the tool-execution path. Re-measured 1180 " +
-			"raw lines across 3 files 2026-08-15 (index.ts 529 + read-only.ts 548 + utils.ts 103)",
+			"raw lines across 3 files 2026-08-15 (index.ts 529 + read-only.ts 548 + utils.ts 103). RAISED " +
+			"1180 -> 1200 for WR2-02: classifyPlanModeCommand took `command: string` and called .trim() on " +
+			"it, while index.ts handed it `event.input.command as string` -- an unchecked assertion over a " +
+			"field Pi documents as mutable in place with no re-validation. Executed, undefined/null/123/{} " +
+			"all THREW out of the tool_call handler, and a handler that throws never returns { block: true }, " +
+			"so a fail-closed gate failed OPEN. Re-measured 1195 raw lines across 3 files 2026-08-15 " +
+			"(index.ts 534 + read-only.ts 558 + utils.ts 103)",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",

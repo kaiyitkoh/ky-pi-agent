@@ -296,7 +296,12 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event) => {
 		if (!planModeEnabled || event.toolName !== "bash") return;
 
-		const command = event.input.command as string;
+		// WR2-02: NOT `as string`. The assertion was unchecked and
+		// classifyPlanModeCommand went straight to `.trim()`, so a non-string threw
+		// out of this handler -- and a handler that throws never returns
+		// `{ block: true }`, which makes a fail-closed gate fail OPEN. The verdict
+		// function takes `unknown` and denies anything that is not a string.
+		const command: unknown = event.input.command;
 		// DEVIATION 4 (CR-03): decided over the unbash AST, and EVERY resolved
 		// command node must be admissible, not just the first word. The verdict
 		// carries its own reason so the model is told which node failed and why
