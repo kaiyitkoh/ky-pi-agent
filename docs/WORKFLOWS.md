@@ -34,7 +34,7 @@ the entire point of the walking skeleton.
 
 ## 2. The dispatch shape
 
-`/quick`'s handler runs seven checks, in this exact order, and the order is
+`/quick`'s handler runs eight checks, in this exact order, and the order is
 the whole claim being tested:
 
 1. **Pre-flight the route.** Call `planRoleCall` for the `executor` role. A
@@ -60,9 +60,25 @@ the whole claim being tested:
    (not a second `/quick`) would silently arm anyway, and `agent_end` would
    attribute that other turn's tool results (and its accept/reject verdict)
    to a task `/quick` never actually commissioned.
-5. **Arm the evidence run.** `startRun` records the working directory and the
+5. **Run the deterministic gate stage (GATE-01), and refuse before any model
+   work if it blocks.** `/quick` calls `quality/index.ts#runQuickGateStage`
+   — never inlined here; see `quality/gates.ts` for the four legs
+   (typecheck, lint, the LSP probe, the QUAL-01 anti-pattern rules) and their
+   binding order. This is the step that makes GATE-01's ordering claim real:
+   it runs, and reports, entirely BEFORE `startRun` or `pi.sendUserMessage`
+   below, so a blocking result costs zero provider requests. A blocking
+   result — any leg reporting FAIL — is reported verbatim via
+   `gate.report`, and the handler returns without arming a run or sending a
+   message. The LSP leg's UNAVAILABLE state is visible in that same report
+   but never sets `blocking` on its own — an absent LSP install is not a
+   reason to stop `/quick`. A blocked gate must not bill a later, unrelated
+   turn for work it never asked for: the quality-cost accumulator the gate
+   stage just wrote into is drained and its value discarded on this branch
+   (see the four-part comment at the call site) precisely because no turn
+   ever composes here to carry it honestly.
+6. **Arm the evidence run.** `startRun` records the working directory and the
    SHA that is `HEAD` right now, before any work happens.
-6. **Hand the task to the ordinary prompt loop.** `/quick` does not run a
+7. **Hand the task to the ordinary prompt loop.** `/quick` does not run a
    second, nested model call for the work itself — `runSingleShotRole` is
    built for the four single-shot roles only and throws when handed the
    `executor` role by design [modes.ts:401-406]. The task the command was
@@ -70,7 +86,7 @@ the whole claim being tested:
    session's own prompt loop — the model `/cheap`/`/balanced`/`/max` already
    selected — then acts on with its own tool calls, exactly as it would for
    any other prompt.
-7. **Gate at `agent_end`, not at an awaited idle.** A command handler's
+8. **Gate at `agent_end`, not at an awaited idle.** A command handler's
    `ctx.waitForIdle()` exists, but in a headless session it is bound to a
    no-op that resolves immediately [runner.js:260] — a `/quick` that awaited
    it would evaluate the completion gate before the model had done anything
