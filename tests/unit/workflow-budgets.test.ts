@@ -328,7 +328,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
-		budget: 1070,
+		budget: 1100,
 		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
 			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
 			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten. " +
@@ -361,7 +361,23 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"that name, so sub/.aws/credentials -- the shape the exclusion is named for -- was captured on " +
 			"every turn. Fixed to `*credentials`, with the executed evidence beside it because a pathspec " +
 			"that looks right and matches nothing is exactly the class of bug a comment prevents. " +
-			"Re-measured 1064 raw lines across 3 files 2026-08-15 (index.ts 244 + git.ts 489 + store.ts 331)",
+			"Re-measured 1064 raw lines across 3 files 2026-08-15 (index.ts 244 + git.ts 489 + store.ts 331). " +
+			"RAISED 1070 -> 1100 for the WR-09 lost-update fix (debug session wr09-lost-update): withLock used " +
+			"to run its read-modify-write body UNLOCKED once LOCK_MAX_WAIT_MS (2000ms) elapsed without " +
+			"acquiring the lock, defended as a deliberate trade in the docstring. That trade was never " +
+			"exercised safely -- the staleness breaker already reclaims a genuinely dead holder's lock within " +
+			"LOCK_STALE_MS (30s), so the unlocked fallback only ever fired against LIVE contention, and every " +
+			"fallback firing was a real lost row: instrumented and measured, 4 degraded calls -> 10 rows lost " +
+			"(590/600) under synthetic CPU contention, 0 degraded calls -> 0 rows lost otherwise -- exactly " +
+			"the intermittent 596/600 and 599/600 two prior executors misdiagnosed as test flakiness in " +
+			"deferred-items.md. Fixed by removing the unlocked fallback (withLock now throws on genuine " +
+			"acquisition failure, caught by the existing NEVER THROWS wrapper in recordCheckpoint/" +
+			"pruneCheckpoints) and raising LOCK_MAX_WAIT_MS to LOCK_STALE_MS + 5000ms so a caller only gives " +
+			"up after the staleness breaker has had a full window to clear a dead lock. The added lines are " +
+			"the new docstrings explaining why the old trade did not hold and what replaced it -- exactly the " +
+			"kind of reasoning a budget must not pressure out of a concurrency-correctness fix. Re-measured " +
+			"1098 raw lines across 3 files 2026-08-15 (index.ts 244 + git.ts 489 + store.ts 365), rounded up " +
+			"to the next ten",
 	},
 	{
 		dir: ".pi/extensions/loop-police",

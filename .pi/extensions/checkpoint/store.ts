@@ -185,12 +185,25 @@ export const MAX_CHECKPOINT_ENTRIES = 200;
  *
  * `wx` creates the lock or throws `EEXIST`; there is no check-then-create race.
  * A lock older than {@link LOCK_STALE_MS} is broken, because a process killed
- * mid-write must not wedge every later turn in the repository forever.
+ * mid-write must not wedge every later turn in the repository forever. That
+ * staleness breaker is the ONLY mechanism that clears a stuck lock (see
+ * {@link withLock}'s own docstring for why acquisition no longer degrades to
+ * unlocked instead) — {@link LOCK_MAX_WAIT_MS} is set comfortably above
+ * {@link LOCK_STALE_MS} so a retrying caller always sees the breaker get a
+ * full window to fire before giving up.
  */
 const LOCK_SUFFIX = ".lock";
 const LOCK_STALE_MS = 30_000;
 const LOCK_RETRY_MS = 2;
-const LOCK_MAX_WAIT_MS = 2_000;
+/**
+ * {@link LOCK_STALE_MS} plus a margin, not an independent number: a caller
+ * that has waited this long has already watched the staleness breaker's full
+ * window pass without acquiring the lock, so ordinary contention between live
+ * processes (which always finishes and releases well inside 30s for this
+ * module's tiny critical section) is ruled out. What remains at that point is
+ * a genuine pathology — see {@link withLock}'s docstring.
+ */
+const LOCK_MAX_WAIT_MS = LOCK_STALE_MS + 5_000;
 
 /** Sleep synchronously. `Atomics.wait` is the only dependency-free synchronous sleep in Node. */
 function sleepSync(ms: number): void {
@@ -198,14 +211,34 @@ function sleepSync(ms: number): void {
 }
 
 /**
- * Run `body` holding an exclusive lock on `file`, or run it unlocked if the
- * lock cannot be taken within {@link LOCK_MAX_WAIT_MS}.
+ * Run `body` holding an exclusive lock on `file`. Throws if the lock cannot
+ * be acquired within {@link LOCK_MAX_WAIT_MS} — both callers
+ * ({@link recordCheckpoint}, {@link pruneCheckpoints}) already wrap their call
+ * to this function in their own try/catch and translate any throw into the
+ * module's documented failure signal (`undefined` / `[]`), so this function's
+ * own catch clauses below carry the same NEVER THROWS contract the rest of
+ * the module documents, and this function itself throwing does not violate
+ * it at the module boundary.
  *
- * Degrading to unlocked rather than failing is deliberate and is the same
- * trade the NEVER THROWS contract makes elsewhere in this module: a checkpoint
- * recorded with a small chance of a lost update is strictly better for the
- * user than a turn that records nothing because a stale lock outlived its
- * owner in a way the staleness check did not catch.
+ * This USED TO degrade to running `body` UNLOCKED once {@link
+ * LOCK_MAX_WAIT_MS} elapsed, defended as "a checkpoint recorded with a small
+ * chance of a lost update is better than one that records nothing because a
+ * stale lock outlived its owner in a way the staleness check did not catch."
+ * That argument does not survive contact with the staleness breaker two lines
+ * above: a lock that outlives its owner IS caught, within {@link
+ * LOCK_STALE_MS}, by the loop's own `mtimeMs` check. The only situation the
+ * unlocked fallback actually protected against was a staleness check that
+ * itself somehow never fires — while every case of ordinary contention
+ * between live, working processes paid for that protection with a real,
+ * measured lost update. Instrumented (temporarily) to count degraded calls
+ * and correlate them with lost rows: under CPU contention, degraded calls and
+ * lost rows tracked 1:1 (4 degraded calls -> 10 rows lost, 590/600, in one
+ * run; 0 degraded calls -> 0 rows lost, 600/600, whenever contention stayed
+ * under the old 2s deadline). Removing the fallback and raising the deadline
+ * to clear {@link LOCK_STALE_MS} means a caller now only ever gives up after
+ * the staleness breaker has had a full chance to reclaim a dead lock and
+ * still failed to let this caller through — genuine pathology, not the
+ * everyday four-concurrent-recorder case this module exists to serve.
  */
 function withLock<T>(file: string, body: () => T): T {
 	const lock = `${file}${LOCK_SUFFIX}`;
@@ -229,15 +262,16 @@ function withLock<T>(file: string, body: () => T): T {
 			sleepSync(LOCK_RETRY_MS);
 		}
 	}
+	if (!held) {
+		throw new Error(`withLock: could not acquire lock on ${lock} within ${String(LOCK_MAX_WAIT_MS)}ms`);
+	}
 	try {
 		return body();
 	} finally {
-		if (held) {
-			try {
-				rmSync(lock, { force: true });
-			} catch {
-				// Nothing to release. Never mask the body's own result.
-			}
+		try {
+			rmSync(lock, { force: true });
+		} catch {
+			// Nothing to release. Never mask the body's own result.
 		}
 	}
 }
