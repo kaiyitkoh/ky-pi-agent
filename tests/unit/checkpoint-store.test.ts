@@ -160,27 +160,92 @@ interface WriterReport {
 	finishedAt: number;
 }
 
-/** Run one writer child to completion, returning its parsed report. */
-function runWriter(script: string, args: string[]): Promise<WriterReport> {
-	return new Promise((resolve, reject) => {
-		const child = spawn(process.execPath, [script, ...args], {
-			shell: false,
-			windowsHide: true,
-			timeout: 120_000,
-			stdio: ["ignore", "pipe", "pipe"],
+/** A minimal resolvable-from-outside promise, matching `tests/helpers/qoder-loopback.ts`'s own `createDeferred`. */
+function createDeferred<T = void>(): {
+	promise: Promise<T>;
+	resolve: (value: T) => void;
+	reject: (reason: unknown) => void;
+} {
+	let resolve!: (value: T) => void;
+	let reject!: (reason: unknown) => void;
+	const promise = new Promise<T>((res, rej) => {
+		resolve = res;
+		reject = rej;
+	});
+	return { promise, resolve, reject };
+}
+
+/** One spawned writer child: an event gate proving it is ready, and its eventual report. */
+interface WriterHandle {
+	/** Resolves once the child has imported `store.ts` and sent `ready` -- rejects if it exits/errors first. */
+	ready: Promise<void>;
+	/** Resolves with the child's parsed report once it exits 0; rejects on any failure. */
+	report: Promise<WriterReport>;
+	/** Send the `"go"` message releasing the child's first write. Only meaningful once `ready` has settled. */
+	release: () => void;
+}
+
+/**
+ * Spawn one writer child over an IPC channel (`stdio: [..., "ipc"]`), never a
+ * wall-clock barrier -- see the WR-09 describe block docstring below for why.
+ * The child sends `{ type: "ready", tag }` the instant its own dynamic
+ * `import()` of `store.ts` resolves; the parent collects `ready` across every
+ * child and only THEN releases each with `child.send("go")`. `timeout: 120_000`
+ * is kept unchanged -- it is a real outer bound, not the margin being removed.
+ *
+ * A child that exits or errors before sending `ready` REJECTS `ready` with its
+ * exit code and stderr, so a dead child can never leave the parent awaiting
+ * `Promise.all(handles.map((h) => h.ready))` forever [threat T-09-01-01].
+ */
+function spawnWriter(script: string, args: string[]): WriterHandle {
+	const readyGate = createDeferred<void>();
+	let readySettled = false;
+
+	const child = spawn(process.execPath, [script, ...args], {
+		shell: false,
+		windowsHide: true,
+		timeout: 120_000,
+		stdio: ["ignore", "pipe", "pipe", "ipc"] as const,
+	});
+
+	let stdout = "";
+	let stderr = "";
+	// `stdio` includes `"ipc"`, so TypeScript's `spawn()` overload resolution
+	// still infers `stdout`/`stderr` as possibly-null unless narrowed here --
+	// the runtime value is never null with `"pipe"` at those two slots.
+	if (child.stdout === null || child.stderr === null) {
+		throw new Error("spawnWriter: child.stdout/stderr is null despite requesting pipe stdio");
+	}
+	child.stdout.setEncoding("utf-8");
+	child.stderr.setEncoding("utf-8");
+	child.stdout.on("data", (chunk: string) => {
+		stdout += chunk;
+	});
+	child.stderr.on("data", (chunk: string) => {
+		stderr += chunk;
+	});
+
+	child.on("message", (msg: unknown) => {
+		if (readySettled) return;
+		if (typeof msg === "object" && msg !== null && (msg as { type?: unknown }).type === "ready") {
+			readySettled = true;
+			readyGate.resolve();
+		}
+	});
+
+	const report = new Promise<WriterReport>((resolve, reject) => {
+		child.on("error", (err) => {
+			if (!readySettled) {
+				readySettled = true;
+				readyGate.reject(new Error(`writer failed to launch before sending ready: ${err.message}`));
+			}
+			reject(new Error(`writer failed to launch: ${err.message}`));
 		});
-		let stdout = "";
-		let stderr = "";
-		child.stdout.setEncoding("utf-8");
-		child.stderr.setEncoding("utf-8");
-		child.stdout.on("data", (chunk: string) => {
-			stdout += chunk;
-		});
-		child.stderr.on("data", (chunk: string) => {
-			stderr += chunk;
-		});
-		child.on("error", (err) => reject(new Error(`writer failed to launch: ${err.message}`)));
 		child.on("close", (code) => {
+			if (!readySettled) {
+				readySettled = true;
+				readyGate.reject(new Error(`writer exited ${String(code)} before sending ready; stderr: ${stderr}`));
+			}
 			if (code !== 0) {
 				reject(new Error(`writer exited ${String(code)}; stderr: ${stderr}`));
 				return;
@@ -192,7 +257,28 @@ function runWriter(script: string, args: string[]): Promise<WriterReport> {
 			}
 		});
 	});
+
+	return {
+		ready: readyGate.promise,
+		report,
+		release: () => {
+			child.send("go");
+		},
+	};
 }
+
+/**
+ * Minimum adjacent-tag-switch count required in the store's own row order to
+ * prove genuine interleaving among the four WR-09 writers, rather than four
+ * contiguous per-tag blocks. Four strictly-serial blocks
+ * (`AAAA...BBBB...CCCC...DDDD`) produce exactly 3 switches (A->B, B->C,
+ * C->D); this is set well above that so FALSIFICATION (b) (forcing the four
+ * writers to run strictly serially, one released at a time) turns the
+ * assertion red, while genuine OS-scheduled interleaving among four
+ * lock-holding, IPC-released processes -- routinely dozens of switches in
+ * practice -- stays green.
+ */
+const MIN_TAG_SWITCHES = 8;
 
 describe("WR-09 -- concurrent recorders do not lose each other's entries", () => {
 	/**
@@ -203,15 +289,31 @@ describe("WR-09 -- concurrent recorders do not lose each other's entries", () =>
 	 * A's entry is gone: a checkpoint the user can never restore, lost silently,
 	 * because `recordCheckpoint` still returns a path and looks successful.
 	 *
-	 * THE CHILDREN ARE NOT SPAWNED WITH `spawnSync`, and the barrier is not
-	 * decorative. The first version of this case used `spawnSync` in a loop, which
-	 * BLOCKS -- four strictly serial processes, 100 rows, green against a
-	 * completely unlocked store. It was caught by mutation (removing the lock left
-	 * it passing), which is exactly the vacuous-pass shape this repository keeps
-	 * hitting. So: children are spawned asynchronously and awaited together, every
-	 * child sleeps until one shared wall-clock instant before its first write, and
-	 * the test asserts the latest start precedes the earliest finish -- there was a
-	 * moment when all four were inside the read-modify-write. Same discipline as
+	 * THE CHILDREN ARE NOT SPAWNED WITH `spawnSync`. The first version of this
+	 * case used `spawnSync` in a loop, which BLOCKS -- four strictly serial
+	 * processes, 100 rows, green against a completely unlocked store. It was
+	 * caught by mutation (removing the lock left it passing), which is exactly
+	 * the vacuous-pass shape this repository keeps hitting.
+	 *
+	 * (2026-08-15, Phase 09 plan 09-01, WR-09 de-flake) The overlap barrier used
+	 * to be a fixed `Date.now() + 800` wall-clock instant every child slept
+	 * until, proved by comparing recorded `startedAt`/`finishedAt` timestamps.
+	 * Under load the children's own boot cost (measured 587-970ms) could exceed
+	 * the 800ms margin, so the barrier could fire before every child had
+	 * actually reached it -- an intermittent false result unrelated to the
+	 * store's real locking behaviour. That duration is gone. Each child is now
+	 * spawned with an IPC channel (`stdio: [..., "ipc"]`), sends
+	 * `{ type: "ready", tag }` the INSTANT its own dynamic `import()` of
+	 * `store.ts` resolves, then blocks on its own incoming `"go"` message. The
+	 * parent collects every child's `ready` event, THEN releases all four at
+	 * once with `child.send("go")` -- an event, never a duration. The overlap
+	 * proof is likewise no longer a `Date.now()` comparison: it reads the
+	 * STORE'S OWN row order and asserts the four writers' entries are
+	 * genuinely interleaved (see `MIN_TAG_SWITCHES` above), a property the
+	 * store itself produced rather than a side channel the test raced against.
+	 *
+	 * Same discipline as `tests/helpers/qoder-loopback.ts`'s
+	 * `firstChunkWritten`/`releaseSecondChunk` gate pair and
 	 * `tests/integration/jsonl-concurrency.test.ts`'s DIAG-08.
 	 */
 	it("four overlapping OS processes each recording 150 entries produce all 600 rows", async () => {
@@ -224,11 +326,10 @@ describe("WR-09 -- concurrent recorders do not lose each other's entries", () =>
 				"// Generated child -- see tests/unit/checkpoint-store.test.ts (WR-09).",
 				'import { writeSync } from "node:fs";',
 				`const mod = await import(${JSON.stringify(storeUrl)});`,
-				"const [root, tag, countRaw, startAtRaw] = process.argv.slice(2);",
+				"const [root, tag, countRaw] = process.argv.slice(2);",
 				"const count = Number(countRaw);",
-				"const startAt = Number(startAtRaw);",
-				"const wait = startAt - Date.now();",
-				"if (wait > 0) { await new Promise((r) => setTimeout(r, wait)); }",
+				'process.send({ type: "ready", tag });',
+				'await new Promise((resolve) => { process.once("message", resolve); });',
 				"const startedAt = Date.now();",
 				"for (let i = 0; i < count; i++) {",
 				"\tmod.recordCheckpoint(root, {",
@@ -247,20 +348,14 @@ describe("WR-09 -- concurrent recorders do not lose each other's entries", () =>
 		);
 
 		const tags = ["A", "B", "C", "D"];
-		const startAt = Date.now() + 800;
-		const reports = await Promise.all(
-			tags.map((tag) => runWriter(script, [root, tag, "150", String(startAt)])),
-		);
+		const handles = tags.map((tag) => spawnWriter(script, [root, tag, "150"]));
+		await Promise.all(handles.map((h) => h.ready));
+		for (const handle of handles) {
+			handle.release();
+		}
+		const reports = await Promise.all(handles.map((h) => h.report));
 
 		expect(reports.length, "every writer must have reported").toBe(tags.length);
-		const latestStart = Math.max(...reports.map((r) => r.startedAt));
-		const earliestFinish = Math.min(...reports.map((r) => r.finishedAt));
-		expect(
-			latestStart,
-			"the four writers must have OVERLAPPED -- the latest start has to precede the earliest finish. " +
-				"If they ran back to back, the 600 rows below prove nothing about a lost update and this " +
-				"case is a vacuous pass (which is exactly what the first spawnSync version of it was)",
-		).toBeLessThan(earliestFinish);
 
 		const entries = readCheckpoints(root);
 		expect(
@@ -271,6 +366,22 @@ describe("WR-09 -- concurrent recorders do not lose each other's entries", () =>
 		for (const tag of tags) {
 			expect(entries.filter((e) => e.label.startsWith(`${tag}-`)).length, `writer ${tag} lost entries`).toBe(150);
 		}
+
+		// Structural interleaving proof (WR-09 task 2): a property the store's
+		// OWN row order produced, replacing the deleted `Date.now()` comparison.
+		let tagSwitches = 0;
+		for (let i = 1; i < entries.length; i++) {
+			if (entries[i]?.label.charAt(0) !== entries[i - 1]?.label.charAt(0)) {
+				tagSwitches++;
+			}
+		}
+		expect(
+			tagSwitches,
+			"the four writers' rows must be genuinely INTERLEAVED in the store's own recorded order, not four " +
+				`contiguous blocks. Four strictly-serial blocks produce exactly 3 switches; ${String(MIN_TAG_SWITCHES)} ` +
+				"is well above that so a serialised run (FALSIFICATION (b)) turns this red while a genuinely " +
+				"overlapping run stays green",
+		).toBeGreaterThan(MIN_TAG_SWITCHES);
 	});
 });
 
