@@ -81,7 +81,7 @@
  * immediate parent.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
@@ -106,9 +106,14 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"calls quality/index.ts#runQuickGateStage after the git pre-flight and before startRun, blocks with " +
 			"gate.report on a failing leg, and drains-and-discards takeQualityCost() on that branch with its own " +
 			"four-part comment (why the drain exists, why discarding beats a fabricated {qualityMs:0}, why nothing " +
-			"measurable is lost, why this is a deliberate second call site outside diagnostics/) -- all of it lives " +
-			"in this file per the plan's own instruction not to inline gate/leg logic elsewhere, so the growth is " +
-			"real and visible here rather than offloaded. Plan 08-12 (GATE-01's tree-comparison branch) then passed " +
+			"measurable is lost, why this is a deliberate second call site outside diagnostics/) -- all of THIS " +
+			"FILE'S OWN growth (the call site, the branch, the comment) lives here per the plan's own instruction " +
+			"not to inline gate/leg logic elsewhere, so THAT growth is real and visible here rather than offloaded. " +
+			"CR-04 (code-review fix pass) named the residual overclaim: the gate/leg logic itself (3,400+ lines) " +
+			"was placed in .pi/extensions/quality/, which this registry's commandDirs discovery could not see " +
+			"(quality/ spells no registerCommand( anywhere) -- see the .pi/extensions/quality DIRECTORY_BUDGETS " +
+			"entry below and importedSubsystemDirs, which closes that hole for future subsystems too. Plan 08-12 " +
+			"(GATE-01's tree-comparison branch) then passed " +
 			"currentTree(ctx.cwd) alongside currentSha(ctx.cwd) at both startRun and agent_end call sites, inside " +
 			"the same try/catch as before -- no new branch of control flow, one import and two call-site edits. " +
 			"Measured 95 raw lines 2026-08-15. Code-review fix pass WR-06: takeQualityCost() on the blocking " +
@@ -359,6 +364,37 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"2026-08-15 (index.ts 534 + read-only.ts 585 + utils.ts 103)",
 	},
 	{
+		dir: ".pi/extensions/safety",
+		budget: 4460,
+		why: "CR-04 (code-review fix pass): another directory importedSubsystemDirs newly discovers -- " +
+			"workflows/index.ts imports classifyGitInvocation/currentBranch/currentSha/currentTree from " +
+			"../safety/git.ts and PROTECTED_BRANCHES from ../safety/index.ts, and safety/ spells " +
+			"registerCommand( nowhere (verified: zero matches), so this directory was as invisible to the " +
+			"pre-CR-04 registry as quality/ was. This entry did not exist before CR-04, so there is no prior " +
+			"committed number to raise from -- grandfathered in at its CURRENT measured total, same precedent " +
+			"WR-05 already set for routing/harness/diagnostics (not a number this phase reviewed for " +
+			"tightness). Measured 4,455 raw lines across 9 files 2026-08-15 (approvals.ts 411, audit.ts 133, " +
+			"git.ts 513, index.ts 840, infra.ts 431, paths.ts 585, policy.ts 658, schema.ts 79, shell.ts 805), " +
+			"rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/quality",
+		budget: 3550,
+		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
+			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
+			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
+			"importedSubsystemDirs (see this file's own CR-04 docstring section) is what makes commandDirs see " +
+			"it at all. Measured 3,406 raw lines across 8 files 2026-08-15 pre-fix-pass (advisor.ts 197, " +
+			"calibration.ts 178, gates.ts 407, index.ts 237, reviewer.ts 409, review-schema.ts 541, rules.ts " +
+			"889, verdict.ts 548) -- this entry did not exist before CR-04, so there is no prior committed " +
+			"number to raise from. Re-measured 3,548 raw lines across the same 8 files 2026-08-15 after this " +
+			"phase's OWN code-review fix pass (CR-01/CR-02 localBin resolution in index.ts and gates.ts; WR-01/" +
+			"WR-02 the duplicate-verdict and unrecognised-status branches in review-schema.ts; WR-03 the " +
+			"behaviour-describing calibration needles in calibration.ts; WR-05 the export-from regex in " +
+			"reviewer.ts: advisor.ts 198, calibration.ts 179, gates.ts 426, index.ts 301, reviewer.ts 425, " +
+			"review-schema.ts 580, rules.ts 890, verdict.ts 549), rounded up to the next ten",
+	},
+	{
 		dir: ".pi/extensions/todo.ts",
 		budget: 0,
 		why: "Phase 7 plan 08's vendored todo.ts is a FLAT top-level file (`.pi/extensions/todo.ts`, not a " +
@@ -573,6 +609,41 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 });
 
 /**
+ * CR-04: subsystem roots a discovered command source imports directly --
+ * closes the discovery hole {@link isCommandSource}-based `commandDirs`
+ * cannot see on its own. `.pi/extensions/quality/` spells `registerCommand(`
+ * NOWHERE (it registers zero commands -- `workflows/index.ts` is the only
+ * command surface `/quick` has), yet `workflows/index.ts:12` imports
+ * `runQuickGateStage` from it and `:42` calls it -- 3,400+ lines of the
+ * gate stage this budget exists to bound were invisible to `commandDirs`
+ * for exactly that reason. This function scans every discovered command
+ * source's OWN `import ... from "..."` specifiers (relative only -- a
+ * package import cannot resolve to a local directory this registry
+ * ratchets), resolves each to an absolute path, and -- when that path
+ * lands under `.pi/extensions/` -- adds its SUBSYSTEM ROOT (matching
+ * `commandDirs`' own `slice(0, 3)` convention) to the set. A future
+ * subsystem reached only by import (Phase 9's `/grill`, `/plan`, `/execute`,
+ * `/review` delegating into sibling directories) is caught by this the same
+ * way `quality/` now is, without needing its own `registerCommand(` call.
+ */
+function importedSubsystemDirs(commandFiles: readonly string[]): string[] {
+	const dirs = new Set<string>();
+	for (const file of commandFiles) {
+		const text = readFileSync(join(repoRoot(), file), "utf-8");
+		for (const m of text.matchAll(/\bfrom\s+["'](\.\.?\/[^"']+)["']/g)) {
+			const specifier = m[1];
+			if (specifier === undefined) continue;
+			const abs = resolve(dirname(join(repoRoot(), file)), specifier);
+			const rel = relative(repoRoot(), abs).split("\\").join("/");
+			if (rel.startsWith(`${EXTENSIONS_DIR}/`)) {
+				dirs.add(rel.split("/").slice(0, 3).join("/"));
+			}
+		}
+	}
+	return [...dirs];
+}
+
+/**
  * D-11 / WR-03 -- the directory-level anti-offloading ratchets. Every
  * directory that HOLDS a discovered command source gets its own ratchet
  * over the directory's WHOLE `.ts`/`.js` total (via {@link filesInDir}) --
@@ -583,14 +654,25 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
  * (planted, 3 lines, spells `registerCommand(`) -- the OLD single-directory
  * (`workflows/`-only) aggregate never looked at `grill/` at all, and the
  * per-file completeness check named only `index.ts`.
+ *
+ * CR-04 -- WIDENED to also ratchet every directory a discovered command
+ * source IMPORTS (via {@link importedSubsystemDirs}), not only directories
+ * that themselves spell `registerCommand(`. `.pi/extensions/quality/` is
+ * the concrete case: it registers no command, but `workflows/index.ts`
+ * calls straight into it, and its 3,400+ lines were unbudgeted until this
+ * widening.
  */
 describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
 	const discovered = discoverWorkflowFiles();
+	const commandFiles = discovered.filter(isCommandSource);
 	// WR-01 (iteration 3): the SUBSYSTEM ROOT (`.pi/extensions/<name>`), not the
 	// command file's immediate parent -- `.pi/extensions/grill/sub/index.ts`
 	// must ratchet `.pi/extensions/grill`, not `.pi/extensions/grill/sub`, or a
 	// command file nested one level deeper leaves its own parent uncounted.
-	const commandDirs = Array.from(new Set(discovered.filter(isCommandSource).map((p) => p.split("/").slice(0, 3).join("/")))).sort();
+	// CR-04: unioned with every directory a command source IMPORTS directly.
+	const commandDirs = Array.from(
+		new Set([...commandFiles.map((p) => p.split("/").slice(0, 3).join("/")), ...importedSubsystemDirs(commandFiles)]),
+	).sort();
 
 	it("finds at least one command directory (guards against a vacuous pass)", () => {
 		expect(
@@ -689,6 +771,46 @@ describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
 		// to `.pi/extensions/grill`, per the module docstring's WR-01 section).
 		expect(WORKFLOWS_DIR.split("/").slice(0, 3).join("/")).toBe(WORKFLOWS_DIR);
 		expect(`${WORKFLOWS_DIR}/index.ts`.split("/").slice(0, 3).join("/")).toBe(WORKFLOWS_DIR);
+	});
+
+	it(
+		"CR-04 proof: commandDirs includes .pi/extensions/quality via IMPORT, even though quality/ spells " +
+			"registerCommand( nowhere -- the exact discovery hole the review demonstrated",
+		() => {
+			expect(
+				isCommandSource(".pi/extensions/quality/index.ts"),
+				"quality/index.ts must NOT itself spell registerCommand( -- if it ever does, this proof is " +
+					"testing the wrong mechanism (isCommandSource, not importedSubsystemDirs)",
+			).toBe(false);
+			expect(
+				commandDirs,
+				"workflows/index.ts imports runQuickGateStage from ../quality/index.ts and calls it -- " +
+					"commandDirs must include .pi/extensions/quality via importedSubsystemDirs, not only via " +
+					"isCommandSource, or 3,400+ lines of gate/leg logic stay invisible to every ratchet below",
+			).toContain(".pi/extensions/quality");
+		},
+	);
+
+	it("CR-04 proof: importedSubsystemDirs resolves a relative import to its SUBSYSTEM ROOT, not the imported file's own path", () => {
+		// Direct proof of the resolution arithmetic, independent of whatever
+		// workflows/index.ts happens to import today: a command file importing
+		// "../quality/index.ts" must resolve to ".pi/extensions/quality" (the
+		// subsystem root, matching commandDirs' own slice(0,3) convention), not
+		// ".pi/extensions/quality/index.ts" (the file itself).
+		const dirs = importedSubsystemDirs([".pi/extensions/workflows/index.ts"]);
+		expect(dirs).toContain(".pi/extensions/quality");
+		expect(
+			dirs.some((d) => d.endsWith("index.ts")),
+			"importedSubsystemDirs must resolve to the subsystem ROOT, never the imported file's own path",
+		).toBe(false);
+	});
+
+	it("CR-04 proof: a package import (no leading ./ or ../) is never mistaken for a local subsystem", () => {
+		// importedSubsystemDirs' own regex requires a leading "./" or "../" --
+		// a bare package specifier ("@earendil-works/pi-coding-agent", "vitest")
+		// must never resolve to a local directory this registry could ratchet.
+		const dirs = importedSubsystemDirs([".pi/extensions/workflows/index.ts"]);
+		expect(dirs.some((d) => d.includes("@earendil-works") || d.includes("node_modules"))).toBe(false);
 	});
 });
 
