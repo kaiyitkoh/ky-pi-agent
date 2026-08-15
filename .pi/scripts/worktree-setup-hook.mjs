@@ -159,6 +159,24 @@ function fail(reason, provisioned = []) {
  * legitimate state here, since the worktree existence check runs AFTER
  * containment on purpose -- so that case falls back to `resolve()` alone, and
  * the case-fold below still covers the drive-letter and casing forms.
+ *
+ * WHICH HALF DOES THE WORK, MEASURED (WR2-01). For a path that EXISTS,
+ * `realpathSync.native` alone is sufficient: it returns the true on-disk
+ * casing including the drive letter, so `toLowerCase()` changes nothing.
+ * Measured --
+ *
+ *   orig               C:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+ *   swapped            c:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+ *   realpath(swapped)  C:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+ *
+ * The fold is therefore load-bearing on exactly one branch: when
+ * `realpathSync.native` THROWS, i.e. a repoRoot or worktreePath not yet on
+ * disk. That branch is reachable precisely because containment is checked
+ * before the existence check. `worktree-build.test.ts`'s WR2-01 case is the
+ * fixture that reaches it, and it asserts on the refusal REASON rather than
+ * the exit code, because without the fold the hook still exits 1 -- for
+ * "worktreePath does not exist", having already agreed that a worktree inside
+ * the parent repository was fine.
  */
 function canonical(p) {
 	let out = resolve(p);

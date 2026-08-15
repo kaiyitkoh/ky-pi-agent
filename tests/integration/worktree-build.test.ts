@@ -218,7 +218,16 @@ function runHook(
  * not exist, or -- most importantly -- the containment guard the hook's own
  * header calls "the one catastrophic failure mode here". A regression that
  * deleted `isAncestorOrEqual` outright would have kept the entire suite green.
- * MUTATION-VERIFIED: see this file's commit message for the recorded run.
+ *
+ * MUTATION-VERIFIED, WITH ONE CORRECTION (WR2-01). The label above was carried
+ * by a block containing a case that SURVIVED its own mutation: deleting
+ * `canonical()`'s `toLowerCase()` left all eight cases green, because
+ * `realpathSync.native` had already normalised drive-letter case for a fixture
+ * built entirely out of `mkdtempSync` directories. That is the same shape as
+ * the CR-04 defect the pass carrying the label was fixing. The case now claims
+ * only what it proves, a second case reaches the branch where the fold really
+ * is the only guard, and both assert on the refusal REASON rather than the
+ * exit code -- see them for the recorded mutation runs.
  */
 describe("EXT-02 / WR-08 -- the hook fails closed on every invalid payload", () => {
 	/** A directory that exists, so `worktreePath does not exist` is not what trips a case. */
@@ -275,13 +284,29 @@ describe("EXT-02 / WR-08 -- the hook fails closed on every invalid payload", () 
 		).toBe(false);
 	});
 
-	it("WR-04 -- containment holds when the worktreePath is spelled with different case (Windows)", () => {
-		// `resolve()` does not normalise drive-letter case and Windows paths are
-		// case-insensitive, so `c:\repo` and `C:\repo` are ONE directory that a
-		// raw `===` calls different. Before the canonical() fix the hook would
-		// have junctioned and copied into the parent. On POSIX the two spellings
-		// really are different directories, so this case asserts the platform's
-		// own truth rather than a universal.
+	it("WR-04 -- containment is decided on the CANONICALISED path: realpathSync.native for paths on disk", () => {
+		// WHAT THIS CASE ACTUALLY PROVES, corrected by WR2-01.
+		//
+		// The version of this case that shipped with the WR-04 fix used
+		// `mkdtempSync` for BOTH paths and asserted that a drive-letter-swapped
+		// spelling is refused. It passed with the fix REMOVED
+		// (`return process.platform === "win32" ? out.toLowerCase() : out;` ->
+		// `return out;`) -- 8/8 green -- because `canonical()` calls
+		// `realpathSync.native` FIRST and that already normalises drive-letter
+		// case for a path that exists:
+		//
+		//   orig               C:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+		//   swapped            c:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+		//   realpath(swapped)  C:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+		//   equal without toLowerCase?  true
+		//
+		// So the case-fold was never load-bearing on that fixture, and the
+		// counterfactual the old docstring stated ("before the canonical() fix the
+		// hook would have junctioned and copied into the parent") was false FOR
+		// THAT FIXTURE. This case now claims only what it proves: that
+		// `realpathSync.native` is the mechanism carrying the on-disk form. The
+		// case below covers the branch where it throws, which is where the fold is
+		// the only guard.
 		const repo = scratch("kypi-hook-case-");
 		const swapped = repo.replace(/^([a-zA-Z]):/, (_m, drive: string) =>
 			`${drive === drive.toLowerCase() ? drive.toUpperCase() : drive.toLowerCase()}:`,
@@ -305,10 +330,103 @@ describe("EXT-02 / WR-08 -- the hook fails closed on every invalid payload", () 
 			`a worktreePath that differs from repoRoot ONLY by drive-letter case is the SAME directory on ` +
 				`Windows and must be refused. repoRoot=${repo} worktreePath=${swapped}`,
 		).toBe(1);
+		expect(
+			run.stderr,
+			"and it must be refused BY THE CONTAINMENT GUARD, not incidentally by some later check -- exit 1 " +
+				"alone cannot tell those apart",
+		).toContain("equals or is an ancestor of");
 		expect(run.syntheticPaths).toEqual([]);
 		expect(
 			existsSync(join(repo, "node_modules")),
 			"nothing may have been provisioned into the parent under a differently-cased spelling",
+		).toBe(false);
+	});
+
+	it("WR2-01 -- the case-fold is the ONLY guard when realpathSync.native throws, and this is the fixture that reaches it", () => {
+		// THE BRANCH THE OLD CASE COULD NOT REACH. `canonical()` falls back to
+		// `resolve()` alone when `realpathSync.native` throws, i.e. when the path
+		// is not on disk. `resolve()` does NOT normalise case, so on that branch
+		// `out.toLowerCase()` is the entire guard.
+		//
+		// Reaching it needs BOTH paths absent, which is possible because the hook
+		// checks containment BEFORE it checks that worktreePath exists
+		// (`.pi/scripts/worktree-setup-hook.mjs` -- the containment `fail()`
+		// returns above the `existsSync(resolvedWorktreePath)` one, deliberately:
+		// "checked before anything else that touches the filesystem").
+		//
+		// That ordering is also why the assertion here is on the REASON and not on
+		// the exit code. Both refusals exit 1. Without the fold the hook still
+		// exits 1 -- but for "does not exist", having silently agreed that a
+		// worktree inside the parent repository was fine. Asserting `status === 1`
+		// would therefore survive the mutation, which is the exact defect WR2-01
+		// found in the previous version of the case above.
+		if (process.platform !== "win32") {
+			console.log(`WR2-01: not applicable on platform=${process.platform} -- POSIX paths are case-sensitive`);
+			return;
+		}
+		const parent = scratch("kypi-hook-fold-");
+		// Neither of these is created. `worktreePath` is an ANCESTOR of `repoRoot`,
+		// spelled with different case -- on Windows that is the same directory.
+		const worktreePath = join(parent, "NotYetCreated");
+		const repoRoot = join(parent, "notyetcreated", "child");
+		expect(existsSync(worktreePath), "the fixture is only meaningful while this path is absent").toBe(false);
+		expect(existsSync(repoRoot), "the fixture is only meaningful while this path is absent").toBe(false);
+
+		const run = runHook({ version: 1, repoRoot, worktreePath });
+		expect(
+			run.stderr,
+			`a worktreePath that is an ANCESTOR of repoRoot differing only by case is the same directory on ` +
+				`Windows, and the containment guard is what must say so. repoRoot=${repoRoot} ` +
+				`worktreePath=${worktreePath}. stderr was: ${run.stderr.trim()}`,
+		).toContain("equals or is an ancestor of");
+		expect(run.status).toBe(1);
+		expect(run.syntheticPaths).toEqual([]);
+	});
+
+	it("WR2-01 -- and realpathSync.native is the ONLY guard when the alias is a junction, which no case-fold can see through", () => {
+		// The converse of the case above, so the two together make BOTH halves of
+		// `canonical()` load-bearing and neither can be deleted silently.
+		//
+		// A junction is a real, different pathname for the same directory. Lower-
+		// casing it changes nothing -- only `realpathSync.native` resolves it. The
+		// hook's own header names "a repoRoot reached through a junction alias" as
+		// a form the guard must survive, and this is the fixture for that claim.
+		//
+		// The hazard is concrete: worktreePath is the PARENT of repoRoot here, so
+		// a miss means the hook junctions node_modules and copies .env out of the
+		// repository and into the directory that contains it.
+		if (process.platform !== "win32") {
+			console.log(`WR2-01 junction: not applicable on platform=${process.platform}`);
+			return;
+		}
+		const parent = scratch("kypi-hook-junction-");
+		const real = join(parent, "real");
+		const repoRoot = join(real, "child");
+		mkdirSync(repoRoot, { recursive: true });
+		const alias = join(parent, "alias");
+		try {
+			symlinkSync(real, alias, "junction");
+		} catch (err) {
+			throw new Error(
+				`this case needs a junction and could not create one (${err instanceof Error ? err.message : String(err)}). ` +
+					"Skipping silently would turn a green run into evidence of nothing, so it fails instead",
+			);
+		}
+		expect(alias.toLowerCase(), "the alias must not be a mere case variant, or this proves the fold again").not.toBe(
+			real.toLowerCase(),
+		);
+
+		const run = runHook({ version: 1, repoRoot, worktreePath: alias });
+		expect(
+			run.stderr,
+			`worktreePath ${alias} is a junction to ${real}, the PARENT of repoRoot ${repoRoot}. Only ` +
+				`realpathSync.native can see that. stderr was: ${run.stderr.trim()}`,
+		).toContain("equals or is an ancestor of");
+		expect(run.status).toBe(1);
+		expect(run.syntheticPaths).toEqual([]);
+		expect(
+			existsSync(join(real, "node_modules")) || existsSync(join(real, ".env")),
+			"a containment miss here provisions OUT of the repository and into the directory containing it",
 		).toBe(false);
 	});
 
