@@ -650,10 +650,25 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 			// The only assertions below are on the OUTCOME (`folded.done`,
 			// `folded.text`), never on how much time passed -- exactly the prior
 			// version's own discipline, preserved here.
+			// WR3-03 (`08-REVIEW.md` iteration 3): `nowCalls` makes the injected
+			// clock self-defending. This whole case's proof rests on
+			// `delegateTask`'s deadline arithmetic actually reading `opts.now` --
+			// without it, the seam is production surface added for one test with
+			// nothing pinning it: deleting `opts.now`'s only use (e.g. hardcoding
+			// `const now = Date.now;` inside `delegateTask`, ignoring the option
+			// entirely) leaves all 20 tests in this file green, because real
+			// elapsed time across four loopback chunks is a few milliseconds
+			// against a 300ms budget regardless of reset behaviour. Counting
+			// calls and asserting `> 0` closes that: a client that never consults
+			// `opts.now` at all leaves this counter at zero.
 			const injectedTimeoutMs = 300;
 			const interGapMs = 150;
 			let fakeElapsedMs = 0;
-			const now = (): number => fakeElapsedMs;
+			let nowCalls = 0;
+			const now = (): number => {
+				nowCalls += 1;
+				return fakeElapsedMs;
+			};
 			let progressCount = 0;
 			const splitPoints = [Math.floor(FRAMES.length / 4), Math.floor(FRAMES.length / 2), Math.floor((3 * FRAMES.length) / 4)];
 
@@ -688,6 +703,11 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 						progressCount,
 						"onProgress must have fired once per chunk read (four, for a four-chunk split) -- otherwise this test proved nothing about reset-on-progress",
 					).toBe(4);
+					expect(
+						nowCalls,
+						"delegateTask never consulted the injected clock -- this case's whole proof rests on the deadline " +
+							"arithmetic reading opts.now, so a green run without it proves nothing",
+					).toBeGreaterThan(0);
 					expect(folded.done).toBe(true);
 					expect(folded.text).toBe("Hello world");
 				});
