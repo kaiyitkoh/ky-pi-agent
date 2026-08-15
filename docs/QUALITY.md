@@ -214,12 +214,33 @@ The corpus is **six real, dated incidents from this project's own history**
 | `symptomatic-fix` | Phase 3: a "fix" that suppressed a failing assertion instead of addressing its cause. |
 | `false-label` | Phase 7: a test labelled "MUTATION-VERIFIED" that survived its own mutation. |
 
-**The number recorded so far — 3 of 6, catch rate 0.5 — is a SCRIPTED faux
-reviewer's number, not a live model's judgement.** It was scripted to catch
-exactly three of six, and its purpose is to prove the pipeline (corpus →
-`runReview` → `validateReview` → `scoreCalibration`) computes a real,
-reproducible, non-rounded number end to end — proven further by FOUR
-required negative controls: a blind reviewer (approves everything) scores
+**The number recorded so far — 2 of 6, catch rate 0.333... — is a SCRIPTED
+faux reviewer's number, not a live model's judgement.** Its purpose is to
+prove the pipeline (corpus → `runReview` → `validateReview` →
+`scoreCalibration`) computes a real, reproducible, non-rounded number end
+to end.
+
+**WR3-02 disclosure (`08-REVIEW.md` iteration 3).** This fixture was
+originally scripted to catch 3 of 6, including `false-label`. When WR2-05
+raised the matcher's needle requirement from one to two (`bb2a67c`),
+`false-label`'s finding text did not naturally contain a second needle, so
+— in the SAME commit that raised the bar — it was extended with a phrase
+lifted from the corpus's own `mustMentionAny` answer key, which kept the
+reported 0.5 unchanged **by construction**, not by measurement; the
+pre-edit text scores 2/6 = 0.333... under that same, already-raised bar.
+The fixture has been reverted to its original, unmodified text
+(`tests/integration/reviewer-calibration.test.ts`'s `KNOWN_SUBSET_ARGS`
+and `KNOWN_SUBSET_CAUGHT`), and **2 of 6, 0.333..., is the honest number**:
+the false-label finding is still submitted by the scripted reviewer (three
+findings go in), but only two are credited as genuine catches by today's
+matcher. This is not being re-inflated back toward 0.5 — the catch rate is
+a measurement of what the current matcher, run against unedited fixture
+text, actually reports, not a target to preserve across matcher changes.
+
+Its purpose is proven further by FOUR required negative controls
+(unaffected by the WR3-02 revert above, since none of them ever depended
+on the `false-label` finding's text): a blind reviewer (approves
+everything) scores
 `catchRate: 0`; a shotgun reviewer (twenty generic findings, e.g.
 "this area could probably be improved somehow") also scores `catchRate: 0`;
 (WR-03) a **name-dropping shotgun** — one finding per touched file, naming

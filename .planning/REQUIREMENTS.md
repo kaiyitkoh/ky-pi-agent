@@ -301,7 +301,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | GATE-05 | Phase 8 | Complete |
 | GATE-06 | Phase 8 | Complete |
 | GATE-07 | Phase 6 | Complete |
-| GATE-08 | Phase 8 | Partial — the corpus (six real Phase 3-7 incidents), the pure scorer and both required negative controls (blind/shotgun, both score 0) are complete and proven offline (plan 08-10); the recorded 3/6 catch rate is a SCRIPTED faux reviewer's number, proving the pipeline rather than a live model's judgement. `RB-08-03`, **OUTSTANDING**. Not complete |
+| GATE-08 | Phase 8 | Partial — the corpus (six real Phase 3-7 incidents), the pure scorer and required negative controls (blind/shotgun/name-drop/kitchen-sink/two-needle-kitchen-sink, all score 0) are complete and proven offline (plan 08-10, hardened WR3-01/WR3-02 in `08-REVIEW.md` iteration 3); the recorded 2/6 catch rate (corrected from an undisclosed 3/6, WR3-02) is a SCRIPTED faux reviewer's number, proving the pipeline rather than a live model's judgement. `RB-08-03`, **OUTSTANDING**. Not complete |
 | GATE-09 | Phase 8 | Complete |
 | GATE-10 | Phase 8 | Partial — the nested half is fixed and proven offline: a real Bedrock per-`model.api` defect (nested calls silently dropping their thinking field) was found and fixed (plan 08-01). The main-loop half needs a real wire dump confirming `pi.setModel()`'s own dispatch carries the parameters. `RB-08-01`, **OUTSTANDING**. Not complete |
 | QUAL-01 | Phase 8 | Complete |

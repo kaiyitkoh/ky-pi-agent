@@ -44,6 +44,17 @@ completed: 2026-08-15
 
 # Phase 08 Plan 13: The Phase's Honest Close-Out Summary
 
+> **Correction (WR3-02, `08-REVIEW.md` iteration 3, 2026-08-15):** the
+> `3/6` scripted catch rate this plan's `docs/RUNBOOK.md` and
+> `.planning/REQUIREMENTS.md` edits recorded (below, and in the
+> Accomplishments list) is stale — it held at 0.5 only because a fixture
+> finding's text was edited in the same commit that raised the matcher's
+> needle bar (WR2-05). The fixture has since been reverted to its
+> unmodified text; the honest, currently-measured number is **0.333...
+> (2/6)**. Both `docs/RUNBOOK.md` and `.planning/REQUIREMENTS.md` have
+> been updated to state 2/6, not 3/6 — see `docs/QUALITY.md`'s own WR3-02
+> disclosure for the full account.
+
 **Appended RB-08-01/02/03 to `docs/RUNBOOK.md` (all OUTSTANDING, machine-governed by `docs-policy.test.ts`'s two-source agreement guard), wrote `docs/QUALITY.md` as the quality layer's code-authoritative contract, and reconciled all 16 phase-8 requirement statuses against what each plan's own summary actually proved rather than what the phase intended — four requirements moved from `[x]` to `[~]`, naming their runbook id inline, and one moved from Pending to `[x]` on the strength of a real session-level proof.**
 
 ## Performance

@@ -1432,11 +1432,17 @@ because the reviewer is dispatched via `runSingleShotRole` (`call-model`
 mechanism), not a real `pi-subagents` spawn; wiring it up is `pi-subagents`
 work this machine cannot exercise, since the package has never been
 installed (Correction 2, `RB-07-02`, OUTSTANDING). Separately,
-`tests/fixtures/seeded-defects/`'s calibration run (plan 08-10) reports a
-**scripted** faux reviewer's catch rate — 3 of 6, 0.5 — which measures the
-scorer, not a model's judgement: no live reviewer, of any kind, has ever run
-against this corpus. Both halves need the same two things this machine does
-not have: `pi-subagents` actually installed, and a live model credential.
+`tests/fixtures/seeded-defects/`'s calibration run (plan 08-10, corrected
+WR3-02 in `08-REVIEW.md` iteration 3) reports a **scripted** faux
+reviewer's catch rate — 2 of 6, 0.333... — which measures the scorer, not
+a model's judgement: no live reviewer, of any kind, has ever run against
+this corpus. (This number was 3 of 6, 0.5, before WR3-02: the fixture's
+`false-label` finding had been edited in the same commit that raised the
+matcher's needle bar, which held the reported number constant by
+construction rather than by measurement — see `docs/QUALITY.md`'s own
+WR3-02 disclosure for the full account.) Both halves need the same two
+things this machine does not have: `pi-subagents` actually installed, and
+a live model credential.
 
 **Precondition.** Run this only after `RB-07-02` has completed.
 
@@ -1455,15 +1461,16 @@ not have: `pi-subagents` actually installed, and a live model credential.
    `caught`/`total`/`catchRate`/`perDefectClass`/`unmatchedFindings` — exactly
    as `quality/calibration.ts#scoreCalibration` reports it, never rounded and
    never accompanied by a verdict string.
-3. Record the real catch rate, distinct from the 0.5 scripted number
-   `08-10-SUMMARY.md` already recorded:
+3. Record the real catch rate, distinct from the 0.333... scripted number
+   `08-10-SUMMARY.md` originally recorded (corrected to 2/6 by WR3-02,
+   `08-REVIEW.md` iteration 3):
    `echo "RB-08-03 live catch rate: <caught>/<total>, $(date -u +%FT%TZ)" >> RB-08-03-RESULT.md`
 
 **Expected output.** Step 1: the spawned reviewer's tool call passes
 `validateReview` (or is rejected with a named, specific reason — either
 outcome is informative; a spawn that never calls `submit_review` at all is
 the failure this entry is watching for). Step 2: a `CalibrationResult` with
-a real, non-scripted `catchRate` — expected to differ from 3/6, in either
+a real, non-scripted `catchRate` — expected to differ from 2/6, in either
 direction, since a live model was never tuned to this corpus the way the
 scripted reviewer was.
 

@@ -43,6 +43,18 @@ completed: 2026-08-15
 
 # Phase 08 Plan 10: Seeded-Defect Calibration Summary
 
+> **Correction (WR3-02, `08-REVIEW.md` iteration 3, 2026-08-15):** the
+> `0.5 (3/6)` catch rate this plan originally recorded is stale. WR2-05
+> (iteration 2) later raised the calibration matcher's needle bar and, in
+> the same commit, extended one fixture finding's text to keep clearing
+> it — holding the number at 0.5 by construction, not by measurement. The
+> fixture has since been reverted to its unmodified text; the honest,
+> currently-measured number is **0.333... (2/6)**. See `docs/QUALITY.md`'s
+> own WR3-02 disclosure for the full account. The falsification narrative
+> below is left as originally written — it is an accurate record of what
+> was tested against the matcher and fixture as they stood when this plan
+> executed.
+
 **A reproducible per-defect-class catch rate for GATE-08, computed by `scoreCalibration` over `runReview`'s output against a six-fixture corpus drawn from this project's own Phase 3-7 incidents, with a scripted-reviewer catch rate of 0.5 (3/6) and both required negative controls (blind reviewer, shotgun reviewer) independently proven to report zero.**
 
 ## Performance

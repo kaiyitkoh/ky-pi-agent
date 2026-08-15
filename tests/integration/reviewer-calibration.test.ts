@@ -13,17 +13,25 @@
  *      MEASURED claim: if a fixture were caught deterministically, GATE-08
  *      would be measuring the wrong layer.
  *   B. Calibration — the full corpus, as ONE combined review contract, driven
- *      through `runReview` FOUR times with four differently-scripted faux
- *      reviewers: a KNOWN-SUBSET reviewer (catches exactly 3 of 6, proving
- *      `scoreCalibration` reports a real, non-trivial number), a BLIND
- *      reviewer (approves everything, zero findings — the negative control
- *      that proves the scorer can report a bad number), a SHOTGUN reviewer
- *      (twenty vague findings — the control that proves quantity does not
- *      substitute for specificity), and (WR-03) a NAME-DROPPING SHOTGUN
- *      reviewer (one finding per touched file, naming only that file's own
- *      conspicuous symbol with no defect description — the control that
- *      proves naming a symbol is not identifying a defect; before WR-03's
- *      fix this exact shape scored catchRate === 1.0 having caught nothing).
+ *      through `runReview` SIX times with six differently-scripted faux
+ *      reviewers: a KNOWN-SUBSET reviewer (WR3-02: catches exactly 2 of 6
+ *      against its own unmodified text — see `KNOWN_SUBSET_CAUGHT`'s own
+ *      docstring for why this is 2, not the fixture's originally-scripted
+ *      3, and why it is not being re-inflated to chase that number back —
+ *      proving `scoreCalibration` reports a real, non-trivial number), a
+ *      BLIND reviewer (approves everything, zero findings — the negative
+ *      control that proves the scorer can report a bad number), a SHOTGUN
+ *      reviewer (twenty vague findings — the control that proves quantity
+ *      does not substitute for specificity), (WR-03) a NAME-DROPPING
+ *      SHOTGUN reviewer (one finding per touched file, naming only that
+ *      file's own conspicuous symbol with no defect description — the
+ *      control that proves naming a symbol is not identifying a defect;
+ *      before WR-03's fix this exact shape scored catchRate === 1.0 having
+ *      caught nothing), (WR2-05) a BOILERPLATE KITCHEN SINK (one sentence,
+ *      one needle per defect class, reused across all six files — before
+ *      the fix, catchRate === 1.0 having caught nothing), and (WR3-01) a
+ *      TWO-NEEDLE KITCHEN SINK (the same shape with two needles per class —
+ *      before that fix, catchRate === 1.0 having caught nothing again).
  *   C. Reproducibility — the whole calibration group is run TWICE, against
  *      two independently-built temp repos and faux sessions, and the
  *      resulting `CalibrationResult` objects are asserted identical
@@ -139,8 +147,34 @@ describe("GATE-08 corpus integrity", () => {
 
 const REQUIREMENT_ID = "GATE-08";
 
-/** The three defect classes the "known subset" scripted reviewer catches. Exactly 3 of 6, per the plan. */
-const KNOWN_SUBSET_CAUGHT: readonly string[] = ["fabricated-evidence", "absent-guard", "false-label"];
+/**
+ * WR3-02 (`08-REVIEW.md` iteration 3): the two defect classes the
+ * "known subset" scripted reviewer's UNMODIFIED text actually catches under
+ * today's matcher.
+ *
+ * This fixture originally shipped scripted to catch exactly 3 of 6
+ * (`false-label` included) against a matcher that required only ONE
+ * `mustMentionAny` needle. When WR2-05 (`bb2a67c`) raised the bar to TWO
+ * needles, `false-label`'s `concreteFailure` did not naturally contain a
+ * second one -- so, in the SAME commit that raised the bar, its text was
+ * extended with an additional clause ("meaning the label survived its own
+ * mutation") lifted from this corpus's own `mustMentionAny` answer key
+ * (`seeded-defects/index.ts:401`), which kept the reported number at 0.5
+ * BY CONSTRUCTION, not by measurement. `08-REVIEW.md` (WR3-02, iteration 3)
+ * scored the pre-`bb2a67c` text against the post-`bb2a67c` matcher and got
+ * 2/6 = 0.333..., not 3/6 = 0.5.
+ *
+ * The `false-label` finding below has been reverted to its original,
+ * unmodified text. It no longer catches under `MIN_DISTINCT_NEEDLES = 2`
+ * -- one needle ("regardless of input") is not enough. This fixture is
+ * therefore scripted to catch exactly 2 of 6, honestly, and the number
+ * everywhere it is stated (`docs/QUALITY.md`, `docs/RUNBOOK.md`,
+ * `.planning/REQUIREMENTS.md`) has been updated to match. The fixture's
+ * text is NOT being re-inflated to chase 3/6 back -- see this file's own
+ * header and the autonomous-run instructions this fix pass operated under:
+ * the catch rate is a measurement, not a target.
+ */
+const KNOWN_SUBSET_CAUGHT: readonly string[] = ["fabricated-evidence", "absent-guard"];
 
 async function waitForConfiguredAuth(
 	modelRuntime: FauxSessionHandle["modelRuntime"],
@@ -186,7 +220,13 @@ function verdictFor(status: "Implemented" | "Partial" | "Missing", evidence: str
 	return { requirementId: REQUIREMENT_ID, status, evidence };
 }
 
-/** The known-subset reviewer's submit_review arguments: exactly 3 of 6 defects caught, each with a specific finding. */
+/**
+ * The known-subset reviewer's submit_review arguments. WR3-02: the
+ * `false-label` finding below is the ORIGINAL, UNMODIFIED text (as of
+ * `ac0e427`, before `bb2a67c` extended it to clear the raised bar) -- it
+ * genuinely catches exactly 2 of 6 under today's matcher, not 3. See
+ * {@link KNOWN_SUBSET_CAUGHT}'s own docstring for the full disclosure.
+ */
 const KNOWN_SUBSET_ARGS = {
 	verdicts: [verdictFor("Partial", "src/evidence-claim.ts:1")],
 	findings: [
@@ -205,13 +245,14 @@ const KNOWN_SUBSET_ARGS = {
 		{
 			severity: "BLOCKER",
 			location: "src/parser-mutation-claim.test.ts:3",
-			// WR2-05: two INDEPENDENT needles ("regardless of input" and "survived
-			// its own mutation"), not one -- see calibration.ts's own
-			// MIN_DISTINCT_NEEDLES docstring for why a real, thorough finding
-			// naturally clears this bar while a single boilerplate phrase does not.
-			concreteFailure:
-				"Comment claims MUTATION-VERIFIED but parseCommand always returns true regardless of input, " +
-				"meaning the label survived its own mutation.",
+			// WR3-02: this is the ORIGINAL text, unedited since before WR2-05
+			// (`bb2a67c`) raised MIN_DISTINCT_NEEDLES to 2 -- it carries only ONE
+			// needle ("regardless of input") and no longer catches under today's
+			// matcher. It is deliberately NOT extended to clear the bar; doing so
+			// is the exact undisclosed coupling WR3-02 exists to reverse. A
+			// genuinely thorough finding for this defect would need a second,
+			// independently-descriptive needle it does not have here.
+			concreteFailure: "Comment claims MUTATION-VERIFIED but parseCommand always returns true regardless of input.",
 			suggestedFix: "Remove the false claim or make the test actually exercise parseCommand's logic.",
 		},
 	],
@@ -486,14 +527,21 @@ describe("GATE-08 calibration -- the full corpus driven through runReview", () =
 		run2 = await runCalibrationSuite("kypi-calibration-run2-");
 	}, 60_000);
 
-	it("known-subset: caught === 3, total === 6, catchRate === 0.5, exactly the three scripted classes true", () => {
-		expect(run1.knownSubset.caught).toBe(3);
-		expect(run1.knownSubset.total).toBe(6);
-		expect(run1.knownSubset.catchRate).toBe(0.5);
-		for (const id of DEFECT_CLASSES) {
-			expect(run1.knownSubset.perDefectClass[id], `perDefectClass["${id}"]`).toBe(KNOWN_SUBSET_CAUGHT.includes(id));
-		}
-	});
+	it(
+		"WR3-02 -- known-subset: caught === 2, total === 6, catchRate === 2/6 (0.333...), exactly the two classes " +
+			"whose findings genuinely clear today's matcher unedited. This fixture was originally scripted to catch " +
+			"3 of 6; the false-label finding's text was extended in bb2a67c to keep clearing a bar raised in that " +
+			"same commit, which held the reported number at 0.5 by construction, not by measurement. Reverted to " +
+			"its unmodified text: see KNOWN_SUBSET_CAUGHT's own docstring for the full disclosure.",
+		() => {
+			expect(run1.knownSubset.caught).toBe(2);
+			expect(run1.knownSubset.total).toBe(6);
+			expect(run1.knownSubset.catchRate).toBe(2 / 6);
+			for (const id of DEFECT_CLASSES) {
+				expect(run1.knownSubset.perDefectClass[id], `perDefectClass["${id}"]`).toBe(KNOWN_SUBSET_CAUGHT.includes(id));
+			}
+		},
+	);
 
 	it("THE NEGATIVE CONTROL -- a deliberately blind reviewer (zero findings, approves everything) scores catchRate === 0", () => {
 		expect(run1.blind.caught).toBe(0);
