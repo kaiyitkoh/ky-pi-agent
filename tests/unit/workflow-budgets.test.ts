@@ -502,7 +502,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 1170,
+		budget: 1680,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -517,7 +517,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"parseRootCause), the whole-document validateSpec gate and renderSpecMarkdown -- a genuine growth " +
 			"in a schema/validator module carrying this phase's own EARS-lite/scope-pin/root-cause forcing " +
 			"functions, not incidental bloat. Re-measured 1161 raw lines across the same 1 file 2026-08-15 " +
-			"(spec-schema.ts), rounded up to the next ten",
+			"(spec-schema.ts), rounded up to the next ten. RAISED 1170 -> 1680 by plan 09-07 (FLOW-02): a " +
+			"second file, scorecard.ts, is the ambiguity scorecard -- AMBIGUITY_DIMENSIONS/SCORE_GATE/ " +
+			"HARD_QUESTION_BUDGET/INTERVIEW_PERSPECTIVES, the numbered binding-order gateAmbiguity predicate, " +
+			"nextQuestionSlot's rotation, and assumptionsFromUnmetFloors. Measured 519 raw lines (scorecard.ts) " +
+			"+ 1161 raw lines (spec-schema.ts) = 1680 raw lines across 2 files 2026-08-15, already an exact " +
+			"multiple of ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
