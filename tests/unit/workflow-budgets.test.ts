@@ -270,6 +270,15 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"validateSpec then gateAmbiguity before any write. Measured 135 raw lines 2026-08-15 with " +
 			"countRawLines, rounded up to the next ten",
 	},
+	{
+		file: ".pi/skills/grill/SKILL.md",
+		budget: 60,
+		why: "plan 09-08 (FLOW-02) -- the first real skill body in this repository: the interrogation " +
+			"procedure, the four ambiguity dimensions, the perspective rotation and the SPEC.md §1-§8 outline, " +
+			"each as a table per 09-RESEARCH.md Item 1(d) and 09-PATTERNS.md Group H's own precedent (tables " +
+			"are the right shape for this content, not a trick to cheat the line counter -- D-1, tables count " +
+			"fully). Measured 58 raw lines 2026-08-15 with countRawLines, rounded up to the next ten",
+	},
 ];
 
 /**
@@ -1407,6 +1416,18 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 			"2026-08-15 with countRawLines -- WORKFLOW_BUDGETS' own why string for this same file was stale " +
 			"(stated 96), corrected in the same plan as this entry. 99 rounds up to 100, so the declared " +
 			"ceiling was already correct even though the narrative was not (09-RESEARCH.md Pitfall 2)",
+	},
+	{
+		name: "grill",
+		commandFile: ".pi/extensions/grill/index.ts",
+		bodies: [".pi/skills/grill/SKILL.md"],
+		budget: 250,
+		why: "FEATURES.md Part 2 line 158's ceiling for the flagship workflow -- FROZEN, may not move to absorb " +
+			"growth (D-13). Measured 135 raw lines (index.ts) + 58 raw lines (SKILL.md) = 193 raw lines " +
+			"2026-08-15 with countRawLines, well inside 250 -- scorecard.ts, spec-schema.ts and " +
+			"scorecard-parse.ts are supporting modules bound only by the .pi/extensions/grill DIRECTORY_BUDGETS " +
+			"ratchet above, per this registry's own module-docstring rule (D-13) that a merged closure budget " +
+			"would be meaningless",
 	},
 ];
 
