@@ -198,6 +198,27 @@ const ROWS: readonly Row[] = [
 	// Garbage / unknown-shape inputs -- T-04-38, every one of these must block,
 	// never throw and never fall through to allow
 	// -------------------------------------------------------------------------
+	// -------------------------------------------------------------------------
+	// PLAN 09-04 (FLOW-08) -- glab mr create/mr merge through the COMPOSED
+	// evaluator (never classifyGlabInvocation directly), proving the
+	// signature change (protectedBranches now threaded from PolicyFacts)
+	// composes correctly and evaluation order is unchanged: mr merge stays
+	// blocked even when it carries a target-branch flag.
+	// -------------------------------------------------------------------------
+	{
+		name: "glab mr create --target-branch staging -- allowed through the composed evaluator",
+		toolName: "bash",
+		input: { command: "glab mr create --target-branch staging" },
+		expected: "allow",
+	},
+	{
+		name: "glab mr merge --target-branch staging -- still blocked through the composed evaluator (blocked table wins)",
+		toolName: "bash",
+		input: { command: "glab mr merge --target-branch staging" },
+		expected: "block",
+		reasonIncludes: "deploy trigger",
+	},
+
 	{ name: "bash null input", toolName: "bash", input: null, expected: "block" },
 	{ name: "bash array input", toolName: "bash", input: [], expected: "block" },
 	{ name: "bash command is a number", toolName: "bash", input: { command: 12345 }, expected: "block" },

@@ -903,4 +903,80 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		why: "confirmed by execution: this is a deliberate over-block -- the command only PRINTS advice about running git push, never actually invokes git, but the shell-runner rule cannot distinguish 'a guarded verb as an argument to sh -c' from 'a guarded verb mentioned inside an echoed string', so it blocks both. Accepted per this project's fail-closed posture: the annoyance is a single denied echo, not a bypass.",
 		reference: "04-CONTEXT.md Assumption A3; shell.ts docstring 'a shell runner carrying a guarded verb is denied outright'",
 	},
+
+	// -------------------------------------------------------------------------
+	// Extra: PLAN 09-04 (FLOW-08) -- glab mr create's new conditional-allow
+	// rule, the four forms that correctly stay BLOCKED (an absent target and
+	// the three protected-branch spellings), plus one indirection form
+	// proving the shell-runner rule denies mr create outright before it ever
+	// reaches classifyGlabInvocation's own target check.
+	//
+	// The four ALLOW forms this same rule introduced
+	// (--target-branch staging / --target-branch=staging / -b staging / with
+	// interleaved unrelated flags) are DELIBERATELY NOT added here. This
+	// corpus's own `EvasionExpectation` type is a closed two-value union
+	// (`BLOCKED` | `OUT-OF-SCOPE`), enforced by
+	// `tests/unit/evasion-corpus.test.ts`'s Group C ("every expect value is
+	// exactly BLOCKED or OUT-OF-SCOPE -- no third bucket") -- there is no
+	// bucket this corpus's own machinery offers for "evaluates to allow, and
+	// that is correct, intended behaviour". `OUT-OF-SCOPE` specifically means
+	// "a published LIMIT this guard does not catch" (Group A' asserts the row
+	// literally evaluates to allow AND Group B requires it to appear in
+	// docs/SAFETY.md's "Known bypasses this guard does not catch" table) --
+	// filing a legitimate, by-design allow there would make that table state
+	// something false: that opening an MR against an explicit non-protected
+	// branch is a bypass this guard fails to stop, when it is exactly the
+	// behaviour this plan built on purpose. `docs/SAFETY.md`'s own "Authority"
+	// section says a stale claim there "is not a documentation nit, it is a
+	// false sense of security" -- the same reasoning forbids a FALSE one. The
+	// four allow forms are asserted instead in `tests/unit/git-policy.test.ts`
+	// (the classifier table, which has an `allow` verdict shape) and
+	// `tests/unit/policy-compose.test.ts` (the composed evaluator, same
+	// shape) -- both of which this same plan extends for exactly this reason.
+	// -------------------------------------------------------------------------
+	{
+		id: "EV-75",
+		class: "mr-create-destination",
+		tool: "bash",
+		input: { command: "glab mr create" },
+		expect: "BLOCKED",
+		why: "no explicit --target-branch/-b -- GitLab defaults an omitted target to the project default branch, so silence is itself the deploy trigger; the new conditional-allow rule requires an EXPLICIT target and falls through to the fail-closed block otherwise.",
+		reference: "PLAN 09-04 (FLOW-08); git.ts#classifyGlabInvocation, mrCreateTargetsSafeBranch",
+	},
+	{
+		id: "EV-76",
+		class: "mr-create-destination",
+		tool: "bash",
+		input: { command: "glab mr create --target-branch main" },
+		expect: "BLOCKED",
+		why: "the target is a protected branch by exact name.",
+		reference: "PLAN 09-04 (FLOW-08); git.ts#classifyGlabInvocation, mrCreateTargetsSafeBranch",
+	},
+	{
+		id: "EV-77",
+		class: "mr-create-destination",
+		tool: "bash",
+		input: { command: "glab mr create --target-branch MAIN" },
+		expect: "BLOCKED",
+		why: "the protected-branch comparison is case-insensitive, mirroring isProtected -- an upper-cased spelling of a protected branch must not slip through as an 'explicit, different' target.",
+		reference: "PLAN 09-04 (FLOW-08); git.ts#classifyGlabInvocation, mrCreateTargetsSafeBranch, isProtected",
+	},
+	{
+		id: "EV-78",
+		class: "mr-create-destination",
+		tool: "bash",
+		input: { command: "glab mr create -b main" },
+		expect: "BLOCKED",
+		why: "the -b short-flag form of the target, still protected -- proves the block applies to every accepted flag spelling, not only --target-branch. (master is also protected in this project's own PROTECTED_BRANCHES, but this test file's own FACTS fixture protects only 'main' -- tests/unit/git-policy.test.ts's PROTECTED=[main,master] table is where the master case is asserted.)",
+		reference: "PLAN 09-04 (FLOW-08); git.ts#classifyGlabInvocation, mrCreateTargetsSafeBranch",
+	},
+	{
+		id: "EV-79",
+		class: "nested-shell",
+		tool: "bash",
+		input: { command: 'sh -c "glab mr create --target-branch staging"' },
+		expect: "BLOCKED",
+		why: "the shell-runner rule denies this OUTRIGHT before it ever reaches classifyGlabInvocation's own target check -- 'glab' is in shell.ts's GUARDED_VERB_PATTERN, so a guarded verb handed to a shell runner as a script argument is refused at the parse layer regardless of what its own arguments would otherwise allow, per SAFE-03's fail-closed contract. An explicit, safe target inside the quoted string does not matter -- the invocation never reaches the classifier at all.",
+		reference: "PLAN 09-04 (FLOW-08); shell.ts GUARDED_VERB_PATTERN, findShellRunnerDenial",
+	},
 ];

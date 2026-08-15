@@ -150,6 +150,20 @@ const ROWS: readonly Row[] = [
 	{ command: "glab mr view", rest: "mr view", kind: "glab", currentBranch: "main", expected: "allow", why: "read-only" },
 	{ command: "glab ci status", rest: "ci status", kind: "glab", currentBranch: "main", expected: "allow", why: "read-only" },
 	{ command: "glab repo clone", rest: "repo clone", kind: "glab", currentBranch: "main", expected: "block", why: "unclassified subcommand -- fail closed" },
+
+	// -------------------------------------------------------------------------
+	// PLAN 09-04 (FLOW-08) -- glab mr create, a conditional allow on the
+	// invocation's own DESTINATION target, independent of currentBranch
+	// -------------------------------------------------------------------------
+	{ command: "glab mr create --target-branch staging", rest: "mr create --target-branch staging", kind: "glab", currentBranch: "main", expected: "allow", why: "an explicit, present, non-protected target -- the separated form" },
+	{ command: "glab mr create --target-branch=staging", rest: "mr create --target-branch=staging", kind: "glab", currentBranch: "main", expected: "allow", why: "the = form of the same flag" },
+	{ command: "glab mr create -b staging", rest: "mr create -b staging", kind: "glab", currentBranch: "main", expected: "allow", why: "the -b short flag" },
+	{ command: "glab mr create --draft --target-branch staging --title x", rest: "mr create --draft --target-branch staging --title x", kind: "glab", currentBranch: "main", expected: "allow", why: "unrelated flags interleaved before and after the target flag -- argv position is not load-bearing" },
+	{ command: "glab mr create", rest: "mr create", kind: "glab", currentBranch: "main", expected: "block", why: "no explicit target -- GitLab defaults an omitted target to the project default branch, so silence is the deploy trigger" },
+	{ command: "glab mr create --target-branch main", rest: "mr create --target-branch main", kind: "glab", currentBranch: "main", expected: "block", why: "the target is a protected branch" },
+	{ command: "glab mr create --target-branch MAIN", rest: "mr create --target-branch MAIN", kind: "glab", currentBranch: "main", expected: "block", why: "case-insensitive match against protected branch names, mirroring isProtected" },
+	{ command: "glab mr create --target-branch master", rest: "mr create --target-branch master", kind: "glab", currentBranch: "main", expected: "block", why: "master is also protected" },
+	{ command: "glab mr merge --target-branch staging", rest: "mr merge --target-branch staging", kind: "glab", currentBranch: "main", expected: "block", why: "the blocked-subcommand table is consulted before the mr create conditional-allow -- a merge carrying a target-branch flag is still a merge" },
 ];
 
 describe("SAFE-04/SAFE-05 -- git-policy.test.ts: table is non-empty (vacuous-pass guard)", () => {

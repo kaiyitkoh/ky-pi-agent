@@ -55,7 +55,15 @@ docstring for the structural argument). Concretely, it catches:
   `git push origin HEAD:main`) — the refspec target cannot be trusted from
   argv alone, so it is checked regardless of the checked-out branch.
   `glab mr merge` blocks unconditionally on every branch, because in this
-  project's work repo an MR merge *is* the deploy trigger.
+  project's work repo an MR merge *is* the deploy trigger. `glab mr create`
+  (plan 09-04, FLOW-08) is a conditional allow, independent of `HEAD` but
+  dependent on the invocation's own DESTINATION branch: permitted only with
+  an explicit, present, non-protected `--target-branch`/`-b` target
+  (separated or `=` form), blocked — fail closed — on an omitted target
+  (GitLab silently defaults an omitted target to the project default
+  branch, so silence is itself the deploy trigger) or a protected one,
+  compared case-insensitively. The blocked-subcommand check always runs
+  first, so `mr merge` can never be admitted through the `mr create` rule.
 - **Sensitive reads that reach a tool as a normal string** — `.env`-family
   files, `~/.aws/{credentials,config}`, kubeconfig, and `*.tfstate` block
   through the `read` tool directly and through quoted bash arguments.
