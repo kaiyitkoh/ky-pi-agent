@@ -1,6 +1,6 @@
 /**
- * CR-01 -- the deterministic gate stage's PRODUCTION exec runner, proved
- * against REAL subprocesses, not a scripted `ExecRunner`.
+ * CR-01 / CR-02 -- the deterministic gate stage's PRODUCTION exec runner,
+ * proved against REAL subprocesses, not a scripted `ExecRunner`.
  *
  * The code-review's own reproduction: `spawnSync("npx", [...], {shell:false})`
  * throws `ENOENT` on this machine (win32, Node v24.16.0), which degraded
@@ -15,11 +15,14 @@
  * one place that asserts what actually happens with NEITHER of those safety
  * nets -- the exact shape `runQuickGateStage` runs in for a real user.
  *
- * The fix: resolve `<cwd>/node_modules/.bin/<name>` (branching `shell` on
- * platform for the Windows `.cmd` case) instead of naming `npx`. A missing
- * binary is an honest `unavailable` naming the path, never a network-
- * fetching `npx` -- CR-02 (a following commit) tightens this further for a
- * secondary correctness bug in the lint leg's hardcoded target-file list.
+ * CR-01's fix: resolve `<cwd>/node_modules/.bin/<name>` (branching `shell`
+ * on platform for the Windows `.cmd` case) instead of naming `npx`. A
+ * missing binary is an honest `unavailable` naming the path, never a
+ * network-fetching `npx`. CR-02's fix (this file's own last `describe`):
+ * `LINT_GATE_FILES` (`gates.ts`) is THIS repository's own structural test
+ * paths -- in any other `cwd` they do not exist, and vitest would report a
+ * false FAIL rather than an honest "this leg does not apply here"; a
+ * missing `.test.ts` target is now caught before a subprocess is spawned.
  */
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -92,5 +95,16 @@ describe("CR-01 -- the real production exec runner genuinely spawns on this plat
 		// -- restated here because a regression that turned this into `fail`
 		// would ALSO make this specific assertion false, catching either bug.
 		expect(result.blocking).toBe(false);
+	});
+});
+
+describe("CR-02 -- the lint leg's hardcoded target files degrade honestly in a foreign repository, never a false FAIL", () => {
+	it("productionExec throws naming the missing target file when a .test.ts argument does not exist under cwd, even if the binary IS installed (the LINT_GATE_FILES-in-a-foreign-repo bug)", () => {
+		// repoRoot() has a real vitest binary installed, so this isolates the
+		// target-file-existence check from the binary-existence check CR-01
+		// already covers.
+		expect(() => productionExec("vitest", ["run", "tests/unit/does-not-exist-kypi-cr02.test.ts"], repoRoot())).toThrowError(
+			/target file\(s\) not found under .* tests\/unit\/does-not-exist-kypi-cr02\.test\.ts/,
+		);
 	});
 });

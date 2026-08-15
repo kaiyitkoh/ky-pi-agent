@@ -212,6 +212,18 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 		// to a network-fetching npx, and never silently reports pass.
 		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin -- the leg is unavailable, not skipped or passed`);
 	}
+	// CR-02's secondary correctness bug: LINT_GATE_FILES (gates.ts) is THIS
+	// repository's own structural test paths. In any other cwd those paths do
+	// not exist, and vitest would report a false FAIL against files it never
+	// found rather than an honest "this leg does not apply here". Any `.test.ts`
+	// argument that does not exist under `cwd` degrades the leg to unavailable,
+	// naming the missing path(s), before a subprocess is even spawned.
+	const missingTargets = args.filter((a) => a.endsWith(".test.ts") && !existsSync(join(cwd, a)));
+	if (missingTargets.length > 0) {
+		throw new Error(
+			`${cmd} target file(s) not found under ${cwd}: ${missingTargets.join(", ")} -- this leg only runs ky-pi-agent's own structural lint suite`,
+		);
+	}
 	const result = spawnSync(bin, args, {
 		cwd,
 		// A Windows `.cmd` shim cannot be launched without a shell (Node
