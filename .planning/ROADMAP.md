@@ -409,7 +409,27 @@ Plans:
   4. `/review` produces REVIEW.md and opens an MR targeting **staging, never `main`**, with the diff checked against SPEC's expected-files list — and one real feature has shipped end to end this way on the work laptop.
   5. Gate depth scales with the work: `/quick` runs deterministic rules only while the full workflow runs all four quality mechanisms; subagents receive self-contained handoff packets so delegation costs negative tokens in the parent; total artifacts remain SPEC, PLAN, REVIEW plus a PROGRESS append, with no document no downstream consumer reads.
 
-**Plans**: TBD
+**Plans**: 17 plans
+
+Plans:
+- [ ] 09-01-PLAN.md — WR-09 de-flake: event-gate the checkpoint-store concurrency case, delete the wall-clock margin
+- [ ] 09-02-PLAN.md — the sideways ratchet: `RESOURCE_EDGES` completeness scanner + `WORKFLOW_TEXT_BUDGETS`
+- [ ] 09-03-PLAN.md — ground clearing: `/plan` → `/plan-mode` (DEVIATION 6), `.pi/work/` gitignored, `ARTIFACT_FILES`
+- [ ] 09-04-PLAN.md — extend `classifyGlabInvocation` for `glab mr create` (explicit non-protected target only)
+- [ ] 09-05-PLAN.md — SPEC §2 Verified Codebase Facts evidence gate (FLOW-03)
+- [ ] 09-06-PLAN.md — SPEC §4 `IF/THEN`, §5 scope pin, conditional Root Cause, renderer (FLOW-04, FLOW-05, QUAL-03)
+- [ ] 09-07-PLAN.md — ambiguity scorecard: dimensions, floors, hard question budget, rotating perspectives (FLOW-02)
+- [ ] 09-08-PLAN.md — the `/grill` command + `.pi/skills/grill/SKILL.md` (≤250 lines)
+- [ ] 09-09-PLAN.md — PLAN.md task form + two-directional coverage matrix + renderer (FLOW-06)
+- [ ] 09-10-PLAN.md — the `/plan` command + `.pi/skills/plan-ceremony/SKILL.md` (≤200 lines)
+- [ ] 09-11-PLAN.md — handoff packet builder, honest-degradation subagent probe, agent file (FLOW-09)
+- [ ] 09-12-PLAN.md — QUAL-08's pure gate-depth selector, asserted in both directions
+- [ ] 09-13-PLAN.md — the `/execute` command: PROGRESS append, evidence gate reuse, fail-closed drift abort (FLOW-07)
+- [ ] 09-14-PLAN.md — scope drift computed from `git diff --name-only` + REVIEW.md's Scope Drift section
+- [ ] 09-15-PLAN.md — the `/review` command + MR to staging through the classifier + `.pi/skills/review/SKILL.md`
+- [ ] 09-16-PLAN.md — FLOW-10: the artifact set capped at four with named consumers; text budgets closed
+- [ ] 09-17-PLAN.md — `docs/WORKFLOWS.md` derived from code, `RB-09-01..03` OUTSTANDING, REQUIREMENTS reconciliation
+
 **Research**: Not needed — artifact schemas, gate definitions and line budgets are already prescriptive.
 
 ### Phase 10: Context Budget & Progressive Disclosure
