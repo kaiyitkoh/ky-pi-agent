@@ -121,7 +121,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [x] **QUAL-05**: Any change classified symptomatic or workaround stops the workflow and requires the user's explicit approval before it can ship **[FAUX]**
 - [x] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
 - [x] **QUAL-07**: A design-level review pass covering algorithmic complexity, scalability, and abstraction fit fires **conditionally** — on signals (diff spans many files, a loop wraps a query, a data model or public interface changes) or on explicit `/escalate` — never on every task **[FAUX]**
-- [ ] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]**
+- [x] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]**
 - [x] **QUAL-09**: The wall-clock and token cost added by the quality layer is recorded per turn in the JSONL, so the correctness/latency balance is a measured number and can be tuned rather than guessed **[FAUX]** — *the ledger mechanism (plan 08-04) is exercised by real producers — the deterministic gate stage, the reviewer, the refute pass, the advisor consult — each calling `addQualityCost` exactly once per pass; plan 08-11 proves a real, live-session `/quick` turn's own `kind:"turn"` JSONL row carries `qualityMs`, read off disk rather than an in-memory peek, with a paired negative control proving a blocked gate's cost is never billed to a later, unrelated turn*
 
 ### Workflows
@@ -311,7 +311,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | QUAL-05 | Phase 8 | Complete |
 | QUAL-06 | Phase 8 | Complete |
 | QUAL-07 | Phase 8 | Complete |
-| QUAL-08 | Phase 9 | Pending |
+| QUAL-08 | Phase 9 | Complete |
 | QUAL-09 | Phase 8 | Complete — the ledger mechanism (plan 08-04) is exercised by real producers, and plan 08-11 proves a live-session `/quick` turn's own JSONL row carries `qualityMs`, read off disk, with a paired negative control against cost leaking to an unrelated turn |
 | FLOW-01 | Phase 6 | Complete |
 | FLOW-02 | Phase 9 | Complete |
