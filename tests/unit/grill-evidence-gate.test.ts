@@ -81,14 +81,21 @@ const CASES: readonly Case[] = [
 		why: "must be distinguishable from the absent-heading case -- 'you wrote an empty one' is a different fact than 'you never wrote it'",
 	},
 	{
-		name: "a row with an empty claim",
+		name: "a row with an empty claim AND a malformed evidence cell",
 		markdown: spec({
-			factsRows: [{ claim: "", evidence: ".pi/lib/jsonl.ts:606", howVerified: "read the file directly" }],
+			// Evidence is DELIBERATELY also malformed (not a file:line / command
+			// output shape), not merely absent -- so that branches (3) and (4)
+			// disagree about which defect to report first. This is what makes
+			// FALSIFICATION (c) (reordering (3) and (4)) observable: with a
+			// well-formed evidence cell, swapping the branches would report the
+			// SAME "empty claim" reason either way, and the falsification would
+			// prove nothing about binding order.
+			factsRows: [{ claim: "", evidence: "read the file directly", howVerified: "read the file directly" }],
 			includeRequirements: true,
 		}),
 		expected: "reject",
 		reasonIncludes: ["row 1", "empty claim"],
-		why: "names the offending row index, per this plan's own must_haves.truths",
+		why: "names the offending row index, per this plan's own must_haves.truths -- branch (3) (empty claim) is checked BEFORE branch (4) (evidence shape), so this reason names the claim defect even though the evidence cell is also malformed",
 	},
 	{
 		name: "a row whose evidence cell is the bare word 'verified'",
