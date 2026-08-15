@@ -474,7 +474,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/lib",
-		budget: 690,
+		budget: 840,
 		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs no longer filters to `.pi/extensions/` " +
 			"only -- `.pi/lib/jsonl.ts` is imported (via `../../lib/jsonl.ts`) by quality/index.ts (indirectly, " +
 			"through .pi/lib/win-quote.ts's own CR2-01 wiring), routing/index.ts, safety/audit.ts and " +
@@ -485,7 +485,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"same precedent as routing/harness/diagnostics/quality/safety/providers -- this entry did not " +
 			"exist before WR2-04, so there is no prior committed number to raise from. Measured 687 raw lines " +
 			"across 2 files 2026-08-15 (jsonl.ts 606, win-quote.ts 81 -- win-quote.ts itself landed this same " +
-			"iteration, moved here from tests/helpers/ by CR2-01), rounded up to the next ten",
+			"iteration, moved here from tests/helpers/ by CR2-01), rounded up to the next ten. RAISED " +
+			"690 -> 840 by plan 09-03 (FLOW-10): a third file, work-artifacts.ts, is the ARTIFACT_FILES " +
+			"registry and the two-layer-confined workDir() every one of the four ceremonial commands built " +
+			"in this phase's later plans will import -- it counts toward this total per WR-03's whole-directory " +
+			"discipline even though it is imported by test files only today (its production consumers do not " +
+			"exist until plans 09-08/10/13/15). Measured 839 raw lines across 3 files 2026-08-15 (jsonl.ts 606, " +
+			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",

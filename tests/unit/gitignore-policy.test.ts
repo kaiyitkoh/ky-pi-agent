@@ -49,6 +49,9 @@ const MUST_BE_IGNORED = [
 	".pi/npm/package.json",
 	".pi/npm/node_modules/x",
 	".pi/git/github.com/o/r/package.json",
+	// --- Ceremonial-workflow scratch artifacts (plan 09-03, FLOW-10) --------
+	".pi/work/demo-slug/SPEC.md",
+	".pi/work/demo-slug/PROGRESS.md",
 	// --- Generic credential shapes ------------------------------------------
 	".env",
 	".env.local",

@@ -157,6 +157,19 @@ scratch/
 !/.pi/npm/.npmrc
 
 # ---------------------------------------------------------------------------
+# Ceremonial-workflow scratch artifacts (never committed -- public repo)
+#
+# `.pi/work/<slug>/` holds SPEC.md, PLAN.md, REVIEW.md and a PROGRESS.md
+# append -- per-feature scratch describing the user's WORK codebase, written
+# by /grill, /plan, /execute and /review (plan 09-03, FLOW-10). This repo is
+# PUBLIC; those artifacts describe features of a private employer codebase,
+# and committing them would leak exactly what PROJECT.md's secrets
+# constraint forbids. They are not harness source and no future plan should
+# make them so.
+# ---------------------------------------------------------------------------
+.pi/work/
+
+# ---------------------------------------------------------------------------
 # Vendored-extension runtime state (never committed, machine/session-local)
 #
 # pi-loop-police (07-06, EXT-05/EXT-10) auto-creates loop-police.json next to
