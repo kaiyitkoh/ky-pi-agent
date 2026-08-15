@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-06-PLAN.md
-last_updated: "2026-08-15T14:15:05.900Z"
+stopped_at: Completed 09-07-PLAN.md
+last_updated: "2026-08-15T14:34:20.086Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 92
+  completed_plans: 93
   percent: 73
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 7 of 17
+Plan: 8 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-08-15
 
-Progress: [█████████░] 89%
+Progress: [█████████░] 90%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -162,6 +162,7 @@ credentials can do has been done".
 | Phase 09 P04 | 70m | 2 tasks | 7 files |
 | Phase 09 P05 | 55m | 2 tasks | 3 files |
 | Phase 09 P06 | ~40min | 2 tasks | 4 files |
+| Phase 09 P07 | 9min | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -437,6 +438,10 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-06: FLOW-04 and QUAL-03 are entirely SPEC-shape requirements, closed by validateSpec now; FLOW-05 stays Partial -- its diff half (comparing expected-files against a real git diff) is plan 09-14's job
 - [Phase 09]: 09-06: EXPECTED_FILE_PATTERN rejects a glob via character-class exclusion (no glob metacharacter is ever in the allowed class) rather than per-symbol lookaheads, plus two lookaheads for leading / and .. segments
 - [Phase 09]: 09-06: falsification (a) (case-insensitive IF_THEN_PATTERN) turns only the lower-case reject case red, not the SHOULD-variant case -- recorded honestly as the mathematically correct, weaker-than-predicted result, since case-insensitivity has no effect on the literal SHALL/SHOULD word mismatch
+- [Phase 09]: 09-07: floor check sits BEFORE the overall-score check in gateAmbiguity — a scorecard that aces three dimensions and fails one can still average under SCORE_GATE; floor-first stops that from being laundered into an accept, proved by falsification (b)
+- [Phase 09]: 09-07: the user override permitted by FEATURES.md line 176 is a separate helper (assumptionsFromUnmetFloors), never a branch or parameter gateAmbiguity accepts — a gate that can be told to pass is not a gate (T-09-07-04)
+- [Phase 09]: 09-07: HARD_QUESTION_BUDGET=5 adopts spec-kit's hard rule verbatim, and INTERVIEW_PERSPECTIVES is deliberately also 5 entries — a HARD budget needs one comparable number, not GSD's own softer per-round allowance, and matching perspective count means a fully-used budget visits every perspective exactly once
+- [Phase 09]: 09-07: FLOW-02 stays [ ] Pending in REQUIREMENTS.md, not marked complete — the plan's own requirement ledger states FLOW-02 closes only when 09-08 wires this module into /grill's loop and the skill body carries the dimension rubric and perspective list as tables; this plan ships only the machine-checkable half
 
 ### Pending Todos
 
@@ -489,8 +494,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T14:15:05.888Z
-Stopped at: Completed 09-06-PLAN.md
+Last session: 2026-08-15T14:33:40.354Z
+Stopped at: Completed 09-07-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
