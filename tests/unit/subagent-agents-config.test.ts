@@ -179,9 +179,30 @@ describe("subagent-agents-config -- discovery (guards against a vacuous pass)", 
 // Completeness, both directions
 // -----------------------------------------------------------------------------
 
+/**
+ * Agent files intentionally shipped WITHOUT a routed `AGENT_NAME_BY_ROLE`
+ * entry today. Adding a stem here is a real architectural statement, not a
+ * workaround -- mirrors `chokepoint-lint.test.ts`'s
+ * `CHOKEPOINT_BYPASS_ALLOWLIST` shape: each entry must name (a) why the role
+ * is not yet routed and (b) the `RB-*` id that tracks wiring it up. Checked
+ * for staleness below (every entry must correspond to a real shipped file),
+ * the same completeness discipline this describe block applies everywhere
+ * else.
+ */
+const UNROUTED_AGENT_ALLOWLIST: readonly { readonly stem: string; readonly reason: string }[] = [
+	{
+		stem: "reviewer",
+		reason:
+			'plan 08-07 dispatches the reviewer via runSingleShotRole (ROLE_MECHANISM.reviewer === "call-model"), ' +
+			"never through the subagent/agentOverrides mechanism AGENT_NAME_BY_ROLE serves -- this agent file " +
+			"exists for the eventual real-subagent path, tracked as RB-08-03, OUTSTANDING",
+	},
+];
+
 describe("subagent-agents-config -- completeness, both directions", () => {
 	const declaredNames = Object.values(AGENT_NAME_BY_ROLE);
 	const shippedStems = AGENT_FILES.map((p) => basename(p, ".md"));
+	const allowedUnroutedStems = UNROUTED_AGENT_ALLOWLIST.map((e) => e.stem);
 
 	it("AGENT_NAME_BY_ROLE names at least one subagent role (guards against a vacuous pass)", () => {
 		expect(declaredNames.length).toBeGreaterThanOrEqual(1);
@@ -196,12 +217,23 @@ describe("subagent-agents-config -- completeness, both directions", () => {
 		).toEqual([]);
 	});
 
-	it("present-but-undeclared: every tracked .pi/agents/*.md names a role in AGENT_NAME_BY_ROLE", () => {
-		const offenders = shippedStems.filter((stem) => !declaredNames.includes(stem));
+	it("present-but-undeclared: every tracked .pi/agents/*.md names a role in AGENT_NAME_BY_ROLE, or is a named, reasoned exception", () => {
+		const offenders = shippedStems.filter((stem) => !declaredNames.includes(stem) && !allowedUnroutedStems.includes(stem));
 		expect(
 			offenders,
-			"these agent files ship but no role in AGENT_NAME_BY_ROLE routes to them -- an agent Phase 5 " +
-				"will never override via settings.subagents.agentOverrides",
+			"these agent files ship but no role in AGENT_NAME_BY_ROLE routes to them, and none is named in " +
+				"UNROUTED_AGENT_ALLOWLIST -- an agent Phase 5 will never override via " +
+				"settings.subagents.agentOverrides; add a reasoned allowlist entry if this is deliberate " +
+				"(e.g. a future-path agent file, per RB-08-03's precedent) or wire the role up",
+		).toEqual([]);
+	});
+
+	it("UNROUTED_AGENT_ALLOWLIST carries no stale entry -- every stem it names is a real, shipped agent file", () => {
+		const offenders = allowedUnroutedStems.filter((stem) => !shippedStems.includes(stem));
+		expect(
+			offenders,
+			"UNROUTED_AGENT_ALLOWLIST names a stem with no corresponding .pi/agents/<stem>.md on disk -- " +
+				"remove the stale entry",
 		).toEqual([]);
 	});
 });
