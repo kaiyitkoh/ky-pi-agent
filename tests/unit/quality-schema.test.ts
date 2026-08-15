@@ -127,6 +127,41 @@ describe("verdict", () => {
 });
 
 // ---------------------------------------------------------------------------
+// WR-02 -- an unrecognised verdict status is rejected, never silently coerced
+// ---------------------------------------------------------------------------
+
+describe("WR-02 -- verdict status must be exactly one of Implemented/Partial/Missing", () => {
+	it('rejects status "implemented" (wrong case), naming the offending value -- must NOT be silently coerced to "Missing"', () => {
+		const review = baseline();
+		(review.verdicts as { status: string }[])[0].status = "implemented";
+		const reason = expectRejects(review);
+		expect(reason).toContain("implemented");
+	});
+
+	it('rejects status "Done" (unknown token), naming the offending value', () => {
+		const review = baseline();
+		(review.verdicts as { status: string }[])[0].status = "Done";
+		const reason = expectRejects(review);
+		expect(reason).toContain("Done");
+	});
+
+	it("rejects an absent status field, naming the field", () => {
+		const review = baseline();
+		delete (review.verdicts as Record<string, unknown>[])[0].status;
+		const reason = expectRejects(review);
+		expect(reason).toContain("status");
+	});
+
+	it('accepts a verdict genuinely carrying status "Missing" -- a real Missing verdict must reach the accepted review with status Missing, not be indistinguishable from a coercion (paired positive for the fix that dropped the fallback)', () => {
+		const review = baseline();
+		(review.verdicts as { status: string }[])[1].status = "Missing";
+		const result = expectAccepts(review);
+		const review2 = result.review as { verdicts: { requirementId: string; status: string }[] };
+		expect(review2.verdicts.find((v) => v.requirementId === "GATE-04")?.status).toBe("Missing");
+	});
+});
+
+// ---------------------------------------------------------------------------
 // "malformed" -- GATE-05, an unclassified finding rejected by code
 // ---------------------------------------------------------------------------
 

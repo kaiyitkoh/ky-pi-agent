@@ -274,6 +274,16 @@ function isNonEmptyString(value: unknown): value is string {
  *       and the value that arrived. This is GATE-05, and it is code, not
  *       wording -- an unclassified finding is structurally impossible to
  *       let through.
+ *   (2b) ANY verdict whose `status` is not exactly one of
+ *       Implemented/Partial/Missing -> REJECT AS MALFORMED, naming the
+ *       offending index and the value that arrived, mirroring (2)'s
+ *       discipline for `severity`. WR-02: branch (9)'s normaliser used to
+ *       fabricate `"Missing"` for a `status` it did not recognise (wrong
+ *       case, an absent field, an unknown token) instead of rejecting --
+ *       silently rewriting an unrecognised value into a verdict the
+ *       reviewer never actually gave is the same "fabricate rather than
+ *       report absence" failure this module's own omission rule forbids
+ *       elsewhere.
  *   (3) `expectedRequirementIds` not fully covered by `verdicts` -> reject,
  *       naming the missing ids. A verdict naming a requirement id NOT in the
  *       expected set is also a reject, naming the extra id -- a reviewer
@@ -335,6 +345,17 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 				reason:
 					`findings[${i}].severity must be exactly one of BLOCKER, WARNING, or NIT (GATE-05) -- ` +
 					`received ${describeValue(severity)}`,
+			};
+		}
+	}
+
+	// (2b) WR-02: an unrecognised verdict status is malformed, exactly like an unclassified finding -- never silently coerced.
+	for (let i = 0; i < verdicts.length; i++) {
+		const status = isPlainObject(verdicts[i]) ? (verdicts[i] as Record<string, unknown>).status : undefined;
+		if (typeof status !== "string" || !VALID_STATUSES.has(status)) {
+			return {
+				ok: false,
+				reason: `verdicts[${i}].status must be exactly one of Implemented, Partial, or Missing -- received ${describeValue(status)}`,
 			};
 		}
 	}
@@ -435,13 +456,14 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 		};
 	}
 
-	// (9) accept -- normalise into the validated ReviewArtifact shape.
+	// (9) accept -- normalise into the validated ReviewArtifact shape. `status` is
+	// cast, never defaulted: branch (2b) above already rejected anything not in
+	// VALID_STATUSES, so no fallback-to-"Missing" is reachable here (WR-02).
 	const normalisedVerdicts: ReviewVerdict[] = verdicts.map((v) => {
 		const obj = v as Record<string, unknown>;
-		const status = typeof obj.status === "string" && VALID_STATUSES.has(obj.status) ? (obj.status as ReviewVerdict["status"]) : "Missing";
 		return {
 			requirementId: String(obj.requirementId ?? ""),
-			status,
+			status: obj.status as ReviewVerdict["status"],
 			evidence: String(obj.evidence ?? ""),
 		};
 	});
