@@ -374,7 +374,7 @@ Plans:
 **Wave 2** *(blocked on Wave 1 completion)*
 
 - [x] 08-06-PLAN.md — GATE-01/QUAL-02/QUAL-07: the deterministic gate runner, three states per leg, measured wall clock
-- [ ] 08-07-PLAN.md — GATE-02: the reviewer's six-element context contract, proved on the outgoing request
+- [x] 08-07-PLAN.md — GATE-02: the reviewer's six-element context contract, proved on the outgoing request
 - [ ] 08-08-PLAN.md — GATE-09: the `consult_advisor` mechanism with the boundary rule's three written answers
 
 **Wave 3** *(blocked on Wave 2 completion)*

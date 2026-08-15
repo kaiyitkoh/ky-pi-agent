@@ -100,7 +100,7 @@
 ### Quality Gates
 
 - [x] **GATE-01**: Deterministic gates — typecheck, lint, LSP diagnostics — run and feed errors back **before** any model review **[FAUX]**
-- [ ] **GATE-02**: A fresh-context reviewer subagent receives the full contract: diff, every touched file in full, test and typecheck output, SPEC requirements, files-touched union, and the import graph **[FAUX]**
+- [x] **GATE-02**: A fresh-context reviewer subagent receives the full contract: diff, every touched file in full, test and typecheck output, SPEC requirements, files-touched union, and the import graph **[FAUX]**
 - [x] **GATE-03**: Review output gives a per-requirement verdict (Implemented / Partial / Missing) with file:line evidence **[FAUX]**
 - [x] **GATE-04**: Review output includes a mandatory "checked and cleared" section, so silence is structurally impossible **[FAUX]**
 - [x] **GATE-05**: Findings are classified BLOCKER / WARNING / NIT, and unclassified findings are rejected as malformed **[FAUX]**
@@ -295,7 +295,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | EXT-09 | Phase 7 | Partial — the composed ritual is documented as a single sequence in `docs/RUNBOOK.md`'s `RB-07-01` (plan 07-13), citing existing Phase 2/3 entries for two of its four legs and naming the exact steps for the other two; running it is `RB-07-01`, **OUTSTANDING**. Not complete |
 | EXT-10 | Phase 7 | Complete — not install-dependent; `pi-loop-police`'s missing LICENSE re-verified three times independently (plan 07-06) |
 | GATE-01 | Phase 8 | Complete |
-| GATE-02 | Phase 8 | Pending |
+| GATE-02 | Phase 8 | Complete |
 | GATE-03 | Phase 8 | Complete |
 | GATE-04 | Phase 8 | Complete |
 | GATE-05 | Phase 8 | Complete |
