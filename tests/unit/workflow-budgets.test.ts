@@ -501,6 +501,18 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten",
 	},
 	{
+		dir: ".pi/extensions/grill",
+		budget: 530,
+		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
+			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
+			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
+			"by commandDirs' present-but-undeclared check for that reason -- declared here anyway, ahead of " +
+			"that check requiring it, because DIRECTORY_BUDGETS has no declared-but-absent check and declaring " +
+			"the directory before its command file exists is the honest thing to do, per this plan's own " +
+			"instruction. Measured 522 raw lines across 1 file 2026-08-15 (spec-schema.ts), rounded up to the " +
+			"next ten",
+	},
+	{
 		dir: ".pi/extensions/todo.ts",
 		budget: 0,
 		why: "Phase 7 plan 08's vendored todo.ts is a FLAT top-level file (`.pi/extensions/todo.ts`, not a " +
