@@ -292,21 +292,41 @@ describe("QUAL-01 Group C — dead-rule guard", () => {
  * target tuned to zero. If it rises, either the new source genuinely
  * introduced the anti-pattern (fix the source) or a rule needs narrowing
  * (narrow it and record what shape forced the narrowing) — it is not
- * lowered by silently widening an exemption.
+ * lowered by silently widening an exemption. `toBe`, not merely
+ * `toBeLessThanOrEqual` (see the second `it` below, WR-07): a DROP also
+ * requires a deliberate edit here, the same discipline `workflow-budgets.
+ * test.ts` uses for its own ratchets (WR2-03) — headroom accumulated by a
+ * silent fix is exactly the slack a recorded-number budget exists to
+ * prevent from hiding.
  *
- * why: measured 2026-08-15 against the Phase 1-7 `.pi/extensions/` tree
- * (this plan's own `quality/rules.ts` does not appear in it — the first
- * measurement run found 4 `shipped-todo` self-references inside this
- * module's own docstrings describing the very tokens it detects, which was
- * treated as a genuine finding on real source and fixed by rewording the
- * docstrings to reference `SHIPPED_TODO_TOKENS` by name instead of spelling
- * the four literal tokens in prose — not by narrowing the rule or widening
- * an exemption). The 22 that remain are pre-existing Phase 1-7 code,
- * predominantly `swallowed-exception` (17: undocumented `catch` blocks that
- * may or may not be deliberate) and `magic-number` (5: e.g. `todo.ts`'s
- * repeated `5`-item truncation constant). Fixing them is out of this plan's
- * scope (`08-02-PLAN.md` builds and proves the rules; it does not remediate
- * six phases of pre-existing code) and is left for a future gate-integration
+ * why: originally measured 2026-08-15 against the Phase 1-7 `.pi/
+ * extensions/` tree (this plan's own `quality/rules.ts` did not appear in
+ * it yet — the first measurement run found 4 `shipped-todo`
+ * self-references inside this module's own docstrings describing the very
+ * tokens it detects, which was treated as a genuine finding on real source
+ * and fixed by rewording the docstrings to reference `SHIPPED_TODO_TOKENS`
+ * by name instead of spelling the four literal tokens in prose — not by
+ * narrowing the rule or widening an exemption).
+ *
+ * WR-07 (code-review fix pass): the assertion scans the CURRENT tracked
+ * tree (`trackedFiles(".pi/extensions")`), which by the end of this phase
+ * includes eight `quality/*.ts` files (3,406+ lines) that landed AFTER the
+ * measurement above — so the claim "this plan's own quality/rules.ts does
+ * not appear in it" no longer described what the assertion actually scans.
+ * RE-MEASURED 2026-08-15 against the current tree (51 tracked `.ts` files):
+ * still exactly 22, UNCHANGED. All eight `quality/*.ts` files contribute
+ * ZERO error-tier findings — the new source did not move this number
+ * either direction. The 22 remain pre-existing Phase 1-7 code, same
+ * per-rule breakdown as originally recorded: `swallowed-exception` (17:
+ * checkpoint/git.ts x3, checkpoint/index.ts x1, diagnostics/budget.ts x2,
+ * diagnostics/call-model.ts x1, diagnostics/index.ts x1, loop-police/
+ * loop-police.ts x1, providers/index.ts x1, qoder/client.ts x1, qoder/
+ * index.ts x1, routing/agent-overrides.ts x1, routing/index.ts x1, safety/
+ * index.ts x1, workflows/index.ts x2) and `magic-number` (5: loop-police/
+ * loop-police.ts x2, todo.ts x3, e.g. todo.ts's repeated `5`-item
+ * truncation constant). Fixing them is out of this plan's scope
+ * (`08-02-PLAN.md` builds and proves the rules; it does not remediate six
+ * phases of pre-existing code) and is left for a future gate-integration
  * plan to triage.
  */
 const ERROR_BUDGET_ON_OWN_SOURCE = 22;
@@ -337,6 +357,25 @@ describe("QUAL-01 Group D — false-positive sweep over this repo's real sources
 					.map((f) => `${f.path}:${f.line} (${f.ruleId})`)
 					.join("; "),
 		).toBeLessThanOrEqual(ERROR_BUDGET_ON_OWN_SOURCE);
+	});
+
+	it("WR-07: the recorded budget IS the measured count, exactly -- a DROP requires an edit here too", () => {
+		// Same discipline workflow-budgets.test.ts uses (WR2-03): `toBe`, not
+		// `toBeLessThanOrEqual(actual + slack)`. Headroom accumulated by a real
+		// fix (a `catch` block that stops swallowing, a magic number that gets
+		// named) is exactly the slack a recorded-number budget exists to
+		// prevent from hiding -- so a DROP in the real count must ALSO force a
+		// deliberate edit to this constant, in the same commit as the fix that
+		// earned it, not a silent widening of the margin between recorded and
+		// actual.
+		const findings = runAntiPatternRules(sources);
+		const errorFindings = findings.filter((f) => f.tier === "error");
+		expect(
+			ERROR_BUDGET_ON_OWN_SOURCE,
+			`real .pi/extensions/ source now has ${errorFindings.length} error-tier findings, but ` +
+				`ERROR_BUDGET_ON_OWN_SOURCE is declared as ${ERROR_BUDGET_ON_OWN_SOURCE} -- update the constant AND ` +
+				"its `why` (with the new per-rule breakdown) in the same commit as whatever moved the real count",
+		).toBe(errorFindings.length);
 	});
 });
 
