@@ -101,9 +101,9 @@
 
 - [ ] **GATE-01**: Deterministic gates — typecheck, lint, LSP diagnostics — run and feed errors back **before** any model review **[FAUX]**
 - [ ] **GATE-02**: A fresh-context reviewer subagent receives the full contract: diff, every touched file in full, test and typecheck output, SPEC requirements, files-touched union, and the import graph **[FAUX]**
-- [ ] **GATE-03**: Review output gives a per-requirement verdict (Implemented / Partial / Missing) with file:line evidence **[FAUX]**
-- [ ] **GATE-04**: Review output includes a mandatory "checked and cleared" section, so silence is structurally impossible **[FAUX]**
-- [ ] **GATE-05**: Findings are classified BLOCKER / WARNING / NIT, and unclassified findings are rejected as malformed **[FAUX]**
+- [x] **GATE-03**: Review output gives a per-requirement verdict (Implemented / Partial / Missing) with file:line evidence **[FAUX]**
+- [x] **GATE-04**: Review output includes a mandatory "checked and cleared" section, so silence is structurally impossible **[FAUX]**
+- [x] **GATE-05**: Findings are classified BLOCKER / WARNING / NIT, and unclassified findings are rejected as malformed **[FAUX]**
 - [ ] **GATE-06**: BLOCKERs go through a refute-or-promote pass before they can stop work — reviewers told to find gaps invent them **[FAUX]**
 - [x] **GATE-07**: Task completion is gated on `tool_result` exit codes bound to a git SHA, never on transcript text — a model that writes prose tool calls can also write plausible command output **[FAUX]**
 - [ ] **GATE-08**: Seeded-defect calibration measures what the reviewer actually catches, distinguishing "the code is clean" from "the reviewer is asleep" **[FAUX]**
@@ -117,9 +117,9 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [x] **QUAL-01**: Deterministic anti-pattern rules (ast-grep + lint) detect magic numbers where a constant belongs, special-casing on a literal input value, copy-paste duplication, swallowed exceptions, `TODO`/`FIXME` shipped as a fix, and N+1 query shapes **[FAUX]**
 - [ ] **QUAL-02**: Those rules run inside the existing deterministic gate stage, adding no model round trip and no measurable wall-clock **[FAUX]**
 - [ ] **QUAL-03**: For any change framed as a fix, SPEC.md carries a **Root Cause** section naming the cause with `file:line` evidence and stating why the change addresses the cause rather than the symptom — gated the same way as Verified Codebase Facts **[FAUX]**
-- [ ] **QUAL-04**: The reviewer classifies every change as **root-cause / symptomatic / workaround** with written justification, as extra structure on the review pass already being paid for — not an extra call **[FAUX]**
+- [x] **QUAL-04**: The reviewer classifies every change as **root-cause / symptomatic / workaround** with written justification, as extra structure on the review pass already being paid for — not an extra call **[FAUX]**
 - [ ] **QUAL-05**: Any change classified symptomatic or workaround stops the workflow and requires the user's explicit approval before it can ship **[FAUX]**
-- [ ] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
+- [x] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
 - [ ] **QUAL-07**: A design-level review pass covering algorithmic complexity, scalability, and abstraction fit fires **conditionally** — on signals (diff spans many files, a loop wraps a query, a data model or public interface changes) or on explicit `/escalate` — never on every task **[FAUX]**
 - [ ] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]**
 - [ ] **QUAL-09**: The wall-clock and token cost added by the quality layer is recorded per turn in the JSONL, so the correctness/latency balance is a measured number and can be tuned rather than guessed **[FAUX]**
@@ -296,9 +296,9 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | EXT-10 | Phase 7 | Complete — not install-dependent; `pi-loop-police`'s missing LICENSE re-verified three times independently (plan 07-06) |
 | GATE-01 | Phase 8 | Pending |
 | GATE-02 | Phase 8 | Pending |
-| GATE-03 | Phase 8 | Pending |
-| GATE-04 | Phase 8 | Pending |
-| GATE-05 | Phase 8 | Pending |
+| GATE-03 | Phase 8 | Complete |
+| GATE-04 | Phase 8 | Complete |
+| GATE-05 | Phase 8 | Complete |
 | GATE-06 | Phase 8 | Pending |
 | GATE-07 | Phase 6 | Complete |
 | GATE-08 | Phase 8 | Pending |
@@ -307,9 +307,9 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | QUAL-01 | Phase 8 | Complete |
 | QUAL-02 | Phase 8 | Pending |
 | QUAL-03 | Phase 9 | Pending |
-| QUAL-04 | Phase 8 | Pending |
+| QUAL-04 | Phase 8 | Complete |
 | QUAL-05 | Phase 8 | Pending |
-| QUAL-06 | Phase 8 | Pending |
+| QUAL-06 | Phase 8 | Complete |
 | QUAL-07 | Phase 8 | Pending |
 | QUAL-08 | Phase 9 | Pending |
 | QUAL-09 | Phase 8 | Pending |

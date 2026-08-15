@@ -367,7 +367,7 @@ Plans:
 
 - [x] 08-01-PLAN.md — GATE-10 nested: fix the Bedrock reasoning-effort shape at `modes.ts:409`, thread `tools`, prove per-`model.api` on the wire
 - [x] 08-02-PLAN.md — QUAL-01: six syntax-node anti-pattern rules via the TypeScript compiler API
-- [ ] 08-03-PLAN.md — GATE-03/04/05, QUAL-04/06: the `submit_review` schema and the rejection engine
+- [x] 08-03-PLAN.md — GATE-03/04/05, QUAL-04/06: the `submit_review` schema and the rejection engine
 - [ ] 08-04-PLAN.md — QUAL-09: the quality-layer cost accumulator and its `TurnRow` fields
 - [ ] 08-05-PLAN.md — the diagnosed `qoder-delegate` flake, fixed at root cause (event gate, no wall-clock margin)
 
