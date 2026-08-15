@@ -105,6 +105,7 @@ import type {
 import { registerBudgetCommand } from "./budget.ts";
 import { appendJsonl, pruneLogs } from "./jsonl.ts";
 import { isProseToolCall, proseToolCallName } from "./prose.ts";
+import { takeQualityCost } from "./quality-cost.ts";
 import { redactString } from "./redact.ts";
 import {
 	DIAGNOSTICS_ERROR_EVENT,
@@ -615,6 +616,16 @@ export default function (pi: ExtensionAPI): void {
 				// a missing row is worse than an honestly-degraded one.
 				const model = ctx.model as Model<Api> | undefined;
 
+				// TAKEN ONCE, HERE, AND NOWHERE ELSE. `call-model.ts`'s two
+				// `recordTurn` sites (the success path and the error path) never
+				// call `takeQualityCost()`: those produce `kind:"nested"` rows for a
+				// call that may itself BE a quality-layer contributor (the reviewer,
+				// the refute pass), and draining the accumulator there would empty
+				// it before this main-loop turn row is composed — the exact
+				// repudiation threat T-08-13 names. Only the turn that actually ends
+				// drains the ledger the whole turn accumulated.
+				const qualityCost = takeQualityCost();
+
 				writeTurnsRow(
 					ctx.cwd,
 					composeTurnRow({
@@ -630,6 +641,8 @@ export default function (pi: ExtensionAPI): void {
 						turnIndex: event.turnIndex,
 						toolResults: event.toolResults.length,
 						thinkingLevel: turn?.thinkingLevel,
+						qualityMs: qualityCost?.qualityMs,
+						qualityTokens: qualityCost?.qualityTokens,
 						// `composeTurnRow` omits the key when this is undefined, so a
 						// healthy row carries no `event` at all.
 						//

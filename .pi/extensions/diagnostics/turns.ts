@@ -112,6 +112,14 @@ export interface TurnRowInput {
 	toolResults?: number;
 	/** The REQUESTED thinking level, recorded because Bedrock makes the cost undecomposable. */
 	thinkingLevel?: string;
+	/**
+	 * The quality layer's own share of this turn, drained from
+	 * `quality-cost.ts#takeQualityCost`. See `TurnRow.qualityMs` in
+	 * `schema.ts` for the omission rule and the share-vs-total distinction.
+	 */
+	qualityMs?: number;
+	/** See `TurnRow.qualityTokens` in `schema.ts` for the omission rule and the documented double-count. */
+	qualityTokens?: number;
 	/** Out-of-band marker: `PROSE_EVENT`, `DIAGNOSTICS_ERROR_EVENT`, … */
 	event?: string;
 }
@@ -278,6 +286,19 @@ export function composeTurnRow(input: TurnRowInput): TurnRow {
 
 	if (input.thinkingLevel !== undefined) {
 		row.thinkingLevel = input.thinkingLevel;
+	}
+
+	// THE OMISSION RULE, FOR THE QUALITY LEDGER. `takeQualityCost()` returns
+	// `undefined` on an untouched slot, so `index.ts`'s `turn_end` handler
+	// simply does not pass these keys at all on a turn the quality layer never
+	// ran on — this guard is what stops that absence turning into a
+	// fabricated zero if a future caller ever does pass one explicitly.
+	if (input.qualityMs !== undefined) {
+		row.qualityMs = input.qualityMs;
+	}
+
+	if (input.qualityTokens !== undefined) {
+		row.qualityTokens = input.qualityTokens;
 	}
 
 	if (input.event !== undefined) {

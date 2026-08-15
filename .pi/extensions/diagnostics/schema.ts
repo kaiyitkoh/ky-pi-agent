@@ -297,6 +297,36 @@ export interface TurnRow {
 	httpStatus?: number;
 	/** The REQUESTED thinking level, recorded because Bedrock makes it undecomposable. */
 	thinkingLevel?: string;
+	/**
+	 * The quality layer's OWN share of this turn's wall clock, in milliseconds.
+	 *
+	 * OPTIONAL, AND THE KEY IS OMITTED WHEN THE QUALITY LAYER DID NOT RUN ON
+	 * THIS TURN — never `0`, never `null`. This is NOT the turn total:
+	 * {@link TurnRow.latencyMs} is the turn total, and the two are not
+	 * comparable without that distinction stated. `qualityMs` sums the
+	 * deterministic gate stage's wall clock plus any nested review calls the
+	 * quality layer issued during this turn, drained from
+	 * `quality-cost.ts#takeQualityCost` exactly once, at `turn_end`.
+	 */
+	qualityMs?: number;
+	/**
+	 * The quality layer's own summed input+output tokens for this turn.
+	 *
+	 * Same omission rule as {@link TurnRow.qualityMs}: absent when the quality
+	 * layer never ran on this turn, present (possibly `0`) when it did.
+	 *
+	 * A nested quality-layer call — the deterministic gate stage, the
+	 * reviewer, the refute pass — ALSO emits its own `kind:"nested"` row with
+	 * its own `cost`, via the ordinary `callModel()` chokepoint path. This
+	 * field is an attribution convenience layered on top of those rows, not a
+	 * replacement for them, so a token counted here is ALSO counted on that
+	 * nested row. Double-counting across row kinds is expected and documented
+	 * here, not a bug: summing `qualityTokens` across `kind:"turn"` rows and
+	 * separately summing `totalTokens` across `kind:"nested"` rows measures
+	 * the same spend from two different groupings, and adding the two
+	 * together would double it.
+	 */
+	qualityTokens?: number;
 	/** Set for out-of-band rows: {@link PROSE_EVENT}, {@link DIAGNOSTICS_ERROR_EVENT}, … */
 	event?: string;
 }
