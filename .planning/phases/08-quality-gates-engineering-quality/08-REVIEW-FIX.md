@@ -1,21 +1,214 @@
 ---
 phase: 08-quality-gates-engineering-quality
-fixed_at: 2026-08-15T17:52:00Z
-review_path: .planning/phases/08-quality-gates-engineering-quality/08-REVIEW.md
-iteration: 3
-findings_in_scope: 12
-fixed: 5
-skipped: 7
-status: partial
+fixed_at: 2026-08-15T18:29:00Z
+review_path: .planning/phases/08-quality-gates-engineering-quality/08-REVIEW-R3CHECK.md
+iteration: 4
+findings_in_scope: 3
+fixed: 2
+skipped: 0
+status: all_fixed
 ---
 
-> **This file covers TWO fix passes.** The frontmatter above and the first
-> section below (`## Iteration 3 (final)`) describe the LATEST pass. The
-> original iteration-2 report follows it unmodified, per this round's own
-> instruction to append rather than overwrite. `status: partial` reflects
-> that 7 of 12 iteration-3 findings (WR3-05 and all six Info findings) were
-> deliberately accepted-and-documented rather than code-fixed, per this
-> round's explicit fix-scope instruction — not that any fix attempt failed.
+> **This file now covers THREE fix passes.** The frontmatter above and the
+> first section below (`## Iteration 4 (R3CHECK)`) describe the LATEST
+> pass, a targeted fix against `08-REVIEW-R3CHECK.md`'s three findings
+> (CR3C-01, WR3C-01, WR3C-02) — not the full `08-REVIEW.md` iteration-3
+> report, which the `## Iteration 3 (final)` section below already covers.
+> `findings_in_scope: 3` / `fixed: 2` counts CR3C-01 and WR3C-02, the two
+> findings this pass actually changed code for; WR3C-01 was independently
+> verified already fixed by iteration 3's own `cc1ed23` commit and is
+> documented below as "verified, not re-fixed" rather than counted twice.
+> `status: all_fixed` reflects that every one of the three R3CHECK findings
+> is now either fixed in this pass or confirmed already fixed — nothing was
+> skipped. The original iteration-2 and iteration-3 reports follow
+> unmodified, per this project's own instruction to append rather than
+> overwrite.
+
+# Phase 8: Code Review Fix Report — Iteration 4 (R3CHECK)
+
+**Fixed at:** 2026-08-15T18:29:00Z
+**Source review:** `.planning/phases/08-quality-gates-engineering-quality/08-REVIEW-R3CHECK.md`
+**Iteration:** 4 (R3CHECK — a targeted verification pass over `dc4cc16..7eda58c`, not a full re-review)
+
+**Summary:**
+- Findings in scope: 3 (1 Critical — CR3C-01; 2 Warning — WR3C-01, WR3C-02)
+- Fixed: 2 (CR3C-01, WR3C-02)
+- Verified already fixed, not re-fixed: 1 (WR3C-01)
+- Skipped: 0
+
+Applied inside an isolated git worktree (`gsd-reviewfix/08-1913`, from
+`main`), one commit for both CR3C-01 and WR3C-02 (they touch overlapping
+files and were fixed and verified together; WR3C-01 needed no commit —
+see below). `node_modules` was symlinked into the worktree from the main
+repo (no `npm install`, no new dependency) so `tsc`/`vitest` could run
+without violating the no-install autonomous-run rule. `tsc --noEmit` is
+clean. The full suite was run four times: three fully clean (108 files /
+2024 tests, all passing); the fourth hit the same pre-existing,
+unrelated `tests/unit/checkpoint-store.test.ts` real-OS-process
+concurrency flake iteration 3's own report already documented (Phase 7's
+own file, last touched by an unrelated commit `bcf7adcb`, confirmed to
+pass 17/17 cleanly in isolation immediately after) — disclosed here, not
+silently retried away. Zero `DEP0190`/`DeprecationWarning` output in any
+run. No new npm dependency; `package.json`/`package-lock.json` untouched.
+No provider inference request was issued and no AWS/live credential was
+touched at any point.
+
+## Fixed Issues
+
+### CR3C-01: `findingCatches`'s cross-contamination rule rejected genuine findings, and one generic phrase still scored non-zero — two of six defect classes had non-independent needles
+
+**Files modified:** `tests/fixtures/seeded-defects/index.ts`,
+`tests/integration/reviewer-calibration.test.ts`, `docs/QUALITY.md`,
+`.planning/REQUIREMENTS.md`
+**Commit:** `5da6d44`
+**Applied fix:** `tautological-test`'s `mustMentionAny` set contained
+`"cannot fail"` and `"structurally cannot"` — both satisfied by the single
+contiguous phrase `"structurally cannot fail"`, this project's own house
+vocabulary for the entire "tests that cannot fail" defect family
+(`seeded-defects/index.ts`'s own header, `CLAUDE.md`). Consequence A
+(under-count): a genuine, correctly-located finding carrying two of its
+OWN class's needles was wrongly rejected merely for also containing that
+phrase, because the phrase independently cleared `tautological-test`'s own
+two-needle bar too — cross-contamination logic firing on a class the
+finding was never trying to describe. Consequence B (residual exploit):
+the bare phrase alone, reused verbatim across all six files with zero
+analysis, scored `catchRate: 0.167` — derivable from the input alone,
+unlike the kitchen-sink controls, which require the corpus's own answer
+key. `escaped-side-effect` had the analogous shape (`"writes into the
+real"` + `"developer's own home directory"`, two halves of one natural
+clause, no shared word). Replaced the non-independent needle in each set
+with one describing a genuinely separate fact about the SAME defect
+(`tautological-test`: `"assigned from the same call"` — `decision` is
+assigned directly from the same `currentChainHead()` call `configuredHead`
+already holds; `escaped-side-effect`: `"not redirected to a temp"` — the
+write target was never redirected to the test's own isolated temp repo, a
+distinct observation from WHERE it escaped to). **`findingCatches` itself
+is unchanged** — this is a corpus-data fix, the review's own diagnosis
+("the fix is two needle strings"), not a matcher fix.
+
+Added three tests, all mutation-verified against the actual pre-fix needle
+sets (temporarily reverted, confirmed RED with the exact predicted
+failure, then restored and reconfirmed green): (1) a corpus-wide test
+asserting no two needles within one expectation share a word-bridge or
+substring containment — flags the real `"cannot fail"`/`"structurally
+cannot"` pair, does NOT flag `"writes into the real"`/`"developer's own
+home directory"` (no shared word — a generic string check cannot catch
+that pair, disclosed honestly in the test's own docstring rather than
+claimed as complete); (2) a SIXTH permanent control scoring both known
+generic exploit phrases (`"This test structurally cannot fail."` and `"It
+writes into the real developer's own home directory."`) at `catchRate ===
+0` — under the OLD needle sets both scored `0.167`, reproduced and
+asserted in a companion mutation-check test; (3) a regression test proving
+a genuine `false-label` finding using `"structurally cannot fail"` is
+credited (`perDefectClass["false-label"] === true`), not rejected — fails
+under the old `tautological-test` needles, reproduced in a companion
+mutation-check test. Corrected `docs/QUALITY.md`'s WR3-01 paragraph, which
+affirmatively claimed the exact property this finding disproves, with a
+dated `CR3C-01 correction` disclosure paragraph following this file's own
+established WR3-02 disclosure precedent — the claim was wrong specifically
+because it assumed every expectation's own needles were already mutually
+independent, which was false for two of six. Propagated "five [required
+negative] controls" → "six" to both of `.planning/REQUIREMENTS.md`'s
+GATE-08 statements (`:109`, `:304`).
+
+**The 2/6 = 0.333... catch rate is unaffected, verified not assumed:**
+neither fixed needle participates in `KNOWN_SUBSET_ARGS`'s three scripted
+findings (`fabricated-evidence`, `absent-guard`, `false-label` only), and
+`TWO_NEEDLE_KITCHEN_SINK_ARGS` (the pre-existing cross-contamination
+control) still scores `catchRate: 0` after the fix — confirmed by the
+full suite, not merely reasoned about. No fixture answer-key content,
+defect definition, or scripted positive-control finding text was edited —
+only the two non-independent needle strings and the matcher-adjacent
+test/doc files, per this instruction's own disclosure requirement (naming
+every file touched above; none of them move the number by construction).
+
+### WR3C-02: WR3-04's `%` guard checked only `bin`, not `args`, though `commandFor` folds both into one `cmd.exe` command line
+
+**Files modified:** `.pi/extensions/quality/index.ts`,
+`tests/unit/quality-production-exec.test.ts`,
+`tests/unit/workflow-budgets.test.ts`
+**Commit:** `5da6d44` (same commit as CR3C-01 — both were fixed and
+verified together; see that entry's own note on why)
+**Applied fix:** Took the review's suggested "Minimal" option almost
+verbatim, adapted to this file's existing naming and message conventions:
+`productionExec`'s pre-spawn `%` guard now checks `[bin, ...args].filter(a
+=> a.includes("%"))` instead of `bin` alone, naming every offending token
+in the thrown error. Currently unreachable via any real caller (the only
+two argument lists, `["--noEmit"]` and `["run", ...LINT_GATE_FILES]`,
+never contain `%`), matching the review's own "latent gap, not a live
+bug" verdict — closed anyway per the review's own cost/benefit call ("a
+two-line change... costs less than the note explaining why it is open").
+Added a direct-call regression test (`productionExec("tsc", ["--foo=%OS%"],
+repo)` against a real stubbed binary), mutation-verified: reverting the
+guard to check `bin` alone made the new test fail red (`expected [Function]
+to throw an error` — no throw, since the pre-fix guard never looked at
+`args`), then restored and reconfirmed green.
+
+**Budget ratchet reconciled in the same commit:** `.pi/extensions/quality`'s
+`DIRECTORY_BUDGETS` entry was at 3740 with exactly 1 line of headroom
+(measured 3,739) before this fix, as `08-REVIEW-R3CHECK.md` itself flagged.
+This fix's `index.ts` growth (422 → 431 raw lines) pushed the real total to
+3,748, tripping the ratchet. Raised 3740 → 3750 (measured 3,748, rounded up
+to the next ten, per this ratchet's own established convention) — the
+`why` field states exactly which fix caused the growth and by how much,
+per the ratchet's own discipline. `calibration.ts` and the CR3C-01
+fixture/test changes above touched no other production file under this
+directory, so nothing else moved.
+
+## Verified Already Fixed, Not Re-Fixed
+
+### WR3C-01: `.planning/REQUIREMENTS.md` stated both 3/6 and 2/6 for GATE-08
+
+**File:** `.planning/REQUIREMENTS.md:109` (was claimed to say 3/6) vs
+`:304` (says 2/6)
+**Verification:** Read both lines directly. `:109` already reads *"The
+recorded 2/6 = 0.333... catch rate — corrected down from an undisclosed
+3/6..."* and `:304` already reads *"the recorded 2/6 catch rate (corrected
+from an undisclosed 3/6, WR3-02)..."* — both state 2/6, consistently, with
+no contradiction. This matches the task instruction's own claim that
+commit `3e9c643` already corrected `:109`. No code or doc change was
+needed; re-verified rather than re-fixed to avoid a no-op commit. (Both
+lines were touched again in THIS pass's CR3C-01 commit, but only to add
+the sixth-control count and the CR3C-01 cross-reference — the 2/6 figure
+itself was already correct and is unchanged by that edit.)
+
+## Full-suite verification (this pass)
+
+`npx tsc --noEmit`: clean (zero output, exit 0) — run twice, before and
+after the final commit.
+
+Four `npx vitest run` attempts:
+
+1. **Run 1 — CLEAN.** `Test Files 108 passed (108)` / `Tests 2024 passed
+   (2024)`. Duration 40.27s.
+2. **Run 2 — CLEAN.** `Test Files 108 passed (108)` / `Tests 2024 passed
+   (2024)`. Duration 40.85s.
+3. **Run 3 — 1 unrelated failure.** `Test Files 1 failed | 107 passed
+   (108)` / `Tests 1 failed | 2023 passed (2024)` —
+   `tests/unit/checkpoint-store.test.ts`'s `"four overlapping OS processes
+   each recording 150 entries produce all 600 rows"` lost 2 of 600 rows
+   (`expected 598 to be 600`). `git log` confirms this file was last
+   touched by `bcf7adcb` ("fix(07): WR-09..WR-14, WR-16, WR-19..."), not by
+   anything in this pass. Re-ran the file alone immediately after: 17/17
+   clean.
+4. **Run 4 (retry of run 3) — CLEAN.** `Test Files 108 passed (108)` /
+   `Tests 2024 passed (2024)`. Duration 40.79s.
+5. **Run 5 (post-doc-edit final check) — CLEAN.** `Test Files 108 passed
+   (108)` / `Tests 2024 passed (2024)`. Duration 40.65s. Run after the
+   `.planning/REQUIREMENTS.md` "five controls" → "six controls" edit, to
+   confirm the doc-only change did not disturb anything.
+
+Zero `DEP0190`/`DeprecationWarning` output in any run (`grep -i
+"DEP0190\|DeprecationWarning"` against the full captured log of run 5:
+zero matches).
+
+**This flake is out of this pass's fix scope**, matching iteration 3's own
+disclosure of the identical file and identical failure shape — left
+untouched rather than silently patched around, per this project's
+de-flake prohibitions (no `retry`, no widened bounds, no `it.skip`, no
+`fileParallelism:false`).
+
+---
 
 # Phase 8: Code Review Fix Report — Iteration 3 (final)
 
