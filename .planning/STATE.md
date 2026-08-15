@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-08-PLAN.md
-last_updated: "2026-08-15T04:47:25.754Z"
+stopped_at: Completed 08-09-PLAN.md
+last_updated: "2026-08-15T05:03:00.015Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 86
-  completed_plans: 81
+  completed_plans: 82
   percent: 64
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 08 (quality-gates-engineering-quality) — EXECUTING
-Plan: 9 of 13
+Plan: 10 of 13
 Status: Ready to execute
 Last activity: 2026-08-15
 
-Progress: [█████████░] 94%
+Progress: [██████████] 95%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -148,6 +148,7 @@ credentials can do has been done".
 | Phase 08 P06 | 55m | 2 tasks | 2 files |
 | Phase 08 P07 | 70m | 2 tasks | 4 files |
 | Phase 08 P08 | 12m | 2 tasks | 3 files |
+| Phase 08 P09 | 45m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -395,6 +396,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-08: GATE-09's advisor tool is the one place in Phase 8 the boundary rule's answer is yes -- executeConsultAdvisor returns a plain string with no terminate field (mid-turn continuation, not a final answer); registration itself (registerTool call, TOOL_REGISTRATION_ALLOWLIST entry, TOOL_COUNT_BASELINE row) is deferred to plan 08-11 in the same commit
 - [Phase 08]: 08-08: consult_advisor's measured schema cost is 584 bytes / 146 tokens (node --input-type=module one-liner, same recipe as 05-03/07-08), under the 200-token hard limit but above the todo tool's 96-token floor
 - [Phase 08]: 08-08: a runSingleShotRole refusal from executeConsultAdvisor propagates uncaught rather than being caught and rewrapped, mirroring reviewer.ts#runReview -- a refused consult costs zero provider calls and zero QUAL-09 ledger entries
+- [Phase 08]: 08-09: decideWorkflowStop runs on a POST-refutation review (non-BLOCKER findings + only promoted BLOCKERs), never the raw reviewer output -- callers must reconstruct findings before calling it
+- [Phase 08]: 08-09: runBoundedReviewLoop takes a caller-injected review() closure rather than owning how a review is produced -- this module has no fix-application mechanism, only bound-and-compare
+- [Phase 08]: 08-09: an unparseable or out-of-enum refutation result defaults to UPHELD, never withdrawn -- the opposite of the usual fail-closed instinct, since the safer state is the one where the BLOCKER still stands
 
 ### Pending Todos
 
@@ -445,8 +449,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T04:47:25.744Z
-Stopped at: Completed 08-08-PLAN.md
+Last session: 2026-08-15T05:03:00.003Z
+Stopped at: Completed 08-09-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

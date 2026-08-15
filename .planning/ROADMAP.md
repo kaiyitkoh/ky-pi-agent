@@ -379,7 +379,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 08-09-PLAN.md — GATE-06/QUAL-05: refute-or-promote (BLOCKERs only) and the workflow stop
+- [x] 08-09-PLAN.md — GATE-06/QUAL-05: refute-or-promote (BLOCKERs only) and the workflow stop
 - [ ] 08-10-PLAN.md — GATE-08: the six-incident seeded-defect corpus, the pure scorer, and the blind-reviewer control
 
 **Wave 4** *(blocked on Wave 3 completion)*

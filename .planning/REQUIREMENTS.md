@@ -104,7 +104,7 @@
 - [x] **GATE-03**: Review output gives a per-requirement verdict (Implemented / Partial / Missing) with file:line evidence **[FAUX]**
 - [x] **GATE-04**: Review output includes a mandatory "checked and cleared" section, so silence is structurally impossible **[FAUX]**
 - [x] **GATE-05**: Findings are classified BLOCKER / WARNING / NIT, and unclassified findings are rejected as malformed **[FAUX]**
-- [ ] **GATE-06**: BLOCKERs go through a refute-or-promote pass before they can stop work — reviewers told to find gaps invent them **[FAUX]**
+- [x] **GATE-06**: BLOCKERs go through a refute-or-promote pass before they can stop work — reviewers told to find gaps invent them **[FAUX]**
 - [x] **GATE-07**: Task completion is gated on `tool_result` exit codes bound to a git SHA, never on transcript text — a model that writes prose tool calls can also write plausible command output **[FAUX]**
 - [ ] **GATE-08**: Seeded-defect calibration measures what the reviewer actually catches, distinguishing "the code is clean" from "the reviewer is asleep" **[FAUX]**
 - [x] **GATE-09**: Advisor escalation lets the executor consult a stronger model at a decision point via `callModel()` **[FAUX]**
@@ -118,7 +118,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [x] **QUAL-02**: Those rules run inside the existing deterministic gate stage, adding no model round trip and no measurable wall-clock **[FAUX]**
 - [ ] **QUAL-03**: For any change framed as a fix, SPEC.md carries a **Root Cause** section naming the cause with `file:line` evidence and stating why the change addresses the cause rather than the symptom — gated the same way as Verified Codebase Facts **[FAUX]**
 - [x] **QUAL-04**: The reviewer classifies every change as **root-cause / symptomatic / workaround** with written justification, as extra structure on the review pass already being paid for — not an extra call **[FAUX]**
-- [ ] **QUAL-05**: Any change classified symptomatic or workaround stops the workflow and requires the user's explicit approval before it can ship **[FAUX]**
+- [x] **QUAL-05**: Any change classified symptomatic or workaround stops the workflow and requires the user's explicit approval before it can ship **[FAUX]**
 - [x] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
 - [x] **QUAL-07**: A design-level review pass covering algorithmic complexity, scalability, and abstraction fit fires **conditionally** — on signals (diff spans many files, a loop wraps a query, a data model or public interface changes) or on explicit `/escalate` — never on every task **[FAUX]**
 - [ ] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]**
@@ -299,7 +299,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | GATE-03 | Phase 8 | Complete |
 | GATE-04 | Phase 8 | Complete |
 | GATE-05 | Phase 8 | Complete |
-| GATE-06 | Phase 8 | Pending |
+| GATE-06 | Phase 8 | Complete |
 | GATE-07 | Phase 6 | Complete |
 | GATE-08 | Phase 8 | Pending |
 | GATE-09 | Phase 8 | Complete |
@@ -308,7 +308,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | QUAL-02 | Phase 8 | Complete |
 | QUAL-03 | Phase 9 | Pending |
 | QUAL-04 | Phase 8 | Complete |
-| QUAL-05 | Phase 8 | Pending |
+| QUAL-05 | Phase 8 | Complete |
 | QUAL-06 | Phase 8 | Complete |
 | QUAL-07 | Phase 8 | Complete |
 | QUAL-08 | Phase 9 | Pending |
