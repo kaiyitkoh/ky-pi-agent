@@ -388,7 +388,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 08-12-PLAN.md — the evidence gate's deferred empty-commit residual, closed by tree comparison
+- [x] 08-12-PLAN.md — the evidence gate's deferred empty-commit residual, closed by tree comparison
 
 **Wave 6** *(blocked on Wave 5 completion)*
 

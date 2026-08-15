@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-11-PLAN.md
-last_updated: "2026-08-15T06:02:03.768Z"
+stopped_at: Completed 08-12-PLAN.md
+last_updated: "2026-08-15T06:25:55.535Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 86
-  completed_plans: 84
+  completed_plans: 85
   percent: 64
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 08 (quality-gates-engineering-quality) — EXECUTING
-Plan: 12 of 13
+Plan: 13 of 13
 Status: Ready to execute
 Last activity: 2026-08-15
 
-Progress: [██████████] 98%
+Progress: [██████████] 99%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -151,6 +151,7 @@ credentials can do has been done".
 | Phase 08 P09 | 45m | 2 tasks | 2 files |
 | Phase 08 P10 | 55m | 3 tasks | 3 files |
 | Phase 08 P11 | 180min | 3 tasks | 8 files |
+| Phase 08 P12 | 70m | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -406,6 +407,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-10: SeededDefectExpectation is re-declared structurally in calibration.ts rather than imported from the corpus module, since production code under .pi/extensions/ must not import from tests/
 - [Phase 08]: quality/index.ts stores registeredToolNames' closure on globalThis, not a module-level let, so a jiti-separate copy imported by workflows/index.ts still sees the real closure the factory set — same STATE-SLOT HAZARD class quality-cost.ts and routing/modes.ts already document, applied to a closure rather than plain data
 - [Phase 08]: /quick's WORKFLOW_BUDGETS entry and its own hardcoded ceiling test both raised 80 -> 100 in the same commit as GATE-01's wiring — the mandatory four-part drain comment plus the gate call could not fit the original 1-line headroom without gutting the comment's substance; the plan's own text sanctions a dated budget raise, and 100 is still well under the ROADMAP's above-100-has-FAILED line
+- [Phase 08]: 08-12: gateCompletion's branch (6) (headTree===baseTree) sits between branches (2) and (3), closing the empty-commit gap; the unrelated-content and checkout/reset residuals stay explicitly open in docs/WORKFLOWS.md, not silently claimed fixed
+- [Phase 08]: 08-12: currentTree(cwd) in safety/git.ts copies currentSha's fail-closed contract exactly -- no sentinel for an unknown tree, throws on non-zero exit
 
 ### Pending Todos
 
@@ -457,8 +460,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T06:02:03.757Z
-Stopped at: Completed 08-11-PLAN.md
+Last session: 2026-08-15T06:25:55.525Z
+Stopped at: Completed 08-12-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
