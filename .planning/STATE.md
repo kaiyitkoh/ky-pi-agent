@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-07-PLAN.md
-last_updated: "2026-08-15T04:30:05.021Z"
+stopped_at: Completed 08-08-PLAN.md
+last_updated: "2026-08-15T04:47:25.754Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 86
-  completed_plans: 80
+  completed_plans: 81
   percent: 64
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 08 (quality-gates-engineering-quality) — EXECUTING
-Plan: 8 of 13
+Plan: 9 of 13
 Status: Ready to execute
 Last activity: 2026-08-15
 
-Progress: [█████████░] 93%
+Progress: [█████████░] 94%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -147,6 +147,7 @@ credentials can do has been done".
 | Phase 08 P05 | 35m | 2 tasks | 2 files |
 | Phase 08 P06 | 55m | 2 tasks | 2 files |
 | Phase 08 P07 | 70m | 2 tasks | 4 files |
+| Phase 08 P08 | 12m | 2 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -391,6 +392,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-06: runAntiPatternLeg only reaches fail on at least one ERROR-tier finding -- warning-tier findings never block a leg on their own, so GateResult.blocking is a plain any-leg-is-fail reduction with no separate tier re-check
 - [Phase 08]: 08-07: importGraph absence is checked on the array of per-file entries, never any entry's own to list -- buildImportGraph always emits one entry per source, so a non-empty touchedFiles always yields a non-empty importGraph
 - [Phase 08]: 08-07: .pi/agents/reviewer.md ships with no AGENT_NAME_BY_ROLE mapping by design (dispatch is via runSingleShotRole, RB-08-03 OUTSTANDING) -- tests/unit/subagent-agents-config.test.ts's completeness check gained a named, reasoned UNROUTED_AGENT_ALLOWLIST exception rather than a fabricated role mapping
+- [Phase 08]: 08-08: GATE-09's advisor tool is the one place in Phase 8 the boundary rule's answer is yes -- executeConsultAdvisor returns a plain string with no terminate field (mid-turn continuation, not a final answer); registration itself (registerTool call, TOOL_REGISTRATION_ALLOWLIST entry, TOOL_COUNT_BASELINE row) is deferred to plan 08-11 in the same commit
+- [Phase 08]: 08-08: consult_advisor's measured schema cost is 584 bytes / 146 tokens (node --input-type=module one-liner, same recipe as 05-03/07-08), under the 200-token hard limit but above the todo tool's 96-token floor
+- [Phase 08]: 08-08: a runSingleShotRole refusal from executeConsultAdvisor propagates uncaught rather than being caught and rewrapped, mirroring reviewer.ts#runReview -- a refused consult costs zero provider calls and zero QUAL-09 ledger entries
 
 ### Pending Todos
 
@@ -441,8 +445,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T04:30:05.011Z
-Stopped at: Completed 08-07-PLAN.md
+Last session: 2026-08-15T04:47:25.744Z
+Stopped at: Completed 08-08-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
