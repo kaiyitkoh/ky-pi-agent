@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 07-13-PLAN.md (RB-07-01/RB-07-02 runbook entries, every EXT requirement status reconciled) -- Phase 07 complete
-last_updated: "2026-08-15T02:23:59.779Z"
-last_activity: 2026-08-15 -- Phase 8 planning complete
+stopped_at: Completed 08-01-PLAN.md (buildNestedApiOptions fixes the nested-call thinking field per model.api; GATE-10's nested proof RED-then-GREEN)
+last_updated: "2026-08-15T02:49:41.369Z"
+last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 86
-  completed_plans: 73
+  completed_plans: 74
   percent: 64
 ---
 
@@ -21,16 +21,16 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 07 — composed-extensions-pinned-reviewed
+**Current focus:** Phase 08 — quality-gates-engineering-quality
 
 ## Current Position
 
-Phase: 07 (composed-extensions-pinned-reviewed) — EXECUTING
-Plan: 13 of 13
+Phase: 08 (quality-gates-engineering-quality) — EXECUTING
+Plan: 2 of 13
 Status: Ready to execute
-Last activity: 2026-08-15 -- Phase 8 planning complete
+Last activity: 2026-08-15
 
-Progress: [██████████] 100%
+Progress: [█████████░] 86%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -140,6 +140,7 @@ credentials can do has been done".
 | Phase 07 P10 | 40m | 4 tasks | 1 files |
 | Phase 07 P11 | 55m | 2 tasks | 2 files |
 | Phase 07 P13 | 50m | 3 tasks | 3 files |
+| Phase 08 P01 | 35m | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -368,6 +369,8 @@ Recent decisions affecting current work:
 - [Phase 07]: 07-13: EXT-05 moves from [x] Complete to [~] Partial with RB-07-02 named inline, closing the blocker 07-10-SUMMARY.md registered -- four of its eight named capabilities are npm-backed and have never been installed
 - [Phase 07]: 07-13: EXT-01/03/04/09 move to [~] Partial with RB-07-01 named inline -- structural/source citations against the pinned pi-subagents tarball are complete, but no subagent has ever actually spawned, run in the background, or been steered on this machine
 - [Phase 07]: 07-13: Phase 7 is closed -- all 16 docs/RUNBOOK.md entries across Phases 1-5 and 7 are OUTSTANDING and machine-governed by tests/unit/docs-policy.test.ts's ALL_IDS; full suite (1606 tests, 92 files) and tsc --noEmit green
+- [Phase 08]: 08-01: buildNestedApiOptions's default falls back to the openai-completions shape rather than throwing -- Api's open union (KnownApi | (string & {})) makes compile-time exhaustiveness impossible (verified: TS2322 compiling the shell.ts idiom against it), and a runtime throw broke the required-green single-shot-roles.test.ts, whose faux fixture omits api and gets a random id from pi-ai
+- [Phase 08]: 08-01: registerNativeProvider's fire-and-forget UNSCOPED refresh() races a second, batched registration -- registering two faux providers back-to-back before authing either left the first permanently unconfigured; the fix interleaves each provider's register/grant/wait cycle fully before registering the next
 
 ### Pending Todos
 
@@ -418,8 +421,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-14T22:40:23.696Z
-Stopped at: Completed 07-13-PLAN.md (RB-07-01/RB-07-02 runbook entries, every EXT requirement status reconciled) -- Phase 07 complete
+Last session: 2026-08-15T02:49:41.360Z
+Stopped at: Completed 08-01-PLAN.md (buildNestedApiOptions fixes the nested-call thinking field per model.api; GATE-10's nested proof RED-then-GREEN)
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

@@ -108,7 +108,7 @@
 - [x] **GATE-07**: Task completion is gated on `tool_result` exit codes bound to a git SHA, never on transcript text — a model that writes prose tool calls can also write plausible command output **[FAUX]**
 - [ ] **GATE-08**: Seeded-defect calibration measures what the reviewer actually catches, distinguishing "the code is clean" from "the reviewer is asleep" **[FAUX]**
 - [ ] **GATE-09**: Advisor escalation lets the executor consult a stronger model at a decision point via `callModel()` **[FAUX]**
-- [ ] **GATE-10**: Per-role thinking budgets apply on the nested path (reviewer, advisor, summariser); main-loop budgets apply only if the wire inspector proved the parameters land **[FAUX]** + **[RUNBOOK]**
+- [x] **GATE-10**: Per-role thinking budgets apply on the nested path (reviewer, advisor, summariser); main-loop budgets apply only if the wire inspector proved the parameters land **[FAUX]** + **[RUNBOOK]**
 
 ### Engineering Quality
 
@@ -303,7 +303,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | GATE-07 | Phase 6 | Complete |
 | GATE-08 | Phase 8 | Pending |
 | GATE-09 | Phase 8 | Pending |
-| GATE-10 | Phase 8 | Pending |
+| GATE-10 | Phase 8 | Complete |
 | QUAL-01 | Phase 8 | Pending |
 | QUAL-02 | Phase 8 | Pending |
 | QUAL-03 | Phase 9 | Pending |
