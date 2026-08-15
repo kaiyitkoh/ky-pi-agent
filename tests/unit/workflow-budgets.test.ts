@@ -1281,3 +1281,127 @@ describe("Item 1 (D-12) -- RESOURCE_EDGES: the non-import resource-edge closure"
 		).toBe(expected);
 	});
 });
+
+/**
+ * D-13 (PLAN 09-02) -- see this file's module docstring for the decision.
+ * Sourced verbatim from `.planning/research/FEATURES.md` Part 2: `/grill`
+ * <=250 (line 158), `/plan` <=200 + `/execute` <=250 (line 183), `/review`
+ * <=250 (line 206), `/quick` <=100 (line 238's harder "if it exceeds 100 it
+ * has failed" ceiling, not the softer 80-line target on the same line --
+ * matching workflows/index.ts's own greppable 100-line assertion above).
+ * FROZEN: unlike WORKFLOW_BUDGETS/DIRECTORY_BUDGETS, this table's numbers
+ * MAY NOT MOVE to absorb growth. See the `budget === FEATURES_CEILINGS[name]`
+ * assertion below and Falsification 5 (recorded in `09-02-SUMMARY.md`).
+ */
+const FEATURES_CEILINGS: Readonly<Record<string, number>> = {
+	grill: 250,
+	plan: 200,
+	execute: 250,
+	review: 250,
+	quick: 100,
+};
+
+/**
+ * D-13: a workflow's TOTAL readable text -- its own command file plus every
+ * declared skill/prompt body, summed. Kept SEPARATE from DIRECTORY_BUDGETS
+ * deliberately (`09-RESEARCH.md` Item 1(d)): a merged closure budget would
+ * charge `/quick` with quality+safety+diagnostics (~13k lines) and be
+ * meaningless.
+ *
+ * Only ONE row exists today -- `/quick`, the only ceremonial workflow that
+ * exists. The four ceremonial rows (grill/plan/execute/review) are added by
+ * the plans that CREATE their command files (09-08, 09-10, 09-13, 09-15),
+ * never as placeholder rows for files that do not exist yet.
+ *
+ * HAND-OFF TO PLAN 09-16: an "every FEATURES_CEILINGS name has a
+ * WORKFLOW_TEXT_BUDGETS row" completeness assertion is deliberately NOT
+ * added here -- four of the five command files do not exist yet, so that
+ * assertion would fail on every commit between this plan and 09-16. Plan
+ * 09-16 is the phase's closing completeness gate; it adds that assertion.
+ */
+const WORKFLOW_TEXT_BUDGETS: readonly {
+	name: string;
+	commandFile: string;
+	bodies: readonly string[];
+	budget: number;
+	why: string;
+}[] = [
+	{
+		name: "quick",
+		commandFile: ".pi/extensions/workflows/index.ts",
+		bodies: [],
+		budget: 100,
+		why: "the only ceremonial workflow that exists today; no skill/prompt body. Re-measured 99 raw lines " +
+			"2026-08-15 with countRawLines -- WORKFLOW_BUDGETS' own why string for this same file was stale " +
+			"(stated 96), corrected in the same plan as this entry. 99 rounds up to 100, so the declared " +
+			"ceiling was already correct even though the narrative was not (09-RESEARCH.md Pitfall 2)",
+	},
+];
+
+describe("Item 1(d) (D-13) -- WORKFLOW_TEXT_BUDGETS: the per-workflow readable-text ceiling", () => {
+	it("declares at least one entry (guards against a vacuous pass)", () => {
+		expect(
+			WORKFLOW_TEXT_BUDGETS.length,
+			"WORKFLOW_TEXT_BUDGETS is empty -- the loops below would assert nothing",
+		).toBeGreaterThanOrEqual(1);
+	});
+
+	it("FEATURES_CEILINGS has exactly the five names FEATURES.md Part 2 specifies, at their stated values", () => {
+		expect(Object.keys(FEATURES_CEILINGS).sort()).toEqual(["execute", "grill", "plan", "quick", "review"]);
+		expect(FEATURES_CEILINGS).toEqual({ grill: 250, plan: 200, execute: 250, review: 250, quick: 100 });
+	});
+
+	it.each(WORKFLOW_TEXT_BUDGETS)("$name's command file + declared bodies stay within its budget", (entry) => {
+		const parts = [entry.commandFile, ...entry.bodies];
+		const total = parts.reduce((sum, f) => sum + countRawLines(f), 0);
+		expect(
+			total,
+			`${entry.name}'s readable text is ${total} raw lines (` +
+				`${parts.map((f) => `${f} ${countRawLines(f)}`).join(", ")}), over its budget of ${entry.budget} ` +
+				`(${entry.why})`,
+		).toBeLessThanOrEqual(entry.budget);
+	});
+
+	it.each(WORKFLOW_TEXT_BUDGETS)("$name's budget IS the FEATURES.md ceiling -- it may not move to absorb growth", (entry) => {
+		const ceiling = FEATURES_CEILINGS[entry.name];
+		expect(
+			entry.budget,
+			`${entry.name}'s WORKFLOW_TEXT_BUDGETS budget is ${entry.budget} but FEATURES_CEILINGS['${entry.name}'] ` +
+				`is ${ceiling} -- unlike WORKFLOW_BUDGETS/DIRECTORY_BUDGETS, this ceiling is not a rounded ` +
+				"measurement; it is the spec number from FEATURES.md Part 2, and it MAY NOT MOVE. Over budget " +
+				"means cut text, not raise the number",
+		).toBe(ceiling);
+	});
+
+	it.each(WORKFLOW_TEXT_BUDGETS)("$name's commandFile exists and registers the command by name", (entry) => {
+		expect(existsSync(join(repoRoot(), entry.commandFile)), `${entry.commandFile} does not exist`).toBe(true);
+		const text = readFileSync(join(repoRoot(), entry.commandFile), "utf-8");
+		expect(
+			text.includes(`registerCommand("${entry.name}"`),
+			`${entry.commandFile} does not spell registerCommand("${entry.name}" -- WORKFLOW_TEXT_BUDGETS' ` +
+				"commandFile must actually register the command it claims to budget",
+		).toBe(true);
+	});
+
+	it.each(WORKFLOW_TEXT_BUDGETS)("$name's declared bodies all exist on disk", (entry) => {
+		const offenders = entry.bodies.filter((b) => !existsSync(join(repoRoot(), b)));
+		expect(offenders, `${entry.name} declares a body that does not exist on disk`).toEqual([]);
+	});
+
+	it("claimed-bodies completeness: every discovered skill/prompt .md file is claimed by exactly one WORKFLOW_TEXT_BUDGETS row", () => {
+		// Today .pi/skills/ and .pi/prompts/ are .gitkeep-only -- this passes VACUOUSLY.
+		// 09-08 is the first real exercise of this assertion (09-RESEARCH.md Item 1(d)).
+		const skillsAndPrompts = discoverWorkflowFiles().filter(
+			(p) => (p.startsWith(`${SKILLS_DIR}/`) || p.startsWith(`${PROMPTS_DIR}/`)) && p.endsWith(".md"),
+		);
+		for (const file of skillsAndPrompts) {
+			const claimants = WORKFLOW_TEXT_BUDGETS.filter((e) => e.bodies.includes(file));
+			expect(
+				claimants.length,
+				`${file} is a discovered skill/prompt body claimed by ${claimants.length} WORKFLOW_TEXT_BUDGETS ` +
+					"rows (must be exactly 1) -- a skill body no workflow claims is text the model reads that " +
+					"nothing bounds",
+			).toBe(1);
+		}
+	});
+});
