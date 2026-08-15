@@ -163,7 +163,9 @@ describe("SAFE-04/SAFE-05 -- classifyGitInvocation / classifyGlabInvocation over
 		it(`${row.command} on "${row.currentBranch}" -> ${row.expected} (${row.why})`, () => {
 			const inv = invocation(row.rest);
 			const verdict =
-				row.kind === "git" ? classifyGitInvocation(inv, facts(row.currentBranch)) : classifyGlabInvocation(inv);
+				row.kind === "git"
+						? classifyGitInvocation(inv, facts(row.currentBranch))
+						: classifyGlabInvocation(inv, facts(row.currentBranch).protectedBranches);
 
 			expect(
 				verdict.kind,

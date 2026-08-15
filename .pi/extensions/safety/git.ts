@@ -67,16 +67,37 @@
  * posture `shell.ts`'s deny predicate states for its own unknown node types.
  *
  * ---------------------------------------------------------------------------
- * WHY `glab mr merge` IS SEPARATE, AND UNCONDITIONAL ON BRANCH
+ * WHY `glab mr merge` IS SEPARATE, AND UNCONDITIONAL ON BRANCH — BUT
+ * `mr create` IS NOT (PLAN 09-04, FLOW-08)
  * ---------------------------------------------------------------------------
  * In the user's work repo an MR merge IS the deploy trigger (CONTEXT.md
  * decision 13) — merging a `.tf` change through GitLab is an infra change,
  * not a local plan. `HEAD` is irrelevant to that: the danger is the MERGE
  * TARGET on GitLab's server, not the branch checked out on this laptop.
- * `classifyGlabInvocation` therefore takes no branch facts at all and blocks
- * `mr merge` (with or without an IID, with or without `--auto-merge`) on
- * EVERY branch, while `mr list`/`mr view`/`ci status` stay allowed so the
- * harness remains usable for ordinary orientation.
+ * `mr merge` (with or without an IID, with or without `--auto-merge`) blocks
+ * on EVERY branch regardless of `HEAD`, while `mr list`/`mr view`/`ci status`
+ * stay allowed so the harness remains usable for ordinary orientation.
+ *
+ * Plan 09-04 added a SECOND, narrower fact `classifyGlabInvocation` now
+ * needs: independence from `currentBranch` (`HEAD` on THIS laptop) STAYS
+ * true and unchanged — that claim is not touched by this addition — but the
+ * function is NOT independent of the invocation's own DESTINATION branch, a
+ * genuinely different fact, carried by the new `protectedBranches`
+ * parameter (deliberately NOT the existing `GitPolicyFacts`, which also
+ * bundles `currentBranch` — bundling would misstate that the destination
+ * check depends on `HEAD`, which it does not). `mr create` opens an MR whose
+ * own argv names a destination; GitLab silently defaults an OMITTED
+ * destination to the project's default branch, so SILENCE is itself the
+ * deploy trigger. `mr create` is therefore a conditional allow: permitted
+ * only when its own argv names an EXPLICIT, PRESENT, non-protected target
+ * (`--target-branch`/`-b`, either the separated or `=` form), and blocked —
+ * fail closed — on a missing target or a protected one, compared
+ * case-insensitively, mirroring {@link isProtected}'s own comparison. The
+ * blocked-subcommand table is still consulted FIRST, before the `mr create`
+ * conditional-allow check runs, so a `create` predicate can never
+ * accidentally admit a `merge` — the two verbs are mutually exclusive at
+ * `args[0]`, and the resolution order makes that exclusivity structural,
+ * not incidental (see {@link classifyGlabInvocation}).
  *
  * ---------------------------------------------------------------------------
  * WHY `currentBranch` IS THE ONLY IMPURE EXPORT
@@ -441,12 +462,82 @@ const GLAB_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 ];
 
 /**
+ * PLAN 09-04: extracts an explicit `mr create` target branch from the args
+ * that follow `"create"` (`invocation.args.slice(1)`) -- accepting BOTH the
+ * separated form (`--target-branch staging`, `-b staging`) and the `=` form
+ * (`--target-branch=staging`). Returns `undefined` when no such flag is
+ * present, OR when it is present but its value is missing (the next token is
+ * absent or itself looks like another flag) -- BOTH shapes must be treated
+ * as an ABSENT target by the caller, because GitLab defaults an omitted
+ * target to the project's default branch: silence and an empty value are the
+ * SAME danger, not two different ones.
+ */
+function extractMrCreateTarget(argsAfterCreate: readonly string[]): string | undefined {
+	for (let i = 0; i < argsAfterCreate.length; i++) {
+		const a = argsAfterCreate[i];
+		if (a === "--target-branch" || a === "-b") {
+			const value = argsAfterCreate[i + 1];
+			return value !== undefined && !value.startsWith("-") ? value : undefined;
+		}
+		if (a.startsWith("--target-branch=")) {
+			const value = a.slice("--target-branch=".length);
+			return value.length > 0 ? value : undefined;
+		}
+	}
+	return undefined;
+}
+
+/**
+ * PLAN 09-04: the whole `mr create` conditional-allow predicate -- built as a
+ * function CLOSING OVER `protectedBranches` rather than widening
+ * {@link GitSubcommandRule}'s `matches(args)` shape to a second parameter,
+ * so `GIT_WRITE_SUBCOMMANDS`/`GIT_READ_SUBCOMMANDS`/`GLAB_BLOCKED_SUBCOMMANDS`/
+ * `GLAB_READ_SUBCOMMANDS`'s existing single-argument predicates stay exactly
+ * as they are; only `mr create` needs the extra fact, so only `mr create`
+ * gets a bespoke function rather than every table row's own type growing a
+ * parameter it would otherwise ignore. True only for an explicit, present,
+ * non-protected target -- an absent target (see {@link extractMrCreateTarget})
+ * or one matching `protectedBranches` case-insensitively (mirroring
+ * {@link isProtected}) both return `false`, which the caller falls through to
+ * the fail-closed BLOCK for.
+ */
+function mrCreateTargetsSafeBranch(args: readonly string[], protectedBranches: readonly string[]): boolean {
+	if (args[0] !== "create") {
+		return false;
+	}
+	const target = extractMrCreateTarget(args.slice(1));
+	if (target === undefined) {
+		return false;
+	}
+	return !protectedBranches.some((b) => b.toLowerCase() === target.toLowerCase());
+}
+
+/**
  * `glab mr merge` blocks unconditionally, regardless of `HEAD` -- the danger
  * is the merge target on GitLab's server, not the branch checked out on this
- * laptop. `mr list`/`mr view`/`ci status` stay allowed. An unknown subcommand
- * fails closed, same posture as {@link classifyGitInvocation}.
+ * laptop. `mr list`/`mr view`/`ci status` stay allowed. `mr create` (PLAN
+ * 09-04, FLOW-08) is a conditional allow: permitted only with an explicit,
+ * present, non-protected `--target-branch`/`-b` destination, blocked
+ * otherwise -- see the module docstring's "WHY `glab mr merge` IS
+ * SEPARATE... BUT `mr create` IS NOT" section for the currentBranch-
+ * independent / destination-dependent distinction this introduces. An
+ * unknown subcommand fails closed, same posture as {@link classifyGitInvocation}.
+ *
+ * `protectedBranches` is a NARROW parameter -- not the existing
+ * `GitPolicyFacts` (which also carries `currentBranch`) -- because the
+ * currentBranch-independence claim above stays true and unchanged; only the
+ * destination-branch fact is new here.
+ *
+ * Resolution order, and why it is BINDING: blocked-subcommand lookup runs
+ * FIRST, then the read-subcommand lookup, then the `mr create`
+ * conditional-allow check, then the fail-closed default. `mr merge` and
+ * `mr create` are mutually exclusive at `args[0]` ("merge" vs "create"), so
+ * this order is not what makes `merge` safe from `create`'s predicate --
+ * mutual exclusivity does that structurally -- but it IS what guarantees a
+ * future subcommand added to the blocked table is never shadowed by a
+ * broader conditional-allow check added later without matching care.
  */
-export function classifyGlabInvocation(invocation: GitInvocation): GitVerdict {
+export function classifyGlabInvocation(invocation: GitInvocation, protectedBranches: readonly string[]): GitVerdict {
 	const display = `glab ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
 
 	const blockRule = GLAB_BLOCKED_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
@@ -457,6 +548,23 @@ export function classifyGlabInvocation(invocation: GitInvocation): GitVerdict {
 	const readRule = GLAB_READ_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
 	if (readRule !== undefined && readRule.matches(invocation.args)) {
 		return { kind: "allow" };
+	}
+
+	if (invocation.subcommand === "mr" && invocation.args[0] === "create") {
+		if (mrCreateTargetsSafeBranch(invocation.args, protectedBranches)) {
+			return { kind: "allow" };
+		}
+		const target = extractMrCreateTarget(invocation.args.slice(1));
+		return {
+			kind: "block",
+			reason:
+				target === undefined
+					? `"${display}" names no explicit --target-branch/-b -- GitLab defaults an omitted target to ` +
+						`the project default branch, which is protected (${protectedBranches.join(", ")}); silence is ` +
+						"the deploy trigger, so this defaults to block (fail closed)"
+					: `"${display}" targets "${target}", a protected branch (${protectedBranches.join(", ")}) -- ` +
+						"defaults to block (fail closed)",
+		};
 	}
 
 	return {

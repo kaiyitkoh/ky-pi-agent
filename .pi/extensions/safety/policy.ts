@@ -358,7 +358,13 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 		};
 		strongest = strongerOf(strongest, fromGitVerdict(classifyGitInvocation(toGitInvocation(invocation), gitFacts)));
 	} else if (executable === "glab") {
-		strongest = strongerOf(strongest, fromGitVerdict(classifyGlabInvocation(toGitInvocation(invocation))));
+		// PLAN 09-04: classifyGlabInvocation now needs protectedBranches too --
+		// for its mr create conditional-allow rule, NOT for currentBranch (glab
+		// classification stays independent of HEAD; see git.ts's own docstring).
+		strongest = strongerOf(
+			strongest,
+			fromGitVerdict(classifyGlabInvocation(toGitInvocation(invocation), facts.protectedBranches)),
+		);
 	}
 
 	strongest = strongerOf(strongest, fromInfraVerdict(classifyInfraInvocation(invocation), requestKey));

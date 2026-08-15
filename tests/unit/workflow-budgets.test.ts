@@ -410,7 +410,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/safety",
-		budget: 4460,
+		budget: 4570,
 		why: "CR-04 (code-review fix pass): another directory importedSubsystemDirs newly discovers -- " +
 			"workflows/index.ts imports classifyGitInvocation/currentBranch/currentSha/currentTree from " +
 			"../safety/git.ts and PROTECTED_BRANCHES from ../safety/index.ts, and safety/ spells " +
@@ -420,6 +420,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"WR-05 already set for routing/harness/diagnostics (not a number this phase reviewed for " +
 			"tightness). Measured 4,455 raw lines across 9 files 2026-08-15 (approvals.ts 411, audit.ts 133, " +
 			"git.ts 513, index.ts 840, infra.ts 431, paths.ts 585, policy.ts 658, schema.ts 79, shell.ts 805), " +
+			"rounded up to the next ten. RAISED 4460 -> 4570 by plan 09-04 (FLOW-08): git.ts grew " +
+			"extractMrCreateTarget + mrCreateTargetsSafeBranch (the mr create conditional-allow predicate) " +
+			"plus the module-docstring and classifyGlabInvocation-docstring amendments distinguishing " +
+			"currentBranch-independence from destination-branch-dependence, and policy.ts grew a two-line " +
+			"comment plus the facts.protectedBranches threading at its one classifyGlabInvocation call site. " +
+			"Re-measured 4,569 raw lines across the same 9 files 2026-08-15 (approvals.ts 411, audit.ts 133, " +
+			"git.ts 621, index.ts 840, infra.ts 431, paths.ts 585, policy.ts 664, schema.ts 79, shell.ts 805), " +
 			"rounded up to the next ten",
 	},
 	{
