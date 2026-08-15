@@ -37,6 +37,34 @@
  * commit as the growth that needs it, with a one-line reason in `why` -- it
  * does not delete the entry, and it does not touch the ceiling test.
  *
+ * D-12 (PLAN 09-02) -- THE SIDEWAYS-RATCHET CLOSURE IS SCOPED TO WHAT WAS
+ * GENUINELY INVISIBLE, NOT RE-COVERED WHAT ALREADY HAD A HOME. The `.md`
+ * skill/prompt-body half of Item 1's hole was ALREADY closed before this
+ * plan touched this file: {@link discoverWorkflowFiles} (:553-584) already
+ * globs every `.pi/skills/**\/*.md` and `.pi/prompts/**\/*.md` file, and the
+ * registry-completeness check (:1027-1040) already requires a
+ * WORKFLOW_BUDGETS entry for each one. `RESOURCE_EDGES` and
+ * {@link resourceEdgeCandidates} below cover only the three edges that were
+ * genuinely reachable by NOTHING: (i) `.pi/agents/*.md` (zero glob coverage
+ * anywhere in this file before this plan), (ii) a non-`.md` asset nested
+ * inside a skill/prompt directory (walked by {@link walkOnDisk}, then
+ * dropped by {@link discoverWorkflowFiles}'s own `.endsWith(".md")` filter),
+ * and (iii) a `.pi/`-shaped path literal in a discovered source that is not
+ * already a resolved static import. Re-covering (i)/(ii)'s `.md` half again
+ * would have been Pitfall 3 from `09-RESEARCH.md` -- a second mechanism
+ * guarding a hole this file already closes, spending this phase's own line
+ * budget on redundancy.
+ *
+ * D-13 (PLAN 09-02) -- `WORKFLOW_TEXT_BUDGETS`'S CEILING IS A SPEC NUMBER,
+ * NOT A MEASUREMENT. Every OTHER registry in this file states `budget ===
+ * Math.ceil(actual / 10) * 10` -- the number tracks the file. `FEATURES_CEILINGS`
+ * inverts that: the file must track the number, sourced verbatim from
+ * `.planning/research/FEATURES.md` Part 2 (`/grill` <=250 line 158, `/plan`
+ * <=200 + `/execute` <=250 line 183, `/review` <=250 line 206, `/quick`
+ * <=100 line 238's harder ceiling). Raising `FEATURES_CEILINGS` to make a
+ * failing assertion pass is the exact failure mode this mechanism exists to
+ * catch -- see Falsification 5 in `09-02-SUMMARY.md`.
+ *
  * WR2-03 (ITERATION 3) -- THE ROUNDING RULE IS NOW ASSERTED, NOT RESTATED.
  * Every `why` says "measured N raw lines ... rounded up to the next ten".
  * Re-measured with `countRawLines` -- the function the assertions actually
@@ -90,6 +118,8 @@ const PROMPTS_DIR = ".pi/prompts";
 const SKILLS_DIR = ".pi/skills";
 /** WR-05: every command surface can hide outside `workflows/` too -- see {@link isCommandSource}. */
 const EXTENSIONS_DIR = ".pi/extensions";
+/** D-12 (PLAN 09-02): the genuinely-invisible resource-edge root -- see {@link resourceEdgeCandidates}. */
+const AGENTS_DIR = ".pi/agents";
 /** A file containing this text registers a `/command` directly -- WR-05's "what a file IS, not where it sits". */
 const COMMAND_MARKER = "registerCommand(";
 
@@ -121,7 +151,10 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"any other contributor's already-recorded cost from earlier in the same still-in-progress turn -- " +
 			"replaced with refundQualityCost({ms: gate.totalMs}), which subtracts only its own input. Re-measured " +
 			"96 raw lines 2026-08-15, rounded up to the next ten. Still well under the ROADMAP's own " +
-			"\"above 100 it has FAILED\" line",
+			"\"above 100 it has FAILED\" line. CORRECTED by plan 09-02 (09-RESEARCH.md Pitfall 2): that " +
+			"96 figure was already three lines stale by the time it was written -- re-measured with " +
+			"countRawLines and confirmed 99 raw lines 2026-08-15, still rounding up to the same 100, so " +
+			"the declared budget was never wrong, only the narrative",
 	},
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
@@ -1046,5 +1079,205 @@ describe("FLOW-11 -- registry completeness, both directions", () => {
 			"each of these registry entries names a file that no longer exists on disk -- the entry is " +
 				"stale; delete it in the same commit that deleted the file",
 		).toEqual([]);
+	});
+});
+
+/**
+ * D-12 (PLAN 09-02) -- see this file's module docstring for the decision.
+ * `.pi/agents/*.md` carries zero glob coverage anywhere above: neither
+ * WORKFLOWS_DIR, PROMPTS_DIR, SKILLS_DIR nor EXTENSIONS_DIR is a prefix of
+ * `.pi/agents/`, confirmed by grep (0 matches for `.pi/agents` in this file
+ * before this plan). The two files that exist there today,
+ * `.pi/agents/planner.md` and `.pi/agents/reviewer.md`, are declared to
+ * their honest owner -- `quality/reviewer.ts` dispatches the reviewer via
+ * `runSingleShotRole` and never touches either file
+ * (`.pi/agents/reviewer.md:38`'s own HONEST STATUS paragraph) -- so an
+ * unreachable file still carries a budget rather than staying invisible.
+ */
+const RESOURCE_EDGES: readonly { workflow: string; paths: readonly string[]; budget: number; why: string }[] = [
+	{
+		workflow: ".pi/extensions/quality/reviewer.ts (declared owner -- see this entry's own why)",
+		paths: [".pi/agents/planner.md", ".pi/agents/reviewer.md"],
+		budget: 110,
+		why: "nothing loads either file at runtime today -- .pi/agents/reviewer.md:38's own HONEST STATUS " +
+			"paragraph states ROLE_MECHANISM.reviewer === 'call-model' dispatches through " +
+			"quality/reviewer.ts#runSingleShotRole and never touches .pi/agents/*.md or the subagent " +
+			"machinery at all; RB-08-03 (the eventual real-subagent path) is OUTSTANDING. Declared here " +
+			"unconditionally anyway, because an unreachable file is exactly the shape that would otherwise " +
+			"slip past every budget in this repository. Measured 67 (planner.md) + 42 (reviewer.md) = 109 " +
+			"raw lines 2026-08-15, rounded up to the next ten",
+	},
+];
+
+/** D-12: the character class a `.pi/` path literal may use, matching {@link importedSubsystemDirs}'s own regex discipline. */
+const PI_PATH_LITERAL = /["'`](\.?\/?\.pi\/[A-Za-z0-9._/-]+)["'`]/g;
+
+/**
+ * Every file under a resource-root directory, tracked or on-disk (same
+ * tracked+on-disk union {@link filesInDir} uses), with no `.ts`/`.js` filter
+ * -- D-12's edges (i) and (ii) both need EVERY file, not only source files.
+ */
+function filesUnion(rel: string): string[] {
+	const union = new Set([...trackedFiles(rel), ...walkOnDisk(rel)]);
+	return Array.from(union)
+		.filter((p) => p.startsWith(`${rel}/`))
+		.filter((p) => existsSync(join(repoRoot(), p)))
+		// .gitkeep is a placeholder that makes git track an otherwise-empty
+		// directory -- it carries no content and is never a resource a
+		// workflow could load, so it is noise for this scanner, not a hole.
+		.filter((p) => !p.endsWith("/.gitkeep"))
+		.sort();
+}
+
+/**
+ * Best-effort comment strip -- block comments and line comments removed
+ * before {@link PI_PATH_LITERAL} is applied. NOT a full parser (a
+ * line-comment marker inside a real string literal would be mis-stripped),
+ * which is an accepted, documented limit for a test-side static scanner in
+ * the same spirit as {@link importedSubsystemDirs}'s own regex-only import
+ * walk. Without this, every JSDoc CITATION of another file's path (e.g.
+ * "see `.pi/lib/jsonl.ts`'s module docstring") is indistinguishable from a
+ * genuine resource load, which would make the completeness check below
+ * permanently noisy with prose, not code -- confirmed empirically: the
+ * pre-strip candidate set included `.pi/extensions/qoder/index.ts` and
+ * `.pi/lib/jsonl.ts`, both ONLY EVER mentioned inside a JSDoc citation
+ * naming a sibling module, never loaded by anything.
+ */
+function stripComments(text: string): string {
+	const BLOCK_COMMENT = new RegExp(String.raw`/\*[\s\S]*?\*/`, "g");
+	const LINE_COMMENT = new RegExp(String.raw`//.*$`, "gm");
+	return text.replace(BLOCK_COMMENT, "").replace(LINE_COMMENT, "");
+}
+
+/**
+ * D-12's three genuinely-open edges, scanned fresh each call (not memoised
+ * -- this file has no fixture lifecycle to invalidate a cache against):
+ *
+ * (i) every file under `.pi/agents/` -- zero glob coverage anywhere above.
+ * (ii) every file under `.pi/skills/**` or `.pi/prompts/**` that does NOT
+ *      end in `.md` -- walked by {@link walkOnDisk}, then dropped by
+ *      {@link discoverWorkflowFiles}'s own `.endsWith(".md")` filter.
+ * (iii) every `.pi/`-shaped path literal appearing in a discovered workflow
+ *      source, skill body or prompt body -- EXCLUDING a literal that is ALSO
+ *      a resolvable relative import specifier (that half is
+ *      {@link importedSubsystemDirs}'s job; not double-counted here).
+ *
+ * Deliberately does NOT re-scan `.md` files under `.pi/skills/`/`.pi/prompts/`
+ * -- Pitfall 3 (`09-RESEARCH.md`): that half is ALREADY closed by
+ * {@link discoverWorkflowFiles} + the registry-completeness check above.
+ */
+function resourceEdgeCandidates(): string[] {
+	const out = new Set<string>();
+
+	for (const p of filesUnion(AGENTS_DIR)) {
+		out.add(p);
+	}
+
+	for (const dir of [SKILLS_DIR, PROMPTS_DIR]) {
+		for (const p of filesUnion(dir)) {
+			if (!p.endsWith(".md")) {
+				out.add(p);
+			}
+		}
+	}
+
+	for (const file of discoverWorkflowFiles()) {
+		let rawText: string;
+		try {
+			rawText = readFileSync(join(repoRoot(), file), "utf-8");
+		} catch {
+			continue;
+		}
+		// Comments are prose, not code -- see stripComments' own docstring for
+		// the empirical false-positive set this closes (qoder/index.ts,
+		// .pi/lib/jsonl.ts, both only ever cited in a JSDoc paragraph).
+		const text = stripComments(rawText);
+		for (const m of text.matchAll(PI_PATH_LITERAL)) {
+			const literal = m[1];
+			if (literal === undefined) {
+				continue;
+			}
+			// Already covered by importedSubsystemDirs' own import-edge scan -- a
+			// literal that is ALSO a genuine relative import specifier is not
+			// double-counted here. Defensive, not load-bearing today: a real
+			// import specifier in this codebase never spells ".pi/" literally
+			// (it navigates relative to its OWN file, not the repo root).
+			if (literal.startsWith(".") && resolveLocalImport(file, literal) !== undefined) {
+				continue;
+			}
+			const normalized = literal.replace(/^\.\//, "");
+			if (!existsSync(join(repoRoot(), normalized))) {
+				continue;
+			}
+			out.add(normalized);
+		}
+	}
+
+	return Array.from(out).sort();
+}
+
+describe("Item 1 (D-12) -- RESOURCE_EDGES: the non-import resource-edge closure", () => {
+	const candidates = resourceEdgeCandidates();
+
+	it("finds at least one resource-edge candidate (guards against a vacuous pass)", () => {
+		expect(
+			candidates.length,
+			"resourceEdgeCandidates() found nothing -- without this guard the completeness assertion below " +
+				"would pass having checked nothing. .pi/agents/planner.md and .pi/agents/reviewer.md guarantee " +
+				"this is >= 2 today",
+		).toBeGreaterThanOrEqual(1);
+	});
+
+	it("declares at least one RESOURCE_EDGES entry (guards against a vacuous pass)", () => {
+		expect(RESOURCE_EDGES.length, "RESOURCE_EDGES is empty -- the loops below would assert nothing").toBeGreaterThanOrEqual(1);
+	});
+
+	it("present-but-undeclared: every resource-edge candidate is named in some RESOURCE_EDGES row", () => {
+		const declared = new Set(RESOURCE_EDGES.flatMap((e) => e.paths));
+		const offenders = candidates.filter((p) => !declared.has(p));
+		expect(
+			offenders,
+			"a .pi/ path reachable only by name (not a static import, not a discovered .md skill/prompt body) " +
+				"and not declared in RESOURCE_EDGES is invisible to every budget in this repository -- declare " +
+				"each of these in a RESOURCE_EDGES row with a budget and a reason",
+		).toEqual([]);
+	});
+
+	it("declared-but-absent: every RESOURCE_EDGES path exists on disk", () => {
+		const offenders = RESOURCE_EDGES.flatMap((e) => e.paths).filter((p) => !existsSync(join(repoRoot(), p)));
+		expect(
+			offenders,
+			"each of these RESOURCE_EDGES paths names a file that no longer exists -- delete the stale entry " +
+				"in the same commit that deleted the file",
+		).toEqual([]);
+	});
+
+	it("does not re-flag a .md skill/prompt body -- Pitfall 3: that half is ALREADY closed by discoverWorkflowFiles()", () => {
+		const offenders = candidates.filter((p) => p.endsWith(".md") && !p.startsWith(`${AGENTS_DIR}/`));
+		expect(
+			offenders,
+			"a .md file under .pi/skills/ or .pi/prompts/ is already discovered and budgeted by " +
+				"discoverWorkflowFiles() + WORKFLOW_BUDGETS' completeness check -- re-flagging it here would " +
+				"be a second mechanism for an already-closed hole",
+		).toEqual([]);
+	});
+
+	it.each(RESOURCE_EDGES)("$workflow's declared paths stay within their declared budget", (entry) => {
+		const total = entry.paths.reduce((sum, p) => sum + countRawLines(p), 0);
+		expect(
+			total,
+			`${entry.workflow}'s declared paths total ${total} raw lines, over its budget of ${entry.budget} (${entry.why})`,
+		).toBeLessThanOrEqual(entry.budget);
+	});
+
+	it.each(RESOURCE_EDGES)("$workflow's budget IS the measured total rounded up to the next ten", (entry) => {
+		const total = entry.paths.reduce((sum, p) => sum + countRawLines(p), 0);
+		const expected = Math.ceil(total / 10) * 10;
+		expect(
+			entry.budget,
+			`${entry.workflow}'s declared paths total ${total} raw lines, so its budget must be ${expected} -- ` +
+				`the next multiple of ten. It is declared as ${entry.budget}. Update the number AND the measured ` +
+				"figure in its `why`, in the same commit as the change that moved it",
+		).toBe(expected);
 	});
 });
