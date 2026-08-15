@@ -228,6 +228,23 @@ function localBin(cwd: string, name: string): string | undefined {
  * recurs (a future edit reintroduces raw concatenation, or some other spawn
  * path produces it), it is honestly reported `unavailable`, never masquerades
  * as a compiler verdict.
+ *
+ * WR3-04 (`08-REVIEW.md` iteration 3): this pattern does NOT cover every
+ * `cmd.exe`-level spawn failure. A `%VAR%` pair in `cwd` naming a DEFINED
+ * environment variable (e.g. `D:\work\%CLIENT%\app`) is expanded by
+ * `cmd.exe` BEFORE quote processing — double quotes do not suppress `%`
+ * expansion the way they suppress space/metacharacter splitting, so
+ * `commandFor`'s quoting does not close this one. Confirmed live: a
+ * `%PATH%`-containing cwd produces "The filename, directory name, or volume
+ * label syntax is incorrect."; a `%OS%`-containing cwd produces "The system
+ * cannot find the path specified." — neither matches this regex, so before
+ * the `%`-rejection guard below was added, both were misreported as
+ * `fail`, carrying `cmd.exe` chatter as if it were a compiler finding.
+ * Rather than widen this regex to a second live-observed message (still not
+ * exhaustive — `cmd.exe`'s error text for an unresolvable line is not a
+ * closed set), the guard below refuses BEFORE spawning whenever the
+ * resolved binary path itself contains `%`, which is a structural property
+ * of the path, not a message to pattern-match after the fact.
  */
 const CMD_EXE_SPAWN_FAILURE = /is not recognized as an internal or external command/i;
 
@@ -249,6 +266,24 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 		// this is now true after walking cwd AND every ancestor, not just cwd
 		// itself.
 		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin or any ancestor's -- the leg is unavailable, not skipped or passed`);
+	}
+	// WR3-04 (`08-REVIEW.md` iteration 3): `cmd.exe` expands `%VAR%` INSIDE
+	// double quotes, before quote processing runs -- `commandFor`'s quoting
+	// (which closes the space/metacharacter hazard CR2-01 found) cannot
+	// suppress this one. A `%`-delimited pair naming a DEFINED environment
+	// variable in the resolved path (`bin` embeds `cwd`) would otherwise
+	// corrupt the command line and surface as cmd.exe chatter misreported as
+	// a compiler `fail`, exactly CR2-01's failure shape via a different
+	// message. Refuse honestly, before spawning, rather than pattern-match
+	// cmd.exe's error text after the fact -- see CMD_EXE_SPAWN_FAILURE's own
+	// docstring for why that would not be exhaustive. Only reachable on
+	// win32, where `%` has this meaning; POSIX shells never see this branch
+	// (`commandFor`'s own POSIX path never invokes a shell at all).
+	if (process.platform === "win32" && bin.includes("%")) {
+		throw new Error(
+			`${cmd} resolved to ${bin}, whose path contains '%' -- cmd.exe expands %VAR% inside quotes, so this ` +
+				"command line cannot be built safely; the leg is unavailable, not failed",
+		);
 	}
 	// CR-02's secondary correctness bug: LINT_GATE_FILES (gates.ts) is THIS
 	// repository's own structural test paths. In any other cwd those paths do

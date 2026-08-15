@@ -379,7 +379,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 3670,
+		budget: 3740,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
@@ -402,7 +402,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"calibration.ts (179 -> 206), and WR2-06 added the projectTrusted trust gate to index.ts's " +
 			"resolveExec (355 -> 387). Re-measured 3,661 raw lines across the same 8 files 2026-08-15 " +
 			"(advisor.ts 198, calibration.ts 206, gates.ts 426, index.ts 387, review-schema.ts 580, reviewer.ts " +
-			"425, rules.ts 890, verdict.ts 549), rounded up to the next ten",
+			"425, rules.ts 890, verdict.ts 549), rounded up to the next ten. RAISED 3670 -> 3740 by the " +
+			"iteration-3 fix pass (`08-REVIEW.md`): WR3-01 added the cross-contamination check and its docstring " +
+			"to calibration.ts's findingCatches (206 -> 249), and WR3-04 added the pre-spawn '%' rejection guard " +
+			"to index.ts's productionExec (387 -> 422). Re-measured 3,739 raw lines across the same 8 files " +
+			"2026-08-15 (advisor.ts 198, calibration.ts 249, gates.ts 426, index.ts 422, review-schema.ts 580, " +
+			"reviewer.ts 425, rules.ts 890, verdict.ts 549), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/providers",

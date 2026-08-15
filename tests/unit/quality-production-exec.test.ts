@@ -168,6 +168,65 @@ describe("CR2-01 -- a cwd containing a space or a shell metacharacter runs the R
 	});
 });
 
+describe(
+	"WR3-04 -- a cwd whose resolved binary path contains '%' is refused honestly BEFORE spawning, never " +
+		"misreported as a compiler FAIL",
+	() => {
+		it(
+			"a cwd containing '%OS%' -- productionExec via runTypecheckLeg is UNAVAILABLE on Windows (cmd.exe " +
+				"would expand %VAR% inside quotes, a hazard CR2-01's own commandFor quoting does not close), " +
+				"naming '%' as the reason -- the first test to exercise this guard at all",
+			() => {
+				// %OS% is always defined on Windows (a built-in cmd.exe variable) and
+				// is a harmless literal filename character on POSIX -- reproduces
+				// the review's own live evidence (a %PATH%/%OS%-containing cwd
+				// producing cmd.exe's "filename ... syntax is incorrect" /
+				// "system cannot find the path specified" chatter, neither of which
+				// CMD_EXE_SPAWN_FAILURE's regex matches).
+				const repo = makeTempRepo("kypi-wr3-04-pct%OS%dir-");
+				expect(repo, "fixture path must contain '%' to exercise the WR3-04 regression").toMatch(/%/);
+				stubTsc(repo, { exitCode: 0 });
+				const leg = runTypecheckLeg(repo, productionExec);
+				if (process.platform === "win32") {
+					expect(leg.status, `expected unavailable on win32, got ${JSON.stringify(leg)}`).toBe("unavailable");
+					if (leg.status === "unavailable") {
+						expect(leg.reason).toMatch(/contains '%'/);
+						expect(leg.reason).not.toMatch(/is not recognized as an internal or external command/i);
+					}
+				} else {
+					// '%' carries no shell meaning outside cmd.exe, and commandFor's
+					// POSIX branch never invokes a shell at all (`isWindows` false ->
+					// `[cmd, args]` passed straight to spawnSync with shell:false) --
+					// the leg genuinely runs and passes, proving the guard is Windows-
+					// only, not an overbroad refusal on every platform.
+					expect(leg.status).toBe("pass");
+				}
+			},
+		);
+
+		it("the guard fires on ANY '%' in the resolved path, not only a literal %VAR% pair -- '50% off' also refuses on win32, and still passes cleanly on POSIX", () => {
+			// The review's own example ("50% off is harmless") describes the
+			// REAL-WORLD rarity of this hazard, not a claim that the guard should
+			// try to distinguish a genuine %VAR% pair from an incidental '%'.
+			// Reliably telling the two apart would require knowing which
+			// environment variables cmd.exe would resolve at spawn time, which is
+			// itself unreliable to predict ahead of the spawn -- so the guard is
+			// deliberately a blunt "any '%' at all" check, trading a slightly
+			// wider (but still honest, never a silent pass or misreported fail)
+			// refusal for not having to get that classification right.
+			const repo = makeTempRepo("kypi wr3-04 50% off ");
+			expect(repo, "fixture path must contain '%' to exercise the WR3-04 regression's second case").toMatch(/%/);
+			stubTsc(repo, { exitCode: 0 });
+			const leg = runTypecheckLeg(repo, productionExec);
+			if (process.platform === "win32") {
+				expect(leg.status).toBe("unavailable");
+			} else {
+				expect(leg.status).toBe("pass");
+			}
+		});
+	},
+);
+
 describe("WR2-01 -- localBin walks up to an ancestor node_modules, matching the npx shim it replaced", () => {
 	it("productionExec resolves the binary from a subdirectory of repoRoot() that has no node_modules of its own -- never unavailable", () => {
 		// docs/ is a real subdirectory of this repository with no node_modules
