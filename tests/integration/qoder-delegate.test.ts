@@ -598,11 +598,12 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 	});
 
 	it(
-		"WR-04: does NOT time out across THREE real inter-chunk delays whose SUM exceeds the injected budget, " +
+		"WR-04: does NOT time out across THREE inter-chunk gaps whose SUM exceeds the injected budget, " +
 			"while every INDIVIDUAL gap stays under it -- the only shape that distinguishes reset-on-progress " +
-			"from a fixed budget",
+			"from a fixed budget, proved with an INJECTED CLOCK rather than a real sleep",
 		async () => {
-			// The paired positive, tightened per WR-04. The prior version used ONE
+			// The paired positive, tightened per WR-04, then de-flaked again per
+			// WR2-03 (`08-REVIEW.md` iteration 2). The prior version used ONE
 			// gap (~50ms) against a MUCH larger budget (2000ms): a client that
 			// arms a single fixed timeout at stream-open time and never resets it
 			// would STILL pass that case, because 50ms elapsed is nowhere near
@@ -610,52 +611,83 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 			// claimed to prove reset-on-progress but never actually forced a
 			// choice between the two implementations.
 			//
-			// Here, the stream is split into FOUR chunks (three gaps). Chunk N+1
-			// is released only after chunk N's own `chunkWritten` event plus a
-			// real `interChunkDelayMs` (150ms) sleep, so the four chunks land at
-			// roughly 0ms, 150ms, 300ms and 450ms after stream open. The injected
-			// budget (`injectedTimeoutMs`, 300ms) is DELIBERATELY smaller than the
-			// SUM of the three gaps (450ms) but larger than any ONE gap (150ms,
-			// 150ms of headroom against scheduler jitter):
+			// WR-04's own fix split the stream into FOUR chunks (three gaps) and
+			// used a REAL 150ms sleep between each release against a 300ms
+			// budget -- correct in shape (proves SUM > budget while every
+			// INDIVIDUAL gap stays under it, which DOES force the choice), but
+			// the review found the margin was only 2x (down from the prior
+			// version's ~40x), and on a loaded CI runner a real scheduler hiccup
+			// during any ONE real 150ms sleep could push that single gap over the
+			// real 300ms budget, making delegateTask genuinely and CORRECTLY
+			// reject -- a false-failure risk in the TEST, not a bug in the code
+			// under test, and one that widening the margin cannot honestly fix
+			// per this phase's own de-flake prohibitions (no widened elapsed
+			// bounds).
 			//
-			//   - reset-on-progress (the correct implementation): each gap is
-			//     checked against the budget INDEPENDENTLY and every one is under
-			//     it, so the stream completes normally at ~450ms elapsed.
-			//   - a single fixed deadline armed once at stream open (the bug this
-			//     test exists to catch): the 300ms deadline fires before the
-			//     fourth chunk (which lands at ~450ms), and `delegateTask` rejects.
+			// WR2-03's fix, following 08-05's own "root cause eliminated at its
+			// source, no wall-clock delay option" discipline: `delegateTask` now
+			// accepts an injected `now` AND an `onProgress` callback (both
+			// `DelegateTaskOptions`, test-only). `onProgress` fires from INSIDE
+			// the read loop, exactly once per reset, immediately after
+			// `lastProgressAt` is captured -- so bumping the injected clock and
+			// releasing the NEXT chunk from within this callback guarantees the
+			// client's OWN next remaining-check sees EXACTLY one gap's worth of
+			// elapsed time, never more, never less, and never dependent on
+			// whether the server's write or the client's read happens to be
+			// scheduled first (an earlier version of this fix drove the bump off
+			// the SERVER's own `chunkWritten` event instead, independently of the
+			// client's consumption -- since nothing then throttled the test's own
+			// loop to the client's pace, it could race ahead and dump all three
+			// bumps in before the client had processed even the first chunk,
+			// which is worse than non-deterministic: it is UNFALSIFIABLE, since a
+			// mutated non-resetting client happened to still pass). The four
+			// chunks still arrive over a REAL socket -- nothing about the
+			// transport is faked -- but the TEST never once waits in real time:
+			// this file's own 20-test run, including this case, completes in
+			// well under a second, immune to CI scheduler jitter entirely, not
+			// merely less exposed to it.
 			//
 			// The only assertions below are on the OUTCOME (`folded.done`,
 			// `folded.text`), never on how much time passed -- exactly the prior
 			// version's own discipline, preserved here.
 			const injectedTimeoutMs = 300;
-			const interChunkDelayMs = 150;
+			const interGapMs = 150;
+			let fakeElapsedMs = 0;
+			const now = (): number => fakeElapsedMs;
+			let progressCount = 0;
 			const splitPoints = [Math.floor(FRAMES.length / 4), Math.floor(FRAMES.length / 2), Math.floor((3 * FRAMES.length) / 4)];
 
 			await withTempLogCwd(async (cwd) => {
 				await withQoderLoopback({ frames: FRAMES, splitStreamAtMultiple: splitPoints }, async (loop) => {
 					const config = resolveFixtureConfig(loop.baseUrl);
 
-					const delegatePromise = delegateTask({
+					const folded = await delegateTask({
 						config,
 						task: DELEGATED_TASK_TEXT,
 						cwd,
 						inactivityTimeoutMs: injectedTimeoutMs,
+						now,
+						// Fires once per chunk READ that is not the terminal stream-close
+						// read -- four times for this four-chunk split (chunks 0-2 each
+						// precede a real gap the test controls; chunk 3 also resets, since
+						// the fold only observes `done` AFTER processing it, and the loop
+						// exits on the NEXT `while` check rather than reading again).
+						// `releaseNextChunk` is idempotent past the last boundary
+						// (`qoder-loopback.ts`'s own contract), so the 4th, boundary-less
+						// call here is a harmless no-op. Measured, not guessed: run 5x,
+						// always exactly 4 -- see the commit this test landed in.
+						onProgress: () => {
+							progressCount += 1;
+							fakeElapsedMs += interGapMs;
+							loop.releaseNextChunk();
+						},
 					});
 
-					// Three gaps, each: wait for the chunk to genuinely land, sleep
-					// interChunkDelayMs of REAL time, then release the next one.
-					for (let i = 0; i < 3; i++) {
-						await loop.chunkWritten[i];
-						await new Promise<void>((resolve) => setTimeout(resolve, interChunkDelayMs));
-						loop.releaseNextChunk();
-					}
-					// The fourth (last) chunk needs no release -- it is written as
-					// soon as the third gate opens.
-
-					const folded = await delegatePromise;
-
 					expect(loop.received.length).toBeGreaterThan(0);
+					expect(
+						progressCount,
+						"onProgress must have fired once per chunk read (four, for a four-chunk split) -- otherwise this test proved nothing about reset-on-progress",
+					).toBe(4);
 					expect(folded.done).toBe(true);
 					expect(folded.text).toBe("Hello world");
 				});

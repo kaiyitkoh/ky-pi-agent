@@ -551,6 +551,41 @@ export interface DelegateTaskOptions {
 	 * behaviour without actually waiting five minutes.
 	 */
 	readonly inactivityTimeoutMs?: number;
+	/**
+	 * Test-only injection seam for the deadline clock (`Date.now` by default).
+	 * Production code NEVER passes this. WR2-03 (`08-REVIEW.md` iteration 2):
+	 * lets a loopback test replace `Date.now()` with a test-controlled counter,
+	 * so the deadline arithmetic below can be driven to an exact, reproducible
+	 * value instead of betting on real wall-clock time surviving CI scheduler
+	 * jitter. See {@link onProgress}'s own docstring for how a test
+	 * synchronises the two.
+	 */
+	readonly now?: () => number;
+	/**
+	 * Called exactly once per chunk that resets the inactivity deadline (never
+	 * for the final chunk, which completes the fold instead) -- immediately
+	 * AFTER `lastProgressAt` is reset, i.e. exactly when the client's own
+	 * bookkeeping considers a fresh budget to have started. Test-only; a
+	 * production caller has no use for it and none passes it.
+	 *
+	 * WR2-03 (`08-REVIEW.md` iteration 2): this is the synchronisation point
+	 * `qoder-delegate.test.ts`'s WR-04 case needs to drive {@link now}
+	 * correctly. The prior version of that test advanced a REAL wall clock
+	 * (150ms sleeps) between server-side `chunkWritten` events, which are
+	 * decoupled from when the CLIENT itself has actually consumed and reset
+	 * for a given chunk -- on a loaded runner a single real gap could
+	 * genuinely balloon past the injected budget, a false-failure risk in the
+	 * test, not a bug in the code under test. Because `onProgress` fires from
+	 * INSIDE this function's own read loop, a test can bump its injected
+	 * `now()` and release the NEXT chunk from within this callback, which
+	 * guarantees the client's own next remaining-check sees EXACTLY one
+	 * bump's worth of elapsed time -- never more, never less, never subject
+	 * to server-write-vs-client-read scheduling order -- while the whole
+	 * exchange still happens over a real socket with zero real wall-clock
+	 * waiting. Following 08-05's own "root cause eliminated at its source, no
+	 * wall-clock delay option" discipline.
+	 */
+	readonly onProgress?: () => void;
 }
 
 /** `Authorization`/`Content-Type` headers shared by every request in the sequence. */
@@ -702,12 +737,15 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	// (see the loop body below), never on a fixed wall-clock budget from the
 	// stream's own start -- see STREAM_INACTIVITY_TIMEOUT_MS's own doc comment
 	// for why a genuinely long delegation must not be cut short by this.
+	// WR2-03: `now` is `opts.now` in tests only, `Date.now` in production --
+	// see `DelegateTaskOptions.now`'s own docstring.
 	const inactivityTimeoutMs = opts.inactivityTimeoutMs ?? STREAM_INACTIVITY_TIMEOUT_MS;
-	let lastProgressAt = Date.now();
+	const now = opts.now ?? Date.now;
+	let lastProgressAt = now();
 
 	try {
 		while (!folded.done) {
-			const remaining = inactivityTimeoutMs - (Date.now() - lastProgressAt);
+			const remaining = inactivityTimeoutMs - (now() - lastProgressAt);
 			if (remaining <= 0) {
 				await cancelReaderQuietly(reader, "inactivity timeout");
 				// WR-06: a terminal transcript record before this throw -- see the
@@ -767,7 +805,9 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 			}
 			// Progress: reset the deadline. A genuinely long delegation that keeps
 			// producing bytes (even slowly) is never cut off by this timeout.
-			lastProgressAt = Date.now();
+			lastProgressAt = now();
+			// WR2-03: test-only synchronisation point -- see `onProgress`'s own docstring.
+			opts.onProgress?.();
 
 			buffer += decoder.decode(value, { stream: true });
 			const parsed = parseSseFrames(buffer);
