@@ -1,12 +1,187 @@
 ---
 phase: 08-quality-gates-engineering-quality
-fixed_at: 2026-08-15T09:08:39Z
+fixed_at: 2026-08-15T17:52:00Z
 review_path: .planning/phases/08-quality-gates-engineering-quality/08-REVIEW.md
-iteration: 2
-findings_in_scope: 7
-fixed: 7
-skipped: 0
-status: all_fixed
+iteration: 3
+findings_in_scope: 12
+fixed: 5
+skipped: 7
+status: partial
+---
+
+> **This file covers TWO fix passes.** The frontmatter above and the first
+> section below (`## Iteration 3 (final)`) describe the LATEST pass. The
+> original iteration-2 report follows it unmodified, per this round's own
+> instruction to append rather than overwrite. `status: partial` reflects
+> that 7 of 12 iteration-3 findings (WR3-05 and all six Info findings) were
+> deliberately accepted-and-documented rather than code-fixed, per this
+> round's explicit fix-scope instruction — not that any fix attempt failed.
+
+# Phase 8: Code Review Fix Report — Iteration 3 (final)
+
+**Fixed at:** 2026-08-15T17:52:00Z
+**Source review:** `.planning/phases/08-quality-gates-engineering-quality/08-REVIEW.md` (iteration 3)
+**Iteration:** 3 (final)
+
+**Summary:**
+- Findings in scope: 12 (5 Warning fixed in code — WR3-01 including WR3-01a,
+  WR3-02, WR3-03, WR3-04, WR3-06; 1 Warning and 6 Info explicitly
+  accepted-and-documented per this round's own instruction, not fixed)
+- Fixed: 5
+- Accepted-and-documented (not code-fixed, by explicit instruction): 7
+
+All fixes were applied inside an isolated git worktree
+(`gsd-reviewfix/08-1085`, from `main`), one commit per finding, each
+mutation-verified before being restored and reconfirmed green, then
+fast-forwarded onto `main`. `tsc --noEmit` is clean. The full suite was run
+three times; two runs were fully clean (108 files / 2016 tests, all
+passing); the third run's first two attempts each hit an unrelated,
+pre-existing flake in `tests/unit/checkpoint-store.test.ts` (a real
+four-OS-process concurrency test, Phase 7's own file, untouched by any
+commit in this pass) losing 1 and then 3 of 600 rows — confirmed to pass
+cleanly in isolation both times, and a third full-suite attempt came back
+fully clean (108/108, 2016/2016). See "Full-suite verification" below for
+every real run pasted. Zero `DEP0190`/`DeprecationWarning` output in any
+run. No new npm dependency; `package.json`/`package-lock.json` untouched.
+No provider inference request was issued and no AWS/live credential was
+touched at any point.
+
+## Fixed Issues
+
+### WR3-01 (including WR3-01a): `MIN_DISTINCT_NEEDLES = 2` did not close the boilerplate exploit — a two-needle sentence still scored `catchRate: 1.0` with zero defects identified
+
+**Files modified:** `.pi/extensions/quality/calibration.ts`, `tests/integration/reviewer-calibration.test.ts`, `docs/QUALITY.md`
+**Commit:** `ad92ffd`
+**Applied fix:** `findingCatches` now also rejects a finding whose text independently clears a DIFFERENT, unrelated expectation's own needle bar, not merely one that clears its OWN expectation's bar — a genuine finding about one file's one defect does not organically use enough of a wholly different defect's vocabulary to catch it too, which is exactly what a sentence reused verbatim across all six touched files must do by construction. This targets the actual exploit shape (cross-file boilerplate reuse), not merely "count more needles," which is what "requires actual defect identification, not merely needle-counting" means in code here. Added `TWO_NEEDLE_KITCHEN_SINK_ARGS` as a fifth permanent control, run through the real `runReview -> scoreCalibration` pipeline in both reproducibility runs; it now scores `catchRate: 0`. **WR3-01a:** `docs/QUALITY.md`'s false claim that "the kitchen-sink control's own `catchRate: 0` is the measured CEILING of what a substring proxy can be defeated by" was corrected to an honest statement that this is one measured data point, not a claim of exhaustiveness — the substring-match approach is explicitly stated as not proven to have no further exploit. No fixture text, corpus, or scripted response was edited to move any number; the two-needle control is a new, additional control and every pre-existing assertion is unchanged. Mutation-tested: removing the cross-contamination check made the new fifth control fail red with `catchRate === 1` (6/6, "expected 0, received 1"); every other of the file's 20 tests stayed green under that same mutation. Restored and reconfirmed all 20 green.
+
+### WR3-02: the "UNCHANGED, still 3/6 = 0.50" claim was unchanged *by construction* — the positive control's text was edited in the same commit that raised the matcher bar
+
+**Files modified:** `tests/integration/reviewer-calibration.test.ts`, `docs/QUALITY.md`, `docs/RUNBOOK.md`, `.planning/REQUIREMENTS.md`, `.planning/phases/08-quality-gates-engineering-quality/08-10-SUMMARY.md`, `.planning/phases/08-quality-gates-engineering-quality/08-13-SUMMARY.md`
+**Commit:** `cc1ed23`
+**Applied fix:** Reverted `KNOWN_SUBSET_ARGS`'s `false-label` finding to its original, unmodified text (as of `ac0e427`, before `bb2a67c` extended it with a phrase lifted from the corpus's own `mustMentionAny` answer key). Under today's matcher this finding no longer catches — one needle ("regardless of input") is not two — so the honest, currently-measured number is **2/6 = 0.333...**, not 3/6 = 0.5. `KNOWN_SUBSET_CAUGHT` now lists two classes; the "known-subset" test asserts `caught === 2`, `catchRate === 2/6`. This is a revert to the honest original, not a re-tuning: no fixture text was edited to move the number back toward 0.5, following this round's explicit instruction that the catch rate is a measurement, not a target. Propagated the corrected number to every place it is stated: `docs/QUALITY.md` (full WR3-02 disclosure naming `bb2a67c` and both before/after numbers), `docs/RUNBOOK.md` (`RB-08-03`'s two prose mentions — the pinned `RB-08-03-RESULT.md` echo command itself untouched), `.planning/REQUIREMENTS.md`'s `GATE-08` row, and correction blockquotes (not rewrites, to preserve the historical falsification record) in `08-10-SUMMARY.md` and `08-13-SUMMARY.md`. Verified: `tests/integration/reviewer-calibration.test.ts` (20/20) and `tests/unit/docs-policy.test.ts` (102/102) green — confirming the doc edits did not disturb `docs-policy`'s pinned-command and two-source-agreement checks.
+
+### WR3-03: `DelegateTaskOptions.now` was production surface added for one test, with zero assertions pinning it
+
+**Files modified:** `tests/integration/qoder-delegate.test.ts`
+**Commit:** `c781899`
+**Applied fix:** Added a `nowCalls` counter wrapping the WR-04 case's injected `now` function and an assertion that it is greater than zero after `delegateTask` returns, with a message naming exactly why a zero count means the case proved nothing — the exact one-line fix the review suggested. Mutation-verified all three shapes in isolated runs against the real WR-04 case: (A) removing only the `lastProgressAt` reset — RED, real "no bytes for 300ms" inactivity error, unaffected by this fix (confirms the pre-existing reset proof still holds); (B) `opts.now` ignored (`const now = Date.now;`, reset intact) — now RED, with "delegateTask never consulted the injected clock ... expected 0 to be greater than 0" (this is the case that was previously green and is what this fix closes); (A+B) both together — RED, same `nowCalls === 0` failure (the vacuous-pass shape the review found). Restored the real code after each mutation and reconfirmed all 20 tests in the file green.
+
+### WR3-04: a `%VAR%` pair in the cwd still corrupted the `cmd.exe` command line — the belt-and-braces guard built for exactly this both missed it and was itself entirely untested
+
+**Files modified:** `.pi/extensions/quality/index.ts`, `tests/unit/quality-production-exec.test.ts`, `tests/unit/workflow-budgets.test.ts`
+**Commit:** `b3c8c12`
+**Applied fix:** Took the review's "Minimal" option. `productionExec` now refuses BEFORE spawning whenever the resolved binary path contains `%` on `win32`, naming the reason explicitly ("cmd.exe expands %VAR% inside quotes") rather than pattern-matching `cmd.exe`'s error text after the fact — `CMD_EXE_SPAWN_FAILURE`'s single-message regex is not, and cannot be made, exhaustive over every possible `cmd.exe` error string. The guard is a deliberately blunt "any `%`" check (not an attempt to distinguish a genuine `%VAR%` pair from an incidental `%`, e.g. "50% off" — reliably telling them apart would require predicting which environment variables `cmd.exe` would resolve ahead of the spawn). Added two tests, both platform-branched (win32: `unavailable`; POSIX: `pass`, since `%` carries no shell meaning outside `cmd.exe` and `commandFor`'s POSIX path never invokes a shell at all): a `%OS%`-containing cwd, and a `50% off`-containing cwd proving the guard is not scoped to a literal `%VAR%` pattern. Mutation-verified live on this machine (win32, Node v24.16.0): removing the guard reproduced the exact bug the review found — the `%OS%` case returned `{status: "fail", findings: ["The system cannot find the path specified."]}` instead of `unavailable`, and the `50% off` case returned `{status: "pass"}` instead of refusing. Both new tests caught it; restored and reconfirmed 18/18 green. Also reconciled the `.pi/extensions/quality` `DIRECTORY_BUDGETS` ratchet (`workflow-budgets.test.ts`), which this fix pass (combined with WR3-01's growth of `calibration.ts`) pushed past its prior 3670-line budget: raised 3670 -> 3740 (rounded up from the measured 3,739-line total), with a dated justification sentence naming both contributing changes, following this ratchet's own established convention. **Residual, honestly recorded (not closed this round):** `CMD_EXE_SPAWN_FAILURE`'s own regex-matching branch remains untested — the new `%` guard exits before that branch is ever reached for the cases this commit closes, and constructing an independent trigger for that exact `cmd.exe` message without mocking `spawnSync` (which this file's own header deliberately avoids) was not attempted this round. Documented in `CMD_EXE_SPAWN_FAILURE`'s own docstring.
+
+### WR3-06: `docs/WORKFLOWS.md`'s rewritten paragraph said "nine" ratchets, listed eleven, against a registry of twelve — inside the paragraph that then forbids restating numbers
+
+**Files modified:** `docs/WORKFLOWS.md`
+**Commit:** `7eda58c`
+**Applied fix:** Deleted the parenthetical count and the enumeration entirely; the paragraph now points at `tests/unit/workflow-budgets.test.ts`'s own `DIRECTORY_BUDGETS` as the source of truth, consistent with the rule the very next sentence already states. Documentation-only fix (`docs/QUALITY.md`'s own rule: code is authoritative on disagreement); no test parses this specific count, so there is no assertion to mutation-test.
+
+## Accepted-and-Documented (not code-fixed, per this round's explicit instruction)
+
+The task instructions explicitly designated WR3-05 and all six Info
+findings as "ACCEPT-AND-DOCUMENT (do not code-fix)". Each is recorded below
+with the reason it was accepted rather than fixed. Nothing was silently
+dropped.
+
+### WR3-05: WR2-06's "paired positive" test says "with the SAME repo" and uses a different repo
+
+**File:** `tests/unit/quality-production-exec.test.ts:215-247`
+**Reason accepted, not fixed:** Explicitly out of code-fix scope per this
+round's instruction. The review itself calls this "Not a blocker — the
+negative control's `stringContaining("is not trusted")` assertion already
+makes it impossible for the `unavailable` to come from anywhere else" — a
+mislabelled-but-not-incorrect test (the label claims a pairing the code
+does not implement, but the two halves it actually runs are both correct
+on their own terms). Left for a future pass to make genuinely paired on
+the same fixture, exactly as the review's own suggested replacement test
+shows.
+
+### IN3-01: `evidence-gate.test.ts`'s M1 rationale describes behaviour the code no longer has
+
+**File:** `tests/unit/evidence-gate.test.ts:140`
+**Reason accepted, not fixed:** Explicitly out of code-fix scope (Info,
+carried forward unchanged across iterations 1-3). The row itself passes
+for the right reason; only the recorded rationale comment is stale prose,
+not a functional or security defect.
+
+### IN3-02: `refute-or-promote.test.ts`'s bounded-loop assertion conflates provider calls with iterations
+
+**File:** `tests/integration/refute-or-promote.test.ts:406-416`
+**Reason accepted, not fixed:** Explicitly out of code-fix scope (Info,
+carried forward unchanged across iterations 1-3). The two quantities
+coincide only because the fixture has exactly one BLOCKER per iteration;
+this is a proof-strength gap in a test, not a production defect.
+
+### IN3-03: `quality/index.ts`'s drift guard cannot fire under TypeScript's own narrowing
+
+**File:** `.pi/extensions/quality/index.ts:366`
+**Reason accepted, not fixed:** Explicitly out of code-fix scope (Info,
+carried forward unchanged across iterations 1-3). A literal-typed `const`
+compared against the same literal is a no-op guard, but it is inert, not
+incorrect — `tool-count-baseline.test.ts`'s own grep is the mechanism
+actually enforcing tool-name agreement.
+
+### IN3-04: CR-03's exec-seam has no failing signature
+
+**File:** `tests/integration/quick-workflow.test.ts` (nine
+`setQuickGateExecOverrideForTests` install sites)
+**Reason accepted, not fixed:** Explicitly out of code-fix scope (Info,
+carried forward unchanged across iterations 1-3). WR2-06's trust gate
+narrows this slightly, but the enforcing seam iteration 1 suggested was
+never adopted this phase; a future phase's own new tests are the actual
+risk surface, not this phase's already-written tests.
+
+### IN3-05: `firstChunkWritten` never resolves in `splitStreamAtMultiple` mode
+
+**File:** `tests/helpers/qoder-loopback.ts:132-140, 539`
+**Reason accepted, not fixed:** Explicitly out of code-fix scope (Info,
+carried forward from iteration 2). Not currently exploitable — WR2-03's own
+new test does not hit this path (it awaits `onProgress`, not
+`firstChunkWritten`) — but is recorded as a known trap for a future test
+that does.
+
+### IN3-06: `importedSubsystemDirs` finds imports by regex, so a dynamic or side-effect import is invisible to the ratchet
+
+**File:** `tests/unit/workflow-budgets.test.ts:721`
+**Reason accepted, not fixed:** Explicitly out of code-fix scope (Info,
+new this iteration, "not currently exploitable" per the review's own
+verification — grepped `.pi/` and confirmed there are zero dynamic/
+side-effect imports in the tree today). A real but currently-latent
+limitation for a hypothetical Phase 9 lazy-loaded subsystem; left for
+Phase 9 or a future pass to widen the regex or state the limitation
+explicitly in the docstring.
+
+## Full-suite verification
+
+`npx tsc --noEmit`: clean (zero output, exit 0).
+
+Three consecutive `npx vitest run` attempts were required to obtain three
+CLEAN full-suite results, because the third attempt in the first pass hit
+a pre-existing, unrelated flake (see below) — reported here in full,
+nothing hidden:
+
+1. **Run 1 — CLEAN.** `Test Files  108 passed (108)` / `Tests  2016 passed (2016)`. Duration 38.53s (test execution 377.89s wall inside that).
+2. **Run 2 — CLEAN.** `Test Files  108 passed (108)` / `Tests  2016 passed (2016)`. Duration 38.27s.
+3. **Run 3, first attempt — 1 unrelated failure.** `Test Files  1 failed | 107 passed (108)` / `Tests  1 failed | 2015 passed (2016)` — `tests/unit/checkpoint-store.test.ts`'s `"four overlapping OS processes each recording 150 entries produce all 600 rows"` (a real 4-OS-process concurrency test, Phase 7's own file, `git log` shows it last touched by `ec69329` "fix(07): WR2-05" — not touched by any commit in this pass) lost 1 of 600 rows (`expected 599 to be 600`). Re-ran the single file in isolation immediately after: passed cleanly, 17/17. Re-ran the FULL suite again (below) to check whether this was systemic.
+4. **Run 3, second attempt — same unrelated file flaked differently.** `Tests  1 failed | 2015 passed (2016)` — the same `checkpoint-store.test.ts` case, this time losing 3 of 600 rows (`expected 597 to be 600`). Confirms genuine, load-dependent flakiness in that specific real-OS-process concurrency test under this pass's heavy sequential-full-suite-run load, not a one-off fluke and not caused by anything this pass touched (no commit in this pass names `checkpoint` anywhere).
+5. **Run 3, third attempt — CLEAN.** `Test Files  108 passed (108)` / `Tests  2016 passed (2016)`. Duration 38.90s.
+
+Zero `DEP0190`/`DeprecationWarning` output in any of the five runs above
+(`grep -i "DEP0190\|DeprecationWarning"` against every captured log:
+zero matches, every time).
+
+**This flake is out of this round's fix scope** — `tests/unit/
+checkpoint-store.test.ts` is not named anywhere in `08-REVIEW.md`
+iteration 3, belongs to Phase 7 (file checkpointing), and no commit in
+this fix pass touches it, the `checkpoint` directory, or anything it
+imports. Per this round's own de-flake prohibitions (no `retry`, no
+widened elapsed bounds, no raised `testTimeout`, no `it.skip`, no
+`fileParallelism:false`), it was left untouched rather than silently
+patched around — recorded here for whoever picks up Phase 7's own
+outstanding items next, not fixed in this pass.
+
 ---
 
 # Phase 8: Code Review Fix Report — Iteration 2
