@@ -239,7 +239,7 @@ export function buildReviewerContext(input: ReviewerContractInput): string {
 		`# Test/Typecheck Output (Deterministic Gate Stage Report)\n\n${fenced(input.gateReport)}`,
 		`# Stated Requirements\n\n${renderRequirements(input.requirements)}`,
 		`# Files-Touched Union\n\n${renderFilesTouchedUnion(input.filesTouchedUnion)}`,
-		`# Import Graph (declared, syntax-level only -- see buildImportGraph)\n\n${renderImportGraph(input.importGraph)}`,
+		`# Import Graph (declared \`import ... from\` and \`export ... from\`, syntax-level only -- see buildImportGraph)\n\n${renderImportGraph(input.importGraph)}`,
 	];
 
 	return redactString(sections.join("\n\n"));
@@ -250,28 +250,43 @@ export function buildReviewerContext(input: ReviewerContractInput): string {
 // ---------------------------------------------------------------------------
 
 /**
- * `import ... from "<specifier>"` targets, one match per occurrence in
- * `source.text`. Deliberately NOT anchored to a line (`[\s\S]*?` crosses
- * newlines) because a real multi-line destructured import
- * (`import {\n  a,\n  b,\n} from "./x.ts";`) is ordinary TypeScript, and a
- * line-anchored pattern would silently miss every one of those. The lazy
- * quantifier stops at the FIRST `from` after `import`, which is correct for
- * every import statement this codebase writes: nothing legitimate places a
- * second `from` between an `import` keyword and its own clause.
+ * `import ... from "<specifier>"` AND `export ... from "<specifier>"`
+ * targets, one match per occurrence in `source.text`. Deliberately NOT
+ * anchored to a line (`[\s\S]*?` crosses newlines) because a real
+ * multi-line destructured import (`import {\n  a,\n  b,\n} from "./x.ts";`)
+ * is ordinary TypeScript, and a line-anchored pattern would silently miss
+ * every one of those. The lazy quantifier stops at the FIRST `from` after
+ * `import`/`export`, which is correct for every import/re-export statement
+ * this codebase writes: nothing legitimate places a second `from` between
+ * an `import`/`export` keyword and its own clause.
+ *
+ * WR-05: `export` is matched alongside `import` because a re-export
+ * (`export { loopPolice as default } from "./loop-police.ts";` -- this
+ * repository really ships that shape at
+ * `.pi/extensions/loop-police/index.ts`) is a genuine module edge that the
+ * import graph exists to surface, and the prior `import`-only pattern
+ * produced NO entry for it -- a positive, false statement that the
+ * re-exporting file depends on nothing. Still deliberately excludes a bare
+ * side-effect `import "./x"` (no `from` clause) and a dynamic `import()`
+ * call, per this function's own "declared, syntax-level only" scope.
  */
-const IMPORT_FROM_RE = /\bimport\b[\s\S]*?\bfrom\s+["']([^"']+)["']/g;
+const IMPORT_FROM_RE = /\b(?:import|export)\b[\s\S]*?\bfrom\s+["']([^"']+)["']/g;
 
 /**
  * The declared import graph for a set of sources: one {@link ImportGraphEntry}
  * per source, `to` holding every specifier that source's own `import ... from
- * "..."` statements name, in file order. PURE, syntax-level only.
+ * "..."` AND `export ... from "..."` (WR-05: re-exports) statements name, in
+ * file order. PURE, syntax-level only.
  *
  * This is the DECLARED graph, not a RESOLVED module graph — a specifier is
  * recorded exactly as written (`"../diagnostics/redact.ts"`,
  * `"@earendil-works/pi-ai"`), never resolved against the filesystem or
  * `node_modules`, and a dynamic `import(...)` call is out of scope entirely
  * (deliberately: resolving one would need to evaluate an arbitrary
- * expression, which this function does not and must not do).
+ * expression, which this function does not and must not do). A bare
+ * side-effect `import "./x"` (no `from` clause) is also out of scope, for
+ * the same reason it always was: there is no specifier-bearing `from` to
+ * capture.
  *
  * Always returns one entry per source, even when a source's own `to` array
  * is empty (a file that imports nothing) — see {@link buildReviewerContext}'s
