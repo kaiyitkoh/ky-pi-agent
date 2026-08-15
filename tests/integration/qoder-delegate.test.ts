@@ -137,6 +137,15 @@ async function runDelegate(
 	return await withTempLogCwd(async (cwd) => {
 		return await withQoderLoopback(loopbackOpts, async (loop) => {
 			const config = resolveFixtureConfig(loop.baseUrl);
+			// Callers of this shared helper that pass `splitStreamAt` (e.g. the
+			// "split across two writes" case below) do not care about the
+			// stall-detection behaviour WR-07 exercises directly -- they only
+			// want a genuine two-write arrival. Release the gate as soon as the
+			// FIRST chunk has genuinely landed (an event, never a duration) so
+			// `delegateTask` cannot hang waiting on a gate nobody else would open.
+			void loop.firstChunkWritten.then(() => {
+				loop.releaseSecondChunk();
+			});
 			const folded = await delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd });
 			return { loop, folded, cwd };
 		});
@@ -505,50 +514,56 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 		// production never passes it, defaulting to the real five-minute
 		// STREAM_INACTIVITY_TIMEOUT_MS. Injecting a short one here is what makes
 		// this stall-detection behaviour provable without an actual five-minute
-		// wait. The loopback server is told to split the stream body into two
-		// writes with a real gap BETWEEN them (`splitDelayMs`) that is
-		// deliberately LONGER than the injected timeout -- the gap itself, not
-		// the connection closing, is what must trip the deadline.
+		// wait. The loopback server splits the stream body into two writes and
+		// then holds the second one behind `loop.releaseSecondChunk()` -- a
+		// gate this test never calls until AFTER the rejection assertion below,
+		// so the server genuinely goes silent rather than racing a wall-clock
+		// guess at when it would. See tests/helpers/qoder-loopback.ts's own
+		// docstring ("Event-gated stream splitting") for why the previous
+		// duration-based version of this fixture made this file intermittently
+		// red.
 		const injectedTimeoutMs = 60;
-		const splitDelayMs = 400;
-
-		const splitAt = Math.floor(FRAMES.length / 2);
+		// Split right at the frame boundary AFTER the first `agent.message`
+		// delta (rather than at the string midpoint) -- the `textChars > 0`
+		// assertion below needs the first chunk to contain at least one
+		// COMPLETE, parseable frame, not merely half the byte count. Splitting
+		// mid-frame would leave `folded.text` empty until the (never-sent)
+		// second chunk arrived, which is a fact about SSE framing, not about
+		// timing.
+		const splitAt = FRAMES.indexOf(UNKNOWN_FRAME);
 
 		await withTempLogCwd(async (cwd) => {
-			await withQoderLoopback(
-				{ frames: FRAMES, splitStreamAt: splitAt, splitDelayMs },
-				async (loop) => {
-					const config = resolveFixtureConfig(loop.baseUrl);
+			await withQoderLoopback({ frames: FRAMES, splitStreamAt: splitAt }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
 
-					const start = Date.now();
-					await expect(
-						delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd, inactivityTimeoutMs: injectedTimeoutMs }),
-					).rejects.toThrow(/no bytes for \d+ms/);
-					const elapsed = Date.now() - start;
+				const delegatePromise = delegateTask({
+					config,
+					task: DELEGATED_TASK_TEXT,
+					cwd,
+					inactivityTimeoutMs: injectedTimeoutMs,
+				});
 
-					// Non-vacuity: the stream endpoint really was reached (all
-					// three requests happened) before the timeout fired.
-					expect(loop.received.length).toBeGreaterThan(0);
-					expect(loop.received).toHaveLength(3);
+				try {
+					// The property the deleted `>= 60ms` wall-clock bound was
+					// standing in for: the first read genuinely happened. This is a
+					// FACT the server reports, not a duration long enough for it to
+					// probably have happened by.
+					await loop.firstChunkWritten;
 
-					// The timeout fired close to the INJECTED budget, not close to
-					// splitDelayMs (which would mean the real 5-minute default was
-					// used instead of the injected seam) and not near-instantly
-					// (which would mean it fired on the FIRST read, before the
-					// server's first chunk had any chance to arrive at all).
-					expect(
-						elapsed,
-						`the call took ${elapsed}ms, expected roughly the injected ${injectedTimeoutMs}ms budget -- ` +
-							"either the injection seam is not wired to the actual deadline, or the timeout fired " +
-							"on the wrong read",
-					).toBeGreaterThanOrEqual(injectedTimeoutMs);
-					expect(
-						elapsed,
-						`the call took ${elapsed}ms -- too close to splitDelayMs (${splitDelayMs}ms) for the ` +
-							"injected timeout to plausibly be what fired",
-					).toBeLessThan(splitDelayMs);
-				},
-			);
+					await expect(delegatePromise).rejects.toThrow(/no bytes for \d+ms/);
+				} finally {
+					// A failed assertion above must not leave the server's responder
+					// awaiting a gate nobody will ever open -- release it here too,
+					// as well as relying on the helper's own teardown, which does
+					// the same thing as a second line of defence.
+					loop.releaseSecondChunk();
+				}
+
+				// Non-vacuity: the stream endpoint really was reached (all
+				// three requests happened) before the timeout fired.
+				expect(loop.received.length).toBeGreaterThan(0);
+				expect(loop.received).toHaveLength(3);
+			});
 
 			// WR-06: a terminal transcript record for the inactivity-timeout path.
 			// Before this fix, the transcript ended at
@@ -559,14 +574,26 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 			const qoderFile = files.find((name) => name.startsWith("qoder-"));
 			expect(qoderFile, `no qoder-*.jsonl transcript found under ${dir}`).toBeDefined();
 			const { records } = readTornSafe(join(dir, qoderFile as string));
-			const failedRecords = (records as { event?: unknown; cause?: unknown }[]).filter(
-				(r) => r.event === "qoder.delegate.failed",
-			);
+			const failedRecords = (
+				records as { event?: unknown; cause?: unknown; afterMs?: unknown; textChars?: unknown }[]
+			).filter((r) => r.event === "qoder.delegate.failed");
 			expect(
 				failedRecords,
 				"no qoder.delegate.failed record was written for the inactivity-timeout path",
 			).toHaveLength(1);
 			expect(failedRecords[0]?.cause).toBe("inactivity-timeout");
+
+			// STRICTLY STRONGER than the deleted `60 <= (Date.now() delta) < 400`
+			// wall-clock bound: `afterMs` is the deadline the client actually armed
+			// (client.ts:706-710,720 -- `afterMs: inactivityTimeoutMs`), proving
+			// the injection seam is wired to the real deadline -- the first
+			// bound's whole purpose. `textChars > 0` proves bytes were folded
+			// before the stall was declared -- the second bound's whole purpose.
+			// Both are read from the LOSSLESS transcript record the client itself
+			// wrote, and neither depends on scheduler timing the way a
+			// `Date.now()` delta does.
+			expect(failedRecords[0]?.afterMs).toBe(injectedTimeoutMs);
+			expect(failedRecords[0]?.textChars).toBeGreaterThan(0);
 		});
 	});
 
@@ -574,21 +601,32 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 		// The paired positive: an injected timeout LONGER than the gap between
 		// chunks must let a genuinely (if slowly) progressing stream complete
 		// normally -- proving the deadline resets on progress rather than being
-		// a fixed budget from the stream's own start.
+		// a fixed budget from the stream's own start. `interChunkDelayMs` is a
+		// realistic-pacing detail for this fixture, not a bound this test
+		// asserts on -- the only assertions below are on the OUTCOME
+		// (`folded.done`, `folded.text`), never on how much time passed.
 		const injectedTimeoutMs = 2000;
-		const splitDelayMs = 50;
+		const interChunkDelayMs = 50;
 		const splitAt = Math.floor(FRAMES.length / 2);
 
 		await withTempLogCwd(async (cwd) => {
-			await withQoderLoopback({ frames: FRAMES, splitStreamAt: splitAt, splitDelayMs }, async (loop) => {
+			await withQoderLoopback({ frames: FRAMES, splitStreamAt: splitAt }, async (loop) => {
 				const config = resolveFixtureConfig(loop.baseUrl);
 
-				const folded = await delegateTask({
+				const delegatePromise = delegateTask({
 					config,
 					task: DELEGATED_TASK_TEXT,
 					cwd,
 					inactivityTimeoutMs: injectedTimeoutMs,
 				});
+
+				await loop.firstChunkWritten;
+				await new Promise<void>((resolve) => {
+					setTimeout(resolve, interChunkDelayMs);
+				});
+				loop.releaseSecondChunk();
+
+				const folded = await delegatePromise;
 
 				expect(loop.received.length).toBeGreaterThan(0);
 				expect(folded.done).toBe(true);
