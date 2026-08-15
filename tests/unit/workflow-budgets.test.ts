@@ -260,6 +260,16 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"rounded up to the next ten -- the figure previously stated here was 352, a CONTENT-line count, " +
 			"which is not the function the assertion uses (WR2-03)",
 	},
+	{
+		file: ".pi/extensions/grill/index.ts",
+		budget: 140,
+		why: "plan 09-08 (FLOW-02/FLOW-03) -- the /grill command itself: two entry points (a description, or the " +
+			"literal --resume), the git pre-flight copied verbatim from workflows/index.ts, slug " +
+			"derivation/resolution via .pi/lib/work-artifacts.ts#workDir, and writeSpecIfGated -- the ONLY " +
+			"function in this subsystem that writes SPEC.md, running gateRequirementsAuthorship then " +
+			"validateSpec then gateAmbiguity before any write. Measured 135 raw lines 2026-08-15 with " +
+			"countRawLines, rounded up to the next ten",
+	},
 ];
 
 /**
@@ -502,7 +512,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 1700,
+		budget: 1870,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -528,7 +538,14 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"fixed by naming DEFAULT_DIMENSION_FLOOR once and reusing it at all four sites, per this " +
 			"repository's own rule that a repeated literal needs a named constant. Re-measured 532 raw lines " +
 			"(scorecard.ts) + 1161 raw lines (spec-schema.ts) = 1693 raw lines across 2 files 2026-08-15, " +
-			"rounded up to the next ten",
+			"rounded up to the next ten. RAISED 1700 -> 1870 by plan 09-08 (FLOW-02/FLOW-03): two new files -- " +
+			"index.ts (the /grill command itself, this directory's first registerCommand( call, which is what " +
+			"makes commandDirs discover this directory directly rather than only via DIRECTORY_BUDGETS' own " +
+			"declared-ahead-of-time allowance) and scorecard-parse.ts (a small pure §8 table parser feeding " +
+			"gateAmbiguity, kept out of index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 250-line grill " +
+			"ceiling headroom for the skill body -- see that registry's own entry for this file). Measured " +
+			"135 (index.ts) + 33 (scorecard-parse.ts) + 532 (scorecard.ts) + 1161 (spec-schema.ts) = 1861 raw " +
+			"lines across 4 files 2026-08-15, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
