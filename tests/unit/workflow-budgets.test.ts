@@ -279,6 +279,24 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"are the right shape for this content, not a trick to cheat the line counter -- D-1, tables count " +
 			"fully). Measured 58 raw lines 2026-08-15 with countRawLines, rounded up to the next ten",
 	},
+	{
+		file: ".pi/extensions/plan-ceremony/index.ts",
+		budget: 140,
+		why: "plan 09-10 (FLOW-06) -- the /plan command itself: one entry point, no flags, the git pre-flight " +
+			"copied verbatim from workflows/index.ts, slug resolution via candidateSlugsWithSpec/resolveSlug " +
+			"(refusing rather than picking on ambiguity), the SPEC pre-flight (existence then validateSpec, " +
+			"re-run every invocation), and writePlanIfGated -- the ONLY function in this subsystem that writes " +
+			"PLAN.md, re-validating the on-disk SPEC.md and deriving its requirement ids before ever calling " +
+			"validatePlan. Measured 140 raw lines 2026-08-15 with countRawLines, already an exact multiple of ten",
+	},
+	{
+		file: ".pi/skills/plan-ceremony/SKILL.md",
+		budget: 50,
+		why: "plan 09-10 (FLOW-06) -- the task-line grammar, the both-directions coverage rule, the three " +
+			"PLAN.md parts each with a named consumer, and the 'what will refuse you' list, each as a table " +
+			"per grill/SKILL.md's own precedent. Measured 44 raw lines 2026-08-15 with countRawLines, rounded " +
+			"up to the next ten",
+	},
 ];
 
 /**
@@ -574,7 +592,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-ceremony",
-		budget: 580,
+		budget: 760,
 		why: "plan 09-09 (FLOW-06) -- the first file of the /plan subsystem, plan-schema.ts: the task-line " +
 			"parser (TASK_LINE_PATTERN, VERIFICATION_SEPARATOR, parseTaskLine), the whole-document scanner " +
 			"(parsePlanTasks, malformed lines returned never dropped), the files-touched union " +
@@ -591,7 +609,15 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"false-positived on ordinary prose words, discovered while constructing this plan's own " +
 			"falsification fixtures -- see 09-09-SUMMARY.md's deviations), and VERIFICATION_SEPARATOR dropped " +
 			"its trailing space to avoid an invisible-whitespace-dependent fixture. Re-measured 578 raw lines " +
-			"across 1 file 2026-08-15, rounded up to the next ten",
+			"across 1 file 2026-08-15, rounded up to the next ten. RAISED 580 -> 760 by plan 09-10 " +
+			"(FLOW-06): two new files -- index.ts (the /plan command itself, this directory's first " +
+			"registerCommand( call, which is what makes commandDirs discover this directory directly rather " +
+			"than only via DIRECTORY_BUDGETS' own declared-ahead-of-time allowance) and requirement-ids.ts " +
+			"(a small pure §3 requirement-id extractor feeding validatePlan's coverage argument, kept out of " +
+			"index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 200-line plan ceiling headroom for the " +
+			"skill body -- the same reason grill/scorecard-parse.ts was kept out of grill/index.ts). Measured " +
+			"578 (plan-schema.ts) + 140 (index.ts) + 42 (requirement-ids.ts) = 760 raw lines across 3 files " +
+			"2026-08-15, already an exact multiple of ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
@@ -1465,6 +1491,18 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 			"scorecard-parse.ts are supporting modules bound only by the .pi/extensions/grill DIRECTORY_BUDGETS " +
 			"ratchet above, per this registry's own module-docstring rule (D-13) that a merged closure budget " +
 			"would be meaningless",
+	},
+	{
+		name: "plan",
+		commandFile: ".pi/extensions/plan-ceremony/index.ts",
+		bodies: [".pi/skills/plan-ceremony/SKILL.md"],
+		budget: 200,
+		why: "FEATURES.md Part 2 line 183's ceiling, the TIGHTEST of the four ceremonial ceilings -- FROZEN, " +
+			"may not move to absorb growth (D-13). Measured 140 raw lines (index.ts) + 44 raw lines " +
+			"(SKILL.md) = 184 raw lines 2026-08-15 with countRawLines, inside 200 with 16 lines of headroom -- " +
+			"plan-schema.ts and requirement-ids.ts are supporting modules bound only by the " +
+			".pi/extensions/plan-ceremony DIRECTORY_BUDGETS ratchet above, per this registry's own " +
+			"module-docstring rule (D-13) that a merged closure budget would be meaningless",
 	},
 ];
 
