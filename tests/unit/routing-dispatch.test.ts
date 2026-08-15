@@ -42,6 +42,7 @@ import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { guardRoute } from "../../.pi/extensions/routing/guard.ts";
 import {
+	buildNestedApiOptions,
 	getModeState,
 	pickConfiguredCandidate,
 	planRoleCall,
@@ -56,6 +57,11 @@ import {
 } from "../../.pi/extensions/routing/modes.ts";
 import { DEFAULT_MODE, ROLE_MAP, ROLES, type ModelRef, type Role } from "../../.pi/extensions/routing/schema.ts";
 import { CHAIN } from "../../.pi/extensions/providers/schema.ts";
+import { repoRoot } from "../helpers/git.ts";
+import { withModelsConfig } from "../helpers/models.ts";
+
+/** The template plan 03-02 shipped -- composed through Pi, never read as literal JSON. */
+const TEMPLATE = `${repoRoot()}/.pi/templates/models-template.json`;
 
 // -----------------------------------------------------------------------------
 // Fixture builders
@@ -269,6 +275,85 @@ describe("usesFallbackChain", () => {
 			expect(usesFallbackChain({ provider: entry.provider, id: entry.id }), `${entry.provider}/${entry.id} is a member of CHAIN`).toBe(true);
 		}
 		expect(usesFallbackChain({ provider: "amazon-bedrock", id: "anthropic.claude-sonnet-4-5-20250929-v1:0" })).toBe(false);
+	});
+});
+
+// -----------------------------------------------------------------------------
+// buildNestedApiOptions -- 08-01: the per-model.api nested options bag, proven
+// per api id, plus the undefined-effort short circuit and the CHAIN-hop
+// homogeneity case (T-08-07).
+// -----------------------------------------------------------------------------
+
+describe("buildNestedApiOptions", () => {
+	it("returns undefined when effort is undefined, regardless of model.api", () => {
+		const openAiModel = makeModel({ api: "openai-completions" });
+		const bedrockModel = makeModel({ api: "bedrock-converse-stream" });
+		expect(buildNestedApiOptions(openAiModel, undefined)).toBeUndefined();
+		expect(buildNestedApiOptions(bedrockModel, undefined)).toBeUndefined();
+	});
+
+	it('openai-completions -> { reasoningEffort: effort }, with no "reasoning" field', () => {
+		const model = makeModel({ api: "openai-completions" });
+		const options = buildNestedApiOptions(model, "high");
+		expect(options).toEqual({ reasoningEffort: "high" });
+		expect("reasoning" in (options ?? {}), "the openai-completions shape must not also carry the bedrock field name").toBe(false);
+	});
+
+	it('bedrock-converse-stream -> { reasoning: effort }, with no "reasoningEffort" field -- the 08-01 fix itself', () => {
+		const model = makeModel({ api: "bedrock-converse-stream" });
+		const options = buildNestedApiOptions(model, "high");
+		expect(options).toEqual({ reasoning: "high" });
+		expect(
+			"reasoningEffort" in (options ?? {}),
+			"the bedrock-converse-stream shape must not carry reasoningEffort -- BedrockOptions has no such " +
+				"field and a real adapter would silently ignore it, which is the defect this function fixes",
+		).toBe(false);
+	});
+
+	it("anthropic-messages throws, naming the model id, rather than inventing a token budget", () => {
+		const model = makeModel({ api: "anthropic-messages", provider: "some-anthropic-provider", id: "some-claude-id" });
+		expect(() => buildNestedApiOptions(model, "high")).toThrowError(/some-anthropic-provider\/some-claude-id/);
+		expect(() => buildNestedApiOptions(model, "high")).toThrowError(/anthropic-messages/);
+	});
+
+	it("an api id outside the known three falls back to the openai-completions shape (the historical default, preserved deliberately)", () => {
+		// See buildNestedApiOptions's own docstring's DEVIATION section: a faux
+		// test fixture that omits `api` gets a RANDOM id from pi-ai
+		// (`faux:<timestamp>:<random>`), and single-shot-roles.test.ts relies on
+		// this function still treating that the way the pre-08-01 code treated
+		// every api -- as the openai-completions shape.
+		const model = makeModel({ api: "faux:1234:abcdef" });
+		expect(buildNestedApiOptions(model, "max")).toEqual({ reasoningEffort: "max" });
+	});
+
+	describe("CHAIN-hop homogeneity (T-08-07)", () => {
+		it("every CHAIN entry's resolved model.api produces the SAME shape key as the chain head's", async () => {
+			expect(CHAIN.length, "vacuity guard -- an empty CHAIN would make the loop below pass on nothing").toBeGreaterThan(0);
+
+			await withModelsConfig({ models: TEMPLATE }, (handle) => {
+				const shapeKeys = CHAIN.map((entry) => {
+					const model = handle.requireModel(entry.provider, entry.id);
+					const options = buildNestedApiOptions(model, "high");
+					expect(options, `${entry.provider}/${entry.id} produced no options for a declared effort`).toBeDefined();
+					const keys = Object.keys(options as Record<string, unknown>);
+					expect(keys.length, `${entry.provider}/${entry.id}'s nested options bag carried more than one key`).toBe(1);
+					return { entry, key: keys[0] };
+				});
+
+				const headKey = shapeKeys[0]?.key;
+				expect(headKey, "vacuity guard -- CHAIN must have resolved at least one shape key").toBeDefined();
+
+				for (const { entry, key } of shapeKeys) {
+					expect(
+						key,
+						`${entry.provider}/${entry.id}'s nested-call shape key ("${key}") does not match the chain ` +
+							`head's ("${headKey}") -- runSingleShotRole computes ONE api options object and ` +
+							"callWithFallback reuses it across every hop, so a chain that mixed apis would " +
+							"silently mis-shape a later hop's request",
+					).toBe(headKey);
+				}
+			});
+		});
 	});
 });
 

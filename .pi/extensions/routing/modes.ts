@@ -95,7 +95,7 @@
  * and the same reason: `tests/unit/extension-layout.test.ts` would otherwise
  * reclassify this file as one).
  */
-import type { Api, AssistantMessage, Message, Model } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Message, Model, ModelsApiStreamOptions, Tool } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { callModel } from "../diagnostics/call-model.ts";
@@ -360,6 +360,121 @@ export function planRoleCall(registry: ModelRegistryLike, opts: PlanRoleCallOpti
 }
 
 // -----------------------------------------------------------------------------
+// Nested api-options shape — pure. One producer of a nested call's `api` bag,
+// branching on the RESOLVED candidate's `model.api`, never assuming
+// openai-completions. This is the 08-01 fix: the code this function replaced
+// built `{ reasoningEffort }` unconditionally, which is the openai-completions
+// shape only — `BedrockOptions` (`@earendil-works/pi-ai`'s
+// `api/bedrock-converse-stream.d.ts`) carries NO `reasoningEffort` field, so
+// every Bedrock-routed nested call (reviewer/advisor in `balanced`/`max`,
+// vision in every mode) silently dropped its declared reasoning effort on the
+// floor. GATE-10's own nested proof
+// (`tests/integration/gate10-nested-thinking.test.ts`) was run RED against
+// the unconditional shape before this function existed.
+// -----------------------------------------------------------------------------
+
+/**
+ * Build the `api` options bag for a nested single-shot call, for the api the
+ * RESOLVED candidate actually carries — never the caller's assumption of
+ * which api that is. Returns `undefined` when `effort` is `undefined` (the
+ * route declares no elevated reasoning for this role), matching the field's
+ * prior unconditional behaviour for that case exactly.
+ *
+ * `"bedrock-converse-stream"` -> `{ reasoning: effort }`
+ * (`node_modules/@earendil-works/pi-ai/dist/api/bedrock-converse-stream.d.ts:6-11`
+ * — this api's field is named `reasoning`, not `reasoningEffort`; the latter
+ * does not exist on `BedrockOptions` and a real adapter silently ignores it).
+ * This is the ONE branch that had to change: every other api keeps the prior
+ * unconditional shape.
+ *
+ * `"anthropic-messages"` THROWS: `ROLE_MAP` resolves no `anthropic-messages`
+ * candidate today, so there is no measured per-level token budget to map
+ * `effort` onto — `AnthropicMessagesOptions` wants `thinkingBudgetTokens`, a
+ * concrete number, not a level string, and inventing one here would be a
+ * fabricated measurement (05-RESEARCH.md Assumption A3). A throw is the
+ * honest degradation, reachable only if the routing table changes to resolve
+ * an `anthropic-messages` candidate for a role that declares `reasoningEffort`
+ * — at which point this function's error message says exactly what is
+ * missing and where to add it.
+ *
+ * `"openai-completions"` -> `{ reasoningEffort: effort }`
+ * (`node_modules/@earendil-works/pi-ai/dist/api/openai-completions.d.ts:4-9`),
+ * and this is ALSO the `default` case, DELIBERATELY, not a distinct arm.
+ *
+ * WHY `default` FALLS BACK TO THE OPENAI SHAPE RATHER THAN THROWING — A
+ * DEVIATION FROM THE PLAN'S OWN WORDING, RECORDED HERE RATHER THAN HIDDEN
+ * (08-01-SUMMARY.md's Deviations section states it too). The plan's action
+ * text asked for a `default` arm that throws, matching a compile-time
+ * exhaustiveness idiom. Two things ruled that out once tried:
+ *
+ *   1. `Api` is `KnownApi | (string & {})` [pi-ai `types.d.ts:16`] — an OPEN
+ *      union, kept open on purpose so a custom `models.json` entry can carry
+ *      an api id this package's own catalogue does not know about (PROV-06).
+ *      A `default: { const exhaustive: never = model.api; }` throwing arm
+ *      does not even COMPILE against this type — verified by trying it:
+ *      `tsc` reports TS2322, `"google-generative-ai" | (string & {})` is not
+ *      assignable to `never`, because equality narrowing on literal `case`s
+ *      cannot exclude the open `(string & {})` fallback arm no matter how
+ *      many literals are matched.
+ *   2. A throwing `default` at RUNTIME (tried and reverted — see the git
+ *      history on this line if it is ever restored) broke
+ *      `tests/integration/single-shot-roles.test.ts`, an EXISTING, in-scope,
+ *      required-green proof this plan may not modify: that file's own
+ *      `fauxProvider({provider:"deepseek", ...})` call passes no `api`
+ *      option, so pi-ai's `fauxProvider` assigns a RANDOM id
+ *      (`faux:<timestamp>:<random>`, `pi-ai src/providers/faux.js:297`) —
+ *      neither `"openai-completions"` nor any other `KnownApi` member. That
+ *      is a legitimate test fixture, not a bug to fix by editing a plan-
+ *      external file: every api this codebase's `ROLE_MAP` resolves today
+ *      (openai-completions, bedrock-converse-stream) is either explicitly
+ *      handled above or falls into this default, and an unlabelled faux
+ *      provider is exactly the class of "some other api, treat it like the
+ *      historical default" case this function must still serve without
+ *      breaking. Reproduced: throwing here turned 2 passing tests in that
+ *      file red with `buildNestedApiOptions: unrecognised model.api
+ *      "faux:...:..." `.
+ *
+ * The scope of the actual defect this function fixes is narrow — Bedrock got
+ * the wrong shape — and the fix stays narrow: ONE branch changed
+ * (`bedrock-converse-stream`), ONE branch added (`anthropic-messages`, which
+ * genuinely cannot be served honestly), and everything else — the real
+ * `openai-completions` api along with every other api id this function has
+ * never been told how to handle, faux test ids included — keeps doing
+ * exactly what the pre-fix code did for it.
+ */
+export function buildNestedApiOptions(
+	model: Model<Api>,
+	effort: "high" | "max" | undefined,
+): ModelsApiStreamOptions<Api> | undefined {
+	if (effort === undefined) {
+		return undefined;
+	}
+	switch (model.api) {
+		case "bedrock-converse-stream":
+			return { reasoning: effort };
+		case "anthropic-messages":
+			throw new Error(
+				`buildNestedApiOptions: no per-level token budget has been chosen for anthropic-messages ` +
+					`(model ${model.provider}/${model.id}) -- ROLE_MAP resolves no anthropic-messages candidate ` +
+					"today (05-RESEARCH.md Assumption A3), so there is nothing measured to map " +
+					`${JSON.stringify(effort)} onto. AnthropicMessagesOptions wants thinkingBudgetTokens, a ` +
+					"concrete number, not a level string -- inventing one here would be a fabricated " +
+					"measurement. Add a real mapping to this function before routing any role through an " +
+					"anthropic-messages candidate that declares reasoningEffort.",
+			);
+		case "openai-completions":
+		default:
+			// See this function's own docstring for why `default` is the
+			// openai-completions shape rather than a throw: `model.api`'s type
+			// here is NOT `never` (Api's open `(string & {})` fallback arm makes
+			// true compile-time exhaustiveness impossible for this union), and a
+			// runtime throw here broke an existing, in-scope, required-green test
+			// whose faux fixture carries an unlabelled api id.
+			return { reasoningEffort: effort };
+	}
+}
+
+// -----------------------------------------------------------------------------
 // Dispatch — impure. The only half of this file that touches a session.
 // -----------------------------------------------------------------------------
 
@@ -368,6 +483,14 @@ export interface RunSingleShotRoleOptions {
 	readonly messages: Message[];
 	readonly systemPrompt?: string;
 	readonly need: RoleNeed;
+	/**
+	 * Threads straight to the chokepoint's existing `tools` field
+	 * (`CallModelOptions.tools`, `.pi/extensions/diagnostics/call-model.ts`) —
+	 * that field has existed since Phase 2 with no caller until this one. How a
+	 * nested call is given a forced structured-output tool: pass the single
+	 * tool the caller wants the model to invoke.
+	 */
+	readonly tools?: Tool[];
 }
 
 /**
@@ -385,12 +508,19 @@ export interface RunSingleShotRoleOptions {
  * swallowed into an `undefined` result, so the caller (a command or a tool)
  * always has something to report.
  *
- * `api` carries `{ reasoningEffort }` only when the route declares one.
- * `signal` is deliberately never passed: `callModel()`/`callWithFallback()`
- * both default it to the session's own abort signal, so pressing Esc cancels
- * this nested work too. Nothing here reaches for the mode-switch commands'
- * own mechanism, and nothing here writes a custom session entry — this path
- * mutates no session state at all (ROUTE-04).
+ * `api` is built by {@link buildNestedApiOptions}, which branches on the
+ * RESOLVED candidate's `model.api` — `{ reasoningEffort }` for
+ * openai-completions, `{ reasoning }` for bedrock-converse-stream, never the
+ * same shape for both. `BedrockOptions` carries no `reasoningEffort` field at
+ * all, so the earlier unconditional `{ reasoningEffort }` shape silently
+ * dropped every Bedrock-routed nested call's declared reasoning effort (the
+ * 08-01 fix). `api` is `undefined` when the route declares no elevated
+ * reasoning for this role, exactly as before. `signal` is deliberately never
+ * passed: `callModel()`/`callWithFallback()` both default it to the session's
+ * own abort signal, so pressing Esc cancels this nested work too. Nothing
+ * here reaches for the mode-switch commands' own mechanism, and nothing here
+ * writes a custom session entry — this path mutates no session state at all
+ * (ROUTE-04).
  */
 export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleShotRoleOptions): Promise<AssistantMessage> {
 	const state = getModeState();
@@ -406,7 +536,7 @@ export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleSh
 	}
 
 	const ref: ModelRef = { provider: plan.model.provider, id: plan.model.id };
-	const api = plan.reasoningEffort !== undefined ? { reasoningEffort: plan.reasoningEffort } : undefined;
+	const api = buildNestedApiOptions(plan.model, plan.reasoningEffort);
 
 	// CR-02: `callWithFallback` always restarts at the chain's OWN head
 	// (`../providers/fallback.ts`'s own doc comment, "Per entry, in order",
@@ -433,6 +563,7 @@ export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleSh
 			role: opts.role,
 			systemPrompt: opts.systemPrompt,
 			messages: opts.messages,
+			tools: opts.tools,
 			api,
 		});
 	}
@@ -442,6 +573,7 @@ export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleSh
 		model: plan.model,
 		systemPrompt: opts.systemPrompt,
 		messages: opts.messages,
+		tools: opts.tools,
 		api,
 	});
 }

@@ -210,10 +210,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/routing",
-		budget: 2230,
-		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 2224 " +
-			"raw lines across 5 files 2026-08-15 (not re-reviewed for tightness, same precedent as WR-05's " +
-			"per-file entries), rounded up to the next ten",
+		budget: 2360,
+		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 2356 " +
+			"raw lines across 5 files 2026-08-15 (08-01's buildNestedApiOptions plus its docstring, incl. the " +
+			"deviation note explaining why default falls back to the openai-completions shape rather than " +
+			"throwing; not re-reviewed for tightness, same precedent as WR-05's per-file entries), rounded up " +
+			"to the next ten",
 	},
 	{
 		dir: ".pi/extensions/harness",
