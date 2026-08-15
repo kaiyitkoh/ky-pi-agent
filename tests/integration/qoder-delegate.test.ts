@@ -597,43 +597,71 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 		});
 	});
 
-	it("does NOT time out when bytes keep arriving, even across a real inter-chunk delay shorter than the injected budget", async () => {
-		// The paired positive: an injected timeout LONGER than the gap between
-		// chunks must let a genuinely (if slowly) progressing stream complete
-		// normally -- proving the deadline resets on progress rather than being
-		// a fixed budget from the stream's own start. `interChunkDelayMs` is a
-		// realistic-pacing detail for this fixture, not a bound this test
-		// asserts on -- the only assertions below are on the OUTCOME
-		// (`folded.done`, `folded.text`), never on how much time passed.
-		const injectedTimeoutMs = 2000;
-		const interChunkDelayMs = 50;
-		const splitAt = Math.floor(FRAMES.length / 2);
+	it(
+		"WR-04: does NOT time out across THREE real inter-chunk delays whose SUM exceeds the injected budget, " +
+			"while every INDIVIDUAL gap stays under it -- the only shape that distinguishes reset-on-progress " +
+			"from a fixed budget",
+		async () => {
+			// The paired positive, tightened per WR-04. The prior version used ONE
+			// gap (~50ms) against a MUCH larger budget (2000ms): a client that
+			// arms a single fixed timeout at stream-open time and never resets it
+			// would STILL pass that case, because 50ms elapsed is nowhere near
+			// 2000ms regardless of reset behaviour -- the test's own comment
+			// claimed to prove reset-on-progress but never actually forced a
+			// choice between the two implementations.
+			//
+			// Here, the stream is split into FOUR chunks (three gaps). Chunk N+1
+			// is released only after chunk N's own `chunkWritten` event plus a
+			// real `interChunkDelayMs` (150ms) sleep, so the four chunks land at
+			// roughly 0ms, 150ms, 300ms and 450ms after stream open. The injected
+			// budget (`injectedTimeoutMs`, 300ms) is DELIBERATELY smaller than the
+			// SUM of the three gaps (450ms) but larger than any ONE gap (150ms,
+			// 150ms of headroom against scheduler jitter):
+			//
+			//   - reset-on-progress (the correct implementation): each gap is
+			//     checked against the budget INDEPENDENTLY and every one is under
+			//     it, so the stream completes normally at ~450ms elapsed.
+			//   - a single fixed deadline armed once at stream open (the bug this
+			//     test exists to catch): the 300ms deadline fires before the
+			//     fourth chunk (which lands at ~450ms), and `delegateTask` rejects.
+			//
+			// The only assertions below are on the OUTCOME (`folded.done`,
+			// `folded.text`), never on how much time passed -- exactly the prior
+			// version's own discipline, preserved here.
+			const injectedTimeoutMs = 300;
+			const interChunkDelayMs = 150;
+			const splitPoints = [Math.floor(FRAMES.length / 4), Math.floor(FRAMES.length / 2), Math.floor((3 * FRAMES.length) / 4)];
 
-		await withTempLogCwd(async (cwd) => {
-			await withQoderLoopback({ frames: FRAMES, splitStreamAt: splitAt }, async (loop) => {
-				const config = resolveFixtureConfig(loop.baseUrl);
+			await withTempLogCwd(async (cwd) => {
+				await withQoderLoopback({ frames: FRAMES, splitStreamAtMultiple: splitPoints }, async (loop) => {
+					const config = resolveFixtureConfig(loop.baseUrl);
 
-				const delegatePromise = delegateTask({
-					config,
-					task: DELEGATED_TASK_TEXT,
-					cwd,
-					inactivityTimeoutMs: injectedTimeoutMs,
+					const delegatePromise = delegateTask({
+						config,
+						task: DELEGATED_TASK_TEXT,
+						cwd,
+						inactivityTimeoutMs: injectedTimeoutMs,
+					});
+
+					// Three gaps, each: wait for the chunk to genuinely land, sleep
+					// interChunkDelayMs of REAL time, then release the next one.
+					for (let i = 0; i < 3; i++) {
+						await loop.chunkWritten[i];
+						await new Promise<void>((resolve) => setTimeout(resolve, interChunkDelayMs));
+						loop.releaseNextChunk();
+					}
+					// The fourth (last) chunk needs no release -- it is written as
+					// soon as the third gate opens.
+
+					const folded = await delegatePromise;
+
+					expect(loop.received.length).toBeGreaterThan(0);
+					expect(folded.done).toBe(true);
+					expect(folded.text).toBe("Hello world");
 				});
-
-				await loop.firstChunkWritten;
-				await new Promise<void>((resolve) => {
-					setTimeout(resolve, interChunkDelayMs);
-				});
-				loop.releaseSecondChunk();
-
-				const folded = await delegatePromise;
-
-				expect(loop.received.length).toBeGreaterThan(0);
-				expect(folded.done).toBe(true);
-				expect(folded.text).toBe("Hello world");
 			});
-		});
-	});
+		},
+	);
 });
 
 describe("qoder-delegate -- WR-08: a malformed server-supplied session id is refused, never spliced raw into a request path", () => {

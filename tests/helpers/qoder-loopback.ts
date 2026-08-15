@@ -134,9 +134,23 @@ export interface QoderLoopbackOptions {
 	 * ending the response -- an event a test controls, never a duration it
 	 * races. Omitted (or out of range) means the whole body is written in one
 	 * call, and `firstChunkWritten` still resolves once that single write has
-	 * happened, so a caller may always await it without hanging.
+	 * happened, so a caller may always await it without hanging. Ignored when
+	 * `splitStreamAtMultiple` is also set.
 	 */
 	splitStreamAt?: number;
+	/**
+	 * WR-04: split the stream body into MORE than two `res.write()` calls, at
+	 * these character offsets into `frames` (strictly increasing, each within
+	 * `(0, frames.length)`). Exists for exactly one property `splitStreamAt`'s
+	 * single gate cannot express: proving an inactivity deadline resets on
+	 * EVERY chunk, not merely once, by making the SUM of several real
+	 * inter-chunk gaps exceed an injected timeout while every INDIVIDUAL gap
+	 * stays under it -- the only shape that distinguishes "resets on progress"
+	 * from "one fixed budget from the stream's own start". Event-gated, same
+	 * discipline as `splitStreamAt`: no `res.write()` here is timed against a
+	 * duration, only against the handle's own `releaseNextChunk()` calls.
+	 */
+	splitStreamAtMultiple?: readonly number[];
 	/** Per-endpoint status overrides. */
 	statusOverrides?: QoderLoopbackStatusOverrides;
 	/**
@@ -179,6 +193,21 @@ export interface QoderLoopbackHandle {
 	 * assertion, an early `return`) can never deadlock the helper.
 	 */
 	releaseSecondChunk: () => void;
+	/**
+	 * WR-04: one promise per chunk written when `splitStreamAtMultiple` was
+	 * set -- `chunkWritten[i]` resolves once chunk `i` (0-indexed) has
+	 * genuinely landed on the wire. Empty when `splitStreamAtMultiple` was not
+	 * set.
+	 */
+	chunkWritten: readonly Promise<void>[];
+	/**
+	 * WR-04: release the gate before the NEXT chunk in a
+	 * `splitStreamAtMultiple` sequence. Idempotent per boundary and safe to
+	 * call more times than there are gates (a harmless no-op past the last
+	 * one), matching `releaseSecondChunk`'s own discipline. A no-op when
+	 * `splitStreamAtMultiple` was not set.
+	 */
+	releaseNextChunk: () => void;
 }
 
 /**
@@ -319,6 +348,46 @@ function createDeferred<T = void>(): { promise: Promise<T>; resolve: (value: T) 
 }
 
 /**
+ * WR-04: write `frames` as MORE than two `res.write()` calls, at `points`
+ * (strictly increasing offsets into `frames`). Chunk `i` is written, its own
+ * `onChunkWritten(i)` fires, then (for every chunk but the last) the server
+ * AWAITS `gates[i]` before writing chunk `i + 1` -- event-gated exactly like
+ * {@link writeStreamBody}'s two-chunk case, just generalised to N chunks.
+ */
+async function writeStreamBodyMultiSplit(
+	res: ServerResponse,
+	status: number,
+	frames: string,
+	points: readonly number[],
+	onChunkWritten: (index: number) => void,
+	gates: readonly Promise<void>[],
+): Promise<void> {
+	res.writeHead(status, {
+		"content-type": "text/event-stream",
+		"cache-control": "no-cache",
+		connection: "close",
+	});
+	if (status < 200 || status >= 300) {
+		res.end();
+		// No bytes were ever written -- still resolve every gate a caller might
+		// unconditionally await, mirroring writeStreamBody's own discipline.
+		for (let i = 0; i < points.length + 1; i++) {
+			onChunkWritten(i);
+		}
+		return;
+	}
+	const boundaries = [0, ...points, frames.length];
+	for (let i = 0; i < boundaries.length - 1; i++) {
+		res.write(frames.slice(boundaries[i] as number, boundaries[i + 1] as number));
+		onChunkWritten(i);
+		if (i < gates.length) {
+			await gates[i];
+		}
+	}
+	res.end();
+}
+
+/**
  * Stand a Cloud-Agents-shaped capture server on `127.0.0.1`, await `fn` with
  * it, then close it and release the port.
  *
@@ -356,6 +425,25 @@ export async function withQoderLoopback<T>(
 		}
 		secondChunkReleased = true;
 		secondChunkGate.resolve();
+	};
+
+	// WR-04: the N-way generalisation. One deferred per chunk boundary (one
+	// fewer than the number of chunks); `releaseNextChunk` pops them in order,
+	// so a caller never needs to track which gate is "next" itself. Empty
+	// arrays when `splitStreamAtMultiple` was not set -- `chunkWritten` stays
+	// `[]` and `releaseNextChunk` is a harmless no-op, matching
+	// `releaseSecondChunk`'s own past-the-end idempotency.
+	const multiSplitPoints = opts.splitStreamAtMultiple ?? [];
+	const chunkWrittenGates = Array.from({ length: multiSplitPoints.length + (multiSplitPoints.length > 0 ? 1 : 0) }, () => createDeferred<void>());
+	const nextChunkGates = Array.from({ length: multiSplitPoints.length }, () => createDeferred<void>());
+	let nextGateIndex = 0;
+	const releaseNextChunk = (): void => {
+		const gate = nextChunkGates[nextGateIndex];
+		if (gate === undefined) {
+			return;
+		}
+		nextGateIndex += 1;
+		gate.resolve();
 	};
 
 	// Every in-flight request responder, tracked so teardown can await it
@@ -430,6 +518,17 @@ export async function withQoderLoopback<T>(
 					if (status < 200 || status >= 300) {
 						res.writeHead(status, { "content-type": "application/json" });
 						res.end(JSON.stringify({ error: `qoder-loopback: stream open forced to HTTP ${status}` }));
+						return;
+					}
+					if (multiSplitPoints.length > 0) {
+						await writeStreamBodyMultiSplit(
+							res,
+							status,
+							frames,
+							multiSplitPoints,
+							(index) => chunkWrittenGates[index]?.resolve(),
+							nextChunkGates.map((gate) => gate.promise),
+						);
 						return;
 					}
 					await writeStreamBody(
@@ -532,16 +631,22 @@ export async function withQoderLoopback<T>(
 			received,
 			firstChunkWritten: firstChunkWrittenGate.promise,
 			releaseSecondChunk,
+			chunkWritten: chunkWrittenGates.map((gate) => gate.promise),
+			releaseNextChunk,
 		});
 	} finally {
-		// Release the gate FIRST: a test that failed (or returned early) before
-		// calling `releaseSecondChunk` itself must not deadlock teardown on a
-		// responder that is awaiting a gate nobody will ever open.
+		// Release the gates FIRST: a test that failed (or returned early)
+		// before calling `releaseSecondChunk`/`releaseNextChunk` itself must not
+		// deadlock teardown on a responder that is awaiting a gate nobody will
+		// ever open.
 		releaseSecondChunk();
+		for (const gate of nextChunkGates) {
+			gate.resolve();
+		}
 		// Now await every tracked responder -- one still pending here (e.g.
-		// mid-`writeStreamBody`, having just had its gate released) is a live
-		// timer that must finish before the sockets it is writing to are
-		// destroyed out from under it.
+		// mid-`writeStreamBody`/`writeStreamBodyMultiSplit`, having just had its
+		// gate released) is a live timer that must finish before the sockets it
+		// is writing to are destroyed out from under it.
 		await Promise.allSettled(pendingResponders);
 		for (const socket of sockets) {
 			socket.destroy();
