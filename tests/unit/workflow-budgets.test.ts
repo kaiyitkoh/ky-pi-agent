@@ -126,11 +126,16 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/loop-police/loop-police.ts",
-		budget: 1240,
+		budget: 1290,
 		why: "Phase 7 plan 06 (EXT-05/EXT-10)'s vendored pi-loop-police@1.14.1, registers /loop-police -- " +
 			"WR-05 widened discovery to catch command surfaces outside workflows/; this is upstream's own " +
 			"size plus a short vendoring-fix comment (see .pi/extensions/loop-police/PROVENANCE.md), " +
-			"measured 1237 raw lines 2026-08-15, rounded up to the next ten",
+			"measured 1237 raw lines 2026-08-15, rounded up to the next ten. RAISED 1240 -> 1290 by the " +
+			"Phase 7 code-review fix pass: WR-17 found HOOK_CMD -- an arbitrary command run via pi.exec on " +
+			"every detection -- was read from loop-police.json INSIDE the working tree, which the agent " +
+			"writes with an ordinary write/edit the bash tool_call guard never sees. Both egress keys are " +
+			"now pinned to the environment, and the block explaining why is the part a future vendoring " +
+			"bump most needs to keep. Re-measured 1276 raw lines 2026-08-15, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/plan-mode/index.ts",
@@ -218,12 +223,14 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/loop-police",
-		budget: 1270,
+		budget: 1310,
 		why: "Phase 7 plan 06 (EXT-05/EXT-10)'s vendored pi-loop-police@1.14.1 -- index.ts never spells " +
 			"registerCommand( itself (a named re-export) but counts toward this total per WR-03; measured " +
 			"1260 raw lines across 2 files 2026-08-15 (index.ts 23 + loop-police.ts 1237, both including " +
 			"short vendoring-fix comments), upstream's own size, not a number this phase reviewed for " +
-			"tightness, rounded up to the next ten",
+			"tightness, rounded up to the next ten. RAISED 1270 -> 1310 by the Phase 7 code-review fix " +
+			"pass for WR-17's environment pinning of HOOK_CMD/HOOK_LOG -- see the per-file entry above for " +
+			"the finding. Re-measured 1299 raw lines across 2 files 2026-08-15",
 	},
 	{
 		dir: ".pi/extensions/plan-mode",

