@@ -248,6 +248,23 @@ const TOOL_COUNT_BASELINE: readonly ToolCountRow[] = [
 			"ZERO tools -- grepped index.ts, git.ts and store.ts, no registerTool( match; a single " +
 			"/checkpoint-restore command, zero schema cost per BOOT-10's own citation.",
 	},
+	{
+		source: ".pi/extensions/quality/index.ts",
+		kind: "vendored",
+		toolNames: ["consult_advisor"],
+		promptMetadata: false,
+		why: "GATE-09 -- plan 08-11's entry point registers `consult_advisor` (built as a plain module by " +
+			"plan 08-08's advisor.ts, wired to pi.registerTool here), 584 bytes / 146 tokens measured " +
+			"(08-08-SUMMARY.md, verbatim; see tests/unit/contributing-boundary.test.ts's own allowlist " +
+			"entry for the full (a)/(b)/(c) answers). `kind: \"vendored\"` here means \"in-repo authored " +
+			"source, grep-enforced against this repository's own tracked files\" -- not an upstream " +
+			"vendored package -- and this row is checked by the SAME Direction 1 vendored-row grep as " +
+			"every other in-repo entry above; there is no better member of this file's kind union for " +
+			"authored-in-repo code. promptMetadata is false: `grep -rc \"promptSnippet\\|promptGuidelines\" " +
+			".pi/extensions/quality/` returns 0 -- neither optional per-tool prompt-metadata field is set " +
+			"anywhere in this subsystem, so activating this tool never rebuilds the system prompt or " +
+			"invalidates the provider cache prefix.",
+	},
 ];
 
 /** Exception: `pi-subagents` serves EXT-01..EXT-04, not one of EXT-05's eight capabilities -- named, not silently allowed. */

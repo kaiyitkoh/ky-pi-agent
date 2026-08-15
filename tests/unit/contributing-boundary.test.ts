@@ -211,12 +211,55 @@ const COMMAND_REGISTRATION = "registerCommand";
  * `tests/unit/tool-count-baseline.test.ts` (plan 07-11, not yet written at
  * the time this entry was added) is the registry Phase 10 will measure the
  * cut against -- this comment is Phase 7's own count showing its work.
+ *
+ * `.pi/extensions/quality/index.ts` (Phase 8, plan 11, GATE-09) is the fifth
+ * entry -- registers `consult_advisor`, built as a plain, unregistered module
+ * by plan 08-08's `advisor.ts` and wired to `pi.registerTool` here, in the
+ * same commit as this allowlist entry:
+ *
+ * (a) The model must call `consult_advisor` MID-TURN -- the consult happens
+ *     at a decision point INSIDE the executor's own turn, about work it is
+ *     currently doing, and the advisor's answer must return into that SAME
+ *     turn so the executor can act on it before finishing. A command cannot
+ *     originate here: `system-prompt.ts` carries no reference to registered
+ *     commands, so a command runs BETWEEN turns and has no path back into
+ *     the model's own reasoning while it is still working. `/escalate`
+ *     (ROUTE-03) is not a substitute -- it lifts the EXECUTOR's own model
+ *     for every subsequent turn; it does not let the executor keep its own
+ *     model while asking a second one a single question.
+ * (b) MEASURED, not estimated: serialised as the exact
+ *     `{type:"function",function:{name,description,parameters}}` shape
+ *     `openai-completions.ts:1337-1372` sends, this tool's schema is 584
+ *     bytes. `Math.ceil(584 / 4) = 146` tokens by this project's own
+ *     estimator (`diagnostics/budget.ts:223-224`), under the plan's 200-token
+ *     hard limit. Computed by running the tool's real `typebox` schema and
+ *     description text through
+ *     `Buffer.byteLength(JSON.stringify(payload), "utf8")` via a
+ *     `node --input-type=module -e` one-liner run from this repo's own root
+ *     -- the exact command and output are recorded in `08-08-SUMMARY.md`'s
+ *     Measurement section.
+ * (c) A skill cannot carry this because a skill is text the model reads and
+ *     interprets -- it has no mechanism to make a nested, routed, guarded
+ *     model call through the Phase 2 chokepoint whose result comes back as
+ *     structured tool output the executor can branch on inside the SAME
+ *     turn. The best a skill can do is tell the model to WRITE a question as
+ *     ordinary prose, which the prose retry / prose-tool-call detector
+ *     (Phase 2, DIAG-05) already treats as a failure mode, not a feature.
+ *
+ * THIS PHASE'S OWN HONESTY ABOUT WHAT THIS COSTS. `consult_advisor` is the
+ * FIFTH tool registered anywhere in this repository and the first Phase 8
+ * adds. The new LIVE TOTAL this commit produces: 5 tools, Phase 7's own
+ * 1015-token, 4-tool figure (the paragraph above) plus this tool's 146 =
+ * 1161 tokens per turn, whether or not `consult_advisor` is ever called.
+ * Phase 10 -- not this plan -- owns deciding whether that is acceptable and
+ * cutting it if not.
  */
 const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [
 	".pi/extensions/safety/index.ts",
 	".pi/extensions/qoder/index.ts",
 	".pi/extensions/todo.ts",
 	".pi/extensions/questionnaire.ts",
+	".pi/extensions/quality/index.ts",
 ];
 
 /** Tracked text sources under `.pi/extensions/`, read from the index's view. */

@@ -99,7 +99,18 @@ const COMMAND_MARKER = "registerCommand(";
  * relaxation, and it never deletes a prior entry.
  */
 const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[] = [
-	{ file: ".pi/extensions/workflows/index.ts", budget: 80, why: "FLOW-01 -- the ROADMAP's /quick raw-line ceiling" },
+	{
+		file: ".pi/extensions/workflows/index.ts",
+		budget: 100,
+		why: "FLOW-01 -- the ROADMAP's /quick raw-line ceiling. RAISED 80 -> 100 by plan 08-11 (GATE-01): /quick now " +
+			"calls quality/index.ts#runQuickGateStage after the git pre-flight and before startRun, blocks with " +
+			"gate.report on a failing leg, and drains-and-discards takeQualityCost() on that branch with its own " +
+			"four-part comment (why the drain exists, why discarding beats a fabricated {qualityMs:0}, why nothing " +
+			"measurable is lost, why this is a deliberate second call site outside diagnostics/) -- all of it lives " +
+			"in this file per the plan's own instruction not to inline gate/leg logic elsewhere, so the growth is " +
+			"real and visible here rather than offloaded. Measured 94 raw lines 2026-08-15, rounded up to the next " +
+			"ten. Still well under the ROADMAP's own \"above 100 it has FAILED\" line",
+	},
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
 		budget: 340,
@@ -204,9 +215,12 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[] = [
 	{
 		dir: WORKFLOWS_DIR,
-		budget: 420,
+		budget: 430,
 		why: "D-11's original ratchet -- /quick's own directory; measured 415 raw lines 2026-08-15 " +
-			"(index.ts 79 + evidence.ts 336) after iteration 3's CR-01/WR-02, rounded up to the next ten",
+			"(index.ts 79 + evidence.ts 336) after iteration 3's CR-01/WR-02, rounded up to the next ten. " +
+			"RAISED 420 -> 430 by plan 08-11 (GATE-01 wiring) -- see the per-file entry above for what grew. " +
+			"Re-measured 430 raw lines 2026-08-15 (index.ts 94 + evidence.ts 336), already an exact multiple " +
+			"of ten",
 	},
 	{
 		dir: ".pi/extensions/routing",
@@ -522,14 +536,20 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 		).toBe(expected);
 	});
 
-	it("/quick (index.ts) never exceeds the explicit 80-line ceiling", () => {
+	it("/quick (index.ts) never exceeds the explicit 100-line ceiling", () => {
+		// RAISED 80 -> 100 by plan 08-11 (GATE-01 wiring), in the SAME commit as
+		// the WORKFLOW_BUDGETS entry above -- a registry edit ALONE still cannot
+		// quietly relax this: both this literal number and that entry had to
+		// move together, visibly, for /quick to grow at all. The ROADMAP's own
+		// "above 100 it has FAILED" line is the real ceiling this explicit,
+		// greppable assertion still holds well under.
 		const actual = countRawLines(".pi/extensions/workflows/index.ts");
 		expect(
 			actual,
 			`.pi/extensions/workflows/index.ts is ${actual} raw lines -- the ROADMAP states that ` +
-				'"above 100 it has FAILED"; this explicit, greppable assertion holds it to 80, well ' +
-				"under that failure line, and a registry edit alone cannot quietly relax it",
-		).toBeLessThanOrEqual(80);
+				'"above 100 it has FAILED"; this explicit, greppable assertion holds it to 100, and ' +
+				"a registry edit alone cannot quietly relax it",
+		).toBeLessThanOrEqual(100);
 	});
 });
 

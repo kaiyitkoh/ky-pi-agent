@@ -8,6 +8,8 @@
  * not an oversight.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { takeQualityCost } from "../diagnostics/quality-cost.ts";
+import { runQuickGateStage } from "../quality/index.ts";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
@@ -37,6 +39,19 @@ export default function (pi: ExtensionAPI): void {
 				);
 				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
+				const gate = runQuickGateStage(ctx.cwd);
+				if (gate.blocking) {
+					// GATE-01 blocked: drain-and-discard the cost gate.ts wrote via
+					// addQualityCost, since no turn_end runs for this invocation:
+					// (i) a blocked gate must not bill a later turn; (ii) a
+					// fabricated {qualityMs:0} is worse than absent (DIAGNOSTICS.md's
+					// omission rule); (iii) the SAME cost IS measured on the
+					// clean-run path below; (iv) a deliberate SECOND takeQualityCost
+					// site outside diagnostics/, per 08-04's T-08-13 (no turn row
+					// composes here).
+					takeQualityCost();
+					return void ctx.ui.notify(gate.report, "error");
+				}
 				startRun(ctx.cwd, currentSha(ctx.cwd));
 				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
 			} catch (err) {
