@@ -218,29 +218,42 @@ The corpus is **six real, dated incidents from this project's own history**
 reviewer's number, not a live model's judgement.** It was scripted to catch
 exactly three of six, and its purpose is to prove the pipeline (corpus →
 `runReview` → `validateReview` → `scoreCalibration`) computes a real,
-reproducible, non-rounded number end to end — proven further by THREE
+reproducible, non-rounded number end to end — proven further by FOUR
 required negative controls: a blind reviewer (approves everything) scores
 `catchRate: 0`; a shotgun reviewer (twenty generic findings, e.g.
 "this area could probably be improved somehow") also scores `catchRate: 0`;
-and (WR-03) a **name-dropping shotgun** — one finding per touched file,
-naming only that file's own most conspicuous symbol
-(`markMigrationComplete`, `isGuardedCommand`, …) with no description of what
-is actually wrong — also scores `catchRate: 0`. That third control exists
+(WR-03) a **name-dropping shotgun** — one finding per touched file, naming
+only that file's own most conspicuous symbol (`markMigrationComplete`,
+`isGuardedCommand`, …) with no description of what is actually wrong — also
+scores `catchRate: 0`; and (WR2-05, `08-REVIEW.md` iteration 2) a
+**boilerplate kitchen sink** — ONE sentence, reused verbatim across all six
+touched files, engineered to contain exactly one `mustMentionAny` phrase per
+defect class — scores `catchRate: 0` too. The name-dropping control exists
 because the first version of `tests/fixtures/seeded-defects/index.ts`'s
-`mustMentionAny` needles were bare symbol names, which are trivially
-derivable from "the file's only function" (five of the six fixture files
-contain exactly one) without having understood the defect at all — the
-exact name-dropping shape scored `catchRate: 1.0` (6/6, having caught
-nothing) before the needles were rewritten to describe the DEFECT's
-behaviour (e.g. `absent-guard`'s needle is `"never calls
-isGuardedCommand"`, not bare `"isGuardedCommand"`). `findingCatches`
-therefore requires the right file **and** a mention of the specific
-malformed *behaviour*, not merely a high finding count and not merely the
-right identifier. **No live reviewer, of any kind, has ever run against
-this corpus.** The live calibration run is `RB-08-03` in `docs/RUNBOOK.md`,
-OUTSTANDING, and its result is expected to differ from 3/6 in either
-direction, since a live model was never tuned to this corpus the way the
-scripted one was.
+`mustMentionAny` needles were bare symbol names, trivially derivable from
+"the file's only function" (five of the six fixture files contain exactly
+one) without having understood the defect at all — that exact shape scored
+`catchRate: 1.0` (6/6, having caught nothing) before the needles were
+rewritten to describe the DEFECT's behaviour (e.g. `absent-guard`'s needle
+is `"never calls isGuardedCommand"`, not bare `"isGuardedCommand"`). The
+kitchen-sink control exists because that rewrite alone was still not enough:
+`mustMentionAny` is an OR set, and an OR set is only as strong as its
+weakest member — a single crafted sentence carrying one generic-sounding
+phrase per class ALSO scored `catchRate: 1.0` having identified nothing,
+until `findingCatches` was changed to require **two independent needles**
+per expectation (`calibration.ts`'s `MIN_DISTINCT_NEEDLES`), not merely one.
+**`findingCatches` is honestly a substring-match proxy for defect
+identification, never a semantic one** — it requires the right file **and**
+at least two of the phrases the corpus names as describing the specific
+malformed *behaviour*, which is a stronger bar than a bare finding count or
+the right identifier alone, but it is still pattern matching against known
+text, not judgement, and the kitchen-sink control's own `catchRate: 0` is
+the measured CEILING of what a substring proxy can be defeated by, not a
+claim that no cleverer construction exists. **No live reviewer, of any
+kind, has ever run against this corpus.** The live calibration run is
+`RB-08-03` in `docs/RUNBOOK.md`, OUTSTANDING, and its result is expected to
+differ from 3/6 in either direction, since a live model was never tuned to
+this corpus the way the scripted one was.
 
 ## 7. The cost record
 

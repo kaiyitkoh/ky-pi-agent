@@ -114,21 +114,48 @@ const SEVERITY_RANK: Readonly<Record<ScorableFinding["severity"], number>> = {
 };
 
 /**
+ * WR2-05 (`08-REVIEW.md` iteration 2): the minimum COUNT of distinct
+ * `mustMentionAny` needles a finding must contain, not merely `>= 1`.
+ *
+ * `mustMentionAny` is an OR set, and an OR set is only as strong as its
+ * weakest member: several individual needles ("cannot fail", "not wired
+ * in", "performs none") are generic enough to be asserted about any file of
+ * that KIND without having analysed it. A single boilerplate sentence
+ * reusing one needle per defect class (verbatim, no analysis) scored
+ * `catchRate === 1.0` against all six real corpus entries before this fix —
+ * see `tests/fixtures/seeded-defects/index.ts`'s corpus and this module's
+ * own `SHOTGUN_KITCHEN_SINK` control in `reviewer-calibration.test.ts`.
+ * Requiring TWO independent needles closes it: the kitchen-sink sentence
+ * carries exactly one matching phrase per class by construction (that is
+ * what made it a minimal, deniable exploit), so a second, INDEPENDENT
+ * needle is not free to include without genuinely describing a second
+ * aspect of the defect. `Math.min(2, ...)` keeps a deliberately
+ * single-needle expectation (used by this module's own direct unit tests,
+ * and legitimate for a defect with only one describable symptom) working
+ * exactly as before — the ceiling only bites once a corpus entry HAS a
+ * second independent needle to demand.
+ */
+const MIN_DISTINCT_NEEDLES = 2;
+
+/**
  * True iff `finding` catches `expectation`: its `location` names
  * `expectation.locationFile`, its `concreteFailure` (or its own `location`)
- * contains at least one of `expectation.mustMentionAny`, and its `severity`
- * is at least `expectation.minimumSeverity`. All three conditions are
- * required — a finding naming the right file with a vague concern does not
- * count, and a finding using the right words about the wrong file does not
- * count either.
+ * contains at least `Math.min(MIN_DISTINCT_NEEDLES, expectation.mustMentionAny.length)`
+ * DISTINCT entries from `expectation.mustMentionAny` (see
+ * {@link MIN_DISTINCT_NEEDLES}'s own docstring for why this is a count, not
+ * merely `>= 1`), and its `severity` is at least `expectation.minimumSeverity`.
+ * All three conditions are required — a finding naming the right file with a
+ * vague concern does not count, and a finding using the right words about
+ * the wrong file does not count either.
  */
 function findingCatches(finding: ScorableFinding, expectation: SeededDefectExpectation): boolean {
 	if (!finding.location.includes(expectation.locationFile)) {
 		return false;
 	}
 	const haystack = `${finding.concreteFailure} ${finding.location}`;
-	const mentionsSomethingSpecific = expectation.mustMentionAny.some((needle) => haystack.includes(needle));
-	if (!mentionsSomethingSpecific) {
+	const matchedNeedleCount = expectation.mustMentionAny.reduce((count, needle) => (haystack.includes(needle) ? count + 1 : count), 0);
+	const requiredNeedleCount = Math.min(MIN_DISTINCT_NEEDLES, expectation.mustMentionAny.length);
+	if (matchedNeedleCount < requiredNeedleCount) {
 		return false;
 	}
 	return SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[expectation.minimumSeverity];

@@ -205,7 +205,13 @@ const KNOWN_SUBSET_ARGS = {
 		{
 			severity: "BLOCKER",
 			location: "src/parser-mutation-claim.test.ts:3",
-			concreteFailure: 'Comment claims MUTATION-VERIFIED but parseCommand always returns true regardless of input.',
+			// WR2-05: two INDEPENDENT needles ("regardless of input" and "survived
+			// its own mutation"), not one -- see calibration.ts's own
+			// MIN_DISTINCT_NEEDLES docstring for why a real, thorough finding
+			// naturally clears this bar while a single boilerplate phrase does not.
+			concreteFailure:
+				"Comment claims MUTATION-VERIFIED but parseCommand always returns true regardless of input, " +
+				"meaning the label survived its own mutation.",
 			suggestedFix: "Remove the false claim or make the test actually exercise parseCommand's logic.",
 		},
 	],
@@ -292,19 +298,60 @@ const SHOTGUN_NAME_DROP_ARGS = {
 	classificationJustification: "Named a symbol per file without diagnosing a specific defect in any of them.",
 };
 
+/**
+ * WR2-05 (`08-REVIEW.md` iteration 2) -- THE BOILERPLATE KITCHEN SINK, a
+ * FOURTH permanent control.
+ *
+ * One BLOCKER per touched file, correct `location`, and ONE boilerplate
+ * `concreteFailure` reused VERBATIM for all six -- deliberately crafted so
+ * that each of the six defect classes' `mustMentionAny` set has EXACTLY one
+ * matching phrase inside it (`fabricated-evidence` <- "performs none";
+ * `tautological-test` <- "cannot fail"; `escaped-side-effect` <- "writes
+ * into the real"; `absent-guard` <- "never calls isGuardedCommand";
+ * `symptomatic-fix` <- "always returns true"; `false-label` <- "regardless
+ * of input"). Before WR2-05's `MIN_DISTINCT_NEEDLES` fix
+ * (`calibration.ts`), this single boilerplate sentence scored
+ * `catchRate === 1.0` -- 6/6 -- having identified zero actual defects; it is
+ * NOT derivable from the input the way WR-03's name-drop control is
+ * (constructing it requires the ANSWER KEY, i.e. reading this corpus's own
+ * `mustMentionAny` arrays), which is why it was a Warning and not a repeat
+ * Critical, but it is strictly more dangerous than the name-drop control:
+ * it looks like genuine analysis prose, not a bare symbol name. After the
+ * fix, it must score `catchRate === 0`, proving the matcher now requires
+ * TWO independent needles, not merely one boilerplate phrase reused six
+ * times.
+ */
+const SHOTGUN_KITCHEN_SINK_CONCRETE_FAILURE =
+	"This code cannot fail; it performs none of the verification it claims, writes into the real home directory, " +
+	"never calls isGuardedCommand, and always returns true regardless of input.";
+const SHOTGUN_KITCHEN_SINK_ARGS = {
+	verdicts: [verdictFor("Partial", "src/evidence-claim.ts:1")],
+	findings: SHOTGUN_LOCATION_FILES.map((file, index) => ({
+		severity: "BLOCKER" as const,
+		location: `${file}:${index + 1}`,
+		concreteFailure: SHOTGUN_KITCHEN_SINK_CONCRETE_FAILURE,
+		suggestedFix: "Fix it.",
+	})),
+	checkedAndCleared: "Applied the same general-purpose finding template to each of the six touched files.",
+	classification: "symptomatic",
+	classificationJustification: "The template names failure modes generically without diagnosing any one file's actual defect.",
+};
+
 interface CalibrationSuiteResult {
 	knownSubset: CalibrationResult;
 	blind: CalibrationResult;
 	shotgun: CalibrationResult;
 	shotgunNameDrop: CalibrationResult;
+	shotgunKitchenSink: CalibrationResult;
 }
 
 /**
  * Builds a fresh temp repo + faux session, drives the combined corpus through
- * `runReview` FOUR times (known-subset, blind, shotgun, WR-03's name-dropping
- * shotgun), and scores each result against the corpus's own expectations. A
- * fresh session per call is what makes the reproducibility check in group C
- * meaningful -- two INDEPENDENT builds, not one build read twice.
+ * `runReview` FIVE times (known-subset, blind, shotgun, WR-03's name-dropping
+ * shotgun, WR2-05's boilerplate kitchen sink), and scores each result against
+ * the corpus's own expectations. A fresh session per call is what makes the
+ * reproducibility check in group C meaningful -- two INDEPENDENT builds, not
+ * one build read twice.
  */
 async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResult> {
 	setMode("cheap");
@@ -333,6 +380,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 			() => fauxAssistantMessage(fauxToolCall("submit_review", BLIND_REVIEWER_ARGS), { stopReason: "toolUse" }),
 			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_REVIEWER_ARGS), { stopReason: "toolUse" }),
 			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_NAME_DROP_ARGS), { stopReason: "toolUse" }),
+			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_KITCHEN_SINK_ARGS), { stopReason: "toolUse" }),
 		]);
 
 		handle.modelRuntime.registerNativeProvider(wrapFauxWithPayload(deepseekFaux, undefined));
@@ -346,6 +394,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 		const blindResult = await runReview(ctx, { contract, requirementIds });
 		const shotgunResult = await runReview(ctx, { contract, requirementIds });
 		const shotgunNameDropResult = await runReview(ctx, { contract, requirementIds });
+		const shotgunKitchenSinkResult = await runReview(ctx, { contract, requirementIds });
 
 		if (!knownSubsetResult.ok) {
 			throw new Error(`known-subset runReview was rejected: ${knownSubsetResult.reason}`);
@@ -358,6 +407,9 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 		}
 		if (!shotgunNameDropResult.ok) {
 			throw new Error(`shotgun name-drop runReview was rejected: ${shotgunNameDropResult.reason}`);
+		}
+		if (!shotgunKitchenSinkResult.ok) {
+			throw new Error(`shotgun kitchen-sink runReview was rejected: ${shotgunKitchenSinkResult.reason}`);
 		}
 
 		const expected: SeededDefectExpectation[] = SEEDED_DEFECTS.map((defect) => ({
@@ -372,6 +424,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 			blind: scoreCalibration(expected, blindResult.review.findings),
 			shotgun: scoreCalibration(expected, shotgunResult.review.findings),
 			shotgunNameDrop: scoreCalibration(expected, shotgunNameDropResult.review.findings),
+			shotgunKitchenSink: scoreCalibration(expected, shotgunKitchenSinkResult.review.findings),
 		};
 	} finally {
 		await handle.dispose();
@@ -422,11 +475,27 @@ describe("GATE-08 calibration -- the full corpus driven through runReview", () =
 		},
 	);
 
+	it(
+		"WR2-05 -- THE BOILERPLATE KITCHEN SINK, a fourth permanent control: one reused sentence containing " +
+			"exactly one needle per defect class scores catchRate === 0 -- MIN_DISTINCT_NEEDLES now requires TWO. " +
+			"Before this fix this exact fixture scored 1.0 (6/6) having identified zero real defects, and it is " +
+			"NOT derivable from the input alone (constructing it requires the corpus's own answer key), so it is " +
+			"a strictly weaker exploit than WR-03's name-drop -- still a real one, and now permanently measured.",
+		() => {
+			expect(run1.shotgunKitchenSink.catchRate).toBe(0);
+			expect(run1.shotgunKitchenSink.unmatchedFindings).toBe(SHOTGUN_LOCATION_FILES.length);
+			for (const id of DEFECT_CLASSES) {
+				expect(run1.shotgunKitchenSink.perDefectClass[id], `perDefectClass["${id}"] must be false for the boilerplate kitchen sink`).toBe(false);
+			}
+		},
+	);
+
 	it("reproducibility: two independently-built runs produce identical CalibrationResult values", () => {
 		expect(run2.knownSubset).toEqual(run1.knownSubset);
 		expect(run2.blind).toEqual(run1.blind);
 		expect(run2.shotgun).toEqual(run1.shotgun);
 		expect(run2.shotgunNameDrop).toEqual(run1.shotgunNameDrop);
+		expect(run2.shotgunKitchenSink).toEqual(run1.shotgunKitchenSink);
 	});
 });
 
