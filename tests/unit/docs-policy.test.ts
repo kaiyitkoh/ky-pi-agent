@@ -45,11 +45,14 @@ import {
 	TRUNCATION_PLACEHOLDER,
 } from "../../.pi/extensions/diagnostics/redact.ts";
 import { repoRoot } from "../helpers/git.ts";
+import { RULE_IDS } from "../../.pi/extensions/quality/rules.ts";
+import { DEFECT_CLASSES } from "../fixtures/seeded-defects/index.ts";
 
 const ROOT = repoRoot();
 const README = readFileSync(join(ROOT, "README.md"), "utf-8");
 const RUNBOOK_PATH = join(ROOT, "docs", "RUNBOOK.md");
 const DIAGNOSTICS_PATH = join(ROOT, "docs", "DIAGNOSTICS.md");
+const QUALITY_PATH = join(ROOT, "docs", "QUALITY.md");
 const REDACT_SOURCE_PATH = join(ROOT, ".pi", "extensions", "diagnostics", "redact.ts");
 
 /** The Phase 1 entries this file governs. */
@@ -1129,5 +1132,124 @@ describe("Group D — the redaction contract matches the redactor", () => {
 				"placeholder would misreport a deletion as a secret, and a reader who does not know " +
 				"that will read a surviving `null` as a redaction failure",
 		).toContain("delete this header");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Group E — docs/QUALITY.md cannot drift from RULE_IDS or DEFECT_CLASSES,
+// in EITHER direction — following the docs/ROUTING.md <-> ROLE_MAP precedent
+// (05-12, tests/unit/routing-map.test.ts). The CONVERSE direction is the one
+// that matters, per docs/SAFETY.md's own corpus-derived-limits discipline:
+// without it, docs/QUALITY.md could grow a rule id or defect-class id the
+// code does not have, which is exactly how a doc becomes a second, driftable
+// source of truth.
+// ---------------------------------------------------------------------------
+
+/** A lowercase, hyphenated, backtick-quoted token — the shape every rule id and defect-class id in this repository actually uses. */
+const HYPHENATED_CODE_SPAN_RE = /`([a-z]+(?:-[a-z]+)+)`/g;
+
+/**
+ * Slice one numbered `## N. <title>` section out of `docs/QUALITY.md`,
+ * mirroring `redactionSection()`'s and `routing-map.test.ts`'s own
+ * `roleModelTableSection()` extraction discipline — scoped to the section so
+ * a mention elsewhere in the document cannot accidentally satisfy or break
+ * this check.
+ */
+function qualitySection(doc: string, heading: string): string {
+	const start = doc.indexOf(heading);
+	expect(
+		start,
+		`docs/QUALITY.md has no ${JSON.stringify(heading.trim())} heading — every assertion below scans ` +
+			"that section, so an absent or renamed heading would make this whole group vacuous",
+	).toBeGreaterThan(-1);
+	const rest = doc.slice(start + heading.length);
+	const end = rest.indexOf("\n## ");
+	return end === -1 ? rest : rest.slice(0, end);
+}
+
+describe("Group E — docs/QUALITY.md agrees with RULE_IDS and DEFECT_CLASSES, in both directions", () => {
+	it("exists", () => {
+		expect(
+			existsSync(QUALITY_PATH),
+			"docs/QUALITY.md is the quality layer's own document — the rule table and the defect-class " +
+				"table below are published there",
+		).toBe(true);
+	});
+
+	const doc = readFileSync(QUALITY_PATH, "utf-8");
+	const ruleSection = qualitySection(doc, "\n## 2. The six anti-pattern rules (QUAL-01)");
+	const calibrationSection = qualitySection(doc, "\n## 6. Calibration");
+
+	it("RULE_IDS has more than one entry (non-vacuity)", () => {
+		expect(
+			RULE_IDS.length,
+			"RULE_IDS is empty or a singleton — the checks below would iterate almost nothing and pass " +
+				"without checking a real list",
+		).toBeGreaterThan(1);
+	});
+
+	it("every RULE_IDS entry appears in docs/QUALITY.md's rule table", () => {
+		const missing = RULE_IDS.filter((id) => !ruleSection.includes(id));
+		expect(
+			missing,
+			"docs/QUALITY.md's rule table does not name these RULE_IDS entries — a reader of the " +
+				"document would not know these rules exist",
+		).toEqual([]);
+	});
+
+	it("every rule-id-shaped token the table names is a real RULE_IDS entry (the converse)", () => {
+		const found = Array.from(new Set(Array.from(ruleSection.matchAll(HYPHENATED_CODE_SPAN_RE), (m) => m[1])));
+		expect(
+			found.length,
+			"no rule-id-shaped token found in docs/QUALITY.md's rule section — this assertion scans " +
+				"that set, so an empty one would pass while verifying nothing",
+		).toBeGreaterThan(0);
+
+		const invented = found.filter((id) => !(RULE_IDS as readonly string[]).includes(id));
+		expect(
+			invented,
+			"docs/QUALITY.md's rule table names these ids and RULE_IDS has no entry matching any of " +
+				"them — the document has grown a rule the code does not have, which is exactly how a " +
+				"doc becomes a second, driftable source of truth. Falsified by hand: adding a fake id " +
+				"(e.g. `unbounded-recursion`) to the rule table turns this exact case red, naming the " +
+				"invented id, before being reverted",
+		).toEqual([]);
+	});
+
+	it("DEFECT_CLASSES has more than one entry (non-vacuity)", () => {
+		expect(
+			DEFECT_CLASSES.length,
+			"DEFECT_CLASSES is empty or a singleton — the checks below would iterate almost nothing and " +
+				"pass without checking a real list",
+		).toBeGreaterThan(1);
+	});
+
+	it("every DEFECT_CLASSES entry appears in docs/QUALITY.md's calibration section", () => {
+		const missing = DEFECT_CLASSES.filter((id) => !calibrationSection.includes(id));
+		expect(
+			missing,
+			"docs/QUALITY.md's calibration section does not name these DEFECT_CLASSES entries — a " +
+				"reader of the document would not know these defect classes exist",
+		).toEqual([]);
+	});
+
+	it("every defect-class-id-shaped token the section names is a real DEFECT_CLASSES entry (the converse)", () => {
+		const found = Array.from(
+			new Set(Array.from(calibrationSection.matchAll(HYPHENATED_CODE_SPAN_RE), (m) => m[1])),
+		);
+		expect(
+			found.length,
+			"no defect-class-id-shaped token found in docs/QUALITY.md's calibration section — this " +
+				"assertion scans that set, so an empty one would pass while verifying nothing",
+		).toBeGreaterThan(0);
+
+		const invented = found.filter((id) => !(DEFECT_CLASSES as readonly string[]).includes(id));
+		expect(
+			invented,
+			"docs/QUALITY.md's calibration section names these ids and DEFECT_CLASSES has no entry " +
+				"matching any of them — the document has grown a defect class the code does not have. " +
+				"Falsified by hand: adding a fake id (e.g. `off-by-one`) to the calibration section " +
+				"turns this exact case red, before being reverted",
+		).toEqual([]);
 	});
 });

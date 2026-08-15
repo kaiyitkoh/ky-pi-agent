@@ -99,16 +99,16 @@
 
 ### Quality Gates
 
-- [x] **GATE-01**: Deterministic gates — typecheck, lint, LSP diagnostics — run and feed errors back **before** any model review **[FAUX]**
-- [x] **GATE-02**: A fresh-context reviewer subagent receives the full contract: diff, every touched file in full, test and typecheck output, SPEC requirements, files-touched union, and the import graph **[FAUX]**
+- [~] **GATE-01**: Deterministic gates — typecheck, lint, LSP diagnostics — run and feed errors back **before** any model review **[FAUX]** — *typecheck, lint and the QUAL-01 anti-pattern legs run for real inside `/quick` (plan 08-11); the LSP leg's `probeLspAvailability` mechanism is proven offline in both states, but `@narumitw/pi-lsp` has never been installed on this machine, so this leg has only ever reported `UNAVAILABLE`, never `FAIL` against a real language server. `RB-08-02`, **OUTSTANDING***
+- [~] **GATE-02**: A fresh-context reviewer subagent receives the full contract: diff, every touched file in full, test and typecheck output, SPEC requirements, files-touched union, and the import graph **[FAUX]** — *`buildReviewerContext`'s six-element contract is proven to reach a captured outgoing request intact and redacted (`tests/integration/reviewer-contract.test.ts`, plan 08-07). `.pi/agents/reviewer.md` ships deliberately unwired — the reviewer is dispatched via `runSingleShotRole`, not a real `pi-subagents` spawn — because the package has never been installed. `RB-08-03`, **OUTSTANDING***
 - [x] **GATE-03**: Review output gives a per-requirement verdict (Implemented / Partial / Missing) with file:line evidence **[FAUX]**
 - [x] **GATE-04**: Review output includes a mandatory "checked and cleared" section, so silence is structurally impossible **[FAUX]**
 - [x] **GATE-05**: Findings are classified BLOCKER / WARNING / NIT, and unclassified findings are rejected as malformed **[FAUX]**
 - [x] **GATE-06**: BLOCKERs go through a refute-or-promote pass before they can stop work — reviewers told to find gaps invent them **[FAUX]**
 - [x] **GATE-07**: Task completion is gated on `tool_result` exit codes bound to a git SHA, never on transcript text — a model that writes prose tool calls can also write plausible command output **[FAUX]**
-- [x] **GATE-08**: Seeded-defect calibration measures what the reviewer actually catches, distinguishing "the code is clean" from "the reviewer is asleep" **[FAUX]**
+- [~] **GATE-08**: Seeded-defect calibration measures what the reviewer actually catches, distinguishing "the code is clean" from "the reviewer is asleep" **[FAUX]** — *the corpus (six real Phase 3-7 incidents), the scorer (`scoreCalibration`, a raw ratio) and both required negative controls (blind reviewer, shotgun reviewer, both proven to score 0) are complete and proven offline (plan 08-10). The recorded 3/6 catch rate is a SCRIPTED faux reviewer's number, proving the pipeline, not a live model's judgement — no live reviewer has ever run against this corpus. `RB-08-03`, **OUTSTANDING***
 - [x] **GATE-09**: Advisor escalation lets the executor consult a stronger model at a decision point via `callModel()` **[FAUX]**
-- [x] **GATE-10**: Per-role thinking budgets apply on the nested path (reviewer, advisor, summariser); main-loop budgets apply only if the wire inspector proved the parameters land **[FAUX]** + **[RUNBOOK]**
+- [~] **GATE-10**: Per-role thinking budgets apply on the nested path (reviewer, advisor, summariser); main-loop budgets apply only if the wire inspector proved the parameters land **[FAUX]** + **[RUNBOOK]** — *the nested half is fixed and proven offline (`buildNestedApiOptions`, `tests/integration/gate10-nested-thinking.test.ts`, plan 08-01): a real per-`model.api` bug (Bedrock nested calls silently dropping their thinking field) was found and fixed. The main-loop half — reading a real wire dump to confirm the parameters land on `pi.setModel()`'s own dispatch — is `RB-08-01`, **OUTSTANDING***
 
 ### Engineering Quality
 
@@ -122,7 +122,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [x] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
 - [x] **QUAL-07**: A design-level review pass covering algorithmic complexity, scalability, and abstraction fit fires **conditionally** — on signals (diff spans many files, a loop wraps a query, a data model or public interface changes) or on explicit `/escalate` — never on every task **[FAUX]**
 - [ ] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]**
-- [ ] **QUAL-09**: The wall-clock and token cost added by the quality layer is recorded per turn in the JSONL, so the correctness/latency balance is a measured number and can be tuned rather than guessed **[FAUX]**
+- [x] **QUAL-09**: The wall-clock and token cost added by the quality layer is recorded per turn in the JSONL, so the correctness/latency balance is a measured number and can be tuned rather than guessed **[FAUX]** — *the ledger mechanism (plan 08-04) is exercised by real producers — the deterministic gate stage, the reviewer, the refute pass, the advisor consult — each calling `addQualityCost` exactly once per pass; plan 08-11 proves a real, live-session `/quick` turn's own `kind:"turn"` JSONL row carries `qualityMs`, read off disk rather than an in-memory peek, with a paired negative control proving a blocked gate's cost is never billed to a later, unrelated turn*
 
 ### Workflows
 
@@ -294,16 +294,16 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | EXT-08 | Phase 7 | Complete — re-verified independently in plans 07-01, 07-10 and 07-11, not install-dependent |
 | EXT-09 | Phase 7 | Partial — the composed ritual is documented as a single sequence in `docs/RUNBOOK.md`'s `RB-07-01` (plan 07-13), citing existing Phase 2/3 entries for two of its four legs and naming the exact steps for the other two; running it is `RB-07-01`, **OUTSTANDING**. Not complete |
 | EXT-10 | Phase 7 | Complete — not install-dependent; `pi-loop-police`'s missing LICENSE re-verified three times independently (plan 07-06) |
-| GATE-01 | Phase 8 | Complete |
-| GATE-02 | Phase 8 | Complete |
+| GATE-01 | Phase 8 | Partial — typecheck, lint and the QUAL-01 anti-pattern legs are wired into a real `/quick` (plan 08-11); the LSP leg's mechanism is proven offline in both states, but `@narumitw/pi-lsp` has never been installed, so it has only ever reported `UNAVAILABLE`. `RB-08-02`, **OUTSTANDING**. Not complete |
+| GATE-02 | Phase 8 | Partial — the six-element reviewer context contract reaches a captured outgoing request intact and redacted (`tests/integration/reviewer-contract.test.ts`, plan 08-07); `.pi/agents/reviewer.md` ships deliberately unwired because the reviewer dispatches via `runSingleShotRole`, never a real `pi-subagents` spawn (never installed). `RB-08-03`, **OUTSTANDING**. Not complete |
 | GATE-03 | Phase 8 | Complete |
 | GATE-04 | Phase 8 | Complete |
 | GATE-05 | Phase 8 | Complete |
 | GATE-06 | Phase 8 | Complete |
 | GATE-07 | Phase 6 | Complete |
-| GATE-08 | Phase 8 | Complete |
+| GATE-08 | Phase 8 | Partial — the corpus (six real Phase 3-7 incidents), the pure scorer and both required negative controls (blind/shotgun, both score 0) are complete and proven offline (plan 08-10); the recorded 3/6 catch rate is a SCRIPTED faux reviewer's number, proving the pipeline rather than a live model's judgement. `RB-08-03`, **OUTSTANDING**. Not complete |
 | GATE-09 | Phase 8 | Complete |
-| GATE-10 | Phase 8 | Complete |
+| GATE-10 | Phase 8 | Partial — the nested half is fixed and proven offline: a real Bedrock per-`model.api` defect (nested calls silently dropping their thinking field) was found and fixed (plan 08-01). The main-loop half needs a real wire dump confirming `pi.setModel()`'s own dispatch carries the parameters. `RB-08-01`, **OUTSTANDING**. Not complete |
 | QUAL-01 | Phase 8 | Complete |
 | QUAL-02 | Phase 8 | Complete |
 | QUAL-03 | Phase 9 | Pending |
@@ -312,7 +312,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | QUAL-06 | Phase 8 | Complete |
 | QUAL-07 | Phase 8 | Complete |
 | QUAL-08 | Phase 9 | Pending |
-| QUAL-09 | Phase 8 | Pending |
+| QUAL-09 | Phase 8 | Complete — the ledger mechanism (plan 08-04) is exercised by real producers, and plan 08-11 proves a live-session `/quick` turn's own JSONL row carries `qualityMs`, read off disk, with a paired negative control against cost leaking to an unrelated turn |
 | FLOW-01 | Phase 6 | Complete |
 | FLOW-02 | Phase 9 | Pending |
 | FLOW-03 | Phase 9 | Pending |
@@ -357,7 +357,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | QUAL-08 (gate depth scales) | Phase 9 | The `/quick`-vs-full split is a workflow property; it can only be expressed once both workflows exist. |
 | QUAL-09 (quality-layer cost per turn) | Phase 8 | It extends the Phase 2 JSONL schema, but the number is unfillable until the quality layer exists. |
 
-**[RUNBOOK] distribution (8 of 107):** Phase 2 — DIAG-01, DIAG-05 · Phase 3 — PROV-03, PROV-04, PROV-07, PROV-10 · Phase 4 — SAFE-01 · Phase 5 — ROUTE-11 · Phase 8 — GATE-10 (main-loop half) · Phase 10 — CTX-05.
+**[RUNBOOK] distribution (13 of 107):** Phase 2 — DIAG-01, DIAG-05 · Phase 3 — PROV-03, PROV-04, PROV-07, PROV-10 · Phase 4 — SAFE-01 · Phase 5 — ROUTE-11 · Phase 8 — GATE-01 (the LSP leg), GATE-02 (the reviewer subagent spawn), GATE-08 (the live calibration run), GATE-10 (main-loop half) · Phase 10 — CTX-05. Corrected from "8" to "13" by plan 08-13's reconciliation — the prior count predated this phase's own honest accounting of GATE-01/02/08's live-blocked halves and undercounted even the pre-existing nine.
 
 *Note: GATE-10 and DIAG-01/05 carry both [FAUX] and [RUNBOOK] tags — the offline half is verifiable on the dev machine, the live half is not.*
 
