@@ -24,7 +24,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 5: Routing & Capability Guards** - Explicit role→model map, session modes, and hard blocks on impossible routes (all 12 plans executed 2026-08-14; **one live check `RB-05-01` is OUTSTANDING** and ROUTE-11 is partial until it runs — see `docs/RUNBOOK.md`)
 - [x] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size (completed 2026-08-14)
 - [x] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified (all 13 plans executed 2026-08-15; **two live checks `RB-07-01` and `RB-07-02` are OUTSTANDING** and EXT-01/03/04/05/09 are partial until they run — see `docs/RUNBOOK.md`)
-- [ ] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects
+- [x] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects (completed 2026-08-15)
 - [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
 - [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
@@ -392,7 +392,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 08-13-PLAN.md — `RB-08-01..03` (OUTSTANDING), `docs/QUALITY.md`, and requirement-status reconciliation
+- [x] 08-13-PLAN.md — `RB-08-01..03` (OUTSTANDING), `docs/QUALITY.md`, and requirement-status reconciliation
 
 **Research**: Not needed — the comparative survey produced prescriptive artifact schemas, gate definitions and the anti-review-theatre protocol. Implement from it.
 

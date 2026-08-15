@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: executing
-stopped_at: Completed 08-12-PLAN.md
-last_updated: "2026-08-15T06:25:55.535Z"
+status: verifying
+stopped_at: Completed 08-13-PLAN.md
+last_updated: "2026-08-15T06:45:23.414Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
-  completed_phases: 7
+  completed_phases: 8
   total_plans: 86
-  completed_plans: 85
-  percent: 64
+  completed_plans: 86
+  percent: 73
 ---
 
 # Project State
@@ -27,10 +27,10 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 Phase: 08 (quality-gates-engineering-quality) — EXECUTING
 Plan: 13 of 13
-Status: Ready to execute
+Status: Phase complete — ready for verification
 Last activity: 2026-08-15
 
-Progress: [██████████] 99%
+Progress: [██████████] 100%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -152,6 +152,7 @@ credentials can do has been done".
 | Phase 08 P10 | 55m | 3 tasks | 3 files |
 | Phase 08 P11 | 180min | 3 tasks | 8 files |
 | Phase 08 P12 | 70m | 2 tasks | 8 files |
+| Phase 08 P13 | 50m | 3 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -409,6 +410,9 @@ Recent decisions affecting current work:
 - [Phase 08]: /quick's WORKFLOW_BUDGETS entry and its own hardcoded ceiling test both raised 80 -> 100 in the same commit as GATE-01's wiring — the mandatory four-part drain comment plus the gate call could not fit the original 1-line headroom without gutting the comment's substance; the plan's own text sanctions a dated budget raise, and 100 is still well under the ROADMAP's above-100-has-FAILED line
 - [Phase 08]: 08-12: gateCompletion's branch (6) (headTree===baseTree) sits between branches (2) and (3), closing the empty-commit gap; the unrelated-content and checkout/reset residuals stay explicitly open in docs/WORKFLOWS.md, not silently claimed fixed
 - [Phase 08]: 08-12: currentTree(cwd) in safety/git.ts copies currentSha's fail-closed contract exactly -- no sentinel for an unknown tree, throws on non-zero exit
+- [Phase 08]: GATE-01/02/08 moved from [x] to [~] naming their RB-08-xx id inline -- a green offline proxy is not the check, regardless of the requirement's original [FAUX]/[RUNBOOK] tag
+- [Phase 08]: QUAL-09 promoted Pending to [x] on plan 08-11's live-JSONL proof -- a real gated /quick turn's own qualityMs row, read off disk, not a scripted stand-in
+- [Phase 08]: docs/QUALITY.md's rule table and calibration section are asserted against RULE_IDS/DEFECT_CLASSES in both directions, falsified by hand with a fake rule id, following the docs/ROUTING.md <-> ROLE_MAP precedent
 
 ### Pending Todos
 
@@ -460,8 +464,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T06:25:55.525Z
-Stopped at: Completed 08-12-PLAN.md
+Last session: 2026-08-15T06:45:23.404Z
+Stopped at: Completed 08-13-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
