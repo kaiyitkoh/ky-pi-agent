@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-03-PLAN.md
-last_updated: "2026-08-15T13:19:08.004Z"
+stopped_at: Completed 09-04-PLAN.md
+last_updated: "2026-08-15T13:37:05.218Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 89
+  completed_plans: 90
   percent: 73
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 4 of 17
+Plan: 5 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-08-15
 
-Progress: [█████████░] 86%
+Progress: [█████████░] 87%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -159,6 +159,7 @@ credentials can do has been done".
 | Phase 09 P01 | 40m | 2 tasks | 1 files |
 | Phase 09 P02 | 20min | 2 tasks | 1 files |
 | Phase 09 P03 | 15min | 2 tasks | 9 files |
+| Phase 09 P04 | 70m | 2 tasks | 7 files |
 
 ## Accumulated Context
 
@@ -427,6 +428,8 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-03: workDir() throws on an illegal slug (fail closed) rather than sanitising -- same posture safety/git.ts:462-465 states for an unclassified glab form
 - [Phase 09]: 09-03: SLUG_PATTERN's leading-alphanumeric anchor alone makes a leading '.' structurally impossible, independent of workDir's containment assertion -- recorded honestly via falsification rather than claiming containment catches something this fixture does not demonstrate
 - [Phase 09]: 09-03 advances FLOW-06 and FLOW-10 but completes neither -- plan 09-03's own objective text says so explicitly; REQUIREMENTS.md left unchecked for both, to be marked complete by the plans that actually build /plan (09-10) and wire ARTIFACT_FILES into all four ceremonial commands (09-08/10/13/15)
+- [Phase 09-04]: classifyGlabInvocation grew a narrow protectedBranches parameter, not GitPolicyFacts -- the currentBranch-independence claim stays literally true, only the destination-branch fact (mr create's target) is new
+- [Phase 09-04]: the four legitimate glab mr create ALLOW forms are asserted in git-policy.test.ts/policy-compose.test.ts, never added to tests/fixtures/evasion-corpus.ts -- the corpus's OUT-OF-SCOPE bucket specifically means a published, uncaught bypass limit, and a by-design allow filed there would falsely document legitimate MR creation as a guard failure
 
 ### Pending Todos
 
@@ -479,8 +482,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T13:18:37.156Z
-Stopped at: Completed 09-03-PLAN.md
+Last session: 2026-08-15T13:37:05.208Z
+Stopped at: Completed 09-04-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
