@@ -32,7 +32,7 @@
  */
 import type { Api, Model, Usage } from "@earendil-works/pi-ai";
 
-import { describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
 
 import {
 	OUTCOME_BY_STOP_REASON,
@@ -40,6 +40,11 @@ import {
 	type StopReason,
 	type TurnRow,
 } from "../../.pi/extensions/diagnostics/schema.ts";
+import {
+	addQualityCost,
+	peekQualityCost,
+	takeQualityCost,
+} from "../../.pi/extensions/diagnostics/quality-cost.ts";
 import {
 	cacheReadRatio,
 	composeTurnRow,
@@ -228,6 +233,122 @@ describe("DIAG-04 — the `reasoning` key is absent, not zero, when the provider
 			"the row is written through JSON.stringify, so the guarantee that matters is the one about " +
 				"the bytes a later phase reads back",
 		).not.toContain("reasoning");
+	});
+});
+
+// ---------------------------------------------------------------------------
+// 1b. QUAL-09 — the quality-cost ledger: omission on the row, accumulation on
+//     the accumulator, and the "measured zero is not the same as omitted"
+//     distinction the reasoning-key tests above already established.
+// ---------------------------------------------------------------------------
+
+describe("QUAL-09 — the `qualityMs`/`qualityTokens` keys follow the same omission rule as `reasoning`", () => {
+	it("omits both keys when composeTurnRow receives no quality input at all", () => {
+		const row = makeRow();
+
+		expect(
+			"qualityMs" in row,
+			"a turn the quality layer never touched has no share to report; a fabricated zero would be " +
+				"indistinguishable on disk from a turn where it genuinely ran for zero milliseconds. " +
+				"Asserted with `in` rather than `row.qualityMs === undefined`, which the plan calls out " +
+				"explicitly: the latter also passes for a key that is present-and-undefined, a DIFFERENT " +
+				"object JSON.stringify would drop but a reader checking `hasOwnProperty` would not",
+		).toBe(false);
+		expect(Object.prototype.hasOwnProperty.call(row, "qualityTokens")).toBe(false);
+	});
+
+	it("keeps `qualityMs: 0` when the caller explicitly supplies a measured zero", () => {
+		// THE DISTINCTION THIS TEST NAME STATES: the omission rule forbids
+		// FABRICATING a zero (the case above), not RECORDING one a caller actually
+		// measured. A quality layer that ran for genuinely 0ms — a deterministic
+		// gate stage that short-circuited instantly — has a real number to report,
+		// and dropping it would be the opposite failure: hiding a real measurement
+		// behind the same absence a turn with no quality work also produces.
+		const row = makeRow({ qualityMs: 0, qualityTokens: 0 });
+
+		expect(
+			"qualityMs" in row,
+			"an explicitly-supplied 0 is a measurement, and the omission rule's job is to keep it " +
+				"distinguishable from the untouched case above — not to erase it",
+		).toBe(true);
+		expect(row.qualityMs).toBe(0);
+		expect("qualityTokens" in row).toBe(true);
+		expect(row.qualityTokens).toBe(0);
+	});
+
+	it("records real qualityMs/qualityTokens values verbatim", () => {
+		const row = makeRow({ qualityMs: 812, qualityTokens: 4096 });
+
+		expect(row.qualityMs).toBe(812);
+		expect(row.qualityTokens).toBe(4096);
+	});
+
+	it("still lacks the keys after a JSON round trip", () => {
+		const row = makeRow();
+		const roundTripped = JSON.parse(JSON.stringify(row)) as Record<string, unknown>;
+
+		expect(
+			Object.prototype.hasOwnProperty.call(roundTripped, "qualityMs"),
+			"the bytes a later phase reads back off disk must carry no qualityMs key on a turn the " +
+				"quality layer never touched",
+		).toBe(false);
+		expect(Object.prototype.hasOwnProperty.call(roundTripped, "qualityTokens")).toBe(false);
+	});
+});
+
+describe("QUAL-09 — the quality-cost accumulator sums contributions and drains exactly once", () => {
+	// Isolation: this repository's `globalThis`-keyed accumulator (the same
+	// STATE-SLOT pattern `routing/modes.ts` uses) is process-wide, so a value
+	// left over from one test would leak into the next. `takeQualityCost()`
+	// both reads and clears, so calling it once before each case is the drain.
+	beforeEach(() => {
+		takeQualityCost();
+	});
+
+	it("returns undefined from a fresh, never-touched slot — not an object with zeros", () => {
+		expect(
+			takeQualityCost(),
+			"a slot nothing was ever added to has no measurement to report; an object with zeros here " +
+				"would be indistinguishable from a quality layer that ran and measured genuinely nothing",
+		).toBeUndefined();
+	});
+
+	it("sums two contributions into one drained value, then reports empty on the next take", () => {
+		addQualityCost({ ms: 12 });
+		addQualityCost({ ms: 30, tokens: 400 });
+
+		expect(
+			takeQualityCost(),
+			"the deterministic gate stage, the reviewer and the refute pass each contribute " +
+				"independently within one turn; the ledger must sum them rather than overwrite",
+		).toEqual({ qualityMs: 42, qualityTokens: 400 });
+
+		expect(
+			takeQualityCost(),
+			"a second take on the same turn must find the slot already drained by the first — a " +
+				"caller that reads twice must not see the same cost counted twice",
+		).toBeUndefined();
+	});
+
+	it("peekQualityCost reads without clearing; takeQualityCost then still returns the same value", () => {
+		addQualityCost({ ms: 5, tokens: 10 });
+
+		expect(peekQualityCost(), "a peek must not drain the slot").toEqual({ qualityMs: 5, qualityTokens: 10 });
+		expect(peekQualityCost(), "peeking twice must be idempotent").toEqual({ qualityMs: 5, qualityTokens: 10 });
+		expect(takeQualityCost(), "the value peekQualityCost saw must still be there for the real drain").toEqual({
+			qualityMs: 5,
+			qualityTokens: 10,
+		});
+		expect(takeQualityCost(), "and now it really is drained").toBeUndefined();
+	});
+
+	it("addQualityCost never throws on a call that supplies neither field", () => {
+		expect(() => addQualityCost({})).not.toThrow();
+		expect(
+			takeQualityCost(),
+			"an empty contribution is still a contribution: the slot moves from untouched to " +
+				"touched-with-zeros, which is the caller's own business to avoid, not this module's to reject",
+		).toEqual({ qualityMs: 0, qualityTokens: 0 });
 	});
 });
 

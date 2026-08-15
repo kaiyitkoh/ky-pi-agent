@@ -61,6 +61,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { SESSION_TURN_ROLE } from "../../.pi/extensions/diagnostics/index.ts";
 import { logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
+import { addQualityCost, takeQualityCost } from "../../.pi/extensions/diagnostics/quality-cost.ts";
 import {
 	TURNS_LOG_BASE,
 	WIRE_LOG_BASE,
@@ -132,6 +133,8 @@ interface TurnRowShape {
 	toolResults?: number;
 	turnIndex?: number;
 	thinkingLevel?: string;
+	qualityMs?: number;
+	qualityTokens?: number;
 	event?: string;
 	where?: string;
 }
@@ -606,5 +609,85 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 					"tokens. Those are different facts and the row must be able to say both",
 			).not.toContain("reasoning");
 		}
+	});
+});
+
+// ---------------------------------------------------------------------------
+// QUAL-09 — the quality-cost ledger, on a live session
+// ---------------------------------------------------------------------------
+
+let qualityAbsent: Capture;
+let qualityPresent: Capture;
+
+describe("QUAL-09 — takeQualityCost() reaches the turns row on a live session", () => {
+	beforeAll(async () => {
+		// DRAINED FIRST, so a value left over from an unrelated prior test in this
+		// process — the `globalThis`-keyed slot is process-wide, exactly the
+		// STATE-SLOT pattern `routing/modes.ts` documents — cannot leak into the
+		// negative control below and make it pass for the wrong reason.
+		takeQualityCost();
+
+		// THE NEGATIVE CONTROL, CAPTURED FIRST AND WITHOUT `addQualityCost`.
+		// A presence assertion with no absence control cannot distinguish "the
+		// field reflects what was added" from "the field is always there" — this
+		// session is what makes the positive case below mean something.
+		qualityAbsent = await capture({
+			responses: [fauxAssistantMessage("ok", { stopReason: "stop" })],
+			prompts: ["hello"],
+		});
+
+		// `addQualityCost` runs synchronously, before the session below issues its
+		// prompt, so the value is sitting in the accumulator by the time this
+		// session's `turn_end` drains it. Two contributions, exactly like the
+		// deterministic gate stage and the reviewer would make within one turn.
+		addQualityCost({ ms: 12, tokens: 100 });
+		addQualityCost({ ms: 25, tokens: 400 });
+		qualityPresent = await capture({
+			responses: [fauxAssistantMessage("ok", { stopReason: "stop" })],
+			prompts: ["hello"],
+		});
+	});
+
+	it("carries no qualityMs/qualityTokens key when nothing called addQualityCost", () => {
+		const rows = turnRowsOf(qualityAbsent);
+		expect(
+			rows.length,
+			"no turn row to assert the absence on, which makes the whole case vacuous",
+		).toBe(1);
+
+		const row = rows[0] as TurnRowShape;
+		expect(
+			Object.keys(row),
+			"a turn the quality layer never touched carries a qualityMs key. A fabricated zero here " +
+				"would be indistinguishable from a turn where the quality layer genuinely ran for zero " +
+				"milliseconds — the omission rule exists to keep those two facts apart",
+		).not.toContain("qualityMs");
+		expect(Object.keys(row)).not.toContain("qualityTokens");
+	});
+
+	it("carries the summed qualityMs/qualityTokens when addQualityCost ran before the turn ended", () => {
+		const rows = turnRowsOf(qualityPresent);
+		expect(rows.length, "no turn row to assert the presence on").toBe(1);
+
+		const row = rows[0] as TurnRowShape;
+		expect(
+			row.qualityMs,
+			"the turn_end handler must drain the accumulator's SUM of both addQualityCost calls " +
+				"(12 + 25), not just the last one or the first",
+		).toBe(37);
+		expect(row.qualityTokens, "same for the token half: 100 + 400").toBe(500);
+	});
+
+	it("the negative and positive sessions used the same script, so the difference is only the ledger call", () => {
+		// The paired-fixture discipline this file already uses elsewhere (case 4b's
+		// httpStatus check, the reasoning-key sweep in case 6): both sessions here
+		// are otherwise IDENTICAL scripts. If this assertion ever fails alongside
+		// the two above, the difference being measured is not `addQualityCost` at
+		// all — something else diverged between the two captures.
+		const absentRow = turnRowsOf(qualityAbsent)[0] as TurnRowShape;
+		const presentRow = turnRowsOf(qualityPresent)[0] as TurnRowShape;
+
+		expect(absentRow.stopReason).toBe(presentRow.stopReason);
+		expect(absentRow.outcome).toBe(presentRow.outcome);
 	});
 });

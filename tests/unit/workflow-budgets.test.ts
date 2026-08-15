@@ -224,9 +224,9 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
-		budget: 3670,
-		why: "WR-03; measured 3662 raw lines across 9 files 2026-08-15 (not re-reviewed for tightness), " +
-			"rounded up to the next ten",
+		budget: 3920,
+		why: "WR-03; measured 3913 raw lines across 10 files 2026-08-15 (08-04 added quality-cost.ts; not " +
+			"re-reviewed for tightness), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
