@@ -66,7 +66,8 @@ describe("CR-01 -- the real production exec runner genuinely spawns on this plat
 			"NEVER unavailable (the exact regression CR-01 fixes)",
 		() => {
 			setQuickGateExecOverrideForTests(undefined); // explicit: proves the PRODUCTION path, not a leaked override
-			const result = runQuickGateStage(repoRoot());
+			// WR2-06: projectTrusted: true -- this IS this repository, genuinely trusted.
+			const result = runQuickGateStage(repoRoot(), true);
 			expect(
 				result.legs.typecheck.status,
 				`typecheck leg is UNAVAILABLE -- ${result.legs.typecheck.status === "unavailable" ? result.legs.typecheck.reason : ""} -- ` +
@@ -84,7 +85,7 @@ describe("CR-01 -- the real production exec runner genuinely spawns on this plat
 	);
 
 	it("this repository's own source is clean: typecheck and lint both PASS for real (paired positive, not merely 'not unavailable')", () => {
-		const result = runQuickGateStage(repoRoot());
+		const result = runQuickGateStage(repoRoot(), true); // WR2-06: this repository is genuinely trusted
 		expect(result.legs.typecheck.status, result.legs.typecheck.status === "fail" ? result.legs.typecheck.findings.join("\n") : "").toBe("pass");
 		expect(result.legs.lint.status, result.legs.lint.status === "fail" ? result.legs.lint.findings.join("\n") : "").toBe("pass");
 	});
@@ -96,7 +97,9 @@ describe("CR-01 -- the real production exec runner genuinely spawns on this plat
 
 	it("runQuickGateStage against a throwaway fixture with no node_modules -- typecheck and lint legs are UNAVAILABLE, naming the missing binary, never FAIL and never a hang", () => {
 		const repo = makeTempRepo("kypi-cr01-gate-");
-		const result = runQuickGateStage(repo);
+		// WR2-06: projectTrusted: true -- this test isolates CR-01's missing-binary
+		// degradation from WR2-06's separate trust gate (covered by its own describe below).
+		const result = runQuickGateStage(repo, true);
 		expect(result.legs.typecheck).toEqual({
 			status: "unavailable",
 			reason: expect.stringContaining("tsc is not installed under"),
@@ -185,7 +188,7 @@ describe("WR2-01 -- localBin walks up to an ancestor node_modules, matching the 
 		// from docs/ (naming the missing target files, not a missing binary);
 		// that is CR-02's own documented behaviour, not WR2-01's concern.
 		const subdir = join(repoRoot(), "docs");
-		const result = runQuickGateStage(subdir);
+		const result = runQuickGateStage(subdir, true); // WR2-06: this repository's own subdirectory is trusted
 		expect(
 			result.legs.typecheck.status,
 			result.legs.typecheck.status === "unavailable" ? result.legs.typecheck.reason : "",
@@ -205,5 +208,53 @@ describe("WR2-01 -- localBin walks up to an ancestor node_modules, matching the 
 	it("productionExec still reports an honest unavailable, naming both cwd and 'or any ancestor's', when no node_modules exists anywhere up the chain (a throwaway temp repo)", () => {
 		const repo = makeTempRepo("kypi-wr2-01-exec-");
 		expect(() => productionExec("tsc", ["--noEmit"], repo)).toThrowError(/tsc is not installed under .* or any ancestor's/);
+	});
+});
+
+describe("WR2-06 -- an untrusted project's cwd never reaches a real spawn, even when a real binary is genuinely installed there", () => {
+	it("runQuickGateStage(<temp repo with a REAL tsc stub installed>, false) -- typecheck and lint legs are UNAVAILABLE naming trust, never pass or fail, even though a real binary genuinely exists at the resolved path", () => {
+		setQuickGateExecOverrideForTests(undefined); // explicit: proves the PRODUCTION path, not a leaked override
+		// A throwaway temp repo, never repoRoot() -- isolates this assertion from
+		// this repository's OWN unrelated deterministic anti-pattern findings
+		// (a pre-existing, accepted residual, orthogonal to WR2-06 entirely) so
+		// `result.blocking` below measures only what this test claims to measure.
+		const repo = makeTempRepo("kypi-wr2-06-untrusted-");
+		stubTsc(repo, { exitCode: 0 }); // a REAL binary genuinely resolvable at node_modules/.bin/tsc(.cmd)
+		const result = runQuickGateStage(repo, false);
+		expect(result.legs.typecheck).toEqual({
+			status: "unavailable",
+			reason: expect.stringContaining("is not trusted"),
+		});
+		expect(result.legs.lint).toEqual({
+			status: "unavailable",
+			reason: expect.stringContaining("is not trusted"),
+		});
+		// UNAVAILABLE never sets blocking, by GATE-01's own three-state contract --
+		// an untrusted project degrades honestly, it does not block /quick outright
+		// (a user who has not yet answered Pi's own trust prompt is not thereby
+		// locked out of the command entirely). No .pi/extensions/ content exists in
+		// this temp repo, so the (untouched, non-exec) anti-pattern leg trivially
+		// passes and the LSP leg is UNAVAILABLE by its own separate contract --
+		// neither sets blocking either, so this genuinely isolates WR2-06's own claim.
+		expect(result.blocking).toBe(false);
+	});
+
+	it("runQuickGateStage(repoRoot(), true) with the SAME repo -- typecheck and lint legs genuinely run (paired positive: the gate is proved to actually flip on trust, not merely always refuse)", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const result = runQuickGateStage(repoRoot(), true);
+		expect(result.legs.typecheck.status, result.legs.typecheck.status === "fail" ? result.legs.typecheck.findings.join("\n") : "").toBe("pass");
+		expect(result.legs.lint.status, result.legs.lint.status === "fail" ? result.legs.lint.findings.join("\n") : "").toBe("pass");
+	});
+
+	it("an installed test override wins regardless of projectTrusted -- an override is a scripted stub that never touches disk, so gating it behind trust would be friction with no security benefit", () => {
+		const alwaysPass = (): { code: number; stdout: string; stderr: string } => ({ code: 0, stdout: "", stderr: "" });
+		setQuickGateExecOverrideForTests(alwaysPass);
+		try {
+			const untrusted = runQuickGateStage(repoRoot(), false);
+			expect(untrusted.legs.typecheck.status, "an installed override must win even when projectTrusted is false").toBe("pass");
+			expect(untrusted.legs.lint.status).toBe("pass");
+		} finally {
+			setQuickGateExecOverrideForTests(undefined);
+		}
 	});
 });

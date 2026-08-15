@@ -39,7 +39,10 @@ export default function (pi: ExtensionAPI): void {
 				);
 				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
-				const gate = runQuickGateStage(ctx.cwd);
+				// WR2-06: the trust decision now reaches the gate stage -- see
+				// quality/index.ts#resolveExec's own docstring for what this closes
+				// (an untrusted cwd's node_modules/.bin binary must never be spawned).
+				const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
 				if (gate.blocking) {
 					// WR-06: refund ONLY this gate's own cost -- takeQualityCost() would
 					// drain the WHOLE ledger, erasing any OTHER contributor (e.g. a

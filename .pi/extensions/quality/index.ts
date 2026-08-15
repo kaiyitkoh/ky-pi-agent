@@ -300,9 +300,36 @@ export function setQuickGateExecOverrideForTests(exec: ExecRunner | undefined): 
 	(globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY] = exec;
 }
 
-function resolveExec(): ExecRunner {
+/**
+ * WR2-06 (`08-REVIEW.md` iteration 2): resolves the `ExecRunner` `/quick`
+ * actually uses, gating the REAL (production) path behind `projectTrusted`.
+ *
+ * A test-installed override ALWAYS wins, regardless of `projectTrusted` --
+ * an override is a scripted stub that never touches disk or spawns
+ * anything, so gating it behind trust would add friction to every existing
+ * test (`quality-gate-order.test.ts`, `quick-workflow.test.ts`) for zero
+ * security benefit; the hazard this gate closes is specific to
+ * {@link productionExec} actually resolving and spawning a binary out of
+ * `cwd`. Only when NO override is installed does `projectTrusted` matter:
+ * an untrusted `cwd` gets an honest, immediate refusal (never a spawn
+ * attempt), naming trust as the reason, which `runTypecheckLeg`/
+ * `runLintLeg` (`gates.ts`) turn into an actionable `unavailable` -- the
+ * same three-state contract CR-01 already established for a missing
+ * binary, now covering an untrusted one too.
+ */
+function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
 	const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
-	return typeof override === "function" ? (override as ExecRunner) : productionExec;
+	if (typeof override === "function") {
+		return override as ExecRunner;
+	}
+	if (!projectTrusted) {
+		return () => {
+			throw new Error(
+				`the project at ${cwd} is not trusted -- the typecheck/lint legs will not execute a binary from this cwd until it is`,
+			);
+		};
+	}
+	return productionExec;
 }
 
 /**
@@ -310,13 +337,18 @@ function resolveExec(): ExecRunner {
  * the live registered-tool-name list, and a real (or test-overridden) exec
  * runner. This is the whole surface `/quick` calls -- see the module
  * docstring's PURPOSE section.
+ *
+ * `projectTrusted` (WR2-06, `08-REVIEW.md` iteration 2): threaded through
+ * from `ctx.isProjectTrusted()` at the one production call site
+ * (`workflows/index.ts`) -- see {@link resolveExec}'s own docstring for what
+ * this gates and why a test override is exempt from it.
  */
-export function runQuickGateStage(cwd: string): GateResult {
+export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateResult {
 	return runDeterministicGates({
 		sources: collectQualitySources(cwd),
 		registeredToolNames: registeredToolNames(),
 		cwd,
-		exec: resolveExec(),
+		exec: resolveExec(cwd, projectTrusted),
 	});
 }
 

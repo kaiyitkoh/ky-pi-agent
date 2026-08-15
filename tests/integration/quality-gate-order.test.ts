@@ -344,8 +344,11 @@ describe("unavailable", () => {
 			try {
 				gitInit(cwd, "work");
 				// No offending fixture -- isolates the LSP leg's own state from the
-				// anti-pattern leg's.
-				const result = runQuickGateStage(cwd);
+				// anti-pattern leg's. projectTrusted: true is moot here (WR2-06) --
+				// the installed override always wins over the trust gate, see
+				// quality/index.ts#resolveExec's own docstring -- but true is the
+				// honest value for what this test is actually proving.
+				const result = runQuickGateStage(cwd, true);
 
 				expect(result.legs.lsp.status, "the LSP leg must report UNAVAILABLE -- @narumitw/pi-lsp is pinned but not installed (RB-07-02)").toBe(
 					"unavailable",

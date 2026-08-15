@@ -379,7 +379,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 3610,
+		budget: 3670,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
@@ -397,7 +397,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"instead of raw shell:true+args concatenation, and WR2-01 widened localBin to walk ancestor " +
 			"node_modules directories -- both in index.ts, which grew 301 -> 355. Re-measured 3,602 raw lines " +
 			"across the same 8 files 2026-08-15 (advisor.ts 198, calibration.ts 179, gates.ts 426, index.ts 355, " +
-			"review-schema.ts 580, reviewer.ts 425, rules.ts 890, verdict.ts 549), rounded up to the next ten",
+			"review-schema.ts 580, reviewer.ts 425, rules.ts 890, verdict.ts 549). RAISED 3610 -> 3670 by the " +
+			"SAME iteration-2 fix pass: WR2-05 added the MIN_DISTINCT_NEEDLES two-needle matcher to " +
+			"calibration.ts (179 -> 206), and WR2-06 added the projectTrusted trust gate to index.ts's " +
+			"resolveExec (355 -> 387). Re-measured 3,661 raw lines across the same 8 files 2026-08-15 " +
+			"(advisor.ts 198, calibration.ts 206, gates.ts 426, index.ts 387, review-schema.ts 580, reviewer.ts " +
+			"425, rules.ts 890, verdict.ts 549), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/providers",
