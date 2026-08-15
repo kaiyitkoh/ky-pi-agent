@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-09-PLAN.md
-last_updated: "2026-08-15T15:19:59.169Z"
+stopped_at: Completed 09-10-PLAN.md
+last_updated: "2026-08-15T16:21:13.827Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 95
+  completed_plans: 96
   percent: 73
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 10 of 17
+Plan: 11 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-08-15
 
-Progress: [█████████░] 92%
+Progress: [█████████░] 93%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -165,6 +165,7 @@ credentials can do has been done".
 | Phase 09 P07 | 9min | 2 tasks | 3 files |
 | Phase 09 P08 | 19min | 2 tasks | 5 files |
 | Phase 09 P09 | 20m | 2 tasks | 4 files |
+| Phase 09 P10 | 14min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -449,6 +450,9 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-08: /grill --resume takes no slug argument (two entry points, no flags, per FEATURES.md) -- it resolves the most-recently-modified .pi/work/ subdirectory by mtime, refusing if none exists or holds no SPEC.md draft
 - [Phase 09]: FLOW-06 task-path extraction uses the LAST token before the verification separator, not the first EXPECTED_FILE_PATTERN match — EXPECTED_FILE_PATTERN legally accepts a bare word with no dot/slash, so a first-match search misidentified ordinary prose as the path -- caught while building this plan's own falsification fixtures
 - [Phase 09]: New directory named plan-ceremony, not plan-mode, to avoid colliding with the vendored Pi plan-mode example — per 09-RESEARCH.md; follows plan 09-05's identical precedent of declaring a DIRECTORY_BUDGETS row ahead of any registerCommand( call, since /plan itself is wired in 09-10
+- [Phase 09]: 09-10: writePlanIfGated re-reads and re-validates the on-disk SPEC.md rather than trusting a caller-supplied requirement-id list -- defense-in-depth mirroring T-09-10-01's 'never trust a prior verdict' rule
+- [Phase 09]: 09-10: extractSpecRequirementIds (new small module) treats every bounded R<digits> token anywhere in SPEC section 3 as a requirement id -- no code anywhere already produced this list since spec-schema.ts's requirementsBody is deliberately free text
+- [Phase 09]: 09-10: slug-ambiguity resolution is a hard refusal over any candidate count above one, never an mtime tie-break, naming every candidate -- proven by the two-candidate-slugs integration test case
 
 ### Pending Todos
 
@@ -501,8 +505,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T15:19:59.159Z
-Stopped at: Completed 09-09-PLAN.md
+Last session: 2026-08-15T16:21:13.817Z
+Stopped at: Completed 09-10-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
