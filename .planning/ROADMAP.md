@@ -360,7 +360,23 @@ Plans:
   5. The wall-clock and token cost the quality layer adds is a recorded number per turn in the JSONL, so the correctness/latency balance is measured and tunable rather than guessed. Nested-role thinking budgets (reviewer, advisor, summariser) apply; main-loop budgets apply only where Phase 2 proved the parameters land.
 
 **Contains [RUNBOOK] requirements**: GATE-10 — the main-loop half is verified live; the nested-role half is `fauxProvider`-verifiable.
-**Plans**: TBD
+**Plans**: 13 plans in 6 waves
+
+Plans:
+- [ ] 08-01-PLAN.md — GATE-10 nested: fix the Bedrock reasoning-effort shape at `modes.ts:409`, thread `tools`, prove per-`model.api` on the wire
+- [ ] 08-02-PLAN.md — QUAL-01: six syntax-node anti-pattern rules via the TypeScript compiler API
+- [ ] 08-03-PLAN.md — GATE-03/04/05, QUAL-04/06: the `submit_review` schema and the rejection engine
+- [ ] 08-04-PLAN.md — QUAL-09: the quality-layer cost accumulator and its `TurnRow` fields
+- [ ] 08-05-PLAN.md — the diagnosed `qoder-delegate` flake, fixed at root cause (event gate, no wall-clock margin)
+- [ ] 08-06-PLAN.md — GATE-01/QUAL-02/QUAL-07: the deterministic gate runner, three states per leg, measured wall clock
+- [ ] 08-07-PLAN.md — GATE-02: the reviewer's six-element context contract, proved on the outgoing request
+- [ ] 08-08-PLAN.md — GATE-09: the `consult_advisor` mechanism with the boundary rule's three written answers
+- [ ] 08-09-PLAN.md — GATE-06/QUAL-05: refute-or-promote (BLOCKERs only) and the workflow stop
+- [ ] 08-10-PLAN.md — GATE-08: the six-incident seeded-defect corpus, the pure scorer, and the blind-reviewer control
+- [ ] 08-11-PLAN.md — wiring: `/quick` calls the gate stage, `consult_advisor` is registered, the BOOT-10 toll is paid
+- [ ] 08-12-PLAN.md — the evidence gate's deferred empty-commit residual, closed by tree comparison
+- [ ] 08-13-PLAN.md — `RB-08-01..03` (OUTSTANDING), `docs/QUALITY.md`, and requirement-status reconciliation
+
 **Research**: Not needed — the comparative survey produced prescriptive artifact schemas, gate definitions and the anti-review-theatre protocol. Implement from it.
 
 ### Phase 9: Ceremonial Workflows
