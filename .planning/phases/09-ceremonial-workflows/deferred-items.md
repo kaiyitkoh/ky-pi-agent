@@ -56,3 +56,19 @@ docstring explaining why the old trade did not hold, which the earlier ratchet r
 `why` string argue a budget must never pressure out of a correctness fix).
 
 Debug session archived at `.planning/debug/resolved/wr09-lost-update.md`.
+
+## Plan 09-12
+
+- `tests/unit/subagent-agents-config.test.ts` > "subagent-agents-config -- completeness, both directions" >
+  "present-but-undeclared: every tracked .pi/agents/*.md names a role in AGENT_NAME_BY_ROLE, or is a
+  named, reasoned exception" -- fails on `main` before this plan's own changes: `.pi/agents/executor-handoff.md`
+  ships (added in plan 09-11, commit `5a5db3a`) but no role in `AGENT_NAME_BY_ROLE`
+  (`.pi/extensions/routing/`) routes to it, and it is not named in `UNROUTED_AGENT_ALLOWLIST`. Confirmed
+  pre-existing via `git log --oneline -3 -- .pi/agents/executor-handoff.md tests/unit/subagent-agents-config.test.ts`
+  (last touched by plan 09-11's own commit, before this plan started) and via `git status --short`/`git diff --stat`
+  showing zero unstaged changes to either file at the point this failure was first observed. Not fixed: out of
+  scope for plan 09-12, which touches only `.pi/extensions/quality/gates.ts`,
+  `tests/unit/gate-depth-selector.test.ts` and `tests/unit/workflow-budgets.test.ts` -- none of which name a
+  role, an agent file, or `AGENT_NAME_BY_ROLE`. Belongs to whichever later plan wires `/execute`'s subagent
+  handoff (FLOW-09/plan 09-11's own follow-on) to a routed role, or adds `executor-handoff` to
+  `UNROUTED_AGENT_ALLOWLIST` with a stated reason if it is deliberately future-path.
