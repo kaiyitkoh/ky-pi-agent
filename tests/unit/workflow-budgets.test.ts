@@ -502,7 +502,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 1680,
+		budget: 1700,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -522,7 +522,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"HARD_QUESTION_BUDGET/INTERVIEW_PERSPECTIVES, the numbered binding-order gateAmbiguity predicate, " +
 			"nextQuestionSlot's rotation, and assumptionsFromUnmetFloors. Measured 519 raw lines (scorecard.ts) " +
 			"+ 1161 raw lines (spec-schema.ts) = 1680 raw lines across 2 files 2026-08-15, already an exact " +
-			"multiple of ten",
+			"multiple of ten. RAISED 1680 -> 1700 in the same plan: quality-rules.test.ts's own magic-number " +
+			"rule (QUAL-01) fired error-tier on scorecard.ts's four repeated `floor: 0.7` literals (each " +
+			"nested inside an Object.freeze() call, which breaks isConstDeclarationPosition's parent walk) -- " +
+			"fixed by naming DEFAULT_DIMENSION_FLOOR once and reusing it at all four sites, per this " +
+			"repository's own rule that a repeated literal needs a named constant. Re-measured 532 raw lines " +
+			"(scorecard.ts) + 1161 raw lines (spec-schema.ts) = 1693 raw lines across 2 files 2026-08-15, " +
+			"rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",

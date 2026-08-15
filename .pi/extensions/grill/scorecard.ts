@@ -146,6 +146,19 @@ export interface AmbiguityDimension {
 }
 
 /**
+ * The floor every {@link AMBIGUITY_DIMENSIONS} entry currently uses. Named,
+ * not repeated as a bare `0.7` literal at each of the four dimension rows
+ * below -- `quality/rules.ts`'s own `magic-number` rule (QUAL-01) fires
+ * error-tier on any literal appearing 2+ times in a file with no named
+ * constant, and this repository's own anti-pattern gate grants this module
+ * no exemption. A future dimension needing a DIFFERENT floor sets its own
+ * `floor` field directly rather than reusing this constant -- it exists to
+ * name the CURRENT shared value, not to force every dimension to share one
+ * forever.
+ */
+const DEFAULT_DIMENSION_FLOOR = 0.7;
+
+/**
  * The four dimensions, frozen, and each entry frozen individually so a
  * caller cannot mutate one row's `floor` out from under every other consumer
  * of this table -- mirroring `spec-schema.ts`'s `SPEC_SECTIONS` discipline.
@@ -157,7 +170,7 @@ export const AMBIGUITY_DIMENSIONS: readonly AmbiguityDimension[] = Object.freeze
 	Object.freeze({
 		id: "factual-grounding",
 		label: "Factual Grounding",
-		floor: 0.7,
+		floor: DEFAULT_DIMENSION_FLOOR,
 		why:
 			"is every claim this SPEC makes about the codebase actually backed by evidence, rather than assumed? " +
 			"A low score here means the agent is about to build on something false about the codebase -- " +
@@ -168,7 +181,7 @@ export const AMBIGUITY_DIMENSIONS: readonly AmbiguityDimension[] = Object.freeze
 	Object.freeze({
 		id: "requirement-precision",
 		label: "Requirement Precision",
-		floor: 0.7,
+		floor: DEFAULT_DIMENSION_FLOOR,
 		why:
 			"does every requirement carry a runnable acceptance criterion, or does it read as a vague intention? " +
 			"A low score here means §3's requirements are fuzzy enough that the user will only discover the " +
@@ -178,7 +191,7 @@ export const AMBIGUITY_DIMENSIONS: readonly AmbiguityDimension[] = Object.freeze
 	Object.freeze({
 		id: "failure-coverage",
 		label: "Failure Coverage",
-		floor: 0.7,
+		floor: DEFAULT_DIMENSION_FLOOR,
 		why:
 			"does §4 name the REAL failure paths for this change, or a token minimum satisfied by filler entries? " +
 			"A low score here means the happy path works but edge cases and error handling were invented or " +
@@ -188,7 +201,7 @@ export const AMBIGUITY_DIMENSIONS: readonly AmbiguityDimension[] = Object.freeze
 	Object.freeze({
 		id: "scope-definiteness",
 		label: "Scope Definiteness",
-		floor: 0.7,
+		floor: DEFAULT_DIMENSION_FLOOR,
 		why:
 			"are §5's in-scope and out-of-scope lists CLOSED -- would a reasonable reader know exactly what is " +
 			"and is not being built? A low score here means the change will build more or less than asked -- " +

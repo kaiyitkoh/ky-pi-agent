@@ -77,10 +77,16 @@ describe("FLOW-02 -- gateAmbiguity, both directions", () => {
 			why: "score === floor is not a floor violation -- boundary, inclusive",
 		},
 		{
-			name: "all four floors met, overall === SCORE_GATE + 0.01",
-			card: scorecard({}, SCORE_GATE + 0.01),
+			// HARDCODED to FEATURES.md line 176's literal 0.20 gate, deliberately
+			// NOT derived from the imported SCORE_GATE constant -- a case built from
+			// the constant self-adjusts to whatever the constant is mutated to and
+			// can never catch the constant itself drifting. Falsification (c)
+			// (SCORE_GATE changed to 0.9) turns this exact row red: 0.21 no longer
+			// exceeds the mutated gate, so the scorecard would wrongly ACCEPT.
+			name: "all four floors met, overall = 0.21 (one hundredth over FEATURES.md's stated 0.20 gate)",
+			card: scorecard({}, 0.21),
 			expected: "reject",
-			reasonIncludes: [String(SCORE_GATE + 0.01), String(SCORE_GATE)],
+			reasonIncludes: ["0.21", "above the gate of 0.2"],
 			why: "an over-gate score blocks even though every individual floor is met",
 		},
 		{
@@ -124,6 +130,21 @@ describe("FLOW-02 -- gateAmbiguity, both directions", () => {
 			expected: "reject",
 			reasonIncludes: ["requirement-precision", "-0.1"],
 			why: "range check must fire in the negative direction too",
+		},
+		{
+			// overall is a fixed 0.9, not derived from SCORE_GATE, so this row's
+			// outcome is unaffected by falsification (c)'s SCORE_GATE mutation --
+			// it stays reserved for proving falsification (b)'s ordering claim
+			// specifically, and it stays within the valid 0..1 range so it can
+			// never accidentally trip the (unrelated) range check instead.
+			name: "one dimension below floor AND overall over the gate, simultaneously -- the floor defect must be named",
+			card: scorecard({ "factual-grounding": 0.69 }, 0.9),
+			expected: "reject",
+			reasonIncludes: ["Factual Grounding"],
+			why:
+				"binding order (T-09-07-01): the floor check fires BEFORE the overall-score check, so a scorecard " +
+				"failing BOTH must report the floor defect, never the over-gate score alone -- falsification (b) " +
+				"(swapping the two checks) turns this exact row's reason assertion red",
 		},
 	];
 
