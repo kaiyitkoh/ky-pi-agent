@@ -127,6 +127,23 @@ describe("verdict", () => {
 });
 
 // ---------------------------------------------------------------------------
+// WR-01 -- duplicate, contradictory verdicts for the same requirement id
+// ---------------------------------------------------------------------------
+
+describe("WR-01 -- duplicate verdicts for one requirement id", () => {
+	it("rejects two verdicts for the SAME requirement id (contradictory statuses), naming the duplicated id", () => {
+		const review = baseline();
+		(review.verdicts as unknown[]).push({ requirementId: "GATE-03", status: "Missing", evidence: "src/foo.ts:99" });
+		const reason = expectRejects(review);
+		expect(reason).toContain("GATE-03");
+	});
+
+	it("accepts the baseline's own single verdict per id (paired positive -- proves the rejection above is about DUPLICATION, not merely a second array entry)", () => {
+		expectAccepts(baseline());
+	});
+});
+
+// ---------------------------------------------------------------------------
 // WR-02 -- an unrecognised verdict status is rejected, never silently coerced
 // ---------------------------------------------------------------------------
 

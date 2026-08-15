@@ -288,6 +288,11 @@ function isNonEmptyString(value: unknown): value is string {
  *       naming the missing ids. A verdict naming a requirement id NOT in the
  *       expected set is also a reject, naming the extra id -- a reviewer
  *       inventing requirement ids is the same failure as omitting them.
+ *   (3b) `verdicts` carries more than one verdict for the SAME requirement
+ *       id -> reject, naming the duplicated id(s). WR-01: two verdicts for
+ *       one id -- possibly contradictory -- is not a review, it is two, and
+ *       a consumer reading `verdicts.find(v => v.requirementId === id)`
+ *       would silently see only the first and never know a second existed.
  *   (4) ANY verdict whose `evidence` does not match a `file:line` shape
  *       (`<path>:<digits>`) -> reject, naming the verdict's requirement id
  *       and the string that arrived.
@@ -382,6 +387,17 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 			reason:
 				`submit_review carries a verdict for requirement id(s) not among the stated requirements: ${inventedIds.join(", ")} -- ` +
 				"inventing a requirement id is the same failure as omitting one",
+		};
+	}
+
+	// (3b) WR-01: exactly one verdict per requirement id -- a duplicate (even a contradictory one) is not a review, it is two.
+	const duplicateIds = verdictRequirementIds.filter((id, i, all) => id.length > 0 && all.indexOf(id) !== i);
+	if (duplicateIds.length > 0) {
+		return {
+			ok: false,
+			reason:
+				`submit_review carries more than one verdict for requirement id(s): ${[...new Set(duplicateIds)].join(", ")} -- ` +
+				"every stated requirement needs exactly ONE verdict; two verdicts for one id is not a review, it is two",
 		};
 	}
 
