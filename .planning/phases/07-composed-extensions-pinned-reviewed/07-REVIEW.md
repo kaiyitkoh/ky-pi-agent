@@ -38,7 +38,26 @@ findings:
   warning: 19
   info: 7
   total: 30
-status: issues_found
+status: fixes_applied
+fix_pass:
+  applied_at: 2026-08-15
+  critical_fixed: 4
+  critical_skipped: 0
+  warning_fixed: 19
+  warning_skipped: 0
+  info_fixed: 0
+  info_skipped: 7
+  info_skip_reason: "explicitly out of scope for this pass"
+  suite_after: "1727 tests / 97 files green; npx tsc --noEmit clean"
+  commits:
+    - "34e1465 CR-01 redact real AWS account identifiers from every tracked file"
+    - "9b1dbb0 CR-02/CR-04 make restoreCheckpoint actually restore, and un-vacuum the test that hid it"
+    - "4d2242a CR-03 route plan mode's bash gate through the unbash AST, not a regex"
+    - "efef045 WR-03..WR-08 harden the worktree setup hook and cover its fail-closed branches"
+    - "bcf7adc WR-09..WR-14, WR-16, WR-19 harden the checkpoint store, fork selector and headless path"
+    - "b828495 WR-18 stop plan mode silently dropping grep/find/ls/questionnaire on exit"
+    - "845b7b7 WR-15/WR-17 complete the vendoring registry, make its guard able to fire, and close loop-police's agent-writable exec path"
+    - "00facb8 WR-01/WR-02 give merge_subagent_config real coverage and a --check-only report"
 ---
 
 # Phase 7: Code Review Report
@@ -1179,6 +1198,68 @@ contract.
 
 ---
 
+## Fix pass outcome — 2026-08-15
+
+Applied by the `--fix` pass. Every BLOCKER and every Warning is **fixed**; the
+seven Info findings are **skipped**, explicitly out of scope for this pass and
+carried forward as-is.
+
+**Discipline applied throughout, stated because it changed several outcomes:**
+every test added or changed was falsified — its subject mutated, the suite run,
+the failure observed, the mutation reverted. Three findings' framing changed as
+a result and the corrections are recorded below rather than smoothed over.
+Ratchet budgets in `tests/unit/workflow-budgets.test.ts` were **raised, never
+relaxed silently**: each raise carries the previous figure, the re-measurement
+and the per-finding reason inline.
+
+**Suite after:** 1727 tests / 97 files green; `npx tsc --noEmit` clean.
+**Runbook:** `RB-07-01` and `RB-07-02` untouched and still OUTSTANDING.
+`RB-07-03` **appended** (never renumbered), OUTSTANDING, and registered in
+`tests/unit/docs-policy.test.ts`'s `ALL_IDS` in the same commit.
+
+### Critical
+
+| ID | Outcome | Note |
+|---|---|---|
+| CR-01 | **fixed** | Redacted from all 8 tracked files. `tests/unit/secret-scan.test.ts` scans every tracked file each run, in both directions, with no exemption for itself (needles assembled from fragments). **Correction to the finding's framing:** it says the identifiers were "committed to a public repository". Verified: `git grep` over `origin/main` finds nothing, the remote is 15 commits all predating Phase 7, and the strings live only in 3 unpushed local commits. Must-fix-before-first-push, not a completed disclosure. `RB-07-03` records the decision the user must make (rewrite history vs accept) — deliberately NOT taken by an agent. |
+| CR-02 | **fixed** | `restoreCheckpoint` now removes then restores. Removal is a **set difference** (`pathsAddedSince` + empty-dir prune), not `git clean`: both sides come from the same `add -A`, so a gitignored path is in neither tree and can be neither captured nor deleted. Case 1 and Case 3 were turned around to ask restore to *remove*; falsified two ways. |
+| CR-03 | **fixed** | New `.pi/extensions/plan-mode/read-only.ts` routes through `safety/shell.ts#canonicalise` — the same `unbash` parser Phase 4 built; **no third classifier**. Every resolved invocation must be admissible, not just the first word. `utils.ts`'s two regex arrays deleted, not bypassed. 61-row corpus where `isSafeCommand` had **zero** tests. Falsified by running the original regex predicate out of `git show HEAD:...`: all six bypasses `ALLOWED` before / `denied` after, all six ordinary reads allowed under both. |
+| CR-04 | **fixed** | Assertion bounded to the registration block, with an in-line mutation guard; new case 6 **drives the shipped handler** against a real repo instead of grepping. Confirmed the old greedy regex still returned `true` against a gutted handler. |
+
+### Warnings
+
+| ID | Outcome | Note |
+|---|---|---|
+| WR-01 | **fixed** | 5 behavioural cases through `makeBootstrapRepoCopy` + `PI_CODING_AGENT_DIR` + `KYPI_SKIP_INSTALL=1` + stubbed npm. Falsified at the review's own bar: body replaced with `:` → all 5 red (`sh -n` confirms the script still parses). |
+| WR-02 | **fixed** | `report_subagent_config()` added, called from `run_check_only()`, mirroring `report_safety_extension`. 4 cases; falsified by deleting the call site. That mutation also exposed a vacuity in this pass's own first draft — recorded in the commit. |
+| WR-03 | **fixed (documented)** | Named as a second accepted residual in `docs/EXTENSIONS.md` beside T-07-07/T-07-08, and narrowed three ways (never overwrite, chmod 0600, never silent). The un-narrowed part — a `.env` leaving its repo tree on every machine-scope worktree spawn — is a **Phase 8 follow-up**, stated not carried. |
+| WR-04 | **fixed** | Canonicalised, case-folded real-path comparison. Falsified with a Windows drive-letter-case worktreePath. |
+| WR-05 | **fixed** | Both silent skips now report on stderr; the already-present case still declares `node_modules` synthetic. |
+| WR-06 | **fixed** | `fail(reason, provisioned)` reports what exists. |
+| WR-07 | **fixed** | `.env` never overwritten; a skipped copy is not declared synthetic (it is the worktree's own, possibly tracked, content). |
+| WR-08 | **fixed** | 13 malformed payloads + containment + case-folding + declined-provisioning + half-provisioned-failure. Deleting the containment guard now turns two cases red — the regression the review said would have kept the suite green. |
+| WR-09 | **fixed** | O_EXCL lock with bounded retry and stale break. **Measured:** four overlapping processes recording 600 entries keep **55** unlocked, 600 locked. The first version of this test used `spawnSync` (which blocks) and passed against a completely unlocked store — caught by the mutation run and rewritten on `jsonl-concurrency.test.ts`'s barrier pattern. |
+| WR-10 | **fixed** | Objects anchored at `refs/kypi-checkpoints/<sha>`; index bounded at 200 with `dropCheckpointRef` releasing evicted refs. |
+| WR-11 | **fixed** | Per-element validation that drops bad rows and **keeps** good ones (negative control pins the difference). |
+| WR-12 | **fixed** | Oldest matching checkpoint, not newest. |
+| WR-13 | **fixed** | `repoTopLevel()` at the `git.ts` module boundary and `rootFor()` in `index.ts`. The store therefore lands at the repo root, where `.gitignore`'s root-anchored `.pi/state/` actually ignores it — the review's alternative (a `gitignore-policy` row for `foo/.pi/state/`) was not needed once the path is root-anchored by construction. |
+| WR-14 | **fixed** | Human label stored; `entryId` no longer duplicated. |
+| WR-15 | **fixed** | Four PROVENANCE.md records with **real** provenance (version, lock integrity hash, per-file SHA-256 computed from the installed tarball). Registry completed and given `provenancePath` (flat vendorings have no directory — that is *why* they could not have rows), `sourcePath`, and `mustNotBeInstalled` so Direction 2 checks the **alternative** each vendoring exists instead of. Direction 4 gains a header-marker discovery that can fire; falsified twice. |
+| WR-16 | **fixed** | **Verified at source:** `noOpUIContext.notify` is `notify: () => { }` at `dist/core/extensions/runner.js:92` of the installed 0.84.1. The headless branch now writes an audit row — a channel that exists without a UI — and the provenance header states what was verified with the citation. |
+| WR-17 | **fixed (closed, not documented)** | `HOOK_CMD`/`HOOK_LOG` read from `process.env` only, default `""`, override applied **after** the config write so a live value is never persisted into the tree. An env var is not reachable through `write`/`edit`. PROVENANCE.md records it as deviation 3 **and corrects the `process.env`-grep claim it invalidates**. |
+| WR-18 | **fixed, reachability corrected** | `NORMAL_MODE_TOOLS` extended; the three pure selectors hoisted and exported because the defect was otherwise untestable. **The review's reachability claim does not hold**: `session_start`'s tail calls `enablePlanModeTools()` unconditionally when plan mode is on, and that snapshots whenever the value is undefined, so the `??` fallback is currently DEAD (both call sites traced). Fixed anyway — a wrong tool set in the tool-gating path one refactor from being live. The round-trip test is the one that goes red; the reachability test is labelled as *not* evidence for the fix, because under the mutation it stays green. |
+| WR-19 | **fixed (mitigated + documented)** | Stated in `git.ts`'s SCOPE BOUNDARY and as a third residual in `docs/EXTENSIONS.md`, and mitigated by `SECRET_EXCLUDE_PATHSPECS` applied to **both** `add -A` call sites so an excluded path is in neither tree. Honestly a mitigation, not a guarantee: a secret under an unremarkable name is still captured. |
+
+### Info
+
+`IN-01` … `IN-07` — **skipped**, all seven. Out of scope for this pass by
+instruction. Note that `IN-03` (the `restoreCheckpoint.length === 2` arity
+check) survives inside a case that was otherwise rewritten for CR-04; it was
+left deliberately rather than swept up.
+
+---
+
 _Reviewed: 2026-08-15_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
+_Fixed: 2026-08-15 — 4 of 4 Critical, 19 of 19 Warning, 0 of 7 Info (out of scope)_
