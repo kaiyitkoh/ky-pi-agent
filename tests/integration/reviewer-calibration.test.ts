@@ -13,13 +13,17 @@
  *      MEASURED claim: if a fixture were caught deterministically, GATE-08
  *      would be measuring the wrong layer.
  *   B. Calibration — the full corpus, as ONE combined review contract, driven
- *      through `runReview` three times with three differently-scripted faux
+ *      through `runReview` FOUR times with four differently-scripted faux
  *      reviewers: a KNOWN-SUBSET reviewer (catches exactly 3 of 6, proving
  *      `scoreCalibration` reports a real, non-trivial number), a BLIND
  *      reviewer (approves everything, zero findings — the negative control
- *      that proves the scorer can report a bad number), and a SHOTGUN
- *      reviewer (twenty vague findings — the control that proves quantity
- *      does not substitute for specificity).
+ *      that proves the scorer can report a bad number), a SHOTGUN reviewer
+ *      (twenty vague findings — the control that proves quantity does not
+ *      substitute for specificity), and (WR-03) a NAME-DROPPING SHOTGUN
+ *      reviewer (one finding per touched file, naming only that file's own
+ *      conspicuous symbol with no defect description — the control that
+ *      proves naming a symbol is not identifying a defect; before WR-03's
+ *      fix this exact shape scored catchRate === 1.0 having caught nothing).
  *   C. Reproducibility — the whole calibration group is run TWICE, against
  *      two independently-built temp repos and faux sessions, and the
  *      resulting `CalibrationResult` objects are asserted identical
@@ -256,18 +260,51 @@ const SHOTGUN_REVIEWER_ARGS = {
 	classificationJustification: "Could not pin down a single root cause across this many files.",
 };
 
+/**
+ * WR-03 -- THE NAME-DROPPING SHOTGUN, a THIRD control.
+ *
+ * This is the EXACT mutation the code review used to prove the pre-fix
+ * matcher was gameable: instead of `SHOTGUN_REVIEWER_ARGS`'s uniformly vague
+ * `concreteFailure`, each finding here names the touched file's own most
+ * conspicuous SYMBOL (the same six identifiers the pre-fix `mustMentionAny`
+ * arrays used verbatim: `markMigrationComplete`, `configuredHead`,
+ * `homedir()`, `isGuardedCommand`, `isWithinRateLimit`, `MUTATION-VERIFIED`)
+ * with no description of what is actually WRONG with it -- "X could use a
+ * closer look" identifies nothing. Five of six fixture files contain exactly
+ * one function, so naming "the file's only function" is trivially derivable
+ * from the input alone, without having understood the defect. Before WR-03's
+ * fix (bare-symbol needles), this control scored `catchRate === 1.0` --
+ * 6/6 -- having caught nothing. After the fix (behavior-describing needles),
+ * it must score `catchRate === 0`, proving the matcher now requires
+ * identifying the DEFECT, not merely the symbol.
+ */
+const SHOTGUN_NAME_DROP_SYMBOLS = ["markMigrationComplete", "configuredHead", "homedir()", "isGuardedCommand", "isWithinRateLimit", "MUTATION-VERIFIED"];
+const SHOTGUN_NAME_DROP_ARGS = {
+	verdicts: [verdictFor("Partial", "src/evidence-claim.ts:1")],
+	findings: SHOTGUN_LOCATION_FILES.map((file, index) => ({
+		severity: "BLOCKER" as const,
+		location: `${file}:${index + 1}`,
+		concreteFailure: `${SHOTGUN_NAME_DROP_SYMBOLS[index]} in this file could use a closer look.`,
+		suggestedFix: "Take a closer look at this.",
+	})),
+	checkedAndCleared: "Named the most notable symbol in each of the six touched files.",
+	classification: "symptomatic",
+	classificationJustification: "Named a symbol per file without diagnosing a specific defect in any of them.",
+};
+
 interface CalibrationSuiteResult {
 	knownSubset: CalibrationResult;
 	blind: CalibrationResult;
 	shotgun: CalibrationResult;
+	shotgunNameDrop: CalibrationResult;
 }
 
 /**
  * Builds a fresh temp repo + faux session, drives the combined corpus through
- * `runReview` three times (known-subset, blind, shotgun), and scores each
- * result against the corpus's own expectations. A fresh session per call is
- * what makes the reproducibility check in group C meaningful -- two
- * INDEPENDENT builds, not one build read twice.
+ * `runReview` FOUR times (known-subset, blind, shotgun, WR-03's name-dropping
+ * shotgun), and scores each result against the corpus's own expectations. A
+ * fresh session per call is what makes the reproducibility check in group C
+ * meaningful -- two INDEPENDENT builds, not one build read twice.
  */
 async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResult> {
 	setMode("cheap");
@@ -295,6 +332,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 			() => fauxAssistantMessage(fauxToolCall("submit_review", KNOWN_SUBSET_ARGS), { stopReason: "toolUse" }),
 			() => fauxAssistantMessage(fauxToolCall("submit_review", BLIND_REVIEWER_ARGS), { stopReason: "toolUse" }),
 			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_REVIEWER_ARGS), { stopReason: "toolUse" }),
+			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_NAME_DROP_ARGS), { stopReason: "toolUse" }),
 		]);
 
 		handle.modelRuntime.registerNativeProvider(wrapFauxWithPayload(deepseekFaux, undefined));
@@ -307,6 +345,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 		const knownSubsetResult = await runReview(ctx, { contract, requirementIds });
 		const blindResult = await runReview(ctx, { contract, requirementIds });
 		const shotgunResult = await runReview(ctx, { contract, requirementIds });
+		const shotgunNameDropResult = await runReview(ctx, { contract, requirementIds });
 
 		if (!knownSubsetResult.ok) {
 			throw new Error(`known-subset runReview was rejected: ${knownSubsetResult.reason}`);
@@ -316,6 +355,9 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 		}
 		if (!shotgunResult.ok) {
 			throw new Error(`shotgun runReview was rejected: ${shotgunResult.reason}`);
+		}
+		if (!shotgunNameDropResult.ok) {
+			throw new Error(`shotgun name-drop runReview was rejected: ${shotgunNameDropResult.reason}`);
 		}
 
 		const expected: SeededDefectExpectation[] = SEEDED_DEFECTS.map((defect) => ({
@@ -329,6 +371,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 			knownSubset: scoreCalibration(expected, knownSubsetResult.review.findings),
 			blind: scoreCalibration(expected, blindResult.review.findings),
 			shotgun: scoreCalibration(expected, shotgunResult.review.findings),
+			shotgunNameDrop: scoreCalibration(expected, shotgunNameDropResult.review.findings),
 		};
 	} finally {
 		await handle.dispose();
@@ -366,10 +409,24 @@ describe("GATE-08 calibration -- the full corpus driven through runReview", () =
 		expect(run1.shotgun.unmatchedFindings).toBe(SHOTGUN_FINDING_COUNT);
 	});
 
+	it(
+		"WR-03 -- THE NAME-DROPPING SHOTGUN, a third control: naming each touched file's own most conspicuous " +
+			"symbol, with no description of what is wrong, scores catchRate === 0 -- naming a symbol is not " +
+			"identifying a defect. Before WR-03's fix this exact fixture scored 1.0 (6/6) having caught nothing.",
+		() => {
+			expect(run1.shotgunNameDrop.catchRate).toBe(0);
+			expect(run1.shotgunNameDrop.unmatchedFindings).toBe(SHOTGUN_LOCATION_FILES.length);
+			for (const id of DEFECT_CLASSES) {
+				expect(run1.shotgunNameDrop.perDefectClass[id], `perDefectClass["${id}"] must be false for the name-dropping shotgun`).toBe(false);
+			}
+		},
+	);
+
 	it("reproducibility: two independently-built runs produce identical CalibrationResult values", () => {
 		expect(run2.knownSubset).toEqual(run1.knownSubset);
 		expect(run2.blind).toEqual(run1.blind);
 		expect(run2.shotgun).toEqual(run1.shotgun);
+		expect(run2.shotgunNameDrop).toEqual(run1.shotgunNameDrop);
 	});
 });
 

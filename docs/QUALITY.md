@@ -218,15 +218,29 @@ The corpus is **six real, dated incidents from this project's own history**
 reviewer's number, not a live model's judgement.** It was scripted to catch
 exactly three of six, and its purpose is to prove the pipeline (corpus →
 `runReview` → `validateReview` → `scoreCalibration`) computes a real,
-reproducible, non-rounded number end to end — proven further by two
+reproducible, non-rounded number end to end — proven further by THREE
 required negative controls: a blind reviewer (approves everything) scores
-`catchRate: 0`, and a shotgun reviewer (twenty generic findings) also scores
-`catchRate: 0` because `findingCatches` requires both the right file **and**
-a specific, named mention, not merely a high finding count. **No live
-reviewer, of any kind, has ever run against this corpus.** The live
-calibration run is `RB-08-03` in `docs/RUNBOOK.md`, OUTSTANDING, and its
-result is expected to differ from 3/6 in either direction, since a live
-model was never tuned to this corpus the way the scripted one was.
+`catchRate: 0`; a shotgun reviewer (twenty generic findings, e.g.
+"this area could probably be improved somehow") also scores `catchRate: 0`;
+and (WR-03) a **name-dropping shotgun** — one finding per touched file,
+naming only that file's own most conspicuous symbol
+(`markMigrationComplete`, `isGuardedCommand`, …) with no description of what
+is actually wrong — also scores `catchRate: 0`. That third control exists
+because the first version of `tests/fixtures/seeded-defects/index.ts`'s
+`mustMentionAny` needles were bare symbol names, which are trivially
+derivable from "the file's only function" (five of the six fixture files
+contain exactly one) without having understood the defect at all — the
+exact name-dropping shape scored `catchRate: 1.0` (6/6, having caught
+nothing) before the needles were rewritten to describe the DEFECT's
+behaviour (e.g. `absent-guard`'s needle is `"never calls
+isGuardedCommand"`, not bare `"isGuardedCommand"`). `findingCatches`
+therefore requires the right file **and** a mention of the specific
+malformed *behaviour*, not merely a high finding count and not merely the
+right identifier. **No live reviewer, of any kind, has ever run against
+this corpus.** The live calibration run is `RB-08-03` in `docs/RUNBOOK.md`,
+OUTSTANDING, and its result is expected to differ from 3/6 in either
+direction, since a live model was never tuned to this corpus the way the
+scripted one was.
 
 ## 7. The cost record
 

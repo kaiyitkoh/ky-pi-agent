@@ -322,7 +322,13 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 		build: buildFabricatedEvidence,
 		expected: {
 			locationFile: "src/evidence-claim.ts",
-			mustMentionAny: ["markMigrationComplete"],
+			// WR-03: the needle names the DEFECT (what markMigrationComplete does
+			// wrong), not merely the symbol -- naming the symbol alone is
+			// trivially derivable from "the file's only function", which a
+			// shotgun reviewer does as a matter of course. See calibration.ts's
+			// findingCatches for how this is combined with the locationFile and
+			// minimumSeverity checks.
+			mustMentionAny: ["performs none", "hardcoded return", "no actual verification"],
 			minimumSeverity: "BLOCKER",
 		},
 	},
@@ -334,7 +340,9 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 		build: buildTautologicalTest,
 		expected: {
 			locationFile: "src/router-wire-proof.test.ts",
-			mustMentionAny: ["configuredHead"],
+			// WR-03: describes the tautology itself (compared to itself / cannot
+			// fail), not the bare variable name.
+			mustMentionAny: ["compares it to itself", "cannot fail", "identical to what it is compared against", "structurally cannot"],
 			minimumSeverity: "BLOCKER",
 		},
 	},
@@ -345,7 +353,9 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 		build: buildEscapedSideEffect,
 		expected: {
 			locationFile: "tests/settings-persistence.test.ts",
-			mustMentionAny: ["homedir()"],
+			// WR-03: describes the escape (writes into the real home directory /
+			// outside the temp repo), not the bare function-call name.
+			mustMentionAny: ["writes into the real", "outside the temp repo", "escapes the test", "developer's own home directory"],
 			minimumSeverity: "BLOCKER",
 		},
 	},
@@ -357,7 +367,9 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 		build: buildAbsentGuard,
 		expected: {
 			locationFile: "src/dispatch-real.ts",
-			mustMentionAny: ["isGuardedCommand"],
+			// WR-03: describes the missing wiring (never calls the guard / guard
+			// not wired / execSync with no check), not the bare symbol name.
+			mustMentionAny: ["never calls isGuardedCommand", "not wired in", "execSync without", "guard is never called"],
 			minimumSeverity: "BLOCKER",
 		},
 	},
@@ -368,7 +380,9 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 		build: buildSymptomaticFix,
 		expected: {
 			locationFile: "src/rate-limiter.ts",
-			mustMentionAny: ["isWithinRateLimit"],
+			// WR-03: describes the behavior (always true / ignores its arguments),
+			// not the bare symbol name -- per the review's own suggested fix.
+			mustMentionAny: ["always returns true", "unconditionally true", "ignores its arguments", "ignores the count"],
 			minimumSeverity: "BLOCKER",
 		},
 	},
@@ -379,7 +393,12 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 		build: buildFalseLabel,
 		expected: {
 			locationFile: "src/parser-mutation-claim.test.ts",
-			mustMentionAny: ["MUTATION-VERIFIED"],
+			// WR-03: describes the false claim (the label survived its own
+			// mutation / always true regardless of input), not the bare label
+			// string -- a shotgun reviewer that merely quotes the label back
+			// (as this file's own fixture literally contains it, verbatim) must
+			// not score.
+			mustMentionAny: ["regardless of input", "survived its own mutation", "always returns true, so the label"],
 			minimumSeverity: "BLOCKER",
 		},
 	},
