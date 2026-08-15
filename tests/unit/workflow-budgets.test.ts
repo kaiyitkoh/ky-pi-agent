@@ -1265,6 +1265,19 @@ const RESOURCE_EDGES: readonly { workflow: string; paths: readonly string[]; bud
 			"slip past every budget in this repository. Measured 67 (planner.md) + 42 (reviewer.md) = 109 " +
 			"raw lines 2026-08-15, rounded up to the next ten",
 	},
+	{
+		workflow: ".pi/extensions/execute/handoff.ts (declared owner -- see this entry's own why)",
+		paths: [".pi/agents/executor-handoff.md"],
+		budget: 40,
+		why: "plan 09-11 (FLOW-09) -- executor-handoff.md's own HONEST STATUS paragraph states plainly that " +
+			"nothing in this repository loads this file at runtime today; it is exercised only by " +
+			"tests/unit/handoff-packet.test.ts's offline packet-builder unit tests, which build and measure " +
+			"the packet this file's own prose describes without ever spawning a real subagent (pi-subagents " +
+			"is pinned, RB-07-02, OUTSTANDING). Declared to handoff.ts as its honest owner for the identical " +
+			"reason the planner/reviewer row above declares to quality/reviewer.ts -- an unreachable file is " +
+			"exactly the shape that would otherwise slip past every budget in this repository. Measured 33 " +
+			"raw lines 2026-08-16, rounded up to the next ten",
+	},
 ];
 
 /** D-12: the character class a `.pi/` path literal may use, matching {@link importedSubsystemDirs}'s own regex discipline. */
