@@ -20,12 +20,13 @@
  * reverted. The observed RED output for each is recorded in
  * `06-01-SUMMARY.md`, not merely asserted here.
  */
+import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { currentSha } from "../../.pi/extensions/safety/git.ts";
+import { currentSha, currentTree } from "../../.pi/extensions/safety/git.ts";
 import {
 	armedCwd,
 	endRun,
@@ -47,6 +48,27 @@ tempDirs.push(repo);
 const shaA = commitFile(repo, "a.txt", "one", "first commit");
 /** Second commit -- the repo's current HEAD, what every claim is made against. */
 const shaB = commitFile(repo, "b.txt", "two", "second commit");
+
+/** The tree object id of `shaA`, read directly via `git rev-parse <sha>^{tree}` -- `currentTree` only reads HEAD's tree, so an older commit's tree needs its own lookup. */
+function treeOfSha(cwd: string, sha: string): string {
+	const result = spawnSync("git", ["rev-parse", `${sha}^{tree}`], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	if (result.status !== 0) {
+		throw new Error(`git rev-parse ${sha}^{tree} failed (exit ${result.status}) in ${cwd}`);
+	}
+	return (result.stdout ?? "").trim();
+}
+
+/** GATE-01: shaA's tree -- genuinely different from shaB's tree below, since the second commit adds a new file rather than amending the first. */
+const treeA = treeOfSha(repo, shaA);
+/** GATE-01: shaB's tree -- `repo`'s HEAD is still shaB at this point, so `currentTree` (the real production function) reads it directly. */
+const treeB = currentTree(repo);
+
+/** Maps a fixture SHA to its already-computed tree -- the only two SHAs `ROWS`' `baseSha` ever names. */
+function treeForSha(sha: string): string {
+	if (sha === shaA) return treeA;
+	if (sha === shaB) return treeB;
+	throw new Error(`treeForSha: no known tree for sha ${sha} -- ROWS only ever names shaA or shaB`);
+}
 
 /** A convincing fabricated transcript. NEVER fed to `records` -- R1 proves the gate never looked at it. */
 const FABRICATED_TRANSCRIPT = "$ npm test\nexit 0\nAll 12 tests passed.";
@@ -143,10 +165,18 @@ describe("GATE-07 -- gateCompletion", () => {
 		expect(shaA).not.toBe(shaB);
 	});
 
+	it("GATE-01: treeA and treeB are two genuinely different real trees, not fixture constants -- the second commit adds a file rather than amending the first", () => {
+		expect(treeA).toMatch(/^[0-9a-f]{40}$/);
+		expect(treeB).toMatch(/^[0-9a-f]{40}$/);
+		expect(treeA).not.toBe(treeB);
+	});
+
 	for (const row of ROWS) {
 		it(row.name, () => {
 			const head = currentSha(repo);
-			const verdict = gateCompletion(row.records, head, row.baseSha ?? shaA);
+			const headTree = currentTree(repo);
+			const baseSha = row.baseSha ?? shaA;
+			const verdict = gateCompletion(row.records, head, baseSha, headTree, treeForSha(baseSha));
 
 			if (row.expected === "accept") {
 				expect(verdict.ok, `${row.why} -- got ${JSON.stringify(verdict)}`).toBe(true);
@@ -169,7 +199,7 @@ describe("GATE-07 -- gateCompletion", () => {
 	}
 
 	it("R1's reason contains no substring of the fabricated transcript -- the gate never looked at it", () => {
-		const verdict = gateCompletion([], currentSha(repo), shaA);
+		const verdict = gateCompletion([], currentSha(repo), shaA, currentTree(repo), treeA);
 		expect(verdict.ok).toBe(false);
 		if (!verdict.ok) {
 			expect(verdict.reason).not.toContain("exit 0");
@@ -186,14 +216,14 @@ describe("WR-03: armedCwd() reports the cwd the run was armed against", () => {
 	it("returns undefined before any startRun(), the exact armed cwd once armed, and undefined again once disarmed", () => {
 		expect(armedCwd(), "no run armed yet").toBeUndefined();
 
-		startRun(repo, shaA);
+		startRun(repo, shaA, treeA);
 		expect(
 			armedCwd(),
 			"armedCwd() must return the exact cwd startRun() was called with, not some other ambient cwd",
 		).toBe(repo);
 
 		recordToolResult({ ts: Date.now(), toolName: "bash", command: "echo hi", isError: false, sha: shaB });
-		endRun(shaB);
+		endRun(shaB, treeB);
 		expect(armedCwd(), "endRun() disarms -- armedCwd() must go back to undefined").toBeUndefined();
 	});
 });
@@ -228,17 +258,17 @@ describe("WR-06 -- run-state machinery (startRun / recordToolResult / isRunArmed
 	it("isRunArmed() is false, and recordToolResult()/endRun() are no-ops, before any startRun()", () => {
 		expect(isRunArmed()).toBe(false);
 		recordToolResult(record("bash", shaB, false)); // must not throw, must record nothing observable
-		expect(endRun(shaB)).toBeUndefined();
+		expect(endRun(shaB, treeB)).toBeUndefined();
 	});
 
 	it("a second startRun() discards the first buffer entirely (WR-01's pinned behaviour)", () => {
-		startRun(repo, shaA);
+		startRun(repo, shaA, treeA);
 		recordToolResult(record("bash", shaA, false));
 		expect(isRunArmed()).toBe(true);
 
-		startRun(repo, shaB); // re-arms; the first run's one record must not survive
+		startRun(repo, shaB, treeB); // re-arms; the first run's one record must not survive
 		expect(isRunArmed()).toBe(true);
-		const verdict = endRun(shaB);
+		const verdict = endRun(shaB, treeB);
 		expect(verdict?.ok).toBe(false);
 		if (verdict?.ok === false) {
 			expect(verdict.reason).toContain("structured");
@@ -247,10 +277,10 @@ describe("WR-06 -- run-state machinery (startRun / recordToolResult / isRunArmed
 	});
 
 	it("endRun() disarms: a second endRun() call with no intervening startRun() returns undefined", () => {
-		startRun(repo, shaA);
+		startRun(repo, shaA, treeA);
 		recordToolResult(record("bash", shaB, false));
-		expect(endRun(shaB)?.ok).toBe(true);
-		expect(endRun(shaB)).toBeUndefined();
+		expect(endRun(shaB, treeB)?.ok).toBe(true);
+		expect(endRun(shaB, treeB)).toBeUndefined();
 	});
 });
 
@@ -265,6 +295,95 @@ describe("currentSha", () => {
 		const notARepo = mkdtempSync(join(tmpdir(), "quick-not-a-repo-"));
 		tempDirs.push(notARepo);
 		expect(() => currentSha(notARepo)).toThrow();
+	});
+});
+
+/**
+ * GATE-01 (Phase 8, plan 08-12) -- `gateCompletion`'s sixth ordered branch:
+ * `headTree === baseTree` rejects. This is the exact residual `evidence.ts`'s
+ * own docstring and `docs/WORKFLOWS.md` section 4 both named as Phase 8's
+ * job: an empty commit (`git commit --allow-empty`) moves `HEAD` and its SHA
+ * without moving its tree. A dedicated repo, separate from `repo` above, so
+ * these commits cannot shift what `head`/`shaA`/`shaB` mean for any ROW in
+ * the table above (`ROWS`' `it`s read `currentSha(repo)` fresh on every
+ * run -- a later commit to the SAME repo would silently change what "HEAD"
+ * means for every row that ran after it).
+ */
+describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the empty-commit gap", () => {
+	const gate01Repo = makeTempRepo("quick-evidence-gate01-");
+	tempDirs.push(gate01Repo);
+	const gate01BaseSha = commitFile(gate01Repo, "seed.txt", "seed", "seed commit");
+	const gate01BaseTree = currentTree(gate01Repo);
+
+	it("EMPTY COMMIT: git commit --allow-empty moves the SHA but not the tree -- gateCompletion rejects, naming both tree ids", () => {
+		const result = spawnSync("git", ["commit", "--allow-empty", "-m", "empty commit"], {
+			cwd: gate01Repo,
+			encoding: "utf-8",
+			shell: false,
+			windowsHide: true,
+		});
+		expect(result.status, "git commit --allow-empty must itself succeed, or this test proves nothing").toBe(0);
+
+		const emptyHeadSha = currentSha(gate01Repo);
+		const emptyHeadTree = currentTree(gate01Repo);
+		// The fixture really is the shape under test: SHA moved, tree did not.
+		expect(emptyHeadSha, "an allow-empty commit must still produce a NEW sha").not.toBe(gate01BaseSha);
+		expect(emptyHeadTree, "an allow-empty commit's tree must be byte-identical to its parent's -- that IS the empty-commit shape").toBe(gate01BaseTree);
+
+		const verdict = gateCompletion(
+			[record("bash", emptyHeadSha, false)],
+			emptyHeadSha,
+			gate01BaseSha,
+			emptyHeadTree,
+			gate01BaseTree,
+		);
+		expect(verdict.ok, `an empty commit must not satisfy a completion claim -- this is the exact gap Phase 8 closes -- got ${JSON.stringify(verdict)}`).toBe(false);
+		if (!verdict.ok) {
+			expect(verdict.reason, "the rejection reason must name both tree ids").toContain(emptyHeadTree);
+			expect(verdict.reason, "the rejection reason must name both tree ids").toContain(gate01BaseTree);
+		}
+	});
+
+	it("PAIRED POSITIVE: a commit that genuinely changes a file, from the same base, accepts", () => {
+		const changedSha = commitFile(gate01Repo, "real-change.txt", "real content", "a real change");
+		const changedTree = currentTree(gate01Repo);
+		expect(changedTree, "a commit that adds a new file must produce a genuinely different tree").not.toBe(gate01BaseTree);
+
+		const verdict = gateCompletion(
+			[record("bash", changedSha, false)],
+			changedSha,
+			gate01BaseSha,
+			changedTree,
+			gate01BaseTree,
+		);
+		expect(verdict.ok, `a genuine content change must still accept -- without this, branch (6) would reject everything -- got ${JSON.stringify(verdict)}`).toBe(true);
+	});
+
+	it("ORDER PRESERVED: a run with a FAILED tool result still rejects with the failure reason even when the tree DID change", () => {
+		// Continues from the "real change" commit above -- its tree already
+		// differs from gate01BaseTree, so branch (6) alone would pass this
+		// through; only branch (3), further down the order, may reject it.
+		const changedHeadSha = currentSha(gate01Repo);
+		const changedHeadTree = currentTree(gate01Repo);
+		expect(changedHeadTree, "this run's tree really did change from the base -- otherwise this test cannot tell branch (3) from branch (6)").not.toBe(gate01BaseTree);
+
+		const verdict = gateCompletion(
+			[record("bash", changedHeadSha, true)],
+			changedHeadSha,
+			gate01BaseSha,
+			changedHeadTree,
+			gate01BaseTree,
+		);
+		expect(verdict.ok, "a failed tool result must still reject even though the tree changed -- branch (3) must not have been displaced by branch (6)").toBe(false);
+		if (!verdict.ok) {
+			expect(verdict.reason, "the rejection must name the failing tool, not the (here, irrelevant) tree ids").toContain("bash");
+		}
+	});
+
+	it("currentTree throws on a directory that is not a git repository -- no sentinel, matching currentSha's contract", () => {
+		const notARepo = mkdtempSync(join(tmpdir(), "quick-not-a-repo-tree-"));
+		tempDirs.push(notARepo);
+		expect(() => currentTree(notARepo)).toThrow();
 	});
 });
 

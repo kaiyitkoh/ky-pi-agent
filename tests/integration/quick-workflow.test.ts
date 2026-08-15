@@ -614,7 +614,11 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 
 	it("case 4 -- a real guarded commit is accepted, bound to a SHA this test reads from git itself", async () => {
 		const candidate = flashExecutorCandidate();
-		const COMMIT_COMMAND = 'git commit --allow-empty -m "quick: skeleton commit"';
+		// GATE-01 (Phase 8, plan 08-12): a bare --allow-empty commit's tree is
+		// byte-identical to its parent's and now correctly REJECTS (branch (6)) --
+		// this case's own point is an ACCEPT, so the fixture must make a genuine
+		// tree change, same as any other test in this file asserting "accept".
+		const COMMIT_COMMAND = 'echo skeleton >> skeleton.txt && git add skeleton.txt && git commit -m "quick: skeleton commit"';
 
 		await withFauxSession(
 			{
@@ -693,7 +697,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					// (d) the Phase 4 audit log carries a row naming the git commit -- non-empty asserted FIRST.
 					const auditRows = readAudit(cwd);
 					expect(auditRows.length, "the audit log exists but is empty").toBeGreaterThan(0);
-					const commitAuditRows = auditRows.filter((r) => (r.command ?? "").includes("git commit --allow-empty"));
+					const commitAuditRows = auditRows.filter((r) => (r.command ?? "").includes(COMMIT_COMMAND));
 					expect(
 						commitAuditRows.length,
 						"no audit row names the git commit /quick made -- the wrapped bash tool's own enforcement " +
@@ -811,10 +815,14 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				responses: [
 					// (1) a real verification command that genuinely fails (exit 1).
 					fauxAssistantMessage([fauxToolCall("bash", { command: "exit 1" })], { stopReason: "toolUse" }),
-					// (2) the model, undeterred, makes the commit anyway.
-					fauxAssistantMessage([fauxToolCall("bash", { command: 'git commit --allow-empty -m "quick: PROBE F"' })], {
-						stopReason: "toolUse",
-					}),
+					// (2) the model, undeterred, makes the commit anyway -- a REAL content
+					// change (not --allow-empty), so branch (6) genuinely passes it through
+					// and this test still exercises branch (3)'s CR-01 anti-aging behaviour
+					// rather than accidentally passing via the tree-comparison branch instead.
+					fauxAssistantMessage(
+						[fauxToolCall("bash", { command: 'echo probe-f >> probe-f.txt && git add probe-f.txt && git commit -m "quick: PROBE F"' })],
+						{ stopReason: "toolUse" },
+					),
 					fauxAssistantMessage([fauxText("tests pass, done")], { stopReason: "stop" }),
 				],
 			},
@@ -893,10 +901,14 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					// check fires on the refspec destination regardless of the checked-out
 					// branch, so this blocks even though gitInit below checks out "work".
 					fauxAssistantMessage([fauxToolCall("bash", { command: BLOCKED_PUSH })], { stopReason: "toolUse" }),
-					// (2) undeterred, the model commits anyway.
-					fauxAssistantMessage([fauxToolCall("bash", { command: 'git commit --allow-empty -m "quick: PROBE P4"' })], {
-						stopReason: "toolUse",
-					}),
+					// (2) undeterred, the model commits anyway -- a REAL content change (not
+					// --allow-empty), so branch (6) does not pre-empt this case's own point:
+					// the earlier BLOCKED push must still surface in the rejection, not be
+					// silently superseded by the (here, irrelevant) tree-comparison branch.
+					fauxAssistantMessage(
+						[fauxToolCall("bash", { command: 'echo probe-p4 >> probe-p4.txt && git add probe-p4.txt && git commit -m "quick: PROBE P4"' })],
+						{ stopReason: "toolUse" },
+					),
 					fauxAssistantMessage([fauxText("pushed and verified, tests pass")], { stopReason: "stop" }),
 				],
 			},
@@ -953,6 +965,14 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 						"both the BLOCKED push and the passing commit must have been recorded -- a blocked call must " +
 							"not be structurally invisible to the gate",
 					).toBe(2);
+					// GATE-01: the commit's tree genuinely changed (a real content commit,
+					// not --allow-empty), so branch (6) does not fire -- the reason below
+					// must therefore be branch (3)'s, naming the failing tool, proving the
+					// block is what this case's own rejection is actually about.
+					expect(
+						row.reason ?? "",
+						"the reject reason must name the failing (blocked) tool, not a tree-comparison reason",
+					).toContain("bash");
 					expect(
 						row.baseSha,
 						"HEAD genuinely moved during this run -- the commit really landed, and still rejected",
@@ -984,10 +1004,16 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					// CAPTURE nonetheless throws: tool_execution_end's currentSha(cwd)
 					// call cannot find a `.git` to read while it is renamed away.
 					fauxAssistantMessage([fauxToolCall("bash", { command: "mv .git .gitx" })], { stopReason: "toolUse" }),
-					// (2) restore .git and make the real commit -- this call's own
-					// capture succeeds normally.
+					// (2) restore .git and make the real commit -- a REAL content change
+					// (not --allow-empty), so branch (6) does not pre-empt this case's own
+					// point, which is the dropped-capture record from step (1) -- this
+					// call's own capture succeeds normally.
 					fauxAssistantMessage(
-						[fauxToolCall("bash", { command: 'mv .gitx .git && git commit --allow-empty -m "quick: PROBE P7"' })],
+						[
+							fauxToolCall("bash", {
+								command: 'mv .gitx .git && echo probe-p7 >> probe-p7.txt && git add probe-p7.txt && git commit -m "quick: PROBE P7"',
+							}),
+						],
 						{ stopReason: "toolUse" },
 					),
 					fauxAssistantMessage([fauxText("tests pass, done")], { stopReason: "stop" }),
@@ -1163,8 +1189,11 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				providerId: candidate.provider,
 				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
 				responses: [
+					// GATE-01: a REAL content change (not --allow-empty) -- this case's own
+					// point is that run 1 is still accepted, which now requires a genuinely
+					// changed tree.
 					fauxAssistantMessage(
-						[fauxToolCall("bash", { command: 'git commit --allow-empty -m "quick: run one"' })],
+						[fauxToolCall("bash", { command: 'echo run-one >> run-one.txt && git add run-one.txt && git commit -m "quick: run one"' })],
 						{ stopReason: "toolUse" },
 					),
 					fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),

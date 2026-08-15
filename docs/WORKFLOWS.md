@@ -201,21 +201,38 @@ still a fact about that task after the commit lands.
 
 **What an ACCEPT verdict actually guarantees, stated plainly because
 overclaiming here is worse than underclaiming it:** HEAD is a different
-commit than when the run was armed, and no tool call finalized during the
-run — including a blocked, schema-invalid, unknown-tool or aborted one, and
-including a dropped capture — carried a structural failure. **What it does
-NOT guarantee:** that a commit landed at all. `checkout`, `reset` and
-`revert` all move HEAD without committing anything — and `reset --hard` can
-DELETE a commit outright — so "HEAD moved" is not "a commit landed" (CR-01,
-iteration 4: the reviewer obtained an ACCEPT from `git checkout --detach
-HEAD~1`, which made zero commits, and from `git reset --hard HEAD~1`, which
-destroyed one). Even when a commit genuinely landed, this predicate does not
-guarantee its diff contains the claimed work, or that anything was
-meaningfully verified: an empty commit (`git commit --allow-empty`) and a
-commit of wholly unrelated content both still ACCEPT, because distinguishing
-any of this needs a diff or a tree hash, which this phase does not have —
-that is Phase 8's job. `/quick`'s own notification text says only what was
-checked
-(`quick: HEAD moved to <sha> with no failed tool result -- no commit was
-verified and the work itself is NOT verified`), never the stronger, and
-sometimes false, "a commit landed" or "evidence accepted."
+commit than when the run was armed, its tree DIFFERS from the tree recorded
+at arm time (`gateCompletion` branch (6), added by Phase 8 plan 08-12 — see
+below), and no tool call finalized during the run — including a blocked,
+schema-invalid, unknown-tool or aborted one, and including a dropped
+capture — carried a structural failure. **What it does NOT guarantee:**
+that a commit landed at all. `checkout`, `reset` and `revert` all move HEAD
+without committing anything — and `reset --hard` can DELETE a commit
+outright — so "HEAD moved" is not "a commit landed", and moving to an
+older, genuinely different commit moves BOTH the SHA and the tree, so
+branch (6) does not close this particular gap either (CR-01, iteration 4:
+the reviewer obtained an ACCEPT from `git checkout --detach HEAD~1`, which
+made zero commits, and from `git reset --hard HEAD~1`, which destroyed
+one — both remain open, unrelated to what this section closes below).
+
+**What Phase 8 plan 08-12 (GATE-01) closes: the empty-commit gap.**
+`gateCompletion` (`.pi/extensions/workflows/evidence.ts`) gained a sixth
+ordered branch, positioned immediately after the `headSha === baseSha`
+branch and before the recorded-failure branch: `headTree === baseTree`
+rejects, naming both tree ids. `HEAD^{tree}` is read via
+`.pi/extensions/safety/git.ts`'s `currentTree` (mirroring `currentSha`'s
+fail-closed contract exactly — no sentinel for an unknown tree, throws on a
+non-zero exit) at both arm time (`baseTree`) and at `agent_end`
+(`headTree`). An empty commit (`git commit --allow-empty`) moves the SHA
+but never the tree, and now REJECTS rather than accepting, naming both
+tree ids in the reason.
+
+**What remains open, and is a DIFFERENT, permanent limit, not a bug this
+phase failed to fix:** a commit of wholly unrelated content, whose tree
+genuinely DIFFERS from the tree at arm time, still ACCEPTS — deciding
+whether a diff contains the CLAIMED work is a semantic judgement no
+predicate over tree or SHA equality can make. `/quick`'s own notification
+text says only what was checked
+(`quick: HEAD moved to <sha> with a changed tree and no failed tool result
+-- no commit was verified and the work itself is NOT verified`), never the
+stronger, and sometimes false, "a commit landed" or "evidence accepted."
