@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-07-PLAN.md
-last_updated: "2026-08-15T14:34:20.086Z"
+stopped_at: Completed 09-08-PLAN.md
+last_updated: "2026-08-15T14:57:27.168Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 93
+  completed_plans: 94
   percent: 73
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 8 of 17
+Plan: 9 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-08-15
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 91%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -163,6 +163,7 @@ credentials can do has been done".
 | Phase 09 P05 | 55m | 2 tasks | 3 files |
 | Phase 09 P06 | ~40min | 2 tasks | 4 files |
 | Phase 09 P07 | 9min | 2 tasks | 3 files |
+| Phase 09 P08 | 19min | 2 tasks | 5 files |
 
 ## Accumulated Context
 
@@ -442,6 +443,9 @@ Recent decisions affecting current work:
 - [Phase 09]: 09-07: the user override permitted by FEATURES.md line 176 is a separate helper (assumptionsFromUnmetFloors), never a branch or parameter gateAmbiguity accepts — a gate that can be told to pass is not a gate (T-09-07-04)
 - [Phase 09]: 09-07: HARD_QUESTION_BUDGET=5 adopts spec-kit's hard rule verbatim, and INTERVIEW_PERSPECTIVES is deliberately also 5 entries — a HARD budget needs one comparable number, not GSD's own softer per-round allowance, and matching perspective count means a fully-used budget visits every perspective exactly once
 - [Phase 09]: 09-07: FLOW-02 stays [ ] Pending in REQUIREMENTS.md, not marked complete — the plan's own requirement ledger states FLOW-02 closes only when 09-08 wires this module into /grill's loop and the skill body carries the dimension rubric and perspective list as tables; this plan ships only the machine-checkable half
+- [Phase 09]: 09-08: /grill's write path composes 09-05's evidence gate and 09-07's ambiguity gate for the first time -- writeSpecIfGated is the ONLY function in .pi/extensions/grill/ that writes SPEC.md, running gateRequirementsAuthorship then validateSpec then gateAmbiguity in that order before ever writing
+- [Phase 09]: 09-08: nextQuestionSlot's rotation is presented to the model via the skill body table, not called from index.ts -- a single command invocation cannot itself hold a running askedCount across separate conversation turns; only gateAmbiguity is code-invoked, at the single write-gate choke point
+- [Phase 09]: 09-08: /grill --resume takes no slug argument (two entry points, no flags, per FEATURES.md) -- it resolves the most-recently-modified .pi/work/ subdirectory by mtime, refusing if none exists or holds no SPEC.md draft
 
 ### Pending Todos
 
@@ -494,8 +498,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T14:33:40.354Z
-Stopped at: Completed 09-07-PLAN.md
+Last session: 2026-08-15T14:57:27.158Z
+Stopped at: Completed 09-08-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
