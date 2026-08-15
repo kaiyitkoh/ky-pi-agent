@@ -502,7 +502,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 530,
+		budget: 1170,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -510,7 +510,14 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"that check requiring it, because DIRECTORY_BUDGETS has no declared-but-absent check and declaring " +
 			"the directory before its command file exists is the honest thing to do, per this plan's own " +
 			"instruction. Measured 522 raw lines across 1 file 2026-08-15 (spec-schema.ts), rounded up to the " +
-			"next ten",
+			"next ten. RAISED 530 -> 1170 by plan 09-06 (FLOW-04/FLOW-05 declaration half/QUAL-03): the same " +
+			"single file grew the §4 EARS-lite parser (IF_THEN_PATTERN, MIN_ERROR_BEHAVIOURS, " +
+			"parseErrorBehaviours), the §5 scope-pin parser (ScopePin, EXPECTED_FILE_PATTERN, parseScopePin), " +
+			"the QUAL-03 conditional Root Cause gate inputs (FIX_FRAMING_MARKERS, isFixFramed, RootCause, " +
+			"parseRootCause), the whole-document validateSpec gate and renderSpecMarkdown -- a genuine growth " +
+			"in a schema/validator module carrying this phase's own EARS-lite/scope-pin/root-cause forcing " +
+			"functions, not incidental bloat. Re-measured 1161 raw lines across the same 1 file 2026-08-15 " +
+			"(spec-schema.ts), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
