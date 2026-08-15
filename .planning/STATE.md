@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-03-PLAN.md
-last_updated: "2026-08-15T03:23:38.326Z"
+stopped_at: Completed 08-04-PLAN.md
+last_updated: "2026-08-15T03:37:31.855Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 86
-  completed_plans: 76
+  completed_plans: 77
   percent: 64
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 08 (quality-gates-engineering-quality) — EXECUTING
-Plan: 4 of 13
+Plan: 5 of 13
 Status: Ready to execute
 Last activity: 2026-08-15
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 90%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -143,6 +143,7 @@ credentials can do has been done".
 | Phase 08 P01 | 35m | 2 tasks | 4 files |
 | Phase 08 P02 | 55m | 2 tasks | 2 files |
 | Phase 08 P03 | 35m | 2 tasks | 2 files |
+| Phase 08 P04 | 10m | 2 tasks | 8 files |
 
 ## Accumulated Context
 
@@ -378,6 +379,8 @@ Recent decisions affecting current work:
 - [Phase 08-02]: fixing the 22 pre-existing QUAL-01 findings in Phase 1-7 code is out of 08-02's scope -- the plan builds and proves the rules, remediation belongs to a future gate-integration or triage plan
 - [Phase 08]: 08-03: validateReview lives in the same commit as the schema (ee86bff) since both are one pure module with no legitimate intermediate state
 - [Phase 08]: 08-03: falsification of branches (2)/(5)/(6)/(7) was run in-place against the committed file (commit-then-falsify-then-restore via git checkout --), confirming exactly the matching test group turns red for each
+- [Phase 08]: 08-04: qualityMs/qualityTokens follow the same globalThis-slot pattern as routing/modes.ts and the same omitted-key rule as reasoning/cacheReadRatio; call-model.ts's two recordTurn sites deliberately never drain the accumulator — draining on a kind:nested row would empty the ledger before the main-loop turn row is composed (threat T-08-13); only turn_end may call takeQualityCost()
+- [Phase 08]: 08-04: QUAL-09 stays Pending in REQUIREMENTS.md — this plan builds and proves the ledger mechanism only; the requirement's own text is not true until plans 08-06/08-07/08-09 exist to add real quality-layer cost
 
 ### Pending Todos
 
@@ -428,8 +431,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T03:23:38.316Z
-Stopped at: Completed 08-03-PLAN.md
+Last session: 2026-08-15T03:37:31.844Z
+Stopped at: Completed 08-04-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
