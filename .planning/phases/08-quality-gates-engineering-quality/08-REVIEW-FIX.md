@@ -1,101 +1,83 @@
 ---
 phase: 08-quality-gates-engineering-quality
-fixed_at: 2026-08-15T07:55:11Z
+fixed_at: 2026-08-15T09:08:39Z
 review_path: .planning/phases/08-quality-gates-engineering-quality/08-REVIEW.md
-iteration: 1
-findings_in_scope: 11
-fixed: 11
+iteration: 2
+findings_in_scope: 7
+fixed: 7
 skipped: 0
 status: all_fixed
 ---
 
-# Phase 8: Code Review Fix Report
+# Phase 8: Code Review Fix Report — Iteration 2
 
-**Fixed at:** 2026-08-15T07:55:11Z
+**Fixed at:** 2026-08-15T09:08:39Z
 **Source review:** .planning/phases/08-quality-gates-engineering-quality/08-REVIEW.md
-**Iteration:** 1
+**Iteration:** 2
 
 **Summary:**
-- Findings in scope: 11 (4 Critical, 7 Warning; Info findings IN-01..IN-03 out of scope per instruction)
-- Fixed: 11
+- Findings in scope: 7 (1 Critical/BLOCKER — CR2-01, 6 Warning — WR2-01..WR2-06; the 5 Info findings IN2-01..IN2-05 were out of scope per the workflow instruction)
+- Fixed: 7
 - Skipped: 0
 
-All fixes were applied inside an isolated git worktree (`gsd-reviewfix/08-89268`), one commit per finding, then fast-forwarded onto `main`. Every fix was verified with `tsc --noEmit` plus the relevant `vitest` scope, and every fix that could plausibly regress silently was mutation-tested (the fix was temporarily reverted or the exact bug reproduced, the new/updated test was confirmed to fail for the right reason, then the fix was restored and reconfirmed green). Full final verification: `tsc --noEmit` clean, full `vitest run` — **108 test files, 1994 tests, all passing**.
+All fixes were applied inside an isolated git worktree (`gsd-reviewfix/08-928`, from `main`), one commit per finding, then fast-forwarded onto `main`. Every fix was verified with `tsc --noEmit` plus the relevant `vitest` scope, and every fix was mutation-tested (the fix was temporarily reverted or an equivalent regression was reintroduced by hand, the new/updated test was confirmed to fail red for the right reason, then the fix was restored and reconfirmed green). Full final verification: `tsc --noEmit` clean; full `vitest run` — **108 test files, 2013 tests, all passing — run 4 consecutive times**, with zero Node `DeprecationWarning`/`DEP0190` output in any run. No new npm dependency was added; `package.json`/`package-lock.json` are untouched across all seven commits. No provider inference request was issued and no AWS/live credential was touched at any point.
 
 ## Fixed Issues
 
-### CR-01: GATE-01's typecheck and lint legs were permanently UNAVAILABLE on Windows
+### CR2-01: the CR-01 fix reintroduced CR-01's own failure mode on Windows
 
-**Files modified:** `.pi/extensions/quality/gates.ts`, `.pi/extensions/quality/index.ts`, `tests/unit/quality-gates.test.ts`, `tests/unit/quality-production-exec.test.ts` (new)
-**Commit:** `0f34e2f`
-**Applied fix:** `productionExec` now resolves the pinned local binary at `<cwd>/node_modules/.bin/<name>` (branching `shell` on platform for the Windows `.cmd` case) instead of spawning `npx`. Call sites changed from `exec("npx", ["tsc", ...])` to `exec("tsc", [...])` / `exec("vitest", [...])`. Added `tests/unit/quality-production-exec.test.ts`, which installs NO exec override and asserts against the real production runner — proving the typecheck and lint legs are `pass`/`fail`, never `unavailable`, and that this repository's own source genuinely passes both. Executed proof pasted in the commit: `productionExec("tsc", ["--version"], repoRoot())` → exit 0, "Version 5.9.3"; a real `vitest run <12 files>` completes in ~3s with 385 passing tests. Mutation-tested: reverting to the pre-fix `npx`-based shape reproduces the review's exact `spawnSync npx ENOENT` and turns every new test red.
+**Files modified:** `.pi/lib/win-quote.ts` (new), `tests/helpers/win-quote.ts`, `.pi/extensions/quality/index.ts`, `tests/unit/quality-production-exec.test.ts`
+**Commit:** `03a3585`
+**Applied fix:** `productionExec` called `spawnSync(bin, args, {shell: process.platform === "win32"})` — `shell: true` alongside a raw args array is unescaped concatenation into `cmd.exe` (Node's own DEP0190 hazard), and `bin` embeds `cwd`, so a cwd containing a space or `&` corrupted the command line and reported a false `fail` full of `cmd.exe` chatter instead of an honest `unavailable`. Reproduced against the real spawn on this machine (win32, Node v24.16.0) before fixing: a spaced cwd produced `'...\space' is not recognized as an internal or external command`; an `&`-containing cwd produced a genuinely split command. Moved the repository's own solved-and-tested quoter (`tests/helpers/win-quote.ts#commandFor`) to `.pi/lib/win-quote.ts` — production code under `.pi/extensions/` does not import from `tests/`, per `calibration.ts`'s and `safety/git.ts`'s own documented rule — and wired it into `productionExec`: every argument is quoted and folded into one command string on Windows (empty args array, the only shape `shell: true` is safe in). `tests/helpers/win-quote.ts` now re-exports from the new location so no existing test import broke. Added a belt-and-braces check: a residual `cmd.exe`-level "is not recognized" spawn failure is now reported as an honest `unavailable`, never allowed to masquerade as a compiler/vitest verdict. Confirmed zero `DEP0190` warnings remain in `vitest run` output. Mutation-tested: bypassing `commandFor` and reverting to the raw `shell:true`+args form made all three new CR2-01 regression cases (spaced cwd, `&`-containing cwd, a genuine FAIL from a spaced cwd) fail red.
 
-### CR-02: the same runner could download and execute unpinned npm packages
+### WR2-01: `localBin` did not walk up to an ancestor `node_modules`
 
 **Files modified:** `.pi/extensions/quality/index.ts`, `tests/unit/quality-production-exec.test.ts`
-**Commit:** `1128a11`
-**Applied fix:** CR-01's fix already closes the primary concern (no code path names `npx` anymore, so nothing can reach the registry). Additionally fixed the secondary correctness bug: `LINT_GATE_FILES` names this repository's own hardcoded structural test paths, which do not exist in a foreign `cwd`. `productionExec` now checks every `.test.ts` argument against `cwd` before spawning; a missing target degrades the leg to `unavailable`, naming the missing path(s), rather than letting vitest report a false FAIL. Mutation-tested: removing the check made `productionExec` actually run a real `vitest` subprocess against a nonexistent file rather than throwing — exactly the unwanted reach this fix prevents.
+**Commit:** `08be642`
+**Applied fix:** `localBin` was a single-level `join(cwd, "node_modules", ".bin", name)` — the `npx` shim it replaced walked ancestors (`cwd/node_modules/.bin`, then each parent); `ctx.cwd` is wherever the user launched Pi, frequently not the package root in a multi-stack repository, so from any subdirectory both gate legs silently degraded to `unavailable`. `localBin` now walks up from `cwd` to each ancestor and returns `undefined` (never a still-missing path) once the filesystem root is reached, so `productionExec` reports an honest, actionable `unavailable` naming both `cwd` and "or any ancestor's". Mutation-tested: reverting the ancestor walk to a single-level lookup made all three new WR2-01 regression cases (binary resolution from a subdirectory of `repoRoot()`, `runQuickGateStage` from that subdirectory, `vitest` resolution from the same subdirectory) fail red.
 
-### CR-03: `quick-workflow.test.ts` never installed the mandatory exec seam
+### WR2-02: WR-06's session-level regression test asserted an exact float equality
 
-**Files modified:** `tests/integration/quick-workflow.test.ts`
-**Commit:** `a06992d`
-**Applied fix:** Installed `setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC)` before, and restored `undefined` after, every one of the nine `command.handler(...)` calls that reach `runQuickGateStage` (case 3–9, WR-01 regression, WR-02 regression PROBE I), mirroring `quality-gate-order.test.ts`'s own pattern exactly, plus a belt-and-braces `afterEach`. Cases that return before the gate stage (case 0–2, the non-routed-model regression, WR-01 iteration 2) correctly received no override. Verified: with CR-01/CR-02 already landed, stripping all nine overrides as a mutation still left the suite green (production exec now degrades fast and honestly) — this fix is therefore documented as defense-in-depth against any future regression to `productionExec`, not one with a currently-visible failure signature on this branch.
+**Files modified:** `tests/integration/quality-gate-order.test.ts`
+**Commit:** `10b00ed`
+**Applied fix:** `expect(peekQualityCost()).toEqual({qualityMs: 123, qualityTokens: 45})` only holds as an IEEE-754 identity while `gate.totalMs < ~5`; measured mismatch rates of 30.7%/33.4% once `t` (the gate's own `hrtime`-measured duration, which also picks up scheduler/GC pauses) reaches the `[0,20]`/`[0,80]` range — a fixed-magnitude bet of exactly the kind 08-05's de-flake work removed, and this phase's own de-flake prohibitions forbid fixing it by widening a tolerance band. Replaced the bit-pattern equality with two property assertions: `qualityTokens` must be exactly `45` (an integer sum, no float hazard); `qualityMs` must be close to `123` to `1e-6`. Mutation-tested: making `refundQualityCost` wipe the whole ledger slot regardless of prior contributors made the test fail red with `qualityTokens: undefined !== 45`, proving it still catches the bug WR-06 exists to catch. The review's *optional* secondary suggestion (rounding `totalMs` to a whole millisecond in production) was deliberately NOT applied — it is a shared ledger used by three other contributors and a production behaviour change with a blast radius beyond this one test's fragility; the test-level fix alone closes WR2-02.
 
-### CR-04: the FLOW-11 anti-offloading ratchet did not cover `.pi/extensions/quality/`
+### WR2-03: WR-04's reset-on-progress case used a real 2× timing margin
 
-**Files modified:** `tests/unit/workflow-budgets.test.ts`
-**Commit:** `ac0e427`
-**Applied fix:** Added `importedSubsystemDirs(commandFiles)`, which scans every discovered command source's own relative `import ... from` specifiers, resolves each to an absolute path, and adds its subsystem root to `commandDirs` when it lands under `.pi/extensions/`. `commandDirs` is now the union of `isCommandSource`-discovered directories and import-discovered ones. This surfaced a **second** previously-undiscovered directory, `.pi/extensions/safety/` (also imported by `workflows/index.ts`, also registers no command) — added its own `DIRECTORY_BUDGETS` entry too, grandfathered at its current measured total (4,455 raw lines / 9 files), the same precedent already used for `routing/`/`harness/`/`diagnostics/`. Added `.pi/extensions/quality`'s entry at its final measured total for this phase (3,548 raw lines / 8 files, after this phase's own CR-01/CR-02/WR-01/WR-02/WR-03/WR-05 edits). Corrected `workflows/index.ts`'s own budget `why`, which had implied nothing was offloaded. Mutation-tested twice: reverting `commandDirs` to `isCommandSource`-only turns the new CR-04 proof test red while everything else stays green; removing the new entries turns the pre-existing completeness check red, naming both directories.
+**Files modified:** `.pi/extensions/qoder/client.ts`, `tests/integration/qoder-delegate.test.ts`
+**Commit:** `bccb6cc`
+**Applied fix:** WR-04's own case used a real 150ms sleep between releases against a 300ms budget — correct in shape (proves SUM-of-gaps > budget while every individual gap stays under it) but only a 2× safety margin, down from the prior version's ~40×; on a loaded CI runner a scheduler hiccup during any one real sleep could push that single gap's real elapsed time over budget, making `delegateTask` genuinely and correctly reject — a false-failure risk in the test, not a bug in the code under test. Following 08-05's own "root cause eliminated at its source, no wall-clock delay option" discipline: `delegateTask` now accepts two test-only injection seams, `DelegateTaskOptions.now` (a clock, default `Date.now`) and `.onProgress` (fires exactly once per deadline reset, default no-op) — both no-ops for every production caller. `onProgress` is the synchronisation point the test needs: it fires from inside the client's own read loop, immediately after `lastProgressAt` resets, so bumping the injected clock and releasing the next chunk from within this callback guarantees the client's own next remaining-check sees exactly one gap's worth of elapsed time, with zero real wall-clock waiting anywhere in the test. An earlier version of this fix drove the clock bump off the loopback SERVER's own `chunkWritten` event instead (decoupled from the client's actual consumption); mutation-testing caught that this design let a non-resetting client mutation still pass (the test's own loop raced ahead of the client, dumping every bump in before the client processed even the first chunk) — caught during my own verification, before it reached this commit, and replaced with the `onProgress`-synchronised design. Mutation-tested (final design): removing the `lastProgressAt` reset made the test fail red, deterministically, across 4 consecutive runs, with the real "no bytes for 300ms" inactivity error; the real fix was reconfirmed green across 10 consecutive runs of the single test plus the full 20-test file (whole file now completes in well under a second of real wall-clock time).
 
-### WR-01: `validateReview` accepted duplicate, contradictory verdicts for one requirement id
+### WR2-04: `importedSubsystemDirs` closed the offloading hole at depth 1 only, `.pi/extensions/`-only
 
-**Files modified:** `.pi/extensions/quality/review-schema.ts`, `tests/unit/quality-schema.test.ts`
-**Commit:** `458c10b`
-**Applied fix:** Added branch (3b): rejects `verdicts` carrying more than one entry for the same `requirementId`, naming the duplicated id(s). Mutation-tested: removing the branch turns the new duplicate-rejection test red; the paired positive (single verdict per id) stays green.
+**Files modified:** `tests/unit/workflow-budgets.test.ts`, `docs/WORKFLOWS.md`
+**Commit:** `e52bd3c`
+**Applied fix:** Two residuals, both closed. (1) Depth 1 only: `importedSubsystemDirs` scanned only `commandFiles`' own imports, missing a directory reached only through an intermediate file. It is now a fixed-point walk — every file it resolves a local import to is itself enqueued and scanned for its own imports, seeded from every discovered command source, with a visited-files set for cycle safety. Proved concretely: `routing/index.ts -> ./modes.ts -> ../providers/{fallback,schema}.ts` is a real depth-2 chain in this repository today, and `.pi/extensions/providers` had no `DIRECTORY_BUDGETS` entry before this fix. (2) `.pi/extensions/`-only: the filter discarded every local import elsewhere by construction — `.pi/lib/jsonl.ts` (605+ lines, imported by five subsystems) was a live, unbudgeted shared-library target. A hit under `.pi/extensions/` still resolves to its subsystem root; a hit under any other local `.pi/` directory now resolves to its own immediate directory. Added `DIRECTORY_BUDGETS` entries for `.pi/extensions/providers` (1430, grandfathered) and `.pi/lib` (690, grandfathered, includes `win-quote.ts` moved there by CR2-01 this same pass); raised `.pi/extensions/quality`'s own entry 3550 → 3610 in the same commit, reconciling size growth CR2-01/WR2-01 had already landed without updating the ratchet at the time. Rewrote `docs/WORKFLOWS.md`'s stale "a directory aggregate" (singular) prose to state the actual mechanism (per file, per-directory, transitive, general to any local `.pi/` directory) and its actual scope. Mutation-tested: reverting to the pre-fix depth-1/`.pi/extensions/`-only code made all four new WR2-04 proof tests fail red, while the pre-existing "present-but-undeclared" completeness check stayed GREEN throughout — confirming that check alone cannot detect this regression, so the new explicit containment proofs were necessary, not redundant.
 
-### WR-02: an unrecognised verdict status was silently coerced to "Missing"
+### WR2-05: the tightened calibration needles resisted iteration 1's exploit but not a boilerplate one
 
-**Files modified:** `.pi/extensions/quality/review-schema.ts`, `tests/unit/quality-schema.test.ts`
-**Commit:** `a4f57c4`
-**Applied fix:** Added branch (2b), mirroring branch (2)'s hard reject for a malformed `severity`: an unrecognised `status` is now rejected before normalisation, and the now-unreachable fallback-to-`"Missing"` was removed from branch (9)'s normaliser. Mutation-tested: removing branch (2b) turns 3 of the 4 new tests red (the 4th, a genuine `"Missing"` verdict, is indistinguishable from the old coercion by design and is the paired positive proving the fix preserves that legitimate case).
+**Files modified:** `.pi/extensions/quality/calibration.ts`, `tests/integration/reviewer-calibration.test.ts`, `docs/QUALITY.md`
+**Commit:** `bb2a67c`
+**Applied fix:** `mustMentionAny` is an OR set, and a single crafted sentence — reused verbatim across all six touched files, engineered to contain exactly one matching phrase per defect class ("This code cannot fail; it performs none of the verification it claims, writes into the real home directory, never calls isGuardedCommand, and always returns true regardless of input") — scored `catchRate === 1.0` having identified zero real defects. `findingCatches` now requires `MIN_DISTINCT_NEEDLES` (2) distinct entries from `mustMentionAny`, not merely `>= 1` (`Math.min(2, mustMentionAny.length)` preserves single-needle expectations used by this module's own direct unit tests). Verified by hand this defeats the kitchen-sink sentence across all six classes. The existing `KNOWN_SUBSET_ARGS` positive control's `fabricated-evidence` and `absent-guard` findings already naturally contained two needles each; its `false-label` finding did not, and was extended with one additional, TRUE clause describing the SAME already-identified defect ("meaning the label survived its own mutation") to genuinely clear the new bar rather than being weakened to dodge it — the known-subset reviewer is still scripted to catch exactly 3 of 6, and it still does. Added `SHOTGUN_KITCHEN_SINK_ARGS` as a fourth permanent control, run through the real `runReview -> scoreCalibration` pipeline in both reproducibility runs. **Re-ran the full calibration suite after the fix: the number is UNCHANGED, still 3/6 = 0.50** — recorded honestly, not tuned toward a flattering figure; since the number itself did not move, the other five places it is stated (`RB-08-03` in `docs/RUNBOOK.md` ×3, `08-10-SUMMARY.md`, `08-13-SUMMARY.md`) remain accurate and were not touched. `docs/QUALITY.md` was still overclaiming what `findingCatches` enforces ("a mention of the specific malformed behaviour" implied semantic understanding); corrected to state plainly that the matcher is a substring-match proxy, that it now requires two independent needles, and that the kitchen-sink control's own `catchRate: 0` is the measured ceiling of what that proxy can be defeated by, not a claim that no cleverer construction exists. Mutation-tested: setting `MIN_DISTINCT_NEEDLES` back to `1` made the new kitchen-sink control fail red with `catchRate === 1` (6/6), reproducing the exact exploit this commit closes.
 
-### WR-03: the calibration matcher could be satisfied without detecting any defect
+### WR2-06: `productionExec` executed an arbitrary binary out of an untrusted `cwd`
 
-**Files modified:** `.pi/extensions/quality/calibration.ts` (docstring only — the matcher logic itself was already correct; the fixture needles were the bug), `tests/fixtures/seeded-defects/index.ts`, `tests/integration/reviewer-calibration.test.ts`, `docs/QUALITY.md`
-**Commit:** `50d85c5`
-**Applied fix:** Every `mustMentionAny` needle across the six seeded defects now names the DEFECT's behaviour (e.g. `absent-guard`: `"never calls isGuardedCommand"` / `"not wired in"`, not bare `"isGuardedCommand"`) instead of a bare symbol name trivially derivable from "the file's only function". Added a third calibration control, `SHOTGUN_NAME_DROP_ARGS`, reproducing the review's exact exploit shape and asserting it scores `catchRate === 0`. **Number recorded honestly:** the known-subset catch rate is **unchanged at 3/6 = 0.50** — `KNOWN_SUBSET_ARGS`'s own finding text already described behaviour, not bare symbols, so it satisfied the tightened needles without any change to it. Nothing was tuned toward a flattering number. `docs/QUALITY.md`'s calibration section was corrected to record the third control and its own prior overclaim about "a specific, named mention". Mutation-tested: reverting the six needles to bare-symbol form reproduces the review's exact exploit — the new control's `catchRate` goes from 0 to 1.0 (6/6, having caught nothing).
-
-### WR-04: the qoder "does NOT time out" test didn't actually prove reset-on-progress
-
-**Files modified:** `tests/helpers/qoder-loopback.ts`, `tests/integration/qoder-delegate.test.ts`
-**Commit:** `29a4fc1`
-**Applied fix:** The prior case set one ~50ms gap against a 2000ms budget, which a single-fixed-deadline implementation would also pass. Extended `qoder-loopback.ts` with `splitStreamAtMultiple` / `chunkWritten[]` / `releaseNextChunk` (event-gated, same discipline as the existing two-chunk primitives — no `res.write()` is ever timed against a duration). Rewrote the test to split the stream into four chunks (three ~150ms real gaps, 450ms sum) against a 300ms budget: reset-on-progress completes normally; a single fixed deadline fires before the fourth chunk. 150ms of headroom per gap against scheduler jitter. Mutation-tested: commenting out `client.ts`'s `lastProgressAt = Date.now()` reset (simulating a fixed deadline) turns exactly this test red with "the event stream produced no bytes for 300ms", while the other 19 cases (including the WR-07 no-progress-at-all negative controls) stay green.
-
-### WR-05: `buildImportGraph` silently dropped `export ... from` re-export edges
-
-**Files modified:** `.pi/extensions/quality/reviewer.ts`, `tests/unit/reviewer-import-graph.test.ts` (new)
-**Commit:** `c06d293`
-**Applied fix:** `IMPORT_FROM_RE` now matches `\b(?:import|export)\b ... from`, and the rendered heading plus both docstrings state the graph covers `import ... from` AND `export ... from`, still excluding a bare side-effect `import "./x"` and dynamic `import()`. Added `tests/unit/reviewer-import-graph.test.ts` — no dedicated unit test existed for `buildImportGraph` before. Mutation-tested: reverting to `import`-only turns exactly the four new export-related tests red (barrel export, mixed file, the cited `loop-police.ts` shape, and the regression proof), while the paired positive and still-excluded cases stay green.
-
-### WR-06: `/quick`'s blocking branch drained the WHOLE quality ledger
-
-**Files modified:** `.pi/extensions/diagnostics/quality-cost.ts`, `.pi/extensions/workflows/index.ts`, `tests/integration/quality-gate-order.test.ts`, `tests/unit/turn-row.test.ts`, `tests/unit/workflow-budgets.test.ts`
-**Commit:** `937fb81`
-**Applied fix:** Added `refundQualityCost({ms, tokens})`, which subtracts only its own input (floored at zero per field) from whatever the ledger currently holds, leaving any other contributor's own recorded cost untouched; clears to `undefined` only when the result reaches `{0, 0}` for both fields. `workflows/index.ts`'s blocking branch now calls `refundQualityCost({ms: gate.totalMs})` instead of `takeQualityCost()`. Added a session-level regression test that records a prior `{ms:123, tokens:45}` contribution before a blocked `/quick` call and asserts it survives, plus five direct unit tests for `refundQualityCost` itself. Mutation-tested twice: reverting `workflows/index.ts` to `takeQualityCost()` turns only the new regression test red (the pre-existing negative control stays green — it never exercised a multi-contributor turn); reverting `refundQualityCost`'s own body to unconditional `clearSlot()` turns exactly 2 of 5 new unit tests red.
-
-### WR-07: `ERROR_BUDGET_ON_OWN_SOURCE`'s recorded provenance described a stale input set
-
-**Files modified:** `tests/unit/quality-rules.test.ts`
-**Commit:** `48d4db5`
-**Applied fix:** Re-measured against the current tracked `.pi/extensions/` tree (51 files, including all eight `quality/*.ts` files that landed after the original measurement): still exactly 22, unchanged — the new files contribute zero error-tier findings. The constant is unchanged; only its `why` was stale. Updated the `why` with the current per-rule, per-file breakdown. Also added the `toBe(measured)` discipline `workflow-budgets.test.ts` already uses (WR2-03): a second test asserting the constant equals the measured count exactly, so a future drop also requires a deliberate edit. Mutation-tested: setting the constant to a stale value turns only the new `toBe` test red while the pre-existing `toBeLessThanOrEqual` test stays green, demonstrating the new test catches drift the old one could not.
+**Files modified:** `.pi/extensions/quality/index.ts`, `.pi/extensions/workflows/index.ts`, `tests/integration/quality-gate-order.test.ts`, `tests/unit/quality-production-exec.test.ts`, `tests/unit/workflow-budgets.test.ts`
+**Commit:** `dc4cc16`
+**Applied fix:** `runQuickGateStage` resolved and ran `<ctx.cwd>/node_modules/.bin/{tsc,vitest}` unconditionally, before the user had agreed to anything — on a laptop holding live static IAM admin credentials for an account whose `main` auto-deploys, a freshly cloned or malicious repository shipping a `node_modules/.bin/tsc.cmd` would get arbitrary code execution. `runQuickGateStage` now takes `projectTrusted: boolean`, threaded from `ctx.isProjectTrusted()` at the one production call site (`workflows/index.ts`). `resolveExec` refuses honestly instead of executing when untrusted: both legs degrade to an actionable `unavailable` naming trust as the reason, never `blocking` (GATE-01's three-state contract). A test-installed override still wins regardless of `projectTrusted` — an override never touches disk or spawns anything, so gating it behind trust would add friction to the existing `quality-gate-order.test.ts`/`quick-workflow.test.ts` suites for zero security benefit — which kept the test-file blast radius to five direct call sites (all now passing an explicit, honest `projectTrusted` value) instead of requiring every override-driven test to also fake a trust state. Added three new tests: an untrusted temp repo with a REAL `tsc` stub genuinely installed still reports `unavailable` naming trust, never `pass`/`fail`; the same repo trusted genuinely runs; an installed override wins over `projectTrusted: false`. The untrusted case uses a temp repo, never `repoRoot()`, so its `blocking: false` assertion is not confounded by this repository's own pre-existing, unrelated anti-pattern-leg findings (a real, accepted residual discovered while writing this test, orthogonal to WR2-06). Reconciled the `.pi/extensions/quality` `DIRECTORY_BUDGETS` ratchet in the same commit: 3610 → 3670 (`calibration.ts` 179 → 206 from WR2-05, `index.ts` 355 → 387 from this fix). Mutation-tested: removing the trust check entirely made the new untrusted-temp-repo test fail red with `status: "pass"` instead of `"unavailable"`, reproducing the exact vulnerability this commit closes.
 
 ## Skipped Issues
 
-None — all 11 in-scope findings were fixed and verified.
+None — all 7 in-scope findings were fixed and verified.
+
+## Notes on out-of-scope findings
+
+The 5 Info findings (IN2-01..IN2-05) were explicitly out of scope for this fix pass per the workflow instruction and were left untouched:
+- IN2-01 (`evidence-gate.test.ts`'s stale M1 rationale), IN2-02 (`boundedCallDelta` conflates provider calls with iterations), IN2-03 (`quality/index.ts`'s TypeScript-narrowed drift guard), IN2-04 (CR-03's exec-seam has no failing signature) are all "deliberately out of fix scope" per the review's own IN2-01/02/03 headers, or a documented, accepted residual (IN2-04).
+- IN2-05 (`firstChunkWritten` never resolves in `splitStreamAtMultiple` mode) touches `tests/helpers/qoder-loopback.ts`, the same file WR2-03 modified in this pass — left untouched deliberately to keep WR2-03's own diff minimal and reviewable; a future pass can pick it up independently.
 
 ---
 
-_Fixed: 2026-08-15T07:55:11Z_
+_Fixed: 2026-08-15T09:08:39Z_
 _Fixer: Claude (gsd-code-fixer)_
-_Iteration: 1_
+_Iteration: 2_
