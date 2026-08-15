@@ -138,7 +138,7 @@
  * was not found, never a network fetch and never a silent pass.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -192,10 +192,27 @@ function collectQualitySources(cwd: string): QualitySource[] {
 /**
  * The locally-installed binary, resolved per platform — never the `npx`
  * shim. See this file's own "CR-01 / CR-02" docstring section for why.
+ *
+ * WR2-01 (`08-REVIEW.md` iteration 2): walks UP from `cwd` to each ancestor,
+ * exactly the way the `npx` shim it replaced did — `ctx.cwd` is wherever the
+ * user launched Pi, which for a large multi-stack repository is frequently a
+ * subdirectory with no `node_modules` of its own. A single-level lookup
+ * silently degraded both legs to `unavailable` from any such subdirectory,
+ * which is CR-01's own "a control that does not run and nobody downstream
+ * can tell" shape, only narrower. Returns `undefined` (never a
+ * still-missing path) once the filesystem root is reached, so the caller can
+ * report an honest, actionable `unavailable`.
  */
-function localBin(cwd: string, name: string): string {
+function localBin(cwd: string, name: string): string | undefined {
 	const suffix = process.platform === "win32" ? ".cmd" : "";
-	return join(cwd, "node_modules", ".bin", `${name}${suffix}`);
+	let dir = resolve(cwd);
+	for (;;) {
+		const candidate = join(dir, "node_modules", ".bin", `${name}${suffix}`);
+		if (existsSync(candidate)) return candidate;
+		const parent = dirname(dir);
+		if (parent === dir) return undefined; // reached the filesystem root
+		dir = parent;
+	}
 }
 
 /**
@@ -216,20 +233,22 @@ const CMD_EXE_SPAWN_FAILURE = /is not recognized as an internal or external comm
 
 /**
  * Production `ExecRunner` — resolves the pinned LOCAL binary under
- * `<cwd>/node_modules/.bin`, never `npx`. See this file's own "CR-01 /
- * CR-02" docstring section for the two failure modes this closes, and
- * CR2-01 (`08-REVIEW.md` iteration 2) for why the spawn itself goes through
- * {@link commandFor} rather than a raw `shell: true` + args-array call.
- * Exported (not `FOR TESTS ONLY` -- this IS the production implementation)
- * so `tests/unit/quality-production-exec.test.ts` can exercise it directly,
- * including the real spawn CR-01 requires proof of.
+ * `<cwd>/node_modules/.bin` (or an ancestor's, per {@link localBin}), never
+ * `npx`. See this file's own "CR-01 / CR-02" docstring section for the two
+ * failure modes this closes, and CR2-01 (`08-REVIEW.md` iteration 2) for why
+ * the spawn itself goes through {@link commandFor} rather than a raw
+ * `shell: true` + args-array call. Exported (not `FOR TESTS ONLY` -- this IS
+ * the production implementation) so `tests/unit/quality-production-exec.test.ts`
+ * can exercise it directly, including the real spawn CR-01 requires proof of.
  */
 export const productionExec: ExecRunner = (cmd, args, cwd) => {
 	const bin = localBin(cwd, cmd);
-	if (!existsSync(bin)) {
+	if (bin === undefined) {
 		// Honest UNAVAILABLE, naming the missing binary -- never falls through
-		// to a network-fetching npx, and never silently reports pass.
-		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin -- the leg is unavailable, not skipped or passed`);
+		// to a network-fetching npx, and never silently reports pass. WR2-01:
+		// this is now true after walking cwd AND every ancestor, not just cwd
+		// itself.
+		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin or any ancestor's -- the leg is unavailable, not skipped or passed`);
 	}
 	// CR-02's secondary correctness bug: LINT_GATE_FILES (gates.ts) is THIS
 	// repository's own structural test paths. In any other cwd those paths do

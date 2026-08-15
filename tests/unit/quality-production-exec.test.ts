@@ -1,6 +1,7 @@
 /**
- * CR-01 / CR-02 / CR2-01 -- the deterministic gate stage's PRODUCTION exec
- * runner, proved against REAL subprocesses, not a scripted `ExecRunner`.
+ * CR-01 / CR-02 / CR2-01 / WR2-01 -- the deterministic gate stage's
+ * PRODUCTION exec runner, proved against REAL subprocesses, not a scripted
+ * `ExecRunner`.
  *
  * The code-review's own reproduction: `spawnSync("npx", [...], {shell:false})`
  * throws `ENOENT` on this machine (win32, Node v24.16.0), which degraded
@@ -24,14 +25,15 @@
  * false FAIL rather than an honest "this leg does not apply here"; a
  * missing `.test.ts` target is now caught before a subprocess is spawned.
  *
- * CR2-01's fix (`08-REVIEW.md` iteration 2, this file's own last `describe`):
- * the CR-01 fix itself reintroduced CR-01's own failure mode -- `spawnSync(bin,
- * args, {shell: true})` with a raw args array is unescaped `cmd.exe`
- * concatenation, and `bin` embeds `cwd`. A `cwd` containing a space or a
- * shell metacharacter (`&`) corrupted the command line and reported a false
- * `fail` full of `cmd.exe` chatter, never an honest `unavailable`.
- * `.pi/lib/win-quote.ts#commandFor` closes this by quoting every argument
- * and folding them into one command string.
+ * CR2-01's fix (`08-REVIEW.md` iteration 2): the CR-01 fix itself reintroduced
+ * CR-01's own failure mode -- `spawnSync(bin, args, {shell: true})` with a raw
+ * args array is unescaped `cmd.exe` concatenation, and `bin` embeds `cwd`. A
+ * `cwd` containing a space or a shell metacharacter (`&`) corrupted the
+ * command line and reported a false `fail` full of `cmd.exe` chatter, never an
+ * honest `unavailable`. `.pi/lib/win-quote.ts#commandFor` closes this by
+ * quoting every argument and folding them into one command string. WR2-01's
+ * fix (this file's own last `describe`): `localBin` now walks up to an
+ * ancestor `node_modules`, the way the `npx` shim it replaced always did.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -163,3 +165,45 @@ describe("CR2-01 -- a cwd containing a space or a shell metacharacter runs the R
 	});
 });
 
+describe("WR2-01 -- localBin walks up to an ancestor node_modules, matching the npx shim it replaced", () => {
+	it("productionExec resolves the binary from a subdirectory of repoRoot() that has no node_modules of its own -- never unavailable", () => {
+		// docs/ is a real subdirectory of this repository with no node_modules
+		// of its own; repoRoot()'s node_modules is its nearest ancestor with one.
+		const subdir = join(repoRoot(), "docs");
+		const result = productionExec("tsc", ["--version"], subdir);
+		expect(result.code, `tsc --version exited ${result.code} from ${subdir}; stderr: ${result.stderr}`).toBe(0);
+		expect(result.stdout).toMatch(/Version \d+\.\d+\.\d+/);
+	});
+
+	it("runQuickGateStage from a subdirectory with no node_modules of its own -- the typecheck leg is pass or fail, NEVER unavailable (the exact regression WR2-01 fixes)", () => {
+		// The typecheck leg's exec ("tsc", ["--noEmit"], cwd) never names a
+		// cwd-relative path, so this isolates the binary-resolution fix
+		// (localBin's ancestor walk) from CR-02's SEPARATE cwd-relative
+		// target-file check, which the lint leg is intentionally still subject
+		// to from a non-repo-root cwd -- LINT_GATE_FILES names paths relative
+		// to repoRoot(), so the lint leg legitimately still reports unavailable
+		// from docs/ (naming the missing target files, not a missing binary);
+		// that is CR-02's own documented behaviour, not WR2-01's concern.
+		const subdir = join(repoRoot(), "docs");
+		const result = runQuickGateStage(subdir);
+		expect(
+			result.legs.typecheck.status,
+			result.legs.typecheck.status === "unavailable" ? result.legs.typecheck.reason : "",
+		).not.toBe("unavailable");
+		expect(["pass", "fail"]).toContain(result.legs.typecheck.status);
+	});
+
+	it("productionExec resolves the 'vitest' binary itself from a subdirectory of repoRoot() -- the lint leg's OWN unavailability from docs/ is CR-02's cwd-relative target-file check, never a missing-binary error", () => {
+		const subdir = join(repoRoot(), "docs");
+		// No .test.ts argument here -- isolates binary resolution (WR2-01) from
+		// CR-02's missingTargets check, which only fires when a `.test.ts`
+		// argument is present.
+		const result = productionExec("vitest", ["--version"], subdir);
+		expect(result.code, `vitest --version exited ${result.code} from ${subdir}; stderr: ${result.stderr}`).toBe(0);
+	});
+
+	it("productionExec still reports an honest unavailable, naming both cwd and 'or any ancestor's', when no node_modules exists anywhere up the chain (a throwaway temp repo)", () => {
+		const repo = makeTempRepo("kypi-wr2-01-exec-");
+		expect(() => productionExec("tsc", ["--noEmit"], repo)).toThrowError(/tsc is not installed under .* or any ancestor's/);
+	});
+});
