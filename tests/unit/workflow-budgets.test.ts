@@ -620,6 +620,20 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"2026-08-15, already an exact multiple of ten",
 	},
 	{
+		dir: ".pi/extensions/execute",
+		budget: 340,
+		why: "plan 09-11 (FLOW-09) -- the first file of the /execute subsystem, handoff.ts: the honest-degradation " +
+			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/subagent_wait pair, never " +
+			"reading the settings file), the pure buildHandoffPacket/renderHandoffPacket, and the real " +
+			"measurePacketDelta -- built and unit-verified entirely offline, per this plan's own constraint that " +
+			"pi-subagents (RB-07-02, OUTSTANDING) is never installed. This directory holds no registerCommand( " +
+			"call yet (a later plan wires the /execute command itself) and is not YET reachable by commandDirs' " +
+			"present-but-undeclared check for that reason -- declared here anyway, ahead of that check requiring " +
+			"it, per plan 09-05's identical precedent for .pi/extensions/grill and plan 09-09's for " +
+			".pi/extensions/plan-ceremony. Measured 332 raw lines across 1 file 2026-08-16 (handoff.ts), rounded " +
+			"up to the next ten",
+	},
+	{
 		dir: ".pi/extensions/todo.ts",
 		budget: 0,
 		why: "Phase 7 plan 08's vendored todo.ts is a FLAT top-level file (`.pi/extensions/todo.ts`, not a " +
