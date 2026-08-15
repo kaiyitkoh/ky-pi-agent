@@ -558,7 +558,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-ceremony",
-		budget: 560,
+		budget: 580,
 		why: "plan 09-09 (FLOW-06) -- the first file of the /plan subsystem, plan-schema.ts: the task-line " +
 			"parser (TASK_LINE_PATTERN, VERIFICATION_SEPARATOR, parseTaskLine), the whole-document scanner " +
 			"(parsePlanTasks, malformed lines returned never dropped), the files-touched union " +
@@ -569,7 +569,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"registerCommand( call yet (plan 09-10 wires the /plan command itself) and is not YET reachable " +
 			"by commandDirs' present-but-undeclared check for that reason -- declared here anyway, ahead of " +
 			"that check requiring it, per plan 09-05's identical precedent for .pi/extensions/grill. " +
-			"Measured 556 raw lines across 1 file 2026-08-15 (plan-schema.ts), rounded up to the next ten",
+			"Measured 556 raw lines across 1 file 2026-08-15 (plan-schema.ts), rounded up to the next ten. " +
+			"RAISED 560 -> 580 in the same plan's Task 2: extractPathAndCommand switched from a FIRST-matching-" +
+			"token search to a LAST-token check against EXPECTED_FILE_PATTERN (the first-token strategy " +
+			"false-positived on ordinary prose words, discovered while constructing this plan's own " +
+			"falsification fixtures -- see 09-09-SUMMARY.md's deviations), and VERIFICATION_SEPARATOR dropped " +
+			"its trailing space to avoid an invisible-whitespace-dependent fixture. Re-measured 578 raw lines " +
+			"across 1 file 2026-08-15, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",

@@ -103,8 +103,17 @@ import { EXPECTED_FILE_PATTERN } from "../grill/spec-schema.ts";
  * either call site is how the two silently drift apart. The convention is
  * also mirrored in the `/plan` skill body (plan 09-10) — one convention, two
  * places, this constant authoritative.
+ *
+ * DELIBERATELY NO TRAILING SPACE. {@link extractPathAndCommand} always
+ * `.trim()`s the text on both sides of this separator, so a trailing space
+ * on the constant itself would be redundant at best and, at the boundary
+ * case where nothing at all follows the separator, would force a fixture to
+ * carry invisible trailing whitespace to exercise "a task with a path but no
+ * verification command" — a test string a future editor's whitespace
+ * trimming could silently corrupt. {@link renderPlanMarkdown} adds the one
+ * rendering space explicitly, after this constant, not inside it.
  */
-export const VERIFICATION_SEPARATOR = " | verify: ";
+export const VERIFICATION_SEPARATOR = " | verify:";
 
 /**
  * The `PLAN.md` task-line form, `FEATURES.md` Part 2's own example:
@@ -126,12 +135,20 @@ export const VERIFICATION_SEPARATOR = " | verify: ";
  * never do) but a verification command routinely does (`npm test`, `npx
  * vitest run x.test.ts`), so widening this regex to capture both by position
  * would either forbid a multi-word command or swallow the path into it.
- * Per this module's own convention, the path is the token in the remainder
- * matching {@link EXPECTED_FILE_PATTERN} (imported from `spec-schema.ts`,
- * never re-declared — see this module's header docstring), and the
- * verification command is whatever follows {@link VERIFICATION_SEPARATOR}.
- * {@link parseTaskLine} performs that second-pass extraction; this pattern
- * only proves the line has the required outer SHAPE.
+ * Per this module's own convention, the path is the LAST whitespace-delimited
+ * token in the text preceding {@link VERIFICATION_SEPARATOR} (or the whole
+ * remainder, when the separator is absent) — matching `FEATURES.md`'s own
+ * example, where the path is written LAST in the sentence — checked against
+ * {@link EXPECTED_FILE_PATTERN} (imported from `spec-schema.ts`, never
+ * re-declared — see this module's header docstring). The LAST token, not
+ * ANY matching token, is deliberate: `EXPECTED_FILE_PATTERN` legally accepts
+ * a bare single-segment word with no `.`/`/` at all (a real repo-relative
+ * path can be a bare filename), so scanning every token for the FIRST match
+ * would misidentify an ordinary prose word ("to", "the") earlier in the
+ * sentence as the path. The verification command is whatever follows
+ * {@link VERIFICATION_SEPARATOR}, trimmed. {@link parseTaskLine} performs
+ * that second-pass extraction; this pattern only proves the line has the
+ * required outer SHAPE.
  *
  * REJECTS, stated here so the rule is visible beside the pattern: a missing
  * or malformed id (`T1`, `T0001`, no id at all), an absent `[R#]` group, an
@@ -225,17 +242,22 @@ export interface ParsedTask {
 /**
  * Splits a matched {@link TASK_LINE_PATTERN} remainder into its path and
  * verification-command halves, per this module's declared convention (see
- * {@link TASK_LINE_PATTERN}'s own doc comment): the path is the FIRST
- * whitespace-delimited token (in the text before {@link VERIFICATION_SEPARATOR},
- * if present) matching {@link EXPECTED_FILE_PATTERN}; the command is the
- * text after the separator, trimmed, and treated as absent if empty.
+ * {@link TASK_LINE_PATTERN}'s own doc comment): the path is the LAST
+ * whitespace-delimited token in the text before {@link VERIFICATION_SEPARATOR}
+ * (or in the whole remainder, when the separator is absent), checked
+ * against {@link EXPECTED_FILE_PATTERN} — not simply taken on faith, since
+ * the last word of an ordinary sentence with no real path at all ("...works
+ * correctly!") must still fail; the command is the text after the
+ * separator, trimmed, and treated as absent if empty.
  */
 function extractPathAndCommand(remainder: string): { readonly path?: string; readonly verificationCommand?: string } {
 	const sepIndex = remainder.indexOf(VERIFICATION_SEPARATOR);
 	const pathPart = sepIndex === -1 ? remainder : remainder.slice(0, sepIndex);
 	const commandPart = sepIndex === -1 ? undefined : remainder.slice(sepIndex + VERIFICATION_SEPARATOR.length).trim();
 
-	const path = pathPart.split(/\s+/).find((token) => EXPECTED_FILE_PATTERN.test(token));
+	const pathTokens = pathPart.trim().split(/\s+/).filter((token) => token.length > 0);
+	const lastToken = pathTokens[pathTokens.length - 1];
+	const path = lastToken !== undefined && EXPECTED_FILE_PATTERN.test(lastToken) ? lastToken : undefined;
 	const verificationCommand = commandPart !== undefined && commandPart.length > 0 ? commandPart : undefined;
 
 	return {
@@ -520,7 +542,7 @@ export function renderPlanMarkdown(plan: PlanArtifact): string {
 		const parallelToken = task.parallel ? "[P] " : "";
 		lines.push(
 			`- [ ] ${task.id} ${parallelToken}[${task.requirementIds.join(",")}] ${task.verb} ` +
-				`${task.path ?? ""}${VERIFICATION_SEPARATOR}${task.verificationCommand ?? ""}`,
+				`${task.path ?? ""}${VERIFICATION_SEPARATOR} ${task.verificationCommand ?? ""}`,
 		);
 	}
 	lines.push("");
