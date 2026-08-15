@@ -114,7 +114,7 @@
 
 The harness must produce root-cause fixes that scale, not symptom patches. Exhortation in `AGENTS.md` is explicitly **not** the mechanism — agents ignore comprehensive instructions, so this is enforced structurally. Gate depth scales with the work so the quality layer never becomes the bottleneck.
 
-- [ ] **QUAL-01**: Deterministic anti-pattern rules (ast-grep + lint) detect magic numbers where a constant belongs, special-casing on a literal input value, copy-paste duplication, swallowed exceptions, `TODO`/`FIXME` shipped as a fix, and N+1 query shapes **[FAUX]**
+- [x] **QUAL-01**: Deterministic anti-pattern rules (ast-grep + lint) detect magic numbers where a constant belongs, special-casing on a literal input value, copy-paste duplication, swallowed exceptions, `TODO`/`FIXME` shipped as a fix, and N+1 query shapes **[FAUX]**
 - [ ] **QUAL-02**: Those rules run inside the existing deterministic gate stage, adding no model round trip and no measurable wall-clock **[FAUX]**
 - [ ] **QUAL-03**: For any change framed as a fix, SPEC.md carries a **Root Cause** section naming the cause with `file:line` evidence and stating why the change addresses the cause rather than the symptom — gated the same way as Verified Codebase Facts **[FAUX]**
 - [ ] **QUAL-04**: The reviewer classifies every change as **root-cause / symptomatic / workaround** with written justification, as extra structure on the review pass already being paid for — not an extra call **[FAUX]**
@@ -304,7 +304,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | GATE-08 | Phase 8 | Pending |
 | GATE-09 | Phase 8 | Pending |
 | GATE-10 | Phase 8 | Complete |
-| QUAL-01 | Phase 8 | Pending |
+| QUAL-01 | Phase 8 | Complete |
 | QUAL-02 | Phase 8 | Pending |
 | QUAL-03 | Phase 9 | Pending |
 | QUAL-04 | Phase 8 | Pending |
