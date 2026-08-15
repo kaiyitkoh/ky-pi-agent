@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-08-15T12:39:56.980Z"
+last_updated: "2026-08-15T12:59:25.844Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 87
+  completed_plans: 88
   percent: 73
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 2 of 17
+Plan: 3 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-08-15
 
-Progress: [████████░░] 84%
+Progress: [█████████░] 85%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -157,6 +157,7 @@ credentials can do has been done".
 | Phase 08 P12 | 70m | 2 tasks | 8 files |
 | Phase 08 P13 | 50m | 3 tasks | 4 files |
 | Phase 09 P01 | 40m | 2 tasks | 1 files |
+| Phase 09 P02 | 20min | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -419,6 +420,8 @@ Recent decisions affecting current work:
 - [Phase 08]: docs/QUALITY.md's rule table and calibration section are asserted against RULE_IDS/DEFECT_CLASSES in both directions, falsified by hand with a fake rule id, following the docs/ROUTING.md <-> ROLE_MAP precedent
 - [Phase 09-01]: WR-09's concurrent recorders test: IPC ready/release event handshake replaces a Date.now()+800 wall-clock barrier, and a structural adjacent-tag-switch interleaving proof over the store's own row order replaces the Date.now() overlap comparison — boot-cost variance (587-970ms measured under load) could make a fixed 800ms margin fire before every child had reached it; a child sending ready over IPC and a parent releasing only after collecting every ready removes the duration entirely
 - [Phase 09-01]: MIN_TAG_SWITCHES=4, measured from ~150 solo runs (floor 5) plus 3 full-suite-load runs (27-33, higher under contention), not guessed — the first guess (8) flaked 3/10 on a follow-up check; be-suspicious-of-green discipline required real measurement before trusting the threshold
+- [Phase 09]: RESOURCE_EDGES scans .pi/agents/*.md, non-.md skill/prompt assets, and comment-stripped .pi/ path literals; the .md skill/prompt-body half stays closed by the existing discoverWorkflowFiles() completeness check — 09-RESEARCH.md Pitfall 3 -- re-covering the already-closed .md half would spend this phase's own budget on redundant machinery
+- [Phase 09]: WORKFLOW_TEXT_BUDGETS' ceiling is asserted budget === FEATURES_CEILINGS[name], a frozen spec number, never Math.ceil(actual/10)*10 like every other registry in the file — over budget must mean cut text, not raise the ceiling -- Falsification 5 proves raising it turns the assertion red
 
 ### Pending Todos
 
@@ -471,7 +474,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T12:39:56.968Z
+Last session: 2026-08-15T12:59:25.833Z
 Stopped at: Completed 09-01-PLAN.md
 Resume file: None
 

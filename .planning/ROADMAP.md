@@ -415,7 +415,7 @@ Plans:
 **Wave 1**
 
 - [x] 09-01-PLAN.md — WR-09 de-flake: event-gate the checkpoint-store concurrency case, delete the wall-clock margin
-- [ ] 09-02-PLAN.md — the sideways ratchet: `RESOURCE_EDGES` completeness scanner + `WORKFLOW_TEXT_BUDGETS`
+- [x] 09-02-PLAN.md — the sideways ratchet: `RESOURCE_EDGES` completeness scanner + `WORKFLOW_TEXT_BUDGETS`
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -553,7 +553,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
-| 9. Ceremonial Workflows | 1/17 | In Progress|  |
+| 9. Ceremonial Workflows | 2/17 | In Progress|  |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
 | 11. Terminal UI | 0/TBD | Not started | - |
 
