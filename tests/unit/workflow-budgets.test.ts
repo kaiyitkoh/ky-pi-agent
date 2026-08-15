@@ -234,7 +234,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 1070,
+		budget: 1180,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
@@ -256,7 +256,14 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"explodeShortCluster + hasBundledFlag and the argument for why `find`'s primaries must NOT be exploded " +
 			"(`-maxdepth` contains an `x`, and `-x` is a deny flag for fd's sake) and why `--` end-of-options is " +
 			"deliberately NOT honoured. Re-measured 1065 raw lines across 3 files 2026-08-15 (index.ts 529 + " +
-			"read-only.ts 433 + utils.ts 103), rounded up to the next ten",
+			"read-only.ts 433 + utils.ts 103), rounded up to the next ten. RAISED 1070 -> 1180 for CR2-02: `git` " +
+			"subcommands on the READ-ONLY set carry their own escapes -- `git grep -O<cmd>` executes <cmd> as a " +
+			"pager, `git -c alias.x=!cmd` and `--config-env`/`--exec-path` execute from the pre-subcommand " +
+			"position, `--upload-pack` executes against a local-path remote, `--output` writes a file, and " +
+			"`remote add`/`reflog delete` mutate. The 115 added lines are a global-option ALLOWLIST plus three " +
+			"per-subcommand narrowings, each carrying the executed proof that motivated it -- the proof is the " +
+			"part a budget would otherwise pressure out of a file in the tool-execution path. Re-measured 1180 " +
+			"raw lines across 3 files 2026-08-15 (index.ts 529 + read-only.ts 548 + utils.ts 103)",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
