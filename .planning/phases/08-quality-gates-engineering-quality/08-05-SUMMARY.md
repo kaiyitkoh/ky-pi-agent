@@ -189,3 +189,12 @@ None - no external service configuration required.
 ---
 *Phase: 08-quality-gates-engineering-quality*
 *Completed: 2026-08-15*
+
+## Self-Check: PASSED
+
+- FOUND: `tests/helpers/qoder-loopback.ts`
+- FOUND: `tests/integration/qoder-delegate.test.ts`
+- FOUND: `.planning/phases/08-quality-gates-engineering-quality/08-05-SUMMARY.md`
+- FOUND commit: `dfa8c08`
+- FOUND commit: `0454284`
+- FOUND commit: `9bc56e5`
