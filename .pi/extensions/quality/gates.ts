@@ -423,3 +423,63 @@ export function shouldRunDesignReview(signals: DesignReviewSignals): boolean {
 		signals.publicInterfaceChanged
 	);
 }
+
+// ---------------------------------------------------------------------------
+// QUAL-08: gate depth scales with the workflow -- a pure selector, the same
+// family as shouldRunDesignReview above.
+// ---------------------------------------------------------------------------
+
+/**
+ * The four quality mechanisms Phase 8 built, named by the function that
+ * implements each one so a reader can follow an id straight to the code.
+ * Exactly four entries -- see `tests/unit/gate-depth-selector.test.ts`.
+ */
+export const QUALITY_MECHANISMS = [
+	{ id: "deterministic", implementedBy: "runDeterministicGates (gates.ts)" },
+	{ id: "model-review", implementedBy: "runReview + validateReview (reviewer.ts, review-schema.ts)" },
+	{ id: "refute-or-promote", implementedBy: "runBoundedReviewLoop (verdict.ts)" },
+	{ id: "calibration", implementedBy: "scoreCalibration (calibration.ts)" },
+] as const;
+
+export type MechanismId = (typeof QUALITY_MECHANISMS)[number]["id"];
+
+/** The five workflow names gate depth is dialled over -- the sole source of {@link WorkflowId}. */
+export const WORKFLOW_IDS = ["quick", "grill", "plan", "execute", "review"] as const;
+
+export type WorkflowId = (typeof WORKFLOW_IDS)[number];
+
+/** One workflow's gate depth: the SET of mechanisms it runs -- not a numeric level, which would make "which mechanisms" implicit and untestable. */
+export interface GateDepth {
+	readonly mechanisms: readonly MechanismId[];
+}
+
+const DETERMINISTIC_ONLY: readonly MechanismId[] = Object.freeze(["deterministic"]);
+const ALL_MECHANISMS: readonly MechanismId[] = Object.freeze(QUALITY_MECHANISMS.map((m) => m.id));
+
+/**
+ * QUAL-08's dial. `quick` runs the deterministic leg only -- exactly what
+ * `runQuickGateStage` (quality/index.ts) already calls, and this table must
+ * AGREE with that reality or one of them is wrong. Every ceremonial workflow
+ * (`grill`, `plan`, `execute`, `review`) runs all four mechanisms.
+ *
+ * Typed `Record<WorkflowId, ...>`, never `Partial<...>` -- a missing key is
+ * a COMPILE error, not a silent runtime default. Frozen, like {@link
+ * GATE_LEGS} and {@link QUALITY_MECHANISMS} above.
+ */
+export const GATE_DEPTH_BY_WORKFLOW: Readonly<Record<WorkflowId, readonly MechanismId[]>> = Object.freeze({
+	quick: DETERMINISTIC_ONLY,
+	grill: ALL_MECHANISMS,
+	plan: ALL_MECHANISMS,
+	execute: ALL_MECHANISMS,
+	review: ALL_MECHANISMS,
+});
+
+/**
+ * QUAL-08's predicate: which mechanisms should run for `workflow`. Mirrors
+ * {@link shouldRunDesignReview}'s own closing discipline: this function
+ * decides WHICH mechanisms run; it never runs one -- no model call, no I/O,
+ * nothing but a table lookup.
+ */
+export function gateDepthFor(workflow: WorkflowId): GateDepth {
+	return { mechanisms: GATE_DEPTH_BY_WORKFLOW[workflow] };
+}
