@@ -73,10 +73,12 @@ import { join } from "node:path";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
 import { logPath } from "../../.pi/lib/jsonl.ts";
 import { TURNS_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
+import type { ExecRunner } from "../../.pi/extensions/quality/gates.ts";
+import { setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
 import { getModeState, planRoleCall } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { classifyGitInvocation, currentBranch } from "../../.pi/extensions/safety/git.ts";
@@ -86,6 +88,28 @@ import { EVIDENCE_LOG_BASE } from "../../.pi/extensions/workflows/evidence.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readJsonl } from "../helpers/logs.ts";
 import { withFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+
+/**
+ * CR-03: every case from case 3 onward reaches `workflows/index.ts:42`'s
+ * `runQuickGateStage(ctx.cwd)`, between the git pre-flight and `startRun` --
+ * against a `gitInit`-only temp `cwd` with NO `node_modules`. Without this
+ * override installed, a real `tsc`/`vitest` spawn would either fail (this
+ * repository's CR-01/CR-02 fix: an honest `unavailable`, never blocking) or,
+ * pre-CR-01 on a platform where `npx` DOES spawn, attempt to fetch a package
+ * over the network -- exactly the "install nothing" rule this project's
+ * autonomous-run constraints forbid. `tests/integration/quality-gate-
+ * order.test.ts`'s own module docstring calls this seam mandatory; this file
+ * mirrors it exactly, installing and restoring the override around every
+ * `command.handler(...)` call that reaches the gate stage.
+ */
+const INSTANT_PASS_EXEC: ExecRunner = () => ({ code: 0, stdout: "", stderr: "" });
+
+afterEach(() => {
+	// Belt-and-braces, matching quality-gate-order.test.ts's own discipline --
+	// every case below restores this itself, but a thrown assertion must still
+	// never leak the override across test files sharing this worker.
+	setQuickGateExecOverrideForTests(undefined);
+});
 
 /** Absolute, forward-slashed path of the safety extension this repository ships. */
 const SAFETY_ENTRY = `${repoRoot()}/.pi/extensions/safety/index.ts`.replace(/\\/g, "/");
@@ -555,6 +579,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: this call reaches runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("run the tests", ctx);
@@ -607,6 +632,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					).toBe(1);
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -652,6 +678,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: this call reaches runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("make the skeleton commit", ctx);
@@ -725,6 +752,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					).toBe(1);
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -764,6 +792,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: this call reaches runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("do the thing", ctx);
@@ -798,6 +827,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(row.reason ?? "").not.toContain("I made the commit");
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -845,6 +875,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: this call reaches runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("run verification, then commit", ctx);
@@ -881,6 +912,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(row.reason ?? "").not.toContain("tests pass");
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -931,6 +963,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: this call reaches runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("push and commit", ctx);
@@ -985,6 +1018,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(row.reason ?? "").not.toContain("pushed and verified");
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -1038,6 +1072,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: this call reaches runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("rename .git away, then restore and commit", ctx);
@@ -1074,6 +1109,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -1126,6 +1162,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: this call reaches runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("implement and commit the fix", ctx);
@@ -1174,6 +1211,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(last?.level, "an acceptance is informational, not an error").toBe("info");
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -1218,6 +1256,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: both handler calls below reach runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					// Run 1's handler arms the run and fires the turn in the background
@@ -1251,6 +1290,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					);
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
@@ -1363,6 +1403,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					return;
 				}
 
+				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: both handler calls below reach runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
 					await command.handler("destroy the repo after committing", ctx);
@@ -1408,6 +1449,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(notifications[0]?.level, "a reject is an error, not an info message").toBe("error");
 				} finally {
 					restore();
+					setQuickGateExecOverrideForTests(undefined);
 				}
 			},
 		);
