@@ -379,7 +379,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 3740,
+		budget: 3750,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
@@ -407,7 +407,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"to calibration.ts's findingCatches (206 -> 249), and WR3-04 added the pre-spawn '%' rejection guard " +
 			"to index.ts's productionExec (387 -> 422). Re-measured 3,739 raw lines across the same 8 files " +
 			"2026-08-15 (advisor.ts 198, calibration.ts 249, gates.ts 426, index.ts 422, review-schema.ts 580, " +
-			"reviewer.ts 425, rules.ts 890, verdict.ts 549), rounded up to the next ten",
+			"reviewer.ts 425, rules.ts 890, verdict.ts 549), rounded up to the next ten. RAISED 3740 -> 3750 by " +
+			"the R3CHECK fix pass (`08-REVIEW-R3CHECK.md`): WR3C-02 widened index.ts's pre-spawn '%' guard from " +
+			"`bin` alone to `[bin, ...args]` (422 -> 431) -- calibration.ts's own CR3C-01 fix (needle-set and " +
+			"test changes) touched no production file under this directory. Re-measured 3,748 raw lines across " +
+			"the same 8 files 2026-08-15 (advisor.ts 198, calibration.ts 249, gates.ts 426, index.ts 431, " +
+			"review-schema.ts 580, reviewer.ts 425, rules.ts 890, verdict.ts 549), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/providers",

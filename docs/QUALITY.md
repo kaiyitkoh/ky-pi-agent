@@ -295,6 +295,44 @@ result is expected to differ from the scripted number in either direction,
 since a live model was never tuned to this corpus the way the scripted one
 was.
 
+**CR3C-01 correction (`08-REVIEW-R3CHECK.md`).** The paragraph above's claim
+— "a genuine finding about one file's one defect does not organically use
+enough of a wholly different defect's vocabulary to catch it too" — was
+**false** for two of the six classes, and for a narrower reason than the
+cross-contamination rule itself: `tautological-test`'s needle set contained
+`"cannot fail"` **and** `"structurally cannot"`, which are not independent
+facts — the single phrase `"structurally cannot fail"` (this project's own
+house vocabulary for this entire defect family; see `seeded-defects/
+index.ts`'s own header and `CLAUDE.md`) satisfies both at once.
+`escaped-side-effect` had the same shape (`"writes into the real"` +
+`"developer's own home directory"`, both satisfied by one natural clause).
+Two consequences: (1) a genuine, correctly-located finding carrying two of
+its OWN class's needles could be wrongly rejected merely for ALSO containing
+that phrase, because the phrase looked like it independently cleared
+`tautological-test`'s own two-needle bar too — the exact failure mode the
+paragraph above claims cannot happen; (2) the same three-word phrase, reused
+verbatim across all six files with zero analysis, scored a non-zero
+`catchRate` on its own, needing no answer-key access unlike the kitchen-sink
+controls. **The fix is the needle sets, not the cross-contamination rule
+itself** — `tests/fixtures/seeded-defects/index.ts`'s `tautological-test`
+and `escaped-side-effect` entries now each carry four needles with no
+shared word or substring between any pair (pinned corpus-wide by
+`reviewer-calibration.test.ts`'s own needle-independence test), and the
+cross-contamination rule is otherwise unchanged and still load-bearing (see
+`TWO_NEEDLE_KITCHEN_SINK_ARGS` above, still `catchRate: 0` after this fix —
+verified, not assumed). The corrected claim: cross-contamination catches a
+finding that organically clears a DIFFERENT class's bar **only when that
+class's own needles are genuinely mutually independent** — a property that
+must hold for every expectation, is now pinned by a permanent test, and was
+NOT true for two of six before this fix. A sixth permanent control (the
+two generic phrases above, run through `scoreCalibration` directly) and a
+regression test (a genuine `false-label` finding using the phrase
+"structurally cannot fail" is credited, not rejected) both now pin this.
+**The 2/6 = 0.333... number is unaffected** — neither fixed needle
+participates in `KNOWN_SUBSET_ARGS`'s three scripted findings, and every
+other control was re-verified to still score `catchRate: 0` after the
+needle change.
+
 ## 7. The cost record
 
 `qualityMs`/`qualityTokens` are two optional fields on `TurnRow`

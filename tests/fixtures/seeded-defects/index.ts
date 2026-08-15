@@ -342,7 +342,19 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 			locationFile: "src/router-wire-proof.test.ts",
 			// WR-03: describes the tautology itself (compared to itself / cannot
 			// fail), not the bare variable name.
-			mustMentionAny: ["compares it to itself", "cannot fail", "identical to what it is compared against", "structurally cannot"],
+			// CR3C-01 (`08-REVIEW-R3CHECK.md`): "structurally cannot" was NOT
+			// independent of "cannot fail" -- the single contiguous phrase
+			// "structurally cannot fail" (this project's own house vocabulary for
+			// this defect family, see this file's own header) satisfied BOTH,
+			// which both rejected genuine findings that used the phrase (they
+			// looked like they cleared a DIFFERENT expectation's own needle bar)
+			// and let that same three-word phrase alone score a non-zero catch
+			// rate with zero analysis. Replaced with a genuinely separate fact
+			// about THIS tautology: `decision` is assigned directly from the same
+			// `currentChainHead()` call `configuredHead` already holds, which is
+			// why `expect(decision).toBe(configuredHead)` cannot fail structurally
+			// -- a different observation than "cannot fail" itself.
+			mustMentionAny: ["compares it to itself", "cannot fail", "identical to what it is compared against", "assigned from the same call"],
 			minimumSeverity: "BLOCKER",
 		},
 	},
@@ -355,7 +367,15 @@ export const SEEDED_DEFECTS: readonly SeededDefect[] = [
 			locationFile: "tests/settings-persistence.test.ts",
 			// WR-03: describes the escape (writes into the real home directory /
 			// outside the temp repo), not the bare function-call name.
-			mustMentionAny: ["writes into the real", "outside the temp repo", "escapes the test", "developer's own home directory"],
+			// CR3C-01 (`08-REVIEW-R3CHECK.md`): "developer's own home directory"
+			// was NOT independent of "writes into the real" -- the two are simply
+			// the two halves of ONE natural clause ("writes into the real
+			// developer's own home directory") split at an arbitrary point, not
+			// two separate facts. Replaced with a genuinely separate fact: the
+			// write target was never redirected to the isolated temp repo the
+			// test itself creates, which is a distinct observation from WHERE it
+			// escaped to.
+			mustMentionAny: ["writes into the real", "outside the temp repo", "escapes the test", "not redirected to a temp"],
 			minimumSeverity: "BLOCKER",
 		},
 	},

@@ -279,10 +279,19 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 	// docstring for why that would not be exhaustive. Only reachable on
 	// win32, where `%` has this meaning; POSIX shells never see this branch
 	// (`commandFor`'s own POSIX path never invokes a shell at all).
-	if (process.platform === "win32" && bin.includes("%")) {
+	//
+	// WR3C-02 (`08-REVIEW-R3CHECK.md`): `commandFor` folds `[bin, ...args]`
+	// into ONE `cmd.exe` command line -- checking `bin` alone left `args`
+	// half of that same line unguarded. Currently unreachable (the only two
+	// callers pass the literal constants `["--noEmit"]` and `["run",
+	// ...LINT_GATE_FILES]`, neither containing '%'), but the guard's own
+	// docstring justifies itself as closing a structural property of the
+	// WHOLE command line, so it must cover both halves, not one.
+	const pctBearing = [bin, ...args].filter((a) => a.includes("%"));
+	if (process.platform === "win32" && pctBearing.length > 0) {
 		throw new Error(
-			`${cmd} resolved to ${bin}, whose path contains '%' -- cmd.exe expands %VAR% inside quotes, so this ` +
-				"command line cannot be built safely; the leg is unavailable, not failed",
+			`${cmd} command line contains '%' in ${pctBearing.join(", ")} -- cmd.exe expands %VAR% inside quotes, ` +
+				"so this command line cannot be built safely; the leg is unavailable, not failed",
 		);
 	}
 	// CR-02's secondary correctness bug: LINT_GATE_FILES (gates.ts) is THIS

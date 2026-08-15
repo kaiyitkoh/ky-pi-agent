@@ -91,6 +91,56 @@ describe("GATE-08 corpus integrity", () => {
 		}
 	});
 
+	/**
+	 * CR3C-01 (`08-REVIEW-R3CHECK.md`): the corpus-wide guard against the exact
+	 * shape found there -- two needles WITHIN one expectation that are not
+	 * mutually independent because one is a literal substring of the other,
+	 * or a shared word bridges the tail of one directly into the head of the
+	 * other (the `"structurally cannot"` + `"cannot fail"` -> `"structurally
+	 * cannot fail"` shape). This is a MECHANICAL, sound check -- it has zero
+	 * false positives against the six real entries below (verified by hand
+	 * against every pair before landing this test) -- but it is NOT a claim
+	 * of completeness: `escaped-side-effect`'s OTHER pre-fix pair
+	 * (`"writes into the real"` + `"developer's own home directory"`) shared
+	 * no word or substring at all, so no generic string check catches it;
+	 * that pair is guarded instead by the SIXTH CONTROL and REGRESSION tests
+	 * below, which pin the exact historical exploit strings. Two guards,
+	 * different mechanisms, same finding -- neither alone is exhaustive.
+	 */
+	function needlesOverlap(a: string, b: string): boolean {
+		if (a === b) return false;
+		if (a.includes(b) || b.includes(a)) return true;
+		const aWords = a.split(" ");
+		const bWords = b.split(" ");
+		const maxOverlap = Math.min(aWords.length, bWords.length);
+		for (let k = 1; k <= maxOverlap; k++) {
+			if (aWords.slice(-k).join(" ") === bWords.slice(0, k).join(" ")) return true; // a's tail bridges into b's head
+			if (bWords.slice(-k).join(" ") === aWords.slice(0, k).join(" ")) return true; // b's tail bridges into a's head
+		}
+		return false;
+	}
+
+	it("MUTATION CHECK -- needlesOverlap is not vacuously false: it flags the real pre-fix CR3C-01 pair", () => {
+		expect(needlesOverlap("cannot fail", "structurally cannot")).toBe(true);
+		expect(needlesOverlap("structurally cannot", "cannot fail")).toBe(true); // order-independent
+		expect(needlesOverlap("performs none", "hardcoded return")).toBe(false); // a genuinely independent pair stays false
+	});
+
+	it("no two needles within one expectation are jointly satisfiable by a shared word or substring containment, corpus-wide", () => {
+		for (const defect of SEEDED_DEFECTS) {
+			const needles = defect.expected.mustMentionAny;
+			for (let i = 0; i < needles.length; i++) {
+				for (let j = i + 1; j < needles.length; j++) {
+					expect(
+						needlesOverlap(needles[i], needles[j]),
+						`"${needles[i]}" and "${needles[j]}" (${defect.id}) are not independent needles -- ` +
+							"a shared word or substring containment lets one contiguous phrase satisfy both (CR3C-01)",
+					).toBe(false);
+				}
+			}
+		}
+	});
+
 	afterEach(() => {
 		vi.doUnmock("node:fs");
 		vi.resetModules();
@@ -607,6 +657,112 @@ describe("GATE-08 calibration -- the full corpus driven through runReview", () =
 		expect(run2.shotgunNameDrop).toEqual(run1.shotgunNameDrop);
 		expect(run2.shotgunKitchenSink).toEqual(run1.shotgunKitchenSink);
 		expect(run2.twoNeedleKitchenSink).toEqual(run1.twoNeedleKitchenSink);
+	});
+});
+
+// -----------------------------------------------------------------------------
+// CR3C-01 -- a SIXTH permanent control and a false-rejection regression, both
+// driven directly through scoreCalibration (no runReview, no faux session --
+// these are properties of the corpus and the scorer itself, not of any one
+// scripted reviewer transcript, so they do not need one).
+// -----------------------------------------------------------------------------
+
+describe("CR3C-01 -- the sixth control (a generic derivable phrase) and the false-rejection regression", () => {
+	const cr3c01Expected: SeededDefectExpectation[] = SEEDED_DEFECTS.map((defect) => ({
+		id: defect.id,
+		locationFile: defect.expected.locationFile,
+		mustMentionAny: defect.expected.mustMentionAny,
+		minimumSeverity: defect.expected.minimumSeverity,
+	}));
+
+	/**
+	 * WR3C-01 CONSEQUENCE B: before the needle fix, a single generic
+	 * boilerplate phrase -- DERIVABLE FROM THE INPUT ALONE, no answer key
+	 * required, unlike `SHOTGUN_KITCHEN_SINK`/`TWO_NEEDLE_KITCHEN_SINK` --
+	 * reused verbatim across all six touched files, having identified
+	 * nothing, scored a non-zero `catchRate` via exactly one class's own
+	 * non-independent needle pair. This is now the SIXTH permanent control.
+	 */
+	const GENERIC_DERIVABLE_PHRASES = [
+		"This test structurally cannot fail.", // pre-fix: 1/6 via tautological-test
+		"It writes into the real developer's own home directory.", // pre-fix: 1/6 via escaped-side-effect
+	];
+
+	for (const phrase of GENERIC_DERIVABLE_PHRASES) {
+		it(`SIXTH CONTROL -- "${phrase}" reused across all six files scores catchRate === 0`, () => {
+			const findings = SHOTGUN_LOCATION_FILES.map((file, index) => ({
+				severity: "BLOCKER" as const,
+				location: `${file}:${index + 1}`,
+				concreteFailure: phrase,
+			}));
+			const result = scoreCalibration(cr3c01Expected, findings);
+			expect(result.catchRate, JSON.stringify(result.perDefectClass)).toBe(0);
+		});
+	}
+
+	it("MUTATION CHECK -- the sixth control is not vacuously green: under the OLD (pre-fix) needle sets it scored non-zero", () => {
+		// Reproduces CR3C-01's Consequence B against the actual old needle
+		// arrays (copied here, not imported -- the point is to prove the FIX
+		// moved the number, not to re-import code this commit just changed).
+		const preFixExpected: SeededDefectExpectation[] = cr3c01Expected.map((e) =>
+			e.id === "tautological-test"
+				? { ...e, mustMentionAny: ["compares it to itself", "cannot fail", "identical to what it is compared against", "structurally cannot"] }
+				: e.id === "escaped-side-effect"
+					? { ...e, mustMentionAny: ["writes into the real", "outside the temp repo", "escapes the test", "developer's own home directory"] }
+					: e,
+		);
+		const tautologicalFinding = [
+			{ severity: "BLOCKER" as const, location: "src/router-wire-proof.test.ts:1", concreteFailure: GENERIC_DERIVABLE_PHRASES[0] },
+		];
+		const escapedFinding = [
+			{ severity: "BLOCKER" as const, location: "tests/settings-persistence.test.ts:1", concreteFailure: GENERIC_DERIVABLE_PHRASES[1] },
+		];
+		expect(scoreCalibration(preFixExpected, tautologicalFinding).catchRate).toBeGreaterThan(0);
+		expect(scoreCalibration(preFixExpected, escapedFinding).catchRate).toBeGreaterThan(0);
+	});
+
+	/**
+	 * WR3C-01 CONSEQUENCE A: before the needle fix, a genuine, correctly
+	 * located, four-for-four accurate finding carrying two of its OWN class's
+	 * needles was REJECTED (scored `caught: 0`) merely because it also
+	 * contained "structurally cannot fail" -- this project's own house
+	 * vocabulary for this entire defect family (`seeded-defects/index.ts`'s
+	 * own header, `docs/QUALITY.md`, `CLAUDE.md`), which happened to
+	 * independently clear `tautological-test`'s own two-needle bar too. A
+	 * real reviewer at `RB-08-03` is MORE likely to write this phrase than to
+	 * avoid it.
+	 */
+	it("REGRESSION -- a genuine finding is not rejected merely for using this project's own house vocabulary", () => {
+		const finding = [
+			{
+				severity: "BLOCKER" as const,
+				location: "src/parser-mutation-claim.test.ts:3",
+				concreteFailure:
+					"MUTATION-VERIFIED is false: parseCommand returns true regardless of input, so the test " +
+					"structurally cannot fail and the label survived its own mutation.",
+			},
+		];
+		const result = scoreCalibration(cr3c01Expected, finding);
+		expect(result.perDefectClass["false-label"], JSON.stringify(result.perDefectClass)).toBe(true);
+		expect(result.caught).toBe(1);
+	});
+
+	it("MUTATION CHECK -- the regression case genuinely failed before the needle fix (not a test that was always green)", () => {
+		const preFixExpected: SeededDefectExpectation[] = cr3c01Expected.map((e) =>
+			e.id === "tautological-test"
+				? { ...e, mustMentionAny: ["compares it to itself", "cannot fail", "identical to what it is compared against", "structurally cannot"] }
+				: e,
+		);
+		const finding = [
+			{
+				severity: "BLOCKER" as const,
+				location: "src/parser-mutation-claim.test.ts:3",
+				concreteFailure:
+					"MUTATION-VERIFIED is false: parseCommand returns true regardless of input, so the test " +
+					"structurally cannot fail and the label survived its own mutation.",
+			},
+		];
+		expect(scoreCalibration(preFixExpected, finding).perDefectClass["false-label"]).toBe(false);
 	});
 });
 

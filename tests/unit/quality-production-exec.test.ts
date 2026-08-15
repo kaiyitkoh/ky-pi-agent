@@ -204,6 +204,25 @@ describe(
 			},
 		);
 
+		it(
+			"WR3C-02 -- a '%'-bearing ARGUMENT (not the resolved binary path) is refused the same way -- " +
+				"commandFor folds [bin, ...args] into ONE cmd.exe command line, so args are exactly as exposed to " +
+				"%VAR% expansion as bin is. Currently unreachable via any real caller (LINT_GATE_FILES and " +
+				"['--noEmit'] never contain '%'), so this is a direct call, not a runTypecheckLeg/runLintLeg path",
+			() => {
+				const repo = makeTempRepo("kypi-wr3c-02-args-pct-");
+				stubTsc(repo, { exitCode: 0 });
+				if (process.platform === "win32") {
+					expect(() => productionExec("tsc", ["--foo=%OS%"], repo)).toThrowError(/command line contains '%' in .*--foo=%OS%/);
+				} else {
+					// '%' carries no shell meaning outside cmd.exe -- the call genuinely
+					// spawns and returns a real result, never a thrown guard error.
+					const result = productionExec("tsc", ["--foo=%OS%"], repo);
+					expect(result.code).toBe(0);
+				}
+			},
+		);
+
 		it("the guard fires on ANY '%' in the resolved path, not only a literal %VAR% pair -- '50% off' also refuses on win32, and still passes cleanly on POSIX", () => {
 			// The review's own example ("50% off is harmless") describes the
 			// REAL-WORLD rarity of this hazard, not a claim that the guard should
