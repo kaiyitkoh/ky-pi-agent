@@ -116,7 +116,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 
 - [x] **QUAL-01**: Deterministic anti-pattern rules (ast-grep + lint) detect magic numbers where a constant belongs, special-casing on a literal input value, copy-paste duplication, swallowed exceptions, `TODO`/`FIXME` shipped as a fix, and N+1 query shapes **[FAUX]**
 - [x] **QUAL-02**: Those rules run inside the existing deterministic gate stage, adding no model round trip and no measurable wall-clock **[FAUX]**
-- [ ] **QUAL-03**: For any change framed as a fix, SPEC.md carries a **Root Cause** section naming the cause with `file:line` evidence and stating why the change addresses the cause rather than the symptom — gated the same way as Verified Codebase Facts **[FAUX]**
+- [x] **QUAL-03**: For any change framed as a fix, SPEC.md carries a **Root Cause** section naming the cause with `file:line` evidence and stating why the change addresses the cause rather than the symptom — gated the same way as Verified Codebase Facts **[FAUX]** — *`validateSpec`'s branch (8) (`.pi/extensions/grill/spec-schema.ts`, plan 09-06): fix-framed detection via `isFixFramed`/`FIX_FRAMING_MARKERS` (with an explicit override), the conditional gate itself (absent section, empty cause, no file:line citation, empty or cause-identical "why not the symptom" — each its own reject), proved by a fixture table (3 rejects) plus a mandatory non-fix-framed accept case and falsification (c) proving the conditionality is load-bearing*
 - [x] **QUAL-04**: The reviewer classifies every change as **root-cause / symptomatic / workaround** with written justification, as extra structure on the review pass already being paid for — not an extra call **[FAUX]**
 - [x] **QUAL-05**: Any change classified symptomatic or workaround stops the workflow and requires the user's explicit approval before it can ship **[FAUX]**
 - [x] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
@@ -129,8 +129,8 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [x] **FLOW-01**: `/quick` executes trivial work with no ceremony, in **≤80 lines**, enforced by a CI line-budget test
 - [ ] **FLOW-02**: `/grill` interrogates until the spec is unambiguous, using an ambiguity scorecard with per-dimension floors, a hard question budget, one question at a time, and rotating interview perspectives
 - [ ] **FLOW-03**: `/grill` produces SPEC.md containing a **Verified Codebase Facts** table — `claim | evidence (file:line or command output) | how verified` — and refuses to write requirements until it exists
-- [ ] **FLOW-04**: SPEC.md states error behaviour as `IF <condition> THEN THE SYSTEM SHALL <response>`, which cannot be filled in without naming a failure
-- [ ] **FLOW-05**: SPEC.md pins scope as an expected-files list, machine-checkable against the diff at review time
+- [x] **FLOW-04**: SPEC.md states error behaviour as `IF <condition> THEN THE SYSTEM SHALL <response>`, which cannot be filled in without naming a failure — *`IF_THEN_PATTERN`/`MIN_ERROR_BEHAVIOURS`/`parseErrorBehaviours` and `validateSpec`'s branches (4)/(5) (`.pi/extensions/grill/spec-schema.ts`, plan 09-06): exact-uppercase-keyword forcing function, a named minimum-3 count, per-entry shape rejection naming the offending entry; falsifications (a) (case) and (b) (count) both confirmed load-bearing*
+- [ ] **FLOW-05**: SPEC.md pins scope as an expected-files list, machine-checkable against the diff at review time — *DECLARATION half only (plan 09-06): `ScopePin`/`EXPECTED_FILE_PATTERN`/`parseScopePin` and `validateSpec`'s branches (6)/(7) enforce a non-empty, reasoned out-of-scope list and a non-empty expected-files list of legal repo-relative paths (no leading `/`, no `..`, no glob — falsification (d) confirmed load-bearing). The DIFF half — comparing this list against a real `git diff` — is plan 09-14's job; FLOW-05 closes there*
 - [ ] **FLOW-06**: `/plan` produces PLAN.md with tasks in the form `T### [P] [R#] verb <explicit path> + verification command`, plus a requirement-coverage matrix
 - [ ] **FLOW-07**: `/execute` appends to PROGRESS.md with pasted real command output, and commits atomically
 - [ ] **FLOW-08**: `/review` produces REVIEW.md and opens an MR targeting **staging, never main**
@@ -306,7 +306,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | GATE-10 | Phase 8 | Partial — the nested half is fixed and proven offline: a real Bedrock per-`model.api` defect (nested calls silently dropping their thinking field) was found and fixed (plan 08-01). The main-loop half needs a real wire dump confirming `pi.setModel()`'s own dispatch carries the parameters. `RB-08-01`, **OUTSTANDING**. Not complete |
 | QUAL-01 | Phase 8 | Complete |
 | QUAL-02 | Phase 8 | Complete |
-| QUAL-03 | Phase 9 | Pending |
+| QUAL-03 | Phase 9 | Complete — plan 09-06's `validateSpec` branch (8) conditional Root Cause gate |
 | QUAL-04 | Phase 8 | Complete |
 | QUAL-05 | Phase 8 | Complete |
 | QUAL-06 | Phase 8 | Complete |
@@ -316,8 +316,8 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | FLOW-01 | Phase 6 | Complete |
 | FLOW-02 | Phase 9 | Pending |
 | FLOW-03 | Phase 9 | Pending |
-| FLOW-04 | Phase 9 | Pending |
-| FLOW-05 | Phase 9 | Pending |
+| FLOW-04 | Phase 9 | Complete — plan 09-06's `IF_THEN_PATTERN`/`validateSpec` branches (4)/(5) |
+| FLOW-05 | Phase 9 | Partial — plan 09-06 built the declaration half (`validateSpec` branches (6)/(7)); the diff half is plan 09-14's job, FLOW-05 closes there |
 | FLOW-06 | Phase 9 | Pending |
 | FLOW-07 | Phase 9 | Pending |
 | FLOW-08 | Phase 9 | Pending |
