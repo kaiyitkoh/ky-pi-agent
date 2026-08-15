@@ -129,7 +129,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/loop-police/loop-police.ts",
-		budget: 1290,
+		budget: 1310,
 		why: "Phase 7 plan 06 (EXT-05/EXT-10)'s vendored pi-loop-police@1.14.1, registers /loop-police -- " +
 			"WR-05 widened discovery to catch command surfaces outside workflows/; this is upstream's own " +
 			"size plus a short vendoring-fix comment (see .pi/extensions/loop-police/PROVENANCE.md), " +
@@ -138,7 +138,11 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"every detection -- was read from loop-police.json INSIDE the working tree, which the agent " +
 			"writes with an ordinary write/edit the bash tool_call guard never sees. Both egress keys are " +
 			"now pinned to the environment, and the block explaining why is the part a future vendoring " +
-			"bump most needs to keep. Re-measured 1276 raw lines 2026-08-15, rounded up to the next ten",
+			"bump most needs to keep. Re-measured 1276 raw lines 2026-08-15, rounded up to the next ten. " +
+			"RAISED 1290 -> 1310 for WR2-04: that block claimed a live hook value is 'never persisted to " +
+			"disk either', which was true of the MODULE-INIT write only -- `/loop-police save` serialises " +
+			"cfg, which by then holds the environment value. Both writers now blank the two egress keys, " +
+			"and the note says which claim was wrong. Re-measured 1303 raw lines 2026-08-15",
 	},
 	{
 		file: ".pi/extensions/plan-mode/index.ts",
@@ -236,14 +240,16 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/loop-police",
-		budget: 1310,
+		budget: 1330,
 		why: "Phase 7 plan 06 (EXT-05/EXT-10)'s vendored pi-loop-police@1.14.1 -- index.ts never spells " +
 			"registerCommand( itself (a named re-export) but counts toward this total per WR-03; measured " +
 			"1260 raw lines across 2 files 2026-08-15 (index.ts 23 + loop-police.ts 1237, both including " +
 			"short vendoring-fix comments), upstream's own size, not a number this phase reviewed for " +
 			"tightness, rounded up to the next ten. RAISED 1270 -> 1310 by the Phase 7 code-review fix " +
 			"pass for WR-17's environment pinning of HOOK_CMD/HOOK_LOG -- see the per-file entry above for " +
-			"the finding. Re-measured 1299 raw lines across 2 files 2026-08-15",
+			"the finding. Re-measured 1299 raw lines across 2 files 2026-08-15. RAISED 1310 -> 1330 for " +
+			"WR2-04 -- see the per-file entry above. Re-measured 1326 raw lines across 2 files 2026-08-15 " +
+			"(index.ts 23 + loop-police.ts 1303)",
 	},
 	{
 		dir: ".pi/extensions/plan-mode",

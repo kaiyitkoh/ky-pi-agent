@@ -218,7 +218,13 @@ const cfg: typeof DEFAULTS & Record<string, number | string> = (() => {
   // The on-disk keys are still written as "" (so the file stays
   // self-documenting and the upstream backfill logic is untouched); the
   // override happens AFTER the write below, so a live hook value is never
-  // persisted to disk either.
+  // persisted to disk by the module-init write.
+  //
+  // CORRECTED BY WR2-04. That sentence used to read "never persisted to disk
+  // either", full stop, and it was false: `/loop-police save` writes `cfg`,
+  // which by then carries the environment value. There are TWO writers, and
+  // both are now covered -- see the `save` branch of the command handler for
+  // the second. Every write of this file blanks both egress keys.
   merged.HOOK_CMD = "";
   merged.HOOK_LOG = "";
 
@@ -791,8 +797,29 @@ export function loopPolice(pi: ExtensionAPI) {
 
       if (trimmed === "save") {
         try {
-          writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2) + "\n", "utf-8");
-          ctx.ui.notify(`Loop Police: saved ${CONFIG_PATH}`, "info");
+          // VENDORING FIX 4 (WR-17), third half -- added by WR2-04.
+          //
+          // The WR-17 block asserted "the override happens AFTER the write
+          // below, so a live hook value is never persisted to disk either".
+          // That was true of the MODULE-INIT write only. By the time this
+          // handler runs, `cfg` holds process.env.KYPI_LOOP_POLICE_HOOK_CMD --
+          // so an operator who exports a hook and then runs `/loop-police save`
+          // landed the full command line (plausibly a URL, a token or a path)
+          // in loop-police.json. Not an execution escalation (the file is
+          // gitignored, and the value is re-overridden from the environment on
+          // the next load) but a security-critical vendoring note asserting
+          // something the code did not do.
+          //
+          // Blank the two egress keys in the SAVED OBJECT, never in `cfg` --
+          // mutating `cfg` would disarm the operator's live hook as a side
+          // effect of saving unrelated settings.
+          const persistable = { ...cfg, HOOK_CMD: "", HOOK_LOG: "" };
+          writeFileSync(CONFIG_PATH, JSON.stringify(persistable, null, 2) + "\n", "utf-8");
+          ctx.ui.notify(
+            `Loop Police: saved ${CONFIG_PATH} (HOOK_CMD/HOOK_LOG are never persisted -- ` +
+              "export KYPI_LOOP_POLICE_HOOK_CMD / _HOOK_LOG instead)",
+            "info",
+          );
         } catch (e) {
           ctx.ui.notify(`Loop Police: could not save: ${e}`, "error");
         }

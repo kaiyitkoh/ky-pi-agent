@@ -195,6 +195,29 @@ removes the path rather than merely warning about it, and off-by-default
 remains the floor: an operator who wants a hook exports it deliberately, per
 process.
 
+**Correction (WR2-04, iteration 2 of the code review).** The sentence above
+about the ordering of the write was true of the **module-init write only**,
+and this document previously stated it without that qualification. There are
+**two** writers of `loop-police.json`: the module-init one, and upstream's
+`/loop-police save` command, which serialises `cfg` — by then holding
+`process.env.KYPI_LOOP_POLICE_HOOK_CMD`. An operator who exported a hook and
+then ran `/loop-police save` landed the full command line, plausibly carrying
+a URL, a token or a path, in the file.
+
+Checked before writing this: the file **is** gitignored so it cannot be
+committed, and the value is re-overridden from the environment on the next
+load, so this was never an execution escalation. The defect was that a
+security-critical vendoring note asserted something the code did not do.
+
+Closed by blanking both keys in the object the `save` branch serialises —
+`{ ...cfg, HOOK_CMD: "", HOOK_LOG: "" }`, deliberately not in `cfg` itself,
+so persisting an unrelated setting does not silently disarm the operator's
+live hook. `tests/unit/loop-police-hook-egress.test.ts`'s WR2-04 block drives
+the shipped module against a disposable copy of itself and asserts all three
+properties (both writers blank, and the live hook survives a save) rather than
+grepping for them, which is what the previous, source-shape-only coverage
+could not do.
+
 **Note that this invalidates one line of the audit above.** The
 "Credential / environment reads" section says `grep -n "process\.env"` over
 both vendored files returned no matches. That was true of the upstream copy
