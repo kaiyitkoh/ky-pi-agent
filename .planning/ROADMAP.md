@@ -443,7 +443,7 @@ Plans:
 
 **Wave 8** *(blocked on Wave 7 completion)*
 
-- [ ] 09-09-PLAN.md — PLAN.md task form + two-directional coverage matrix + renderer (FLOW-06)
+- [x] 09-09-PLAN.md — PLAN.md task form + two-directional coverage matrix + renderer (FLOW-06)
 
 **Wave 9** *(blocked on Wave 8 completion)*
 
@@ -553,7 +553,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
-| 9. Ceremonial Workflows | 8/17 | In Progress|  |
+| 9. Ceremonial Workflows | 9/17 | In Progress|  |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
 | 11. Terminal UI | 0/TBD | Not started | - |
 
