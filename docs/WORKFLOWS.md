@@ -143,24 +143,51 @@ that this document holds the rationale, and that the terseness is the budget
 being honoured rather than an oversight — nothing else. The rationale is not
 lost, it is relocated here.
 
-**The budget is enforced per file, and as a directory aggregate.** A file
-close to its own limit could be "fixed" by moving logic into a private helper
-that only `/quick` ever calls — same total code, smaller number on the one
-file a reviewer checks. The aggregate exists so that move does not shrink
-anything that matters: raising it requires a deliberate edit to a committed
-number, in the same commit as the growth that needs it, the same discipline
-this repository already applies to a runbook status. A helper module that
-would exist on its own merits, with its own tests, independent of `/quick`,
-is a different thing than an offloading helper — but "legitimate" is a
-judgement no test can make on its own, which is why the aggregate is the
-mechanism that actually holds the line, not a promise.
+**The budget is enforced per file, and as a per-directory ratchet over every
+directory a command source reaches by import.** (WR2-04, `08-REVIEW.md`
+iteration 2, corrected the two claims this paragraph used to overclaim —
+see below.) A file close to its own limit could be "fixed" by moving logic
+into a private helper that only `/quick` ever calls — same total code,
+smaller number on the one file a reviewer checks. There is now ONE ratchet
+per directory reached this way (nine as of this writing — `workflows`,
+`routing`, `harness`, `diagnostics`, `checkpoint`, `loop-police`,
+`plan-mode`, `safety`, `quality`, `providers` and `.pi/lib`, not a single
+combined figure), each raised by a deliberate edit to a committed number, in
+the same commit as the growth that needs it, the same discipline this
+repository already applies to a runbook status. A helper module that would
+exist on its own merits, with its own tests, independent of `/quick`, is a
+different thing than an offloading helper — but "legitimate" is a judgement
+no test can make on its own, which is why the ratchets are the mechanism
+that actually holds the line, not a promise.
+
+**"Reaches by import" is a genuine, transitive fixed point, not a one-hop
+lookup.** `.pi/extensions/quality/` and `.pi/extensions/safety/` register no
+command of their own — `workflows/index.ts` imports directly into both, and
+that direct (depth-1) hop is how they were first discovered (CR-04). A
+command source's import graph does not stop at depth 1, though: `routing/
+index.ts` imports `./modes.ts`, and `modes.ts` — never itself a command
+source, and never itself imported directly by any command file — imports
+`../providers/fallback.ts` and `../providers/schema.ts`. The registry's
+`importedSubsystemDirs` (`tests/unit/workflow-budgets.test.ts`) walks this
+to a fixed point from every discovered command source, so a subsystem
+reached only through an intermediate file — Phase 9's `/grill`, `/plan`,
+`/execute` or `/review` delegating into a sibling directory two or three
+files deep — is caught the same way `quality/` was, without needing its own
+`registerCommand(` call anywhere in the chain. The walk is also no longer
+limited to `.pi/extensions/`: a resolved import landing under any other
+local `.pi/` directory (`.pi/lib`, a shared library `jsonl.ts`/`win-quote.ts`
+live in today, reached by five subsystems) is ratcheted too, mapped to its
+own immediate directory rather than a subsystem-root slice. An import
+resolving outside `.pi/` entirely (a package specifier, a test helper) is
+never ratcheted — that is not local harness code this control's own stated
+scope ever claimed to cover.
 
 **The numbers themselves are not restated here.** `tests/unit/workflow-budgets.test.ts`
-is the single authoritative registry of every workflow file's budget and the
-directory aggregate. Stating a number in this document as well would create
-a second copy that could silently drift from the one the build actually
-enforces — read the registry, not this paragraph, for what the current
-figures are.
+is the single authoritative registry of every workflow file's budget and
+every per-directory ratchet. Stating a number in this document as well would
+create a second copy that could silently drift from the one the build
+actually enforces — read the registry, not this paragraph, for what the
+current figures are.
 
 ## 4. Evidence, not narration — and what that phrase does and does not claim
 

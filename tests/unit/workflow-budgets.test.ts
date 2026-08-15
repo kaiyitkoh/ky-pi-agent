@@ -379,20 +379,53 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 3550,
+		budget: 3610,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
-			"importedSubsystemDirs (see this file's own CR-04 docstring section) is what makes commandDirs see " +
-			"it at all. Measured 3,406 raw lines across 8 files 2026-08-15 pre-fix-pass (advisor.ts 197, " +
-			"calibration.ts 178, gates.ts 407, index.ts 237, reviewer.ts 409, review-schema.ts 541, rules.ts " +
-			"889, verdict.ts 548) -- this entry did not exist before CR-04, so there is no prior committed " +
-			"number to raise from. Re-measured 3,548 raw lines across the same 8 files 2026-08-15 after this " +
-			"phase's OWN code-review fix pass (CR-01/CR-02 localBin resolution in index.ts and gates.ts; WR-01/" +
-			"WR-02 the duplicate-verdict and unrecognised-status branches in review-schema.ts; WR-03 the " +
-			"behaviour-describing calibration needles in calibration.ts; WR-05 the export-from regex in " +
-			"reviewer.ts: advisor.ts 198, calibration.ts 179, gates.ts 426, index.ts 301, reviewer.ts 425, " +
-			"review-schema.ts 580, rules.ts 890, verdict.ts 549), rounded up to the next ten",
+			"importedSubsystemDirs (see this file's own CR-04/WR2-04 docstring section) is what makes " +
+			"commandDirs see it at all. Measured 3,406 raw lines across 8 files 2026-08-15 pre-fix-pass " +
+			"(advisor.ts 197, calibration.ts 178, gates.ts 407, index.ts 237, reviewer.ts 409, review-schema.ts " +
+			"541, rules.ts 889, verdict.ts 548) -- this entry did not exist before CR-04, so there is no prior " +
+			"committed number to raise from. Re-measured 3,548 raw lines across the same 8 files 2026-08-15 " +
+			"after this phase's OWN code-review fix pass (CR-01/CR-02 localBin resolution in index.ts and " +
+			"gates.ts; WR-01/WR-02 the duplicate-verdict and unrecognised-status branches in review-schema.ts; " +
+			"WR-03 the behaviour-describing calibration needles in calibration.ts; WR-05 the export-from regex " +
+			"in reviewer.ts: advisor.ts 198, calibration.ts 179, gates.ts 426, index.ts 301, reviewer.ts 425, " +
+			"review-schema.ts 580, rules.ts 890, verdict.ts 549). RAISED 3550 -> 3610 by the iteration-2 " +
+			"code-review fix pass: CR2-01 wired index.ts's productionExec through .pi/lib/win-quote.ts#commandFor " +
+			"instead of raw shell:true+args concatenation, and WR2-01 widened localBin to walk ancestor " +
+			"node_modules directories -- both in index.ts, which grew 301 -> 355. Re-measured 3,602 raw lines " +
+			"across the same 8 files 2026-08-15 (advisor.ts 198, calibration.ts 179, gates.ts 426, index.ts 355, " +
+			"review-schema.ts 580, reviewer.ts 425, rules.ts 890, verdict.ts 549), rounded up to the next ten",
+	},
+	{
+		dir: ".pi/extensions/providers",
+		budget: 1430,
+		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs' transitive walk newly discovers this " +
+			"directory -- routing/index.ts imports ./modes.ts (same-directory, already inside the routing/ " +
+			"ratchet), and modes.ts itself imports callWithFallback from ../providers/fallback.ts and CHAIN " +
+			"from ../providers/schema.ts, a hop CR-04's depth-1-only version never followed. Grandfathered in " +
+			"at its CURRENT measured total, the same precedent WR-05 set for routing/harness/diagnostics and " +
+			"CR-04 set for quality/safety (not a number this phase reviewed for tightness) -- this entry did " +
+			"not exist before WR2-04, so there is no prior committed number to raise from. Measured 1,430 raw " +
+			"lines across 4 files 2026-08-15 (fallback.ts 304, index.ts 329, schema.ts 623, sso.ts 174), " +
+			"already an exact multiple of ten",
+	},
+	{
+		dir: ".pi/lib",
+		budget: 690,
+		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs no longer filters to `.pi/extensions/` " +
+			"only -- `.pi/lib/jsonl.ts` is imported (via `../../lib/jsonl.ts`) by quality/index.ts (indirectly, " +
+			"through .pi/lib/win-quote.ts's own CR2-01 wiring), routing/index.ts, safety/audit.ts and " +
+			"workflows/evidence.ts, and was a live, unbudgeted shared-library import target with no " +
+			"DIRECTORY_BUDGETS entry at all before this fix -- exactly the residual the finding named. A hit " +
+			"outside `.pi/extensions/` maps to its own immediate directory (dirname), never a subsystem-root " +
+			"slice, since `.pi/lib` is shallow by construction. Grandfathered in at its CURRENT measured total, " +
+			"same precedent as routing/harness/diagnostics/quality/safety/providers -- this entry did not " +
+			"exist before WR2-04, so there is no prior committed number to raise from. Measured 687 raw lines " +
+			"across 2 files 2026-08-15 (jsonl.ts 606, win-quote.ts 81 -- win-quote.ts itself landed this same " +
+			"iteration, moved here from tests/helpers/ by CR2-01), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
@@ -560,7 +593,7 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 			actual,
 			`${entry.file} is ${actual} raw lines, over its budget of ${entry.budget} (${entry.why}) -- ` +
 				"shorten the file, or raise the budget here with a reason -- do not move lines into a " +
-				"private helper, the directory aggregate below is what catches that",
+				"private helper, the per-directory ratchets below are what catches that",
 		).toBeLessThanOrEqual(entry.budget);
 	});
 
@@ -609,34 +642,88 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 });
 
 /**
- * CR-04: subsystem roots a discovered command source imports directly --
- * closes the discovery hole {@link isCommandSource}-based `commandDirs`
- * cannot see on its own. `.pi/extensions/quality/` spells `registerCommand(`
- * NOWHERE (it registers zero commands -- `workflows/index.ts` is the only
- * command surface `/quick` has), yet `workflows/index.ts:12` imports
- * `runQuickGateStage` from it and `:42` calls it -- 3,400+ lines of the
- * gate stage this budget exists to bound were invisible to `commandDirs`
- * for exactly that reason. This function scans every discovered command
- * source's OWN `import ... from "..."` specifiers (relative only -- a
- * package import cannot resolve to a local directory this registry
- * ratchets), resolves each to an absolute path, and -- when that path
- * lands under `.pi/extensions/` -- adds its SUBSYSTEM ROOT (matching
- * `commandDirs`' own `slice(0, 3)` convention) to the set. A future
- * subsystem reached only by import (Phase 9's `/grill`, `/plan`, `/execute`,
- * `/review` delegating into sibling directories) is caught by this the same
- * way `quality/` now is, without needing its own `registerCommand(` call.
+ * WR2-04 (`08-REVIEW.md` iteration 2): resolve one relative import
+ * `specifier` written inside `fromFile` to a repo-relative path, but ONLY
+ * when it names a real, resolvable `.ts`/`.js` file (itself, or its own
+ * `index.ts`/`index.js` if the specifier names a directory) -- never a bare
+ * package specifier (no leading `./`/`../`, filtered by the caller's own
+ * regex) and never a specifier that resolves to nothing on disk.
+ */
+function resolveLocalImport(fromFile: string, specifier: string): string | undefined {
+	const raw = resolve(dirname(join(repoRoot(), fromFile)), specifier);
+	const candidates = [raw, `${raw}.ts`, `${raw}.js`, join(raw, "index.ts"), join(raw, "index.js")];
+	for (const candidate of candidates) {
+		if (existsSync(candidate) && statSync(candidate).isFile()) {
+			return relative(repoRoot(), candidate).split("\\").join("/");
+		}
+	}
+	return undefined;
+}
+
+/**
+ * CR-04, WIDENED by WR2-04 (`08-REVIEW.md` iteration 2): every LOCAL
+ * (`.pi/`) directory reachable, TRANSITIVELY, by following the import graph
+ * outward from `commandFiles` -- closing the discovery hole
+ * {@link isCommandSource}-based `commandDirs` cannot see on its own.
+ * `.pi/extensions/quality/` spells `registerCommand(` NOWHERE (it registers
+ * zero commands -- `workflows/index.ts` is the only command surface `/quick`
+ * has), yet `workflows/index.ts:12` imports `runQuickGateStage` from it and
+ * `:42` calls it -- 3,400+ lines of the gate stage this budget exists to
+ * bound were invisible to `commandDirs` for exactly that reason.
+ *
+ * TWO residuals CR-04's original version left, both closed here:
+ *
+ * 1. DEPTH 1 ONLY. CR-04 scanned only `commandFiles` themselves -- a
+ *    directory imported by `quality/reviewer.ts` (not by `workflows/
+ *    index.ts` directly) was invisible. This function now does a fixed-point
+ *    walk: every file it resolves a LOCAL import to is itself scanned for
+ *    its OWN local imports, seeded from `commandFiles` and iterated until no
+ *    new file is discovered (a `visitedFiles` set makes this terminate on
+ *    any import cycle). A future subsystem reached only by TRANSITIVE import
+ *    (Phase 9's `/grill`, `/plan`, `/execute`, `/review` delegating into
+ *    sibling directories through an intermediate file) is now caught the
+ *    same way `quality/` was, without needing its own `registerCommand(`
+ *    call anywhere in the chain.
+ * 2. `.pi/extensions/`-ONLY. CR-04's filter (`rel.startsWith(EXTENSIONS_DIR)`)
+ *    discarded every local import outside `.pi/extensions/` by construction
+ *    -- `.pi/lib/jsonl.ts` (605+ lines, imported by five subsystems including
+ *    `workflows/evidence.ts`) had no `DIRECTORY_BUDGETS` entry despite being
+ *    a live, unbudgeted import target. A hit under `.pi/extensions/` still
+ *    maps to its SUBSYSTEM ROOT (matching `commandDirs`' own `slice(0, 3)`
+ *    convention, so a file nested arbitrarily deep inside one subsystem does
+ *    not fragment into its own sub-entry); a hit under any OTHER `.pi/`
+ *    directory maps to its own immediate directory (`.pi/lib`, for example --
+ *    shallow by construction, so `dirname` already IS the right boundary).
+ *    Anything the resolved path does NOT start with `.pi/` (a test helper, a
+ *    doc) is left out entirely -- not local harness code this ratchet's own
+ *    stated scope (D-11, WR-03) ever claimed to cover.
  */
 function importedSubsystemDirs(commandFiles: readonly string[]): string[] {
 	const dirs = new Set<string>();
-	for (const file of commandFiles) {
-		const text = readFileSync(join(repoRoot(), file), "utf-8");
+	const visitedFiles = new Set<string>();
+	const queue: string[] = [...commandFiles];
+	while (queue.length > 0) {
+		const file = queue.shift();
+		if (file === undefined || visitedFiles.has(file)) continue;
+		visitedFiles.add(file);
+		let text: string;
+		try {
+			text = readFileSync(join(repoRoot(), file), "utf-8");
+		} catch {
+			continue;
+		}
 		for (const m of text.matchAll(/\bfrom\s+["'](\.\.?\/[^"']+)["']/g)) {
 			const specifier = m[1];
 			if (specifier === undefined) continue;
-			const abs = resolve(dirname(join(repoRoot(), file)), specifier);
-			const rel = relative(repoRoot(), abs).split("\\").join("/");
-			if (rel.startsWith(`${EXTENSIONS_DIR}/`)) {
-				dirs.add(rel.split("/").slice(0, 3).join("/"));
+			const resolved = resolveLocalImport(file, specifier);
+			if (resolved === undefined) continue;
+			if (resolved.startsWith(`${EXTENSIONS_DIR}/`)) {
+				dirs.add(resolved.split("/").slice(0, 3).join("/"));
+			} else if (resolved.startsWith(".pi/")) {
+				dirs.add(dirname(resolved));
+			}
+			if (!visitedFiles.has(resolved)) {
+				queue.push(resolved);
 			}
 		}
 	}
@@ -811,6 +898,58 @@ describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
 		// must never resolve to a local directory this registry could ratchet.
 		const dirs = importedSubsystemDirs([".pi/extensions/workflows/index.ts"]);
 		expect(dirs.some((d) => d.includes("@earendil-works") || d.includes("node_modules"))).toBe(false);
+	});
+
+	it(
+		"WR2-04 proof: commandDirs includes .pi/extensions/providers via a TRANSITIVE, depth-2 import -- " +
+			"routing/index.ts imports ./modes.ts directly, and modes.ts (never itself scanned by CR-04's " +
+			"depth-1-only version) imports callWithFallback from ../providers/fallback.ts and CHAIN from " +
+			"../providers/schema.ts",
+		() => {
+			expect(
+				isCommandSource(".pi/extensions/providers/index.ts"),
+				"providers/index.ts must NOT itself spell registerCommand( -- if it ever does, this proof is " +
+					"testing the wrong mechanism (isCommandSource, not the transitive walk)",
+			).toBe(false);
+			expect(
+				commandDirs,
+				"routing/index.ts -> ./modes.ts -> ../providers/{fallback,schema}.ts is a depth-2 chain; " +
+					"commandDirs must include .pi/extensions/providers via that chain, or the transitive walk " +
+					"is still depth-1-only in substance even if its code LOOKS like a fixed point",
+			).toContain(".pi/extensions/providers");
+		},
+	);
+
+	it(
+		"WR2-04 proof: commandDirs includes .pi/lib, a LOCAL directory outside .pi/extensions/ entirely -- " +
+			".pi/lib/jsonl.ts is imported by (at least) routing/index.ts and safety/audit.ts",
+		() => {
+			expect(
+				commandDirs,
+				".pi/lib/jsonl.ts is a live, shared, unbudgeted import target reached from multiple command " +
+					"subsystems -- commandDirs must include .pi/lib, or the `.pi/extensions/`-only filter is " +
+					"still in effect even after this fix",
+			).toContain(".pi/lib");
+		},
+	);
+
+	it("WR2-04 proof: a hit under .pi/extensions/ still resolves to its SUBSYSTEM ROOT (slice(0,3)), never dirname, even via the transitive walk", () => {
+		// Distinguishes the two branches inside importedSubsystemDirs: a
+		// .pi/extensions/ hit must NOT fragment into a deeper per-file or
+		// per-subdirectory entry, matching commandDirs' own slice(0,3)
+		// convention for consistency with the rest of this registry.
+		const dirs = importedSubsystemDirs([".pi/extensions/routing/index.ts"]);
+		expect(dirs).toContain(".pi/extensions/providers");
+		expect(
+			dirs.some((d) => d.includes("providers/fallback") || d.includes("providers/schema")),
+			"a .pi/extensions/ hit must resolve to the subsystem root, never the imported file's own path",
+		).toBe(false);
+	});
+
+	it("WR2-04 proof: a hit OUTSIDE .pi/extensions/ (but still under .pi/) resolves to its own immediate directory, not a subsystem-root slice", () => {
+		const dirs = importedSubsystemDirs([".pi/extensions/routing/index.ts"]);
+		expect(dirs).toContain(".pi/lib");
+		expect(dirs.some((d) => d === ".pi" || d === "."), "must not over-generalise to an ancestor of .pi/lib").toBe(false);
 	});
 });
 
