@@ -52,9 +52,13 @@
  * TWO CLEARLY SEPARATED IMPURE FUNCTIONS"): {@link runTypecheckLeg} and
  * {@link runLintLeg} each shell a subprocess, but only through an INJECTED
  * runner function the caller supplies — production passes a real
- * `child_process.spawnSync`-backed runner (mirroring `safety/git.ts`'s
- * `spawnSync(..., { shell: false })` discipline), tests pass a scripted one.
- * Every other export here — {@link probeLspAvailability},
+ * `child_process.spawnSync`-backed runner (CR-01: this does NOT mirror
+ * `safety/git.ts`'s `spawnSync(..., { shell: false })` discipline, because
+ * `git.ts` spawns a real `.exe`; `quality/index.ts#productionExec` instead
+ * resolves the LOCAL pinned binary under `<cwd>/node_modules/.bin` and
+ * branches `shell` on platform, since a Windows `.cmd` shim cannot be
+ * launched without one), tests pass a scripted one. Every other export
+ * here — {@link probeLspAvailability},
  * {@link runAntiPatternLeg}, {@link runDeterministicGates},
  * {@link shouldRunDesignReview} — takes and returns plain data with no I/O
  * of its own.
@@ -220,15 +224,24 @@ function outputLines(result: { stdout: string; stderr: string }): string[] {
 }
 
 /**
- * The typecheck leg. Runs `npx tsc --noEmit` through the injected `exec`.
+ * The typecheck leg. Runs `tsc --noEmit` through the injected `exec`.
  * Non-zero exit -> `fail`, carrying the compiler's own output lines.
- * `exec` throwing (the `npx`/`tsc` binary missing) -> `unavailable`, NEVER
- * `pass` — a leg that could not run must never be reported as clean.
+ * `exec` throwing (the `tsc` binary missing) -> `unavailable`, NEVER `pass`
+ * — a leg that could not run must never be reported as clean.
+ *
+ * CR-01/CR-02: `exec` is called with the bare command name `"tsc"`, never
+ * `"npx"` — the production `ExecRunner` (`quality/index.ts#productionExec`)
+ * resolves this to the LOCAL, pinned `<cwd>/node_modules/.bin/tsc`, never the
+ * `npx` shim. `npx` is `npx.cmd` on Windows, which Node cannot spawn without
+ * a shell (ENOENT, verified on this machine); and on any platform where
+ * `npx` IS spawnable, an `npx <pkg>` with no local install downloads and
+ * runs an UNPINNED package from the registry. Neither failure mode is
+ * reachable once the runner never names `npx` at all.
  */
 export function runTypecheckLeg(cwd: string, exec: ExecRunner): LegStatus {
 	let result: { code: number; stdout: string; stderr: string };
 	try {
-		result = exec("npx", ["tsc", "--noEmit"], cwd);
+		result = exec("tsc", ["--noEmit"], cwd);
 	} catch (err) {
 		return {
 			status: "unavailable",
@@ -266,15 +279,20 @@ export const LINT_GATE_FILES = [
 ] as const;
 
 /**
- * The lint leg. Runs `npx vitest run` over {@link LINT_GATE_FILES} through
- * the same injected-runner shape {@link runTypecheckLeg} uses. Non-zero exit
- * -> `fail`, carrying vitest's own output lines. `exec` throwing -> `unavailable`,
- * never `pass`.
+ * The lint leg. Runs `vitest run` over {@link LINT_GATE_FILES} through the
+ * same injected-runner shape {@link runTypecheckLeg} uses -- see that
+ * function's own docstring for why `exec` is called with the bare command
+ * name `"vitest"`, never `"npx"`. Non-zero exit -> `fail`, carrying vitest's
+ * own output lines. `exec` throwing -> `unavailable`, never `pass` -- this
+ * is also how CR-02's secondary bug degrades: {@link LINT_GATE_FILES} names
+ * THIS repository's own structural test paths, so `productionExec` throws
+ * (rather than letting vitest report a false FAIL against paths it cannot
+ * find) when `cwd` is not this repository.
  */
 export function runLintLeg(cwd: string, exec: ExecRunner): LegStatus {
 	let result: { code: number; stdout: string; stderr: string };
 	try {
-		result = exec("npx", ["vitest", "run", ...LINT_GATE_FILES], cwd);
+		result = exec("vitest", ["run", ...LINT_GATE_FILES], cwd);
 	} catch (err) {
 		return {
 			status: "unavailable",

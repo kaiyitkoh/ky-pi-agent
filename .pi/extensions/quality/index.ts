@@ -108,15 +108,34 @@
  * A TEST-ONLY SEAM, NAMED AS SUCH
  * ---------------------------------------------------------------------------
  * `runQuickGateStage`'s default typecheck/lint legs shell a REAL subprocess
- * (`npx tsc --noEmit`, `npx vitest run ...`) against `cwd` — correct for
+ * (`tsc --noEmit`, `vitest run ...`, resolved locally -- see
+ * {@link productionExec}'s own docstring) against `cwd` — correct for
  * production, catastrophic for a session-level test driven against a
  * throwaway `makeTempRepo()` fixture with no `node_modules` at all: a real
- * `npx` there would attempt to fetch a package, which is exactly the
- * "install nothing" rule this phase's own autonomous-run constraints forbid.
+ * spawn there would fail (or, before CR-01/CR-02, would have reached `npx`
+ * and attempted to fetch a package), which is exactly the "install nothing"
+ * rule this phase's own autonomous-run constraints forbid.
  * {@link setQuickGateExecOverrideForTests} is the escape hatch, following
  * `diagnostics/quality-cost.ts#peekQualityCost`'s own "FOR TESTS ONLY" naming
  * convention and the same `globalThis` mechanism this file already uses for
  * {@link registeredToolNames} — production code never calls it.
+ *
+ * ---------------------------------------------------------------------------
+ * CR-01 / CR-02: THE PRODUCTION RUNNER NEVER NAMES `npx`
+ * ---------------------------------------------------------------------------
+ * `npx` is `npx.cmd` on Windows, and Node refuses to spawn a `.cmd` without a
+ * shell (verified on this machine: `spawnSync("npx", [...], {shell:false})`
+ * throws ENOENT) -- so both legs degraded to `unavailable` on this project's
+ * declared primary platform, and `blocking` never sets on an `unavailable`
+ * leg by design (`gates.ts`'s own three-state contract), which made the
+ * degradation invisible. On a platform where `npx` DOES spawn, `npx tsc`/
+ * `npx vitest` with nothing installed locally silently DOWNLOADS AND
+ * EXECUTES an unpinned package from the registry -- a direct violation of
+ * this project's supply-chain posture. {@link productionExec} instead
+ * resolves the LOCAL, already-pinned binary under
+ * `<cwd>/node_modules/.bin/<name>` via {@link localBin} and never reaches the
+ * network: a missing binary is an honest `unavailable`, naming the path that
+ * was not found, never a network fetch and never a silent pass.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join, relative } from "node:path";
@@ -169,9 +188,41 @@ function collectQualitySources(cwd: string): QualitySource[] {
 	return sources;
 }
 
-/** Production `ExecRunner` -- a real, synchronous subprocess, mirroring `safety/git.ts`'s `spawnSync(..., {shell:false})` discipline. */
-const productionExec: ExecRunner = (cmd, args, cwd) => {
-	const result = spawnSync(cmd, args, { cwd, shell: false, windowsHide: true, encoding: "utf-8" });
+/**
+ * The locally-installed binary, resolved per platform — never the `npx`
+ * shim. See this file's own "CR-01 / CR-02" docstring section for why.
+ */
+function localBin(cwd: string, name: string): string {
+	const suffix = process.platform === "win32" ? ".cmd" : "";
+	return join(cwd, "node_modules", ".bin", `${name}${suffix}`);
+}
+
+/**
+ * Production `ExecRunner` — resolves the pinned LOCAL binary under
+ * `<cwd>/node_modules/.bin`, never `npx`. See this file's own "CR-01 /
+ * CR-02" docstring section for the two failure modes this closes. Exported
+ * (not `FOR TESTS ONLY` -- this IS the production implementation) so
+ * `tests/unit/quality-production-exec.test.ts` can exercise it directly,
+ * including the real spawn CR-01 requires proof of.
+ */
+export const productionExec: ExecRunner = (cmd, args, cwd) => {
+	const bin = localBin(cwd, cmd);
+	if (!existsSync(bin)) {
+		// Honest UNAVAILABLE, naming the missing binary -- never falls through
+		// to a network-fetching npx, and never silently reports pass.
+		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin -- the leg is unavailable, not skipped or passed`);
+	}
+	const result = spawnSync(bin, args, {
+		cwd,
+		// A Windows `.cmd` shim cannot be launched without a shell (Node
+		// refuses to spawn one with shell:false); a real executable
+		// (macOS/Linux, or a non-.cmd Windows binary) can be launched
+		// directly. Branch explicitly on platform rather than relying on
+		// ENOENT, per CR-01.
+		shell: process.platform === "win32",
+		windowsHide: true,
+		encoding: "utf-8",
+	});
 	if (result.error) throw result.error;
 	return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 };

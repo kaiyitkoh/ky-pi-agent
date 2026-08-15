@@ -144,8 +144,10 @@ describe("GATE-01 — per-leg three-state table", () => {
 				"",
 			].join("\n"),
 		};
-		const exec: ExecRunner = (_cmd, args) => {
-			if (args.includes("tsc")) {
+		const exec: ExecRunner = (cmd) => {
+			// CR-01: exec is called with the bare command name ("tsc"/"vitest"),
+			// never "npx" -- branch on cmd itself, not an args entry.
+			if (cmd === "tsc") {
 				return { code: 1, stdout: "src/y.ts(1,1): error TS9999: forced failure", stderr: "" };
 			}
 			return { code: 0, stdout: "", stderr: "" };
