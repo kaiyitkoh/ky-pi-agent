@@ -557,6 +557,21 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"lines across 4 files 2026-08-15, rounded up to the next ten",
 	},
 	{
+		dir: ".pi/extensions/plan-ceremony",
+		budget: 560,
+		why: "plan 09-09 (FLOW-06) -- the first file of the /plan subsystem, plan-schema.ts: the task-line " +
+			"parser (TASK_LINE_PATTERN, VERIFICATION_SEPARATOR, parseTaskLine), the whole-document scanner " +
+			"(parsePlanTasks, malformed lines returned never dropped), the files-touched union " +
+			"(filesTouchedUnion, /review's second drift-baseline input), the numbered binding-order " +
+			"validatePlan gate (7 reject branches, coverage checked in both directions), and " +
+			"renderPlanMarkdown. Named `plan-ceremony`, not `plan-mode`, specifically to avoid colliding " +
+			"with the vendored Pi example's own concept (09-RESEARCH.md). This directory holds no " +
+			"registerCommand( call yet (plan 09-10 wires the /plan command itself) and is not YET reachable " +
+			"by commandDirs' present-but-undeclared check for that reason -- declared here anyway, ahead of " +
+			"that check requiring it, per plan 09-05's identical precedent for .pi/extensions/grill. " +
+			"Measured 556 raw lines across 1 file 2026-08-15 (plan-schema.ts), rounded up to the next ten",
+	},
+	{
 		dir: ".pi/extensions/todo.ts",
 		budget: 0,
 		why: "Phase 7 plan 08's vendored todo.ts is a FLAT top-level file (`.pi/extensions/todo.ts`, not a " +
