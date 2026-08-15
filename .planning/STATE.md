@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-13-PLAN.md
-last_updated: "2026-08-15T11:56:14.165Z"
-last_activity: 2026-08-15 -- Phase 09 planning complete
+stopped_at: Completed 09-01-PLAN.md
+last_updated: "2026-08-15T12:39:56.980Z"
+last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 86
+  completed_plans: 87
   percent: 73
 ---
 
@@ -21,19 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 08 — quality-gates-engineering-quality
+**Current focus:** Phase 09 — ceremonial-workflows
 
 ## Current Position
 
-Phase: 08 (quality-gates-engineering-quality) — EXECUTING
-Plan: 13 of 13
+Phase: 09 (ceremonial-workflows) — EXECUTING
+Plan: 2 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
-Last activity: 2026-08-15 -- Phase 09 planning complete
+Last activity: 2026-08-15
 
-Progress: [██████████] 100%
+Progress: [████████░░] 84%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -156,6 +156,7 @@ credentials can do has been done".
 | Phase 08 P11 | 180min | 3 tasks | 8 files |
 | Phase 08 P12 | 70m | 2 tasks | 8 files |
 | Phase 08 P13 | 50m | 3 tasks | 4 files |
+| Phase 09 P01 | 40m | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -416,6 +417,8 @@ Recent decisions affecting current work:
 - [Phase 08]: GATE-01/02/08 moved from [x] to [~] naming their RB-08-xx id inline -- a green offline proxy is not the check, regardless of the requirement's original [FAUX]/[RUNBOOK] tag
 - [Phase 08]: QUAL-09 promoted Pending to [x] on plan 08-11's live-JSONL proof -- a real gated /quick turn's own qualityMs row, read off disk, not a scripted stand-in
 - [Phase 08]: docs/QUALITY.md's rule table and calibration section are asserted against RULE_IDS/DEFECT_CLASSES in both directions, falsified by hand with a fake rule id, following the docs/ROUTING.md <-> ROLE_MAP precedent
+- [Phase 09-01]: WR-09's concurrent recorders test: IPC ready/release event handshake replaces a Date.now()+800 wall-clock barrier, and a structural adjacent-tag-switch interleaving proof over the store's own row order replaces the Date.now() overlap comparison — boot-cost variance (587-970ms measured under load) could make a fixed 800ms margin fire before every child had reached it; a child sending ready over IPC and a parent releasing only after collecting every ready removes the duration entirely
+- [Phase 09-01]: MIN_TAG_SWITCHES=4, measured from ~150 solo runs (floor 5) plus 3 full-suite-load runs (27-33, higher under contention), not guessed — the first guess (8) flaked 3/10 on a follow-up check; be-suspicious-of-green discipline required real measurement before trusting the threshold
 
 ### Pending Todos
 
@@ -468,8 +471,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T06:45:23.404Z
-Stopped at: Completed 08-13-PLAN.md
+Last session: 2026-08-15T12:39:56.968Z
+Stopped at: Completed 09-01-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.

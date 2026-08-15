@@ -210,3 +210,11 @@ None - no external service configuration required. This plan modifies one test f
 ---
 *Phase: 09-ceremonial-workflows*
 *Completed: 2026-08-15*
+
+## Self-Check: PASSED
+
+- FOUND: `tests/unit/checkpoint-store.test.ts`
+- FOUND: `.planning/phases/09-ceremonial-workflows/09-01-SUMMARY.md`
+- FOUND commit: `d03cee8` (Task 1 + Task 2 mechanism)
+- FOUND commit: `10565c1` (Task 2 threshold refinement)
+- FOUND commit: `39bbb09` (this SUMMARY)
