@@ -1,522 +1,373 @@
 ---
 phase: 08-quality-gates-engineering-quality
-reviewed: 2026-08-15T16:20:00Z
+reviewed: 2026-08-15T17:30:00Z
 depth: deep
-iteration: 2
-files_reviewed: 23
+iteration: 3
+files_reviewed: 15
 files_reviewed_list:
-  - .pi/extensions/diagnostics/quality-cost.ts
+  - .pi/lib/win-quote.ts
+  - .pi/extensions/qoder/client.ts
   - .pi/extensions/quality/calibration.ts
   - .pi/extensions/quality/gates.ts
   - .pi/extensions/quality/index.ts
-  - .pi/extensions/quality/review-schema.ts
-  - .pi/extensions/quality/reviewer.ts
   - .pi/extensions/workflows/index.ts
   - docs/QUALITY.md
-  - docs/RUNBOOK.md
   - docs/WORKFLOWS.md
   - tests/fixtures/seeded-defects/index.ts
-  - tests/helpers/qoder-loopback.ts
   - tests/helpers/win-quote.ts
   - tests/integration/qoder-delegate.test.ts
   - tests/integration/quality-gate-order.test.ts
-  - tests/integration/quick-workflow.test.ts
   - tests/integration/reviewer-calibration.test.ts
-  - tests/unit/quality-gates.test.ts
   - tests/unit/quality-production-exec.test.ts
-  - tests/unit/quality-rules.test.ts
-  - tests/unit/quality-schema.test.ts
-  - tests/unit/reviewer-import-graph.test.ts
   - tests/unit/workflow-budgets.test.ts
 findings:
-  critical: 1
+  critical: 0
   warning: 6
-  info: 5
+  info: 6
   total: 12
 status: issues_found
 ---
 
-# Phase 8: Code Review Report — Iteration 2
+# Phase 8: Code Review Report — Iteration 3 (final)
 
-**Reviewed:** 2026-08-15T16:20:00Z
-**Depth:** deep (fix verification + fix-diff review)
-**Files Reviewed:** 23
-**Status:** issues_found
+**Reviewed:** 2026-08-15T17:30:00Z
+**Depth:** deep (fix verification by execution + mutation, plus fix-diff review)
+**Files Reviewed:** 15
+**Status:** issues_found — **no BLOCKER. Recommend landing after two one-line
+doc/comment corrections (WR3-01a, WR3-06); everything else is
+accept-and-document.**
 
 ## Summary
 
-Iteration 1 raised 4 Critical and 7 Warning findings. **All 11 are genuinely
-addressed** — I re-derived each one against the code rather than the fix
-report, and did not find a single case of the fix report claiming more than
-the code delivers. The two claims I pressed hardest both survived:
-
-- **WR-03 (calibration integrity).** The recorded `3/6 = 0.50` is
-  *reproducible by hand*: `KNOWN_SUBSET_ARGS`'s three findings each satisfy
-  their expectation's tightened `mustMentionAny` needle
-  (`"performs none"`, `"never calls isGuardedCommand"`,
-  `"regardless of input"`) at BLOCKER severity with a matching
-  `locationFile`, and the other three defect classes have no finding at all.
-  The number agrees in every place it is stated — `calibration.test.ts:393`,
-  `docs/QUALITY.md:217`, `docs/RUNBOOK.md:1436/1458/1466`,
-  `08-10-SUMMARY.md`, `08-13-SUMMARY.md`. Iteration 1's exact exploit (a
-  per-file symbol name-drop) now scores `0`, and it is pinned as a third
-  control. Nothing was tuned toward a flattering number.
-- **WR-06 (`refundQualityCost`).** Cannot go negative (`Math.max(0, …)` per
-  field), cannot refund what was never charged (`readSlot() === undefined` →
-  early return), and is not racy (no `await` between read and write in a
-  single-threaded runtime).
-
-**Fix-diff review found one new BLOCKER, and it is CR-01's own failure mode
-wearing a new costume.** The CR-01 fix replaced `spawnSync("npx", args,
-{shell:false})` with `spawnSync(localBin, args, {shell: process.platform ===
-"win32"})`. On Windows, `shell:true` alongside an args array is *unescaped
-concatenation into `cmd.exe`* — and `localBin` embeds `cwd`. I executed the
-real `runTypecheckLeg(cwd, productionExec)` against a `cwd` whose path
-contains a space and got `{status: "fail", findings: ["'…\\scratchpad\\space'
-is not recognized as an internal or external command"]}`. This repository
-already owns a solved-and-tested answer to exactly this hazard
-(`tests/helpers/win-quote.ts#commandFor`, whose docstring names the DEP0190
-concatenation problem verbatim); the fix did not use it, and Node's DEP0190
-warning now prints on every run of this repository's own test suite.
-
-I also verified, at source: full suite green (108 files / 1994 tests, matching
-the fix report); `safety/` still imports nothing from `routing/`; `tsc`,
-`chokepoint-lint`, `pinning` (six devDependencies, no new dep),
-`tool-count-baseline` (one new tool) and `contributing-boundary` all pass;
+**No Critical findings this iteration.** I could not construct a case where
+the code shipped at `dc4cc16` produces incorrect behaviour on a realistic
+input, leaks credentials, or issues a provider request. The full suite is
+genuinely green (108 files / 2013 tests, run here, matching the fix report),
+`tsc` is clean, `package.json`/`package-lock.json` are untouched across the
+whole fix range (six devDependencies, one runtime dep `unbash@4.0.10`),
+`.pi/extensions/safety/` still imports nothing from `routing/`,
 RB-08-01/02/03 are OUTSTANDING in both the summary table
-(`docs/RUNBOOK.md:1314-1316`) and their detail sections; no `it.skip`,
-`retry:`, `.only`, raised `testTimeout` or `fileParallelism:false` appears
-anywhere in the fix diff; and nothing in the fix diff can issue a provider
-inference request or touch credentials (the nested `vitest run` the new
-production-exec test spawns runs only the 12 static structural files).
+(`docs/RUNBOOK.md:1314-1316`) and their detail sections, and no `it.skip`,
+`.only`, `retry:`, raised `testTimeout` or `fileParallelism:false` appears
+anywhere in `ac0e427..dc4cc16`.
 
-Per-finding verification of iteration 1:
+**I did not take the fix report's word for anything.** Every verdict below
+came from executing the real module, or from mutating a throwaway `git
+worktree` (created in the scratchpad, `node_modules` junctioned, removed
+afterwards — the reviewed tree was never modified; `git status` is clean).
 
-| ID | Verdict | Note |
-|----|---------|------|
-| CR-01 | **partially fixed** | `npx` is gone and unreachable; the replacement introduces CR2-01 (Windows path with a space → false `fail`) and WR2-01 (no ancestor `node_modules` walk → silent `unavailable` from a subdirectory) |
-| CR-02 | **fixed** | No source path names `npx`; missing `.test.ts` targets degrade before a spawn (`index.ts:221-226`) with a paired test |
-| CR-03 | **fixed** | 9 install sites cover all 11 `command.handler(…)` calls that reach `workflows/index.ts:42`; the 4 uncovered calls (lines 389, 453, 522, 1344) each provably return at the routing / git-block / model-mismatch / `isIdle` guard *before* line 42. See IN2-04 for the honest caveat the fixer already recorded |
-| CR-04 | **fixed** (scope overclaimed) | `commandDirs` now contains `.pi/extensions/quality` and `.pi/extensions/safety`, both budgeted, and the `toBe(ceil(total/10)*10)` ratchet leaves 2 and 5 lines of headroom respectively — a single offloaded line turns it red. No assertion was loosened. See WR2-04 for the residual |
-| WR-01 | **fixed** | Branch (3b), `review-schema.ts:393-403` |
-| WR-02 | **fixed** | Branch (2b), `review-schema.ts:352-362`; the `"Missing"` fallback is gone |
-| WR-03 | **fixed** | See summary. Residual in WR2-05 |
-| WR-04 | **fixed** (new timing risk) | Now genuinely distinguishes reset-on-progress from a fixed deadline. See WR2-03 |
-| WR-05 | **fixed** | `IMPORT_FROM_RE` widened; I traced the lazy-quantifier interaction and it produces no duplicate or shifted edges |
-| WR-06 | **fixed** | See summary. Test-level float hazard in WR2-02 |
-| WR-07 | **fixed** | Re-measured 22; `toBe(measured)` added so a drop also requires an edit |
+### Per-finding verification of iteration 2
+
+| ID | Verdict | Evidence |
+|----|---------|----------|
+| CR2-01 | **fixed** | Executed the real `runTypecheckLeg(cwd, productionExec)` against seven fixture cwds with a genuine `tsc.cmd` stub installed: `plain`, `space test`, `amp&dir`, `paren(dir)`, `caret^dir` all `pass`; a spaced cwd with a stub exiting 2 gives an honest `fail` carrying the stub's own output. Mutation-verified for real: replacing `commandFor(bin, [...args], isWindows)` with the raw `[bin, args]` pair turns all three CR2-01 regression cases red. No stale duplicate — `tests/helpers/win-quote.ts` is a 14-line re-export, `quoteForWindows` exists in exactly one place, and all six prior importers still resolve. Zero `DEP0190` output. **One residual, WR3-04: a `%VAR%` pair in the cwd.** |
+| WR2-01 | **fixed** | `localBin` (`quality/index.ts:206-216`) is a genuine ancestor walk terminating at `dirname(dir) === dir`, returning `undefined` (never a still-missing path). Proved live from `repoRoot()/docs`. |
+| WR2-02 | **fixed** | `toEqual({qualityMs: 123, …})` is gone; `toBe(45)` on the integer field and `toBeCloseTo(123, 6)` on the float. `after?.qualityMs ?? 0` fails closed if the slot is missing, and `after?.qualityTokens` catches `undefined`. |
+| WR2-03 | **partially fixed** | The mechanism is right and I confirmed it red under the stated mutation. But the *new production surface* it added is unpinned: see **WR3-03**, where two mutations together leave the test green and vacuous. |
+| WR2-04 | **fixed** | `importedSubsystemDirs` (`workflow-budgets.test.ts:706-735`) is a genuine BFS fixed point with a `visitedFiles` cycle guard, and the `.pi/extensions/`-only filter is gone. The budget numbers are **measured, not padding** — `workflow-budgets.test.ts:802` asserts `budget === Math.ceil(total/10)*10` for *every* `DIRECTORY_BUDGETS` entry including the two new ones, so a padded number is a red test. Doc residual in **WR3-06**. |
+| WR2-05 | **partially fixed** | It defeats the exact string it was built against and nothing more. See **WR3-01** — I scored a two-needle boilerplate at `catchRate: 1.0` against the real scorer — and **WR3-02**, the fixture edit that held 0.50 constant. |
+| WR2-06 | **fixed** | `resolveExec(cwd, projectTrusted)` (`quality/index.ts:320-333`) uses `if (!projectTrusted)`, so **absent/undefined/falsy fails closed**. `isProjectTrusted(): boolean` is synchronous on `ExtensionContext` (`types.d.ts:234`, inherited by `ExtensionCommandContext:254`) — verified at source, because a `Promise` return here would have been truthy and failed *open*. Test-name overclaim in **WR3-05**. |
+
+### Invariants re-verified
+
+`callModel()` chokepoint (no new exemption), one new tool (`consult_advisor`),
+six devDependency pins, nested-role budgets vs MAIN-LOOP gating, and all of
+08-05's de-flake prohibitions: all hold. Nothing in the fix diff can issue a
+provider inference request or touch credentials — the qoder tests are
+`127.0.0.1` loopback only, and the nested `vitest run` the production-exec
+tests spawn is restricted to the 12 static `LINT_GATE_FILES`.
 
 ## Narrative Findings (AI reviewer)
 
-## Critical Issues
-
-### CR2-01: the CR-01 fix reintroduces CR-01's failure mode on Windows — a `cwd` containing a space makes both gate legs report `fail` with `cmd.exe` noise, blocking every `/quick` invocation
-
-**File:** `.pi/extensions/quality/index.ts:227-237` (with `localBin` at
-`:195-198`, and `tests/unit/quality-production-exec.test.ts` which cannot see
-it)
-
-**Issue:** The replacement runner is
-
-```ts
-const bin = localBin(cwd, cmd);            // join(cwd, "node_modules", ".bin", `${name}.cmd`)
-const result = spawnSync(bin, args, {
-	shell: process.platform === "win32",   // <-- args array + shell:true
-	…
-});
-if (result.error) throw result.error;
-return { code: result.status ?? 1, … };
-```
-
-`spawnSync` with `shell: true` on Windows builds `cmd.exe /d /s /c "<command>
-<args…>"` by **unescaped concatenation** — Node does not quote the command
-or the arguments. `bin` is derived from `cwd`, which is `ctx.cwd`, whatever
-directory the user launched Pi in.
-
-**Executed against the real module** (`node --experimental-strip-types`,
-importing `runTypecheckLeg` from `gates.ts` and `productionExec` from
-`quality/index.ts`, with a `node_modules/.bin/tsc.cmd` genuinely present in
-the target dir):
-
-```
-cwd = ...\scratchpad\space test
-=> { "status": "fail",
-     "findings": [
-       "'C:\\...\\scratchpad\\space' is not recognized as an internal or external command,",
-       "operable program or batch file." ] }
-```
-
-and with a `&` in the directory name, `cmd.exe` splits the command line and
-attempts a **second, path-derived command**:
-
-```
-cwd = ...\scratchpad\amp&dir
-=> findings: [ "'C:\\...\\scratchpad\\amp' is not recognized ...",
-               "The system cannot find the path specified." ]
-```
-
-Note what happens inside `productionExec`: `result.error` is **`undefined`**
-in this case (the spawn of `cmd.exe` itself succeeded), so the `throw` at
-`:238` never fires, the runner returns `code: 1`, and `runTypecheckLeg`/
-`runLintLeg` take the **`fail`** branch, not the `unavailable` branch.
-
-Concrete failure scenario, Windows (the project's declared primary platform):
-a user whose repository lives under `C:\Users\First Last\…`, `C:\Program
-Files\…`, or any OneDrive-synced path (`C:\Users\x\OneDrive - Company\…`)
-runs `/quick <anything>`. `gate.blocking` is `true`, `workflows/index.ts:54`
-notifies `gate.report` as an error, and **no run is ever armed** — `/quick` is
-permanently unusable for that user, and the "findings" it reports are
-`cmd.exe` chatter about a path fragment, not anything about their code. The
-secondary case (`&`, `^`, `|`, `(`, `)` in a directory name — all legal on
-NTFS) is genuine shell-metacharacter interpretation of an attacker- or
-user-influenced path, on a laptop CLAUDE.md states holds live static IAM admin
-credentials.
-
-This repository already contains the correct, tested answer and the fix did
-not use it. `tests/helpers/win-quote.ts:6-14` states the rule verbatim:
-*"`shell: true` alongside an args array is unescaped concatenation, which is
-exactly what Node's DEP0190 deprecation warns about… The safe shape is to
-quote every argument here, fold them into a single command string, and pass
-an empty args array."* `commandFor(cmd, args, isWindows)` at `:71-80` already
-implements it, and `tests/unit/helpers.test.ts` already tests it. Confirming
-the violation is live: `DeprecationWarning: Passing args to a child process
-with shell option true can lead to security vulnerabilities` now prints on
-every `vitest run` of this repository.
-
-`tests/unit/quality-production-exec.test.ts` cannot catch this: it only ever
-uses `repoRoot()` (no space on this machine) and `makeTempRepo()` (an
-`os.tmpdir()` path, no space on this machine). Both are
-environment-dependent, so the file is green here and would be red on a
-developer machine with a space in either path.
-
-**Fix:** apply the repository's own convention. Move the quoter out of
-`tests/helpers/` (production code must not import from `tests/`) — e.g. to
-`.pi/lib/win-quote.ts` — and use it, and add the missing regression case:
-
-```ts
-// .pi/extensions/quality/index.ts
-import { commandFor } from "../../lib/win-quote.ts";
-
-const isWindows = process.platform === "win32";
-const [file, spawnArgs] = commandFor(bin, [...args], isWindows);
-const result = spawnSync(file, spawnArgs, {
-	cwd,
-	shell: isWindows,          // only ever with an EMPTY args array, per commandFor
-	windowsHide: true,
-	encoding: "utf-8",
-});
-```
-
-```ts
-// tests/unit/quality-production-exec.test.ts -- the case that is missing
-it("CR2-01: a cwd whose path contains a space still runs the real binary -- never a cmd.exe-noise FAIL", () => {
-	const repo = makeTempRepo("kypi cr2-01 spaced ");   // space in the fixture name
-	mkdirSync(join(repo, "node_modules", ".bin"), { recursive: true });
-	writeFileSync(join(repo, "node_modules", ".bin", process.platform === "win32" ? "tsc.cmd" : "tsc"),
-		process.platform === "win32" ? "@echo off\r\nexit /b 0\r\n" : "#!/bin/sh\nexit 0\n", { mode: 0o755 });
-	expect(runTypecheckLeg(repo, productionExec)).toEqual({ status: "pass" });
-});
-```
-
-Also consider hardening `productionExec` so a `cmd.exe`-level failure cannot
-masquerade as a compiler verdict: when `stderr` matches `is not recognized as
-an internal or external command`, that is a spawn failure and must be an
-honest `unavailable`, never a `fail`.
-
 ## Warnings
 
-### WR2-01: `localBin` does not walk up to an ancestor `node_modules`, so running `/quick` from any subdirectory silently makes two of four legs `unavailable` — CR-01's original invisibility, in a narrower case
+### WR3-01: `MIN_DISTINCT_NEEDLES = 2` does not close the boilerplate exploit — a two-needle sentence still scores `catchRate: 1.0` with zero defects identified, and `docs/QUALITY.md` now states a "measured CEILING" that this falsifies
 
-**File:** `.pi/extensions/quality/index.ts:195-198, 209-214`
+**File:** `.pi/extensions/quality/calibration.ts:138, 151-162`;
+`docs/QUALITY.md:250-252`; `tests/integration/reviewer-calibration.test.ts:324-341`
 
-**Issue:** `localBin` is exactly `join(cwd, "node_modules", ".bin", name)` —
-one level, no ancestor search. `npx`, which it replaced, *did* walk ancestors
-(`cwd/node_modules/.bin`, then each parent). `ctx.cwd` is wherever the user
-launched Pi, which for a large multi-stack repository is frequently not the
-package root.
+**Issue.** The fix reasons that "a second, INDEPENDENT needle is not free to
+include without genuinely describing a second aspect of the defect"
+(`calibration.ts:129-132`). That premise is false for this corpus: within
+each class the needles are near-synonyms, not independent facts —
+`"cannot fail"` / `"structurally cannot"`, `"performs none"` / `"no actual
+verification"`, `"always returns true"` / `"unconditionally true"`,
+`"writes into the real"` / `"escapes the test"`. Adding the second is a
+clause, not an analysis.
 
-Concrete failure scenario: a user opens Pi in `ky-pi-agent/docs` (or any
-workspace package that has no `node_modules` of its own but whose parent
-does) and runs `/quick`. `existsSync` fails, `productionExec` throws, both
-legs report `unavailable`, `blocking` stays `false` by GATE-01's own
-three-state contract, and the run is armed against a repository whose
-typecheck and structural lint were never executed. That is precisely the
-"control that silently does not run, and nobody downstream can tell" shape
-CR-01 was raised about; the fix narrowed the blast radius from "always on
-Windows" to "whenever `cwd` is not the package root" without closing it.
+Executed against the real `scoreCalibration` and the real `SEEDED_DEFECTS`
+(one BLOCKER per touched file, correct `location`, one boilerplate
+`concreteFailure` reused verbatim for all six):
 
-Nothing tests this: `quality-production-exec.test.ts` only ever passes
-`repoRoot()` or a bare temp dir.
+```
+"This code structurally cannot be trusted and cannot fail; it performs none of the verification it
+ claims and offers no actual verification; it writes into the real home directory and escapes the
+ test sandbox; it never calls isGuardedCommand and is simply not wired in; it always returns true,
+ unconditionally true; and it does the same regardless of input, so the label survived its own
+ mutation."
 
-**Fix:** walk up, and record which root was resolved so the `unavailable`
-reason is actionable:
+=> { caught: 6, total: 6, catchRate: 1, unmatchedFindings: 0 }
+   (the shipped SHOTGUN_KITCHEN_SINK control, for comparison: catchRate 0)
+```
+
+The shipped fourth control is pinned to precisely the one construction the
+fix defeats, which makes it a regression test for the fix rather than a
+measurement of the exploit class. Like iteration 2's version this needs the
+answer key, so it is a Warning and not a repeat Critical.
+
+What must change regardless is the doc. `docs/QUALITY.md:250-252` now reads
+*"the kitchen-sink control's own `catchRate: 0` is the measured CEILING of
+what a substring proxy can be defeated by, not a claim that no cleverer
+construction exists."* The first clause is a claim about a maximum and it is
+false — the trailing hedge does not rescue the word CEILING. This is a
+one-line, provably-wrong sentence in the document a reader will use to
+interpret RB-08-03's live number.
+
+**Fix (a) — do before landing, one line.** Replace "the measured CEILING of
+what a substring proxy can be defeated by" with the honest statement: *"one
+measured data point, not a ceiling: extending the same boilerplate to two
+phrases per class scores `catchRate: 1.0` against the current matcher."*
+
+**Fix (b) — accept and document, or do in Phase 9.** Either add the
+two-needle sentence above as a fifth permanent control and record its `1.0`
+next to the `0.50`, or stop trying to out-run the exploit with substrings
+and require proximity (the needle within N characters of the
+`locationFile`'s own symbol) — the OR/AND-of-substrings axis is exhausted.
+
+---
+
+### WR3-02: the "UNCHANGED, still 3/6 = 0.50" claim is unchanged *by construction* — the positive control's text was edited in the same commit that raised the bar, and nothing in the code or docs records it
+
+**File:** `tests/integration/reviewer-calibration.test.ts:205-215` (commit
+`bb2a67c`); `docs/QUALITY.md:217`
+
+**Issue.** I re-derived 3/6 by hand and it is correct *today*. But it is
+correct because `bb2a67c` changed `KNOWN_SUBSET_ARGS`'s `false-label`
+finding from
+
+```
+"Comment claims MUTATION-VERIFIED but parseCommand always returns true regardless of input."
+```
+
+to that plus `", meaning the label survived its own mutation."` — a phrase
+lifted from the corpus's own `mustMentionAny` answer key
+(`seeded-defects/index.ts:401`), in the same commit that made two needles
+mandatory.
+
+Scored the pre-edit text against **today's** matcher:
+
+```
+KNOWN_SUBSET as of ac0e427, scored by today's calibration.ts:
+  2/6 = 0.333…   { fabricated-evidence: true, absent-guard: true, false-label: FALSE }
+```
+
+So the honest statement is "the bar was raised and the positive fixture was
+moved with it, holding the reported number at 0.50", not "the number is
+UNCHANGED … not tuned toward a flattering figure" (`08-REVIEW-FIX.md:61`).
+Both edits may be individually defensible — a fixture defined as "catches
+exactly 3 of 6" must keep clearing whatever bar the matcher sets — but the
+*combination*, undisclosed, is exactly how a calibration number stops being
+a measurement. `docs/QUALITY.md:217` still presents 0.5 as an end-to-end
+pipeline measurement with no note that the input was adjusted to preserve it.
+
+I would **not block landing on this** — the number is disclosed everywhere
+as scripted, and RB-08-03 is OUTSTANDING. But it must be recorded, not
+dropped.
+
+**Fix.** One sentence in `docs/QUALITY.md` beside the 0.5, and one in the
+`KNOWN_SUBSET_ARGS` docstring: *"When `MIN_DISTINCT_NEEDLES` rose from 1 to 2
+(WR2-05), this fixture's `false-label` finding was extended in the same
+commit so the scripted reviewer still clears its own definition; the pre-edit
+text scores 2/6 under the current matcher. 0.50 is therefore a property of
+this fixture, not a stable measurement across matcher changes."*
+
+---
+
+### WR3-03: `DelegateTaskOptions.now` is production surface added for one test, with **zero** assertions pinning it — deleting its only use leaves all 20 tests green, and together with a non-resetting deadline makes WR-04 pass vacuously
+
+**File:** `.pi/extensions/qoder/client.ts:556-563, 743, 748`;
+`tests/integration/qoder-delegate.test.ts:600-696`
+
+**Issue.** Two mutations, both run in a throwaway worktree against the real
+suite:
+
+| Mutation | WR-04 case | Whole file |
+|---|---|---|
+| remove `lastProgressAt = now()` (the reset) | **RED** — real "no bytes for 300ms" error at the third gap | 1 failed |
+| `const now = Date.now;` (injected clock ignored, reset intact) | green | **20 passed** |
+| **both together** | **GREEN** | **20 passed** |
+
+The first row is the fixer's claim and it holds — good. The second row is
+the problem: `opts.now` has no test that notices its removal. The third row
+is the consequence — with the seam gone, real elapsed time across four
+loopback chunks is a few milliseconds against a 300 ms budget, so a client
+that never resets its deadline passes too. The test's only guard,
+`progressCount === 4`, pins `onProgress` and says nothing about `now`.
+
+This matters more than usual here. `now`/`onProgress` are the phase's one
+clear instance of production surface added to satisfy a test, and the
+obvious future cleanup ("delete the unused test-only clock from the
+production client") is precisely the edit that silently converts this test
+from a real proof into a tautology — with the test name still claiming
+*"proved with an INJECTED CLOCK"*. That is the Phase 7 `MUTATION-VERIFIED`
+shape, one edit away.
+
+I confirmed the seam is not reachable from production or model input:
+`qoder/index.ts:241` constructs `DelegateTaskOptions` field-by-field with no
+spread of tool parameters, so neither `now` nor `onProgress` can be supplied
+by a model or a config file. No security exposure.
+
+**Fix.** One line in the test, which makes the seam self-defending:
 
 ```ts
-function localBin(cwd: string, name: string): string | undefined {
-	const suffix = process.platform === "win32" ? ".cmd" : "";
-	let dir = resolve(cwd);
-	for (;;) {
-		const candidate = join(dir, "node_modules", ".bin", `${name}${suffix}`);
-		if (existsSync(candidate)) return candidate;
-		const parent = dirname(dir);
-		if (parent === dir) return undefined;   // reached the filesystem root
-		dir = parent;
-	}
+let nowCalls = 0;
+const now = (): number => { nowCalls += 1; return fakeElapsedMs; };
+…
+expect(nowCalls, "delegateTask never consulted the injected clock -- this case's whole proof " +
+    "rests on the deadline arithmetic reading opts.now, so a green run without it proves nothing")
+    .toBeGreaterThan(0);
+```
+
+**Secondary, lower confidence, not reproduced:** `progressCount === 4`
+assumes a 1:1 mapping between server `res.write()` calls and client
+`reader.read()` returns. Chunks 1-3 cannot coalesce (each is released from
+inside the previous read), but a transport-level split of chunk 0 would give
+5 and turn the case red. I ran the file 5× green and could not provoke it;
+recording it only because this is the file 08-05 de-flaked.
+
+---
+
+### WR3-04: a `%VAR%` pair in the cwd still corrupts the `cmd.exe` command line — CR2-01's failure mode via a different message — and the belt-and-braces guard built for exactly this both misses it and is itself entirely untested
+
+**File:** `.pi/extensions/quality/index.ts:232, 286-292`; `.pi/lib/win-quote.ts:57-62`
+
+**Issue.** `quoteForWindows` wraps in double quotes, but `cmd.exe` expands
+`%VAR%` **before** quote processing — double quotes do not suppress it.
+Executed against the real `runTypecheckLeg(cwd, productionExec)` with a
+genuine stub installed:
+
+```
+cwd = ...\scratchpad\it3\pct%PATH%dir
+  status 1, stderr "The filename, directory name, or volume label syntax is incorrect."
+  => runTypecheckLeg returns { status: "fail", findings: ["The filename, directory name, ..."] }
+
+cwd = ...\scratchpad\it3\pct%OS%dir
+  status 1, stderr "The system cannot find the path specified."
+  => same: FAIL, carrying cmd.exe chatter as a compiler finding
+```
+
+That is CR2-01's exact shape: `gate.blocking === true`, `/quick` refuses,
+and the "findings" are `cmd.exe` noise about a path fragment. It needs a
+`%`-delimited pair naming a *defined* environment variable in the project
+path (`D:\work\%CLIENT%\app`), so it is rare — `50% off` is harmless — which
+is why this is a Warning, not a repeat Critical. WR2-06's trust gate also
+now sits in front of the malicious-clone variant, so I do **not** treat this
+as a security finding.
+
+The sharper half is the guard. `CMD_EXE_SPAWN_FAILURE`
+(`quality/index.ts:232`) is a single-message allowlist matching only
+`/is not recognized as an internal or external command/i`; neither message
+above matches, so the hardening the fix report presents as closing the
+residual **provably does not fire on a live instance of the thing it was
+built for**. And it has no test at all: I deleted the entire
+`if (result.status !== 0 && CMD_EXE_SPAWN_FAILURE.test(...))` block in a
+worktree and `quality-production-exec.test.ts`,
+`quality-gate-order.test.ts` and `quality-gates.test.ts` stayed green —
+46/46. It is dead code with a docstring.
+
+**Fix — pick one, both are small.**
+
+*Preferred (removes the shell entirely, matching `safety/git.ts`'s
+discipline):* stop launching the `.cmd` shim. Resolve the JS entry point and
+spawn `process.execPath` with `shell: false`, at which point no `cmd.exe`
+parsing — quoting, metacharacters or `%` expansion — can touch the command
+line at all.
+
+*Minimal:* refuse honestly rather than mis-reporting, and give the guard a test:
+
+```ts
+if (isWindows && bin.includes("%")) {
+    throw new Error(`${cmd} resolved to ${bin}, whose path contains '%' -- cmd.exe expands %VAR% ` +
+        "inside quotes, so this command line cannot be built safely; the leg is unavailable, not failed");
 }
 ```
 
-and add a test that resolves from a subdirectory of `repoRoot()` and asserts
-the leg is `pass`/`fail`, never `unavailable`.
+plus a `%OS%`-named fixture asserting `status: "unavailable"` (never `fail`),
+which would also be the first test that exercises the `CMD_EXE_SPAWN_FAILURE`
+path at all.
 
 ---
 
-### WR2-02: WR-06's session-level regression test asserts an exact float equality that only holds while `gate.totalMs < 5` — a slow gate stage turns it red with `122.99999999999999 !== 123`
+### WR3-05: WR2-06's "paired positive" test says "with the SAME repo" and uses a different repo — the trust flip is never demonstrated on the fixture the negative control used
 
-**File:** `tests/integration/quality-gate-order.test.ts:640-643`
+**File:** `tests/unit/quality-production-exec.test.ts:215-247`
 
-**Issue:** The test does `addQualityCost({ms: 123, tokens: 45})`, drives a
-blocked `/quick` (which adds `gate.totalMs` and then refunds it), and asserts
+**Issue.** The negative control (`:215`) uses
+`makeTempRepo("kypi-wr2-06-untrusted-")` with a stub `tsc` installed and
+`projectTrusted: false`. The test named *"runQuickGateStage(repoRoot(), true)
+**with the SAME repo**"* (`:242`) uses `repoRoot()` — a different fixture,
+with a different binary, in a different trust situation. The label states a
+pairing the code does not implement, in the phase whose subject is labels
+that state properties the code does not have.
+
+It is also redundant: `:87-91` already asserts exactly the same two
+expectations against `repoRoot()` with `projectTrusted: true`, so `:242-247`
+adds a third full `tsc --noEmit` and a third nested `vitest run` over 12
+files for no new information. And because the two halves use different
+fixtures, the pair does not isolate trust as the *only* varying input —
+which is what a paired positive is for.
+
+**Fix.** Make it genuinely paired, on the same fixture, and drop the
+duplicate:
 
 ```ts
-expect(peekQualityCost()).toEqual({ qualityMs: 123, qualityTokens: 45 });
+it("the SAME untrusted temp repo, trusted -- the typecheck leg genuinely runs the stub (the gate flips on trust alone)", () => {
+    setQuickGateExecOverrideForTests(undefined);
+    const repo = makeTempRepo("kypi-wr2-06-trusted-");
+    stubTsc(repo, { exitCode: 0 });
+    expect(runQuickGateStage(repo, true).legs.typecheck).toEqual({ status: "pass" });
+});
 ```
 
-The ledger value is `(123 + t) - t` where `t = Number(hrtime.bigint() delta)
-/ 1_000_000` — a full-precision double. That expression is **not** an
-identity in IEEE-754. Measured on this machine:
-
-```
-t uniform in [0, 0.5] : mismatch  0.0%
-t uniform in [0, 5]   : mismatch  0.0%
-t uniform in [0, 20]  : mismatch 30.7%
-t uniform in [0, 80]  : mismatch 33.4%
-example: (123 + 33.123456789) - 33.123456789 === 122.99999999999999
-```
-
-The 0% band is an accident of magnitude: while `123 + t < 128` the sum keeps
-the same binade as `123` and the round-trip cancels exactly. The moment
-`gate.totalMs` exceeds `5`, roughly 40% of values break the assertion. With
-`INSTANT_PASS_EXEC` installed the four legs are fast, so this is normally
-sub-millisecond — but `totalMs` is measured with `hrtime` across the whole
-leg loop and therefore includes any scheduler preemption or GC pause. One
-5 ms hiccup on a loaded CI runner produces a bewildering
-`122.99999999999999 !== 123` failure in a test about ledger accounting.
-
-I ran this file 3× idle and 3× under 48 concurrent CPU hogs on a 24-core
-machine without reproducing it, so this is a latent hazard rather than a
-current failure — but it is a fixed-magnitude bet of exactly the kind 08-05's
-de-flake work removed.
-
-**Fix:** assert the property, not the bit pattern:
-
-```ts
-const after = peekQualityCost();
-expect(after?.qualityTokens, "the prior contributor's tokens must survive untouched").toBe(45);
-expect(after?.qualityMs ?? 0, "the prior contributor's 123ms must survive a blocked gate's refund").toBeCloseTo(123, 6);
-```
-
-The same reasoning applies to the production ledger: consider rounding
-`totalMs` to a whole millisecond at `addQualityCost`/`refundQualityCost`, so a
-refunded turn cannot report `qualityMs: 122.99999999999999` on disk.
+Not a blocker — the negative control's `stringContaining("is not trusted")`
+assertion already makes it impossible for the `unavailable` to come from
+anywhere else.
 
 ---
 
-### WR2-03: WR-04's rewrite cut the timing margin from 40× to 2× — it now genuinely proves reset-on-progress, but it does so with a fixed 300 ms budget against 150 ms sleeps, in the file 08-05 de-flaked
+### WR3-06: `docs/WORKFLOWS.md`'s rewritten paragraph says "nine" ratchets, lists eleven, and the registry holds twelve — inside the paragraph that then forbids restating numbers
 
-**File:** `tests/integration/qoder-delegate.test.ts:601-663` (with
-`tests/helpers/qoder-loopback.ts:350-386`)
+**File:** `docs/WORKFLOWS.md:148-158` (introduced by `e52bd3c`);
+`tests/unit/workflow-budgets.test.ts:232-449`
 
-**Issue:** The mechanism change is right — four event-gated chunks whose gap
-*sum* (450 ms) exceeds the budget while each individual gap stays under it is
-the only shape that distinguishes reset-on-progress from a single fixed
-deadline, and I agree the old 50 ms/2000 ms case proved nothing. But the new
-case replaces a 40× safety margin with a 2× one: `injectedTimeoutMs = 300`,
-`interChunkDelayMs = 150`. Any single gap where the loopback server's write,
-the client's socket read, and the test's own `setTimeout(150)` together drift
-past 300 ms rejects the whole `delegateTask` with *"the event stream produced
-no bytes for 300ms"*.
+**Issue.** The WR2-04 doc fix wrote *"There is now ONE ratchet per directory
+reached this way (nine as of this writing — `workflows`, `routing`,
+`harness`, `diagnostics`, `checkpoint`, `loop-police`, `plan-mode`,
+`safety`, `quality`, `providers` and `.pi/lib`, …)"*. That list has **eleven**
+names, not nine, and `DIRECTORY_BUDGETS` has **twelve** entries (the twelfth
+is `.pi/extensions/todo.ts`, deliberate and honestly documented at
+`:435-448`). The very next paragraph then says *"The numbers themselves are
+not restated here … would create a second copy that could silently drift
+from the one the build actually enforces."* The copy drifted in the same
+commit that wrote the rule.
 
-`tests/helpers/qoder-loopback.ts`'s own docstring is the counter-authority:
-*"No WIDER duration fixes this: any fixed number is a race against however
-loaded the machine happens to be at that moment."* The fix commit's own
-justification — *"150ms of headroom per gap against scheduler jitter"* — is
-the reasoning that docstring rejects.
+`docs/QUALITY.md` declares the code authoritative on disagreement, so this is
+a documentation defect, not a behaviour one — but a wrong count in the
+paragraph correcting a previous overclaim is worth the ten seconds.
 
-I could not break it: 3× clean and 1× under 32 concurrent CPU hogs on 24
-cores all passed. The exposure is CI, where `macos-latest` runners have 3–4
-cores and now share them with `tests/unit/quality-production-exec.test.ts`,
-a new 13.6 s file that spawns two full `tsc --noEmit` runs and two nested
-`vitest run` invocations in parallel with everything else.
-
-**Fix:** take the review's own second suggestion and assert the property from
-the transcript instead of from the clock — the client already knows how many
-times it re-armed its deadline. Expose that count (or the `lastProgressAt`
-update count) on the fold result and assert `deadlineRearmCount === 3`; it is
-exact, instant, and cannot race. Failing that, inject the clock rather than
-sleeping.
-
----
-
-### WR2-04: `importedSubsystemDirs` closes the offloading hole at depth 1 only, while its own docstring and the untouched `docs/WORKFLOWS.md` claim it closes it generally — `.pi/lib/jsonl.ts` (605 lines) is a live, unbudgeted import target today
-
-**File:** `tests/unit/workflow-budgets.test.ts:611-644, 673-675`; with
-`docs/WORKFLOWS.md:146-157`
-
-**Issue:** Three separate residuals, all in the same claim.
-
-1. **Depth 1 only.** `importedSubsystemDirs(commandFiles)` scans only files
-   that themselves spell `registerCommand(` — i.e. `workflows/index.ts`. A
-   directory imported by `quality/` or `safety/` rather than by the command
-   file is still invisible. The docstring at `:625-628` nevertheless claims
-   *"A future subsystem reached only by import (Phase 9's `/grill`, `/plan`,
-   `/execute`, `/review` delegating into sibling directories) is caught by
-   this the same way `quality/` now is"*. It is caught only if the command
-   file imports it directly. Concrete: Phase 9 adds
-   `.pi/extensions/reviewers/`, imported by `quality/reviewer.ts` and never
-   by a command source — unbudgeted, and FLOW-11 reports green.
-2. **`.pi/extensions/` only.** The filter at `:637` is
-   `rel.startsWith(".pi/extensions/")`, which *discards* every non-extension
-   local import by construction. `.pi/lib/jsonl.ts` is **605 lines**, is
-   imported by five subsystems including `workflows/evidence.ts:42`, and has
-   no `DIRECTORY_BUDGETS` entry. It is a legitimate shared library today, and
-   it is also a perfectly good place to hide 1,200 lines of `/quick` logic
-   tomorrow, invisibly.
-3. **`docs/WORKFLOWS.md` was never touched.** `git log a4f57c4..HEAD --
-   docs/WORKFLOWS.md` is empty. The prose iteration 1 cited by line number is
-   verbatim unchanged, including *"which is why the aggregate is the
-   mechanism that actually holds the line, not a promise"* (`:155-157`) and
-   the singular *"the directory aggregate"* (`:146`, `:159-160`) — there are
-   now nine directory entries, not one. The fix report is honest here (it
-   only claims the `why` in the test registry was corrected), but the
-   iteration-1 finding named this file and it is still stating the old
-   mechanism. `docs/QUALITY.md` declares the code authoritative on
-   disagreement, which makes a stale doc a known-tolerated overclaim rather
-   than a lie — but it is still an overclaim.
-
-**Fix:** (a) make the scan transitive over local specifiers, seeded from the
-command sources and iterated to a fixed point; (b) drop the
-`.pi/extensions/` prefix filter in favour of "any repo-relative local
-specifier", mapping a non-extension hit to its own directory
-(`.pi/lib`) and adding a `DIRECTORY_BUDGETS` entry for it, grandfathered at
-its measured total exactly as `safety/` was; (c) update
-`docs/WORKFLOWS.md:146-160` to say "per file, and as a per-directory ratchet
-over every directory a command source reaches by import", and to state the
-residual (transitive depth, or lack of it) plainly.
-
----
-
-### WR2-05: the tightened calibration needles resist iteration 1's exploit but not a boilerplate one — a single sentence containing every needle still scores 6/6, and `docs/QUALITY.md` now overstates what `findingCatches` enforces
-
-**File:** `tests/fixtures/seeded-defects/index.ts:331, 345, 358, 372, 385,
-401`; `.pi/extensions/quality/calibration.ts:125-135`;
-`docs/QUALITY.md:236-239`
-
-**Issue:** The fix is real: the needles now describe behaviour, iteration 1's
-name-drop scores `0`, and it is pinned as `SHOTGUN_NAME_DROP_ARGS`. But
-`mustMentionAny` is still an **OR over plain substrings**, and the OR set is
-only as strong as its weakest member. Several members are generic enough to
-be asserted about any file of that kind without analysis — `"cannot fail"`
-(any test file), `"not wired in"`, `"performs none"`.
-
-**The shape that still scores, with no defect identified:** one BLOCKER per
-touched file, correct `location`, and this one boilerplate `concreteFailure`
-reused verbatim for all six:
-
-> `"This code cannot fail; it performs none of the verification it claims, writes into the real home directory, never calls isGuardedCommand, and always returns true regardless of input."`
-
-Tracing `findingCatches` by hand: `fabricated-evidence` ← `"performs none"`;
-`tautological-test` ← `"cannot fail"`; `escaped-side-effect` ←
-`"writes into the real"`; `absent-guard` ←
-`"never calls isGuardedCommand"`; `symptomatic-fix` ←
-`"always returns true"`; `false-label` ← `"regardless of input"`. Six of six,
-`catchRate === 1.0`, zero defects identified. Unlike iteration 1's exploit
-this one is not derivable from the *input* (it requires the answer key), so
-it is strictly weaker — which is why this is a Warning, not a repeat
-Critical.
-
-The doc, however, has been strengthened past what the code does.
-`docs/QUALITY.md:236-239` now reads *"`findingCatches` therefore requires the
-right file **and** a mention of the specific malformed *behaviour*, not
-merely a high finding count and not merely the right identifier."* What it
-requires is a substring match against one of three-to-four phrases. That
-distinction matters for RB-08-03: the live number will be produced by this
-same matcher, and the doc is the thing a reader will use to interpret it.
-
-**Fix:** add the fourth control so the residual is measured rather than
-argued, and soften the doc to what the code enforces:
-
-```ts
-/** WR2-05: the kitchen-sink shotgun -- one boilerplate sentence per file containing every needle. */
-const SHOTGUN_KITCHEN_SINK_ARGS = { …, findings: SHOTGUN_LOCATION_FILES.map((file, i) => ({
-	severity: "BLOCKER" as const, location: `${file}:${i + 1}`,
-	concreteFailure: "This code cannot fail; it performs none of the verification it claims, writes into " +
-		"the real home directory, never calls isGuardedCommand, and always returns true regardless of input.",
-	suggestedFix: "Fix it." })), … };
-// Record the number honestly, whatever it is -- if it is 1.0 today, that IS the residual,
-// and it belongs in docs/QUALITY.md next to the 0.50, not in a comment.
-```
-
-Then either require *two* independent needles (`mustMentionAll` of a
-two-element set), or require the needle to appear within N characters of the
-`locationFile`'s own symbol, or state plainly in `docs/QUALITY.md` that the
-matcher is a substring proxy for defect identification and that its ceiling
-is what the kitchen-sink control measures.
-
----
-
-### WR2-06: `productionExec` executes an arbitrary binary out of whatever directory `/quick` was invoked in, with no trust check
-
-**File:** `.pi/extensions/quality/index.ts:208-240` (called from
-`runQuickGateStage`, `workflows/index.ts:42`)
-
-**Issue:** The gate stage now resolves and runs
-`<ctx.cwd>/node_modules/.bin/tsc` (and `…/vitest`) unconditionally, at the
-top of every `/quick`, before the user has agreed to anything. `ctx.cwd` is
-whatever directory Pi was started in — which for this harness's stated
-purpose includes freshly cloned third-party repositories. A repository that
-ships a `node_modules/.bin/tsc.cmd` (committed, or installed from a
-compromised package) gets arbitrary code execution with full user
-permissions, on a machine CLAUDE.md states holds live static IAM admin
-credentials for an account whose `main` auto-deploys.
-
-This is not a *regression* — `npx tsc` preferred the same local binary — but
-CR-01's fix made local-binary resolution the deliberate design, and the
-project's own security posture ("review or vendor anything in the
-tool-execution or credential path") argues for a gate here. Pi exposes
-`ctx.isProjectTrusted()` (including temporary and CLI trust overrides) for
-exactly this decision, and `runQuickGateStage` takes only a `cwd`, so the
-trust answer never reaches it.
-
-**Fix:** thread the trust decision through, and refuse honestly rather than
-executing:
-
-```ts
-export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateResult {
-	return runDeterministicGates({
-		…,
-		exec: projectTrusted ? resolveExec() : () => {
-			throw new Error("the project is not trusted -- the typecheck/lint legs will not execute a binary from this cwd");
-		},
-	});
-}
-// workflows/index.ts:42
-const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
-```
-
-An untrusted project then reports `unavailable` with a reason that names
-trust — honest, and unlike WR2-01 it is a state the user can act on.
+**Fix.** Delete the parenthetical count and the enumeration entirely; the
+next paragraph already says to read the registry. If a count is wanted, say
+"one per directory (see `DIRECTORY_BUDGETS`)".
 
 ## Info
 
-### IN2-01: `evidence-gate.test.ts`'s M1 rationale describes behaviour the code no longer has *(carried forward from iteration 1, deliberately out of fix scope)*
+### IN3-01: `evidence-gate.test.ts`'s M1 rationale describes behaviour the code no longer has *(carried forward, iterations 1-2, still open)*
 
-**File:** `tests/unit/evidence-gate.test.ts:140`
-
-**Issue:** Unchanged. The `why` still reads *"only records already at
-headSha are considered for the isError check"*, while
-`workflows/evidence.ts`'s branch (3) inspects every record at any SHA before
-`headSha` is consulted. Row still passes, for the right reason; the recorded
-rationale is the pre-fix behaviour.
+**File:** `tests/unit/evidence-gate.test.ts:140` — verified unchanged. The
+`why` still reads *"only records already at headSha are considered for the
+isError check"*, while `workflows/evidence.ts`'s branch (3) inspects every
+record at any SHA first. Row passes for the right reason; the recorded
+rationale is pre-fix behaviour.
 
 **Fix:** reword to "a passing record from a different SHA cannot rescue a run
 that contains any failing record — branch (3) inspects every record, at any
@@ -524,26 +375,23 @@ SHA, before headSha is consulted."
 
 ---
 
-### IN2-02: `refute-or-promote.test.ts`'s bounded-loop assertion conflates provider calls with iterations *(carried forward from iteration 1, deliberately out of fix scope)*
+### IN3-02: `refute-or-promote.test.ts`'s bounded-loop assertion conflates provider calls with iterations *(carried forward, iterations 1-2, still open)*
 
-**File:** `tests/integration/refute-or-promote.test.ts:406-416`
+**File:** `tests/integration/refute-or-promote.test.ts:406-416` — verified
+unchanged. `boundedCallDelta <= MAX_REVIEW_ITERATIONS` compares a
+provider-call count against an iteration bound; they coincide only because
+this fixture has exactly one BLOCKER per iteration.
 
-**Issue:** Unchanged. `expect(run.boundedCallDelta).toBeLessThanOrEqual(
-MAX_REVIEW_ITERATIONS)` compares a provider-call count against an iteration
-bound; the two coincide only because this fixture has exactly one BLOCKER per
-iteration.
-
-**Fix:** keep the `iterations <= MAX_REVIEW_ITERATIONS` assertion and
-separately assert `boundedCallDelta === iterations * blockersPerIteration`.
+**Fix:** keep the iteration bound and separately assert
+`boundedCallDelta === iterations * blockersPerIteration`.
 
 ---
 
-### IN2-03: `quality/index.ts`'s drift guard cannot fire under TypeScript's own narrowing in the common case *(carried forward from iteration 1, deliberately out of fix scope)*
+### IN3-03: `quality/index.ts`'s drift guard cannot fire under TypeScript's own narrowing *(carried forward, iterations 1-2, still open)*
 
-**File:** `.pi/extensions/quality/index.ts:280-285`
-
-**Issue:** Unchanged. `if (CONSULT_ADVISOR_TOOL_NAME !== "consult_advisor")`
-compares a literal-typed `const` against the same literal.
+**File:** `.pi/extensions/quality/index.ts:366` — verified unchanged.
+`if (CONSULT_ADVISOR_TOOL_NAME !== "consult_advisor")` compares a
+literal-typed `const` against the same literal.
 
 **Fix:** `const _nameMatchesRegistration: "consult_advisor" =
 CONSULT_ADVISOR_TOOL_NAME;`, or drop it and rely on
@@ -551,60 +399,56 @@ CONSULT_ADVISOR_TOOL_NAME;`, or drop it and rely on
 
 ---
 
-### IN2-04: CR-03's exec-seam fix has no failing signature — removing all nine installs leaves the suite green, and the review's stronger suggestion was not adopted
+### IN3-04: CR-03's exec-seam has no failing signature *(carried forward, iterations 1-2, still open)*
 
-**File:** `tests/integration/quick-workflow.test.ts:105-113` (and the nine
-install sites)
+**File:** `tests/integration/quick-workflow.test.ts` (nine
+`setQuickGateExecOverrideForTests` install sites). Stripping all nine still
+leaves the suite green, because `productionExec` degrades fast in a
+`node_modules`-less temp dir. The enforcing seam iteration 1 suggested
+(throw when `process.env.VITEST` is set and no override is installed) was
+not adopted, so Phase 9's new tests are unprotected. Note WR2-06 *narrows*
+this slightly — an untrusted cwd now also refuses — but the seam itself is
+still unenforced.
 
-**Issue:** The fix report records this honestly: with CR-01/CR-02 landed,
-stripping every override still leaves the suite green, because
-`productionExec` now degrades fast in a `node_modules`-less temp dir. So the
-nine installs are defense-in-depth with no test that would notice their
-removal — exactly the "tautological fix" shape this phase exists to catch,
-albeit a benign one. Iteration 1's stronger suggestion — have `resolveExec()`
-throw when `process.env.VITEST` is set and no override has been installed, so
-a *future* test that forgets is red rather than platform-dependent — was not
-taken up, and the seam therefore remains unenforced for Phase 9's new tests.
-
-**Fix:** adopt the enforcing seam:
-
-```ts
-function resolveExec(): ExecRunner {
-	const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
-	if (typeof override === "function") return override as ExecRunner;
-	if (process.env.VITEST !== undefined && process.env.KYPI_ALLOW_REAL_GATE_EXEC === undefined) {
-		throw new Error("runQuickGateStage reached the production exec runner inside vitest without " +
-			"setQuickGateExecOverrideForTests -- install the seam, or set KYPI_ALLOW_REAL_GATE_EXEC=1 " +
-			"(quality-production-exec.test.ts is the only file that may)");
-	}
-	return productionExec;
-}
-```
+**Fix:** adopt the enforcing `resolveExec()` guard from iteration 2's IN2-04.
 
 ---
 
-### IN2-05: `firstChunkWritten` never resolves in `splitStreamAtMultiple` mode, contradicting its own "may always await it without hanging" contract
+### IN3-05: `firstChunkWritten` never resolves in `splitStreamAtMultiple` mode *(carried forward from iteration 2, still open)*
 
-**File:** `tests/helpers/qoder-loopback.ts:132-140, 187, 415-419, 512-530`
+**File:** `tests/helpers/qoder-loopback.ts:132-140, 539` — verified
+unchanged: `firstChunkWrittenGate.resolve` appears only on the two-chunk
+`writeStreamBody` path. A future test that sets `splitStreamAtMultiple` and
+awaits `loop.firstChunkWritten` hangs to the 120 s `testTimeout`, contrary to
+that field's own *"may always await it without hanging"* contract. WR2-03's
+new test does not hit this (it awaits `onProgress`, not
+`firstChunkWritten`), which is luck, not design.
 
-**Issue:** `writeStreamBodyMultiSplit` resolves `chunkWrittenGates[i]`, but
-`firstChunkWrittenGate` is only resolved on the two-chunk
-`writeStreamBody` path (`:539`). `splitStreamAt`'s docstring gained *"Ignored
-when `splitStreamAtMultiple` is also set"*, but `firstChunkWritten`'s own
-docstring at `:132-140` still promises *"a caller may always await it without
-hanging"*, and `:321` records that the design intent is for callers to await
-it unconditionally rather than branching. A future test that sets
-`splitStreamAtMultiple` and awaits `loop.firstChunkWritten` will hang until
-the 120 s `testTimeout` with no useful message.
-
-**Fix:** resolve it from the multi-split path too —
-`onChunkWritten: (index) => { chunkWrittenGates[index]?.resolve(); if (index
-=== 0) firstChunkWrittenGate.resolve(); }` — and note in the docstring that
-in multi-split mode it is an alias for `chunkWritten[0]`.
+**Fix:** resolve it from the multi-split path too and document that in
+multi-split mode it aliases `chunkWritten[0]`.
 
 ---
 
-_Reviewed: 2026-08-15T16:20:00Z_
+### IN3-06: `importedSubsystemDirs` finds imports by regex, so a dynamic or side-effect import is invisible to the ratchet *(new, not currently exploitable)*
+
+**File:** `tests/unit/workflow-budgets.test.ts:721`
+
+The scan is `/\bfrom\s+["'](\.\.?\/[^"']+)["']/g`, which matches static
+`import … from` and `export … from` only. `import("./x.ts")`,
+`import "./x.ts"` (side-effect) and `require()` are not seen. I grepped
+`.pi/` and there are **none** today — the only `require(` is inside a comment
+at `routing/schema.ts:188` — so the fixed point is complete for the current
+tree and WR2-04's claim stands. Recording it because the docstring
+(`:687-694`) and `docs/WORKFLOWS.md` both state the walk generally, and a
+Phase 9 lazy-loaded subsystem reached by `await import()` would be
+unbudgeted with FLOW-11 green.
+
+**Fix:** widen to `/(?:\bfrom\s*|\bimport\s*\(?\s*|^\s*import\s+)["'](\.\.?\/[^"']+)["']/gm`,
+or state the static-only limitation in the docstring.
+
+---
+
+_Reviewed: 2026-08-15T17:30:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
-_Iteration: 2_
+_Iteration: 3 (final)_
