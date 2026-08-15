@@ -636,11 +636,26 @@ describe("cost", () => {
 								await command.handler("do the forbidden thing yet again", ctx);
 								expect(isRunArmed(), "the blocked run must never arm").toBe(false);
 
+								// WR2-02 (`08-REVIEW.md` iteration 2): NOT `toEqual({qualityMs: 123, ...})`.
+								// The ledger value is `(123 + t) - t` for the gate stage's own
+								// hrtime-measured `t` (a full-precision double), which is only an
+								// IEEE-754 identity while `123 + t` stays under 128 (same binade as
+								// 123) -- INSTANT_PASS_EXEC keeps `t` sub-millisecond here, but a
+								// scheduler/GC hiccup pushing `t` past ~5ms would make roughly 40% of
+								// possible values round-trip to `122.99999999999999`, an assertion
+								// about wall-clock jitter wearing a ledger-accounting costume. Assert
+								// the property (the prior contributor's cost survives, to float
+								// tolerance), never the exact bit pattern.
+								const after = peekQualityCost();
 								expect(
-									peekQualityCost(),
-									"the prior contributor's own {ms:123, tokens:45} must survive a blocked gate's refund -- " +
+									after?.qualityTokens,
+									"the prior contributor's own tokens must survive a blocked gate's refund untouched",
+								).toBe(45);
+								expect(
+									after?.qualityMs ?? 0,
+									"the prior contributor's own 123ms must survive a blocked gate's refund -- " +
 										"only the gate stage's OWN cost may be removed, never another contributor's",
-								).toEqual({ qualityMs: 123, qualityTokens: 45 });
+								).toBeCloseTo(123, 6);
 							} finally {
 								takeQualityCost(); // drain the slot so it cannot leak into a later test
 								setQuickGateExecOverrideForTests(undefined);
