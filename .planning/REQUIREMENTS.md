@@ -106,7 +106,7 @@
 - [x] **GATE-05**: Findings are classified BLOCKER / WARNING / NIT, and unclassified findings are rejected as malformed **[FAUX]**
 - [x] **GATE-06**: BLOCKERs go through a refute-or-promote pass before they can stop work — reviewers told to find gaps invent them **[FAUX]**
 - [x] **GATE-07**: Task completion is gated on `tool_result` exit codes bound to a git SHA, never on transcript text — a model that writes prose tool calls can also write plausible command output **[FAUX]**
-- [ ] **GATE-08**: Seeded-defect calibration measures what the reviewer actually catches, distinguishing "the code is clean" from "the reviewer is asleep" **[FAUX]**
+- [x] **GATE-08**: Seeded-defect calibration measures what the reviewer actually catches, distinguishing "the code is clean" from "the reviewer is asleep" **[FAUX]**
 - [x] **GATE-09**: Advisor escalation lets the executor consult a stronger model at a decision point via `callModel()` **[FAUX]**
 - [x] **GATE-10**: Per-role thinking budgets apply on the nested path (reviewer, advisor, summariser); main-loop budgets apply only if the wire inspector proved the parameters land **[FAUX]** + **[RUNBOOK]**
 
@@ -301,7 +301,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | GATE-05 | Phase 8 | Complete |
 | GATE-06 | Phase 8 | Complete |
 | GATE-07 | Phase 6 | Complete |
-| GATE-08 | Phase 8 | Pending |
+| GATE-08 | Phase 8 | Complete |
 | GATE-09 | Phase 8 | Complete |
 | GATE-10 | Phase 8 | Complete |
 | QUAL-01 | Phase 8 | Complete |

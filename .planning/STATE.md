@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-09-PLAN.md
-last_updated: "2026-08-15T05:03:00.015Z"
+stopped_at: Completed 08-10-PLAN.md
+last_updated: "2026-08-15T05:22:35.907Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 86
-  completed_plans: 82
+  completed_plans: 83
   percent: 64
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 08 (quality-gates-engineering-quality) — EXECUTING
-Plan: 10 of 13
+Plan: 11 of 13
 Status: Ready to execute
 Last activity: 2026-08-15
 
-Progress: [██████████] 95%
+Progress: [██████████] 97%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -149,6 +149,7 @@ credentials can do has been done".
 | Phase 08 P07 | 70m | 2 tasks | 4 files |
 | Phase 08 P08 | 12m | 2 tasks | 3 files |
 | Phase 08 P09 | 45m | 2 tasks | 2 files |
+| Phase 08 P10 | 55m | 3 tasks | 3 files |
 
 ## Accumulated Context
 
@@ -399,6 +400,9 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-09: decideWorkflowStop runs on a POST-refutation review (non-BLOCKER findings + only promoted BLOCKERs), never the raw reviewer output -- callers must reconstruct findings before calling it
 - [Phase 08]: 08-09: runBoundedReviewLoop takes a caller-injected review() closure rather than owning how a review is produced -- this module has no fix-application mechanism, only bound-and-compare
 - [Phase 08]: 08-09: an unparseable or out-of-enum refutation result defaults to UPHELD, never withdrawn -- the opposite of the usual fail-closed instinct, since the safer state is the one where the BLOCKER still stands
+- [Phase 08]: 08-10: the calibration group drives ONE combined review contract (all six defects built into one temp repo) through runReview, rather than six separate per-defect calls -- mirrors a real review pass and matches scoreCalibration's expected[]/findings[] signature
+- [Phase 08]: 08-10: the shotgun fixture's 20 findings cycle through the six REAL touched files (not an unrelated path) so 'vagueness does not score' is tested by the mustMentionAny check alone, not a location mismatch -- caught by falsification F1's first attempt staying green when it should have turned red
+- [Phase 08]: 08-10: SeededDefectExpectation is re-declared structurally in calibration.ts rather than imported from the corpus module, since production code under .pi/extensions/ must not import from tests/
 
 ### Pending Todos
 
@@ -421,6 +425,7 @@ None yet.
 - **`shellcheck` is not installed on this machine**: full `--shell=sh` conformance of `bin/bootstrap.sh` and `scripts/check-gh-unauthenticated.sh` is UNVERIFIED locally. Narrowed by code review WR-07: `/usr/bin/dash` IS present (Git for Windows ships it) and is a genuine POSIX shell rather than bash in POSIX mode, so `tests/unit/lf-and-shell.test.ts` now parses every tracked `*.sh` with `dash -n` in addition to the four-construct bashism regex. Both scripts pass. A parse is not a lint — unquoted expansions and BSD-vs-GNU flag differences still need the Ubuntu `posix-lint` job, which has never run.
 - **Moving platform**: Pi ships every 2–3 days; the composed extension ecosystem ships 13–16 releases/month. Every pin must be re-verified at Phase 7 planning time, not inherited from research.
 - **Two Phase 7 checks are OUTSTANDING and machine-enforced as such**: `RB-07-01` (EXT-09, the composed smoke ritual -- one turn per provider, one subagent spawn, one blocked command, one wire dump) and `RB-07-02` (install the five pinned specs with a human physically present for the package-legitimacy gate, then reconcile `pi list` against `.pi/settings.json`). `RB-07-02` must run first -- `RB-07-01`'s subagent-spawn and blocked-command legs presuppose the packages are actually installed. EXT-01, EXT-03, EXT-04 and EXT-09 are `[~]` partial in REQUIREMENTS.md with `RB-07-01` named inline; EXT-05 is `[~]` partial with `RB-07-02` named inline.
+- RB-08-02 (plan 08-06) and RB-08-03 (plan 08-07, now also cited by 08-10) are named in code/doc comments across Phase 8 but neither id has an actual entry in docs/RUNBOOK.md yet, and docs-policy.test.ts's ALL_IDS has no PHASE_EIGHT_IDS array -- verified via grep, returns nothing. Out of 08-10's own file scope (SCOPE BOUNDARY); belongs to this phase's closing plan, matching the Phase 7 precedent where 07-13 added RB-07-01/02/03 together.
 
 ## Deferred Items
 
@@ -449,8 +454,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T05:03:00.003Z
-Stopped at: Completed 08-09-PLAN.md
+Last session: 2026-08-15T05:22:35.896Z
+Stopped at: Completed 08-10-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
