@@ -370,9 +370,9 @@ describe("CR-03 -- plan mode's read-only bash boundary is decided over an unbash
 		await handlers.get("session_start")?.({}, ctx);
 
 		// Now leave plan mode through the shipped command.
-		await commands.get("plan")?.("", ctx);
+		await commands.get("plan-mode")?.("", ctx);
 
-		expect(setCalls.length, "the /plan toggle must have set the active tool list").toBeGreaterThan(0);
+		expect(setCalls.length, "the /plan-mode toggle must have set the active tool list").toBeGreaterThan(0);
 		const restored = setCalls[setCalls.length - 1] ?? [];
 		expect(
 			[...restored].sort(),

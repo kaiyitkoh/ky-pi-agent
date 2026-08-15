@@ -224,9 +224,9 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/plan-mode/index.ts",
-		budget: 540,
-		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/index.ts, " +
-			"registers /plan and /plan-todos -- WR-05 widened discovery to catch command surfaces outside " +
+		budget: 550,
+		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/index.ts " +
+			"-- WR-05 widened discovery to catch command surfaces outside " +
 			"workflows/; upstream's own 390 lines plus this plan's vendoring header (the only permitted " +
 			"addition -- code body otherwise unchanged apart from the /todos -> /plan-todos rename), measured " +
 			"460 raw lines 2026-08-15, rounded up to the next ten. RAISED 470 -> 500 by the Phase 7 " +
@@ -240,7 +240,15 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"The reachability trace showing the review's stated path does NOT hold is recorded there too, " +
 			"rather than the finding being overstated. Re-measured 534 raw lines 2026-08-15 with " +
 			"countRawLines, rounded up to the next ten -- the figure previously stated here was 529, a " +
-			"CONTENT-line count, which is not the function the assertion uses (WR2-03)",
+			"CONTENT-line count, which is not the function the assertion uses (WR2-03). " +
+			"CORRECTED by plan 09-03: this entry's earlier clause naming both commands this file registers " +
+			"was true when written and is now FALSE -- DEVIATION 6 (plan 09-03) renamed the shorter, " +
+			"unhyphenated one to /plan-mode, a genuine composition conflict with Phase 9's ceremonial /plan " +
+			"workflow (.planning/research/FEATURES.md Part 2), resolved the same way DEVIATION 1 resolved " +
+			"the /todos collision: the general name goes to the authored workflow, the vendored example " +
+			"takes the more specific one. The rename plus DEVIATION 6's header paragraph consumed the " +
+			"6 lines of headroom this entry's own docstring already flagged as narrow. RAISED 540 -> 550. " +
+			"Re-measured 547 raw lines 2026-08-15 with countRawLines, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/todo.ts",
@@ -351,7 +359,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 1230,
+		budget: 1240,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
@@ -394,7 +402,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"the ONLY local control, and the decision NOT to add curl/wget to GUARDED_VERB_PATTERN in a " +
 			"review-fix pass is recorded with its reasons rather than left as an omission. A residual that " +
 			"is not written down is one nobody can act on. Re-measured 1222 raw lines across 3 files " +
-			"2026-08-15 (index.ts 534 + read-only.ts 585 + utils.ts 103)",
+			"2026-08-15 (index.ts 534 + read-only.ts 585 + utils.ts 103). RAISED 1230 -> 1240 by plan " +
+			"09-03: DEVIATION 6 (the /plan -> /plan-mode rename, a genuine composition conflict with " +
+			"Phase 9's ceremonial /plan workflow) added its header paragraph to index.ts. Re-measured " +
+			"1235 raw lines across 3 files 2026-08-15 (index.ts 547 + read-only.ts 585 + utils.ts 103), " +
+			"rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/safety",

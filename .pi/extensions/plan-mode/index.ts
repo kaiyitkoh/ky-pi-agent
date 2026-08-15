@@ -84,10 +84,23 @@
 //      upstream, and it is deliberate: upstream's predicate is wrong for a
 //      repository whose entire safety posture is built on not doing this.
 //
-// Verified by grep, recorded here and in 07-07-SUMMARY.md:
+//   6. DEVIATION 6 (plan 09-03). The command this file toggled under the
+//      bare, unhyphenated name became `plan-mode`, its description unchanged
+//      (it already reads correctly under the new name). Forced by a genuine
+//      composition conflict: `.planning/research/FEATURES.md` Part 2 names
+//      that same bare name as the ceremonial spec workflow's own entry point
+//      -- the name the user types to start `/grill`'s successor step -- and
+//      this vendored example was already sitting on it first. Resolved the
+//      same way item 1 above resolved the `/todos` collision (Standing Rule
+//      8): the general name goes to the authored workflow, and this vendored
+//      example -- the more specific capability -- takes the more specific
+//      name. The flag of that same bare name below is a STRUCTURALLY
+//      SEPARATE namespace with no collision and is unchanged.
+//
+// Verified by grep, recorded here and in 09-03-SUMMARY.md:
 //   the tool-registration call over `.pi/extensions/plan-mode/*.ts`  -> 0 matches
 //   `grep -n 'registerCommand' .pi/extensions/plan-mode/index.ts` -> exactly
-//     "plan" and "plan-todos", no "todos"
+//     "plan-mode" and "plan-todos", no bare short form and no "todos"
 //   `grep -n 'setActiveTools' .pi/extensions/plan-mode/index.ts`  -> 4 matches
 //     (enablePlanModeTools, restoreNormalModeTools x2, and the reassignment
 //     inside togglePlanMode's own call graph)
@@ -270,7 +283,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		persistState();
 	}
 
-	pi.registerCommand("plan", {
+	pi.registerCommand("plan-mode", {
 		description: "Toggle plan mode (read-only exploration)",
 		handler: async (_args, ctx) => togglePlanMode(ctx),
 	});

@@ -56,7 +56,7 @@ the unreviewed copy runs alongside the reviewed one.
 
 ## Deviations from a byte-for-byte copy
 
-Five, itemised in full in `index.ts`'s own header. Summarised:
+Six, itemised in full in `index.ts`'s own header. Summarised:
 
 1. `/todos` renamed to `/plan-todos` — a genuine command-name collision with
    the separately vendored `todo.ts` (plan 07-08).
@@ -76,6 +76,14 @@ Five, itemised in full in `index.ts`'s own header. Summarised:
    extension factory and exported so the round-trip property is testable.
    Reachability of the defect is recorded as UNVERIFIED in `index.ts` —
    the review's stated path was traced and does not hold.
+6. **DEVIATION 6 (plan 09-03).** `/plan` renamed to `/plan-mode` — a genuine
+   command-name collision with Phase 9's ceremonial spec workflow, which
+   `.planning/research/FEATURES.md` Part 2 names as owning that exact
+   command. Resolved the same way item 1 resolved the `/todos` collision
+   (Standing Rule 8): the general name goes to the authored workflow, and
+   this vendored example takes the more specific name.
+   `pi.registerFlag("plan", ...)` is a structurally separate namespace and is
+   unchanged.
 
 Deviations 4 and 5 mean this copy is **no longer diffable against upstream**
 in those two regions. That is deliberate: upstream's predicate is wrong for a
