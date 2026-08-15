@@ -189,6 +189,39 @@ export function currentSha(cwd: string): string {
 	return (result.stdout ?? "").trim();
 }
 
+/**
+ * The tree object id `HEAD` currently points at, in the repository at `cwd`.
+ *
+ * Phase 8's GATE-01 tree-comparison branch (`workflows/evidence.ts`
+ * `gateCompletion` branch (6)) needs this to tell "HEAD moved" apart from
+ * "HEAD moved to a commit whose tree is byte-identical to the one at arm
+ * time" -- an empty commit (`git commit --allow-empty`) is the textbook case:
+ * its SHA differs from its parent's, but its tree does not. Copies {@link
+ * currentSha}'s fail-closed contract exactly and for the identical reason: no
+ * sentinel exists for an unknown tree, because an unknown tree can never
+ * legitimately match a piece of evidence, and a sentinel would let a broken
+ * repository read compare-equal to itself under a naive `===`. THROWS on
+ * both a launch failure and a non-zero exit; callers must wrap it and refuse.
+ */
+export function currentTree(cwd: string): string {
+	const result = spawnSync("git", ["rev-parse", "HEAD^{tree}"], {
+		cwd,
+		encoding: "utf-8",
+		shell: false,
+		windowsHide: true,
+	});
+	if (result.error) {
+		throw new Error(`git rev-parse HEAD^{tree} failed to launch in "${cwd}": ${result.error.message}`);
+	}
+	if (result.status !== 0) {
+		throw new Error(
+			`git rev-parse HEAD^{tree} failed in "${cwd}" (exit ${result.status}) -- no sentinel exists for an ` +
+				"unknown tree, because an unknown tree can never legitimately match a piece of evidence",
+		);
+	}
+	return (result.stdout ?? "").trim();
+}
+
 // ---------------------------------------------------------------------------
 // The pure classifier half
 // ---------------------------------------------------------------------------

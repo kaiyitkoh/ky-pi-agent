@@ -11,7 +11,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { takeQualityCost } from "../diagnostics/quality-cost.ts";
 import { runQuickGateStage } from "../quality/index.ts";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
-import { classifyGitInvocation, currentBranch, currentSha } from "../safety/git.ts";
+import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
 
@@ -52,7 +52,7 @@ export default function (pi: ExtensionAPI): void {
 					takeQualityCost();
 					return void ctx.ui.notify(gate.report, "error");
 				}
-				startRun(ctx.cwd, currentSha(ctx.cwd));
+				startRun(ctx.cwd, currentSha(ctx.cwd), currentTree(ctx.cwd)); // GATE-01: baseTree captured in the same try, so a throw refuses via the catch below and never arms a run
 				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
 			} catch (err) {
 				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
@@ -78,16 +78,17 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.on("agent_end", (_event, ctx) => {
 		let sha = ""; // WR-02: currentSha fails closed by design (safety/git.ts:171)
-		try { sha = currentSha(armedCwd() ?? ctx.cwd); } catch { /* gate rejects on unknown SHA below */ }
+		let tree = ""; // GATE-01: same fail-closed contract as sha -- an empty tree never matches a real baseTree, so branch (6) never falsely fires, and an empty sha still rejects at branch (4)
+		try { sha = currentSha(armedCwd() ?? ctx.cwd); tree = currentTree(armedCwd() ?? ctx.cwd); } catch { /* gate rejects on unknown SHA/tree below */ }
 		try {
-			const verdict = endRun(sha);
+			const verdict = endRun(sha, tree);
 			// CR-01 iter4: accept wording states what was checked (HEAD moved), never that a commit landed.
-			if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: HEAD moved to ${verdict.sha} with no failed tool result -- no commit was verified and the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
+			if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: HEAD moved to ${verdict.sha} with a changed tree and no failed tool result -- no commit was verified and the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
 		} catch {
 			// Swallowed -- same rule as the tool_execution_end handler above.
 		}
 	});
 
 	// WR-02 iter3: endRun("") disarms an orphaned run (no agent_end ever arrived) before pruning; a no-op when nothing is armed.
-	pi.on("session_start", (_event, ctx) => { endRun(""); pruneEvidenceLogs(ctx.cwd); });
+	pi.on("session_start", (_event, ctx) => { endRun("", ""); pruneEvidenceLogs(ctx.cwd); });
 }

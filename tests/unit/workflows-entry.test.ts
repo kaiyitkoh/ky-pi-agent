@@ -101,7 +101,7 @@ describe("WR-02 (iteration 3) -- the registered session_start handler disarms a 
 		expect(sessionStartHandler, "the session_start hook must have registered").toBeDefined();
 
 		await withTempLogCwd(async (cwd) => {
-			startRun(cwd, "fixture-base-sha");
+			startRun(cwd, "fixture-base-sha", "fixture-base-tree");
 			expect(isRunArmed(), "the fixture must actually arm a run, or this test proves nothing").toBe(true);
 
 			const fakeCtx = { cwd } as unknown as ExtensionContext;

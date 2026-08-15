@@ -108,15 +108,23 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"four-part comment (why the drain exists, why discarding beats a fabricated {qualityMs:0}, why nothing " +
 			"measurable is lost, why this is a deliberate second call site outside diagnostics/) -- all of it lives " +
 			"in this file per the plan's own instruction not to inline gate/leg logic elsewhere, so the growth is " +
-			"real and visible here rather than offloaded. Measured 94 raw lines 2026-08-15, rounded up to the next " +
-			"ten. Still well under the ROADMAP's own \"above 100 it has FAILED\" line",
+			"real and visible here rather than offloaded. Plan 08-12 (GATE-01's tree-comparison branch) then passed " +
+			"currentTree(ctx.cwd) alongside currentSha(ctx.cwd) at both startRun and agent_end call sites, inside " +
+			"the same try/catch as before -- no new branch of control flow, one import and two call-site edits. " +
+			"Measured 95 raw lines 2026-08-15, rounded up to the next ten. Still well under the ROADMAP's own " +
+			"\"above 100 it has FAILED\" line",
 	},
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
-		budget: 340,
+		budget: 390,
 		why: "CR-01 iteration 3 fix: recordCaptureFailure() so a tool_execution_end capture that throws " +
 			"rejects instead of vanishing, plus the tool_execution_end docstring rewrite -- measured 336 " +
-			"raw lines 2026-08-15 (up from 328), rounded up to the next ten",
+			"raw lines 2026-08-15 (up from 328), rounded up to the next ten. RAISED 340 -> 390 by plan 08-12 " +
+			"(GATE-01): gateCompletion gained a sixth ordered branch (headTree === baseTree, positioned between " +
+			"branches (2) and (3), with the docstring explaining why), startRun/endRun now thread baseTree/headTree " +
+			"through RunState, and the WHAT THIS PREDICATE DOES NOT PROVE paragraph was rewritten to state the " +
+			"narrower, still-true unrelated-content limit rather than the now-closed empty-commit one. Measured " +
+			"381 raw lines 2026-08-15, rounded up to the next ten",
 	},
 	// WR-05: these three are NOT under workflows/ -- discovered because they contain
 	// COMMAND_MARKER (isCommandSource). Declared here so the completeness check
@@ -215,12 +223,14 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[] = [
 	{
 		dir: WORKFLOWS_DIR,
-		budget: 430,
+		budget: 480,
 		why: "D-11's original ratchet -- /quick's own directory; measured 415 raw lines 2026-08-15 " +
 			"(index.ts 79 + evidence.ts 336) after iteration 3's CR-01/WR-02, rounded up to the next ten. " +
 			"RAISED 420 -> 430 by plan 08-11 (GATE-01 wiring) -- see the per-file entry above for what grew. " +
 			"Re-measured 430 raw lines 2026-08-15 (index.ts 94 + evidence.ts 336), already an exact multiple " +
-			"of ten",
+			"of ten. RAISED 430 -> 480 by plan 08-12 (GATE-01's tree-comparison branch) -- see both per-file " +
+			"entries above for what grew. Re-measured 476 raw lines 2026-08-15 (index.ts 95 + evidence.ts 381), " +
+			"rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/routing",

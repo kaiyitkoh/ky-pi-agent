@@ -109,16 +109,34 @@ export function recordFromToolResult(input: {
  *       trivially "at HEAD" by construction and cannot support a completion
  *       claim (CR-01a: this is what stops `bash echo hi` -- or a bare
  *       `read`, which is not even a command -- from satisfying a claim).
+ *   (6) [Phase 8, GATE-01] `headTree === baseTree` -> reject: HEAD MOVED
+ *       (branch (2) already ruled out the unmoved case) but the tree it now
+ *       points at is byte-identical to the tree recorded at arm time -- the
+ *       commit, if any, contains no change and cannot support a completion
+ *       claim. THIS BRANCH IS POSITIONED HERE, IMMEDIATELY AFTER (2) AND
+ *       BEFORE (3), NOT APPENDED AT THE END -- deliberately, and the position
+ *       is as binding as the branch itself: (2) catches "no commit at all"
+ *       and (6) catches "a commit that changed nothing"; they are the same
+ *       class of claim ("HEAD-shaped evidence of work that is not evidence
+ *       of work") and belong adjacent in the reading order. It still sits
+ *       BEFORE (3) because a recorded tool failure must outrank BOTH of
+ *       them, for the identical reason (3)'s own comment gives: a failure is
+ *       a fact about the run's task that a later HEAD movement -- empty
+ *       commit or not -- does not retroactively erase. Numbered (6), not
+ *       renumbered into sequence, because that is the label every caller,
+ *       test and doc in this codebase uses for it; the docstring states the
+ *       true execution position explicitly rather than relying on the
+ *       number to imply it.
  *   (3) ANY record in the run has `isError === true` -> reject, naming every
- *       failing tool. This branch sits BEFORE the `headSha` narrowing on
- *       purpose (CR-01b): a failed tool result is a fact about this run's
- *       task, and a commit landing AFTER the failure does not retroactively
- *       make it irrelevant -- the failing record must not be "aged out" of
- *       the predicate just because it no longer sits at the SHA that ends up
- *       being HEAD. Without this branch the accept condition silently
- *       reduced to "a commit landed via a tool call that exited 0", because
- *       the only record that can ever sit AT a post-commit HEAD is the
- *       commit call itself.
+ *       failing tool. This branch sits BEFORE the `headSha`-vs-evidence
+ *       narrowing on purpose (CR-01b): a failed tool result is a fact about
+ *       this run's task, and a commit landing AFTER the failure does not
+ *       retroactively make it irrelevant -- the failing record must not be
+ *       "aged out" of the predicate just because it no longer sits at the
+ *       SHA that ends up being HEAD. Without this branch the accept
+ *       condition silently reduced to "a commit landed via a tool call that
+ *       exited 0", because the only record that can ever sit AT a
+ *       post-commit HEAD is the commit call itself.
  *   (4) no record whose `sha === headSha` -> reject, naming the recorded
  *       SHA(s) and `headSha`, stating the claim is stale.
  *   (5) otherwise -> accept, carrying `headSha`. Because branch (3) already
@@ -135,14 +153,22 @@ export function recordFromToolResult(input: {
  *
  * WHAT THIS PREDICATE DOES NOT, AND CANNOT, PROVE: that the commit's diff
  * contains the claimed work, or that anything meaningful was verified at
- * all -- an empty commit (`git commit --allow-empty`) or a commit of wholly
- * unrelated content both still ACCEPT here, because distinguishing "the
- * commit contains the work" from "the commit is empty" needs a diff or a
- * tree hash, which this phase does not have (Phase 8's job). Callers must
- * not describe an ACCEPT verdict as an endorsement of the work; see
- * `index.ts`'s notification text and `docs/WORKFLOWS.md` section 4.
+ * all -- a commit of wholly unrelated content, whose tree DIFFERS from the
+ * tree recorded at arm time, still ACCEPTS here, because deciding whether a
+ * diff contains the CLAIMED work is a semantic judgement this predicate does
+ * not, and cannot, make. (An empty commit, or any other way HEAD can end up
+ * pointing at a byte-identical tree, is what branch (6) above closes -- that
+ * narrower gap is no longer open.) Callers must not describe an ACCEPT
+ * verdict as an endorsement of the work; see `index.ts`'s notification text
+ * and `docs/WORKFLOWS.md` section 4.
  */
-export function gateCompletion(records: readonly EvidenceRecord[], headSha: string, baseSha: string): EvidenceVerdict {
+export function gateCompletion(
+	records: readonly EvidenceRecord[],
+	headSha: string,
+	baseSha: string,
+	headTree: string,
+	baseTree: string,
+): EvidenceVerdict {
 	if (records.length === 0) {
 		return {
 			ok: false,
@@ -158,6 +184,20 @@ export function gateCompletion(records: readonly EvidenceRecord[], headSha: stri
 			reason:
 				`no commit was made during this run -- HEAD is still ${headSha}, so the recorded tool results predate ` +
 				"any work landing and cannot support a completion claim",
+		};
+	}
+
+	// (6) [Phase 8, GATE-01]: HEAD moved (branch (2) above already excluded
+	// the unmoved case) but its tree is byte-identical to the tree recorded
+	// at arm time -- the commit contains no change. See this function's own
+	// docstring for why this sits here, between (2) and (3), rather than at
+	// the end.
+	if (headTree === baseTree) {
+		return {
+			ok: false,
+			reason:
+				`HEAD moved to ${headSha} but its tree (${headTree}) is byte-identical to the tree recorded at arm ` +
+				`time (${baseTree}) -- the commit contains no change and cannot support a completion claim`,
 		};
 	}
 
@@ -201,6 +241,8 @@ const RUN_STATE_KEY = "__kypiQuickRun";
 interface RunState {
 	readonly cwd: string;
 	readonly baseSha: string;
+	/** [Phase 8, GATE-01] The tree `HEAD` pointed at when this run was armed -- fed to branch (6) at {@link endRun}. */
+	readonly baseTree: string;
 	readonly records: EvidenceRecord[];
 }
 
@@ -209,9 +251,9 @@ function runSlot(): RunState | undefined {
 	return raw as RunState | undefined;
 }
 
-/** Arm a run: clears any prior buffer and stores `{cwd, baseSha, records: []}`. */
-export function startRun(cwd: string, sha: string): void {
-	const state: RunState = { cwd, baseSha: sha, records: [] };
+/** Arm a run: clears any prior buffer and stores `{cwd, baseSha, baseTree, records: []}`. */
+export function startRun(cwd: string, sha: string, tree: string): void {
+	const state: RunState = { cwd, baseSha: sha, baseTree: tree, records: [] };
 	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = state;
 }
 
@@ -243,13 +285,16 @@ export function armedCwd(): string | undefined {
 /**
  * Compute the verdict for the armed run, write exactly one evidence row,
  * disarm, and return the verdict. Returns `undefined` when no run is armed.
+ *
+ * `headTree` [Phase 8, GATE-01] feeds branch (6) alongside `state.baseTree`
+ * captured at {@link startRun} time -- see `gateCompletion`'s own docstring.
  */
-export function endRun(headSha: string): EvidenceVerdict | undefined {
+export function endRun(headSha: string, headTree: string): EvidenceVerdict | undefined {
 	const state = runSlot();
 	if (state === undefined) {
 		return undefined;
 	}
-	const verdict = gateCompletion(state.records, headSha, state.baseSha);
+	const verdict = gateCompletion(state.records, headSha, state.baseSha, headTree, state.baseTree);
 	writeEvidenceRow(state.cwd, {
 		verdict: verdict.ok ? "accept" : "reject",
 		// CR-01 iter4: state what was actually checked, not an endorsement --
