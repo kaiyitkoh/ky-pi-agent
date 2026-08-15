@@ -427,7 +427,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 09-05-PLAN.md — SPEC §2 Verified Codebase Facts evidence gate (FLOW-03)
+- [x] 09-05-PLAN.md — SPEC §2 Verified Codebase Facts evidence gate (FLOW-03)
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
@@ -553,7 +553,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
-| 9. Ceremonial Workflows | 4/17 | In Progress|  |
+| 9. Ceremonial Workflows | 5/17 | In Progress|  |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
 | 11. Terminal UI | 0/TBD | Not started | - |
 
