@@ -111,7 +111,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/checkpoint/index.ts",
-		budget: 240,
+		budget: 250,
 		why: "Phase 7 plan 03 (EXT-07)'s /checkpoint-restore command -- WR-05 widened discovery to catch " +
 			"command surfaces outside workflows/; measured 161 raw lines 2026-08-15, rounded up to the next ten. " +
 			"RAISED 170 -> 240 by the Phase 7 code-review fix pass, for four findings that all land in this " +
@@ -122,7 +122,10 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"noOpUIContext `notify: () => { }` at dist/core/extensions/runner.js:92 -- it emitted nothing, " +
 			"so the branch was identical to the upstream return it was presented as fixing). Each carries " +
 			"the citation or the worked example that makes it checkable, which is the point. " +
-			"Re-measured 229 raw lines 2026-08-15, rounded up to the next ten",
+			"Re-measured 229 raw lines 2026-08-15, rounded up to the next ten. RAISED 240 -> 250 by the " +
+			"iteration-3 fix pass for CR2-03: both restore call sites now name the undo sha and the count of " +
+			"files removed, because a restore that deletes post-checkpoint work silently is the failure mode " +
+			"that finding IS. Re-measured 244 raw lines 2026-08-15",
 	},
 	{
 		file: ".pi/extensions/loop-police/loop-police.ts",
@@ -201,7 +204,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
-		budget: 940,
+		budget: 1050,
 		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
 			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
 			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten. " +
@@ -219,7 +222,17 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"exclusion pathspec applied symmetrically to both add -A call sites), and the four index.ts " +
 			"findings itemised above. Re-measured 933 raw lines across 3 files 2026-08-15 (index.ts 229 + " +
 			"git.ts 374 + store.ts 330), rounded up to the next ten. Two ratchet raises, both recorded with " +
-			"the previous figure and the reason rather than quietly widened",
+			"the previous figure and the reason rather than quietly widened. RAISED 940 -> 1050 by the " +
+			"iteration-3 fix pass for CR2-03: pathsAddedSince computes 'what exists now' with git add -A, " +
+			"which respects .gitignore AND NOTHING ELSE, so in any repository that does not ignore them " +
+			".pi/state (this module's OWN store, created by store.ts moments after each capture), .env, " +
+			"node_modules/ and .terraform/ were ordinary untracked-non-ignored paths and were DELETED by a " +
+			"restore -- measured, readCheckpoints() returned [] afterwards. The added lines are " +
+			"MACHINE_STATE_EXCLUDE_PATHSPECS, the pre-restore undo checkpoint that makes restoring " +
+			"reversible, and the CORRECTION of the docstring that argued the set difference was safer than " +
+			"git clean -fd (for untracked-non-ignored paths it was identical). A false safety argument in a " +
+			"data-loss path is exactly what a line budget must not pressure out. Re-measured 1050 raw lines " +
+			"across 3 files 2026-08-15 (index.ts 244 + git.ts 475 + store.ts 331)",
 	},
 	{
 		dir: ".pi/extensions/loop-police",

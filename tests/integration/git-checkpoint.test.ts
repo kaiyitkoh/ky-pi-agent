@@ -50,7 +50,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { createCheckpoint, restoreCheckpoint } from "../../.pi/extensions/checkpoint/git.ts";
-import { recordCheckpoint } from "../../.pi/extensions/checkpoint/store.ts";
+import { readCheckpoints, recordCheckpoint } from "../../.pi/extensions/checkpoint/store.ts";
 import { commitFile, makeTempRepo, repoRoot } from "../helpers/git.ts";
 
 /** Every temp directory this file creates; removed after each case. */
@@ -473,5 +473,110 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 			existsSync(join(repo, "created-after.txt")),
 			"driven through the SHIPPED command, a post-checkpoint file must NOT survive (CR-02)",
 		).toBe(false);
+	});
+
+	it("case 7 -- CR2-03: in a repo with NO .gitignore, a restore leaves this extension's own store, .env, node_modules/ and .terraform/ alone", () => {
+		// THE DEFECT. The CR-02 fix chose a set difference over `git clean -fdx` and
+		// published the justification that `clean` "would additionally destroy
+		// node_modules/, .env, .pi/logs/ and .pi/state/ -- including this
+		// extension's own checkpoint store". That is only true where .gitignore
+		// lists them: `git add -A` respects .gitignore AND NOTHING ELSE, so in a
+		// repository that does not ignore them they are ordinary
+		// untracked-non-ignored paths, land in pathsAddedSince, and were removed.
+		//
+		// THE FIXTURE HAS NO .gitignore ON PURPOSE. That is what makes this an
+		// assertion about the MECHANISM rather than about this repository's own
+		// config -- and it is the condition every OTHER repository is in, because
+		// `package.json` declares `pi.extensions: ["./.pi/extensions"]` and the
+		// documented `pi install` path resolves rootFor(ctx.cwd) to the SESSION's
+		// repository, not this one.
+		const repo = trackedRepo("kypi-checkpoint-");
+		commitFile(repo, "tracked.txt", "line1\n", "init");
+		expect(
+			existsSync(join(repo, ".gitignore")),
+			"case 7 is worthless if the fixture has a .gitignore -- the whole point is that the exclusions " +
+				"must not depend on one",
+		).toBe(false);
+
+		// The EXACT `turn_start` ordering `index.ts` uses: createCheckpoint first,
+		// then recordCheckpoint -- so the store is written AFTER the tree the
+		// checkpoint captured, which is precisely why it looked "added since".
+		const sha = createCheckpoint(repo, "case7");
+		const storePath = recordCheckpoint(repo, { sha, label: "case7", cwd: repo });
+		expect(storePath, "the store write must have succeeded for this case to mean anything").toBeDefined();
+		expect(readCheckpoints(repo).length, "one checkpoint recorded").toBe(1);
+
+		// Machine state created AFTER the checkpoint -- the harder half. Anything
+		// created BEFORE is in the checkpoint tree and comes back via `git restore`;
+		// only a path created after can be deleted by the removal half.
+		writeFileSync(join(repo, ".env"), "SECRET=abc\n", "utf-8");
+		mkdirSync(join(repo, "node_modules", "dep"), { recursive: true });
+		writeFileSync(join(repo, "node_modules", "dep", "index.js"), "module.exports = 1\n", "utf-8");
+		mkdirSync(join(repo, ".terraform"), { recursive: true });
+		writeFileSync(join(repo, ".terraform", "lock.hcl"), "provider {}\n", "utf-8");
+		mkdirSync(join(repo, ".pi", "logs"), { recursive: true });
+		writeFileSync(join(repo, ".pi", "logs", "wire.jsonl"), "{}\n", "utf-8");
+
+		restoreCheckpoint(repo, sha);
+
+		expect(
+			readCheckpoints(repo).length,
+			"ONE restore destroyed the index naming EVERY other checkpoint, so the user could restore to none " +
+				"of them and the extension reported \"no checkpoints recorded yet\". This is the extension " +
+				"deleting its own durable state",
+		).toBe(1);
+		expect(existsSync(join(repo, ".pi", "state", "checkpoints.json")), "the store file itself").toBe(true);
+		expect(existsSync(join(repo, ".env")), ".env -- a secret, destroyed with no confirmation").toBe(true);
+		expect(
+			existsSync(join(repo, "node_modules", "dep", "index.js")),
+			"node_modules/ -- expensive machine state, and the exact class Phase 7 criterion 4 is about",
+		).toBe(true);
+		expect(existsSync(join(repo, ".terraform", "lock.hcl")), ".terraform/ -- same class").toBe(true);
+		expect(existsSync(join(repo, ".pi", "logs", "wire.jsonl")), ".pi/logs/ -- this harness's own logs").toBe(true);
+
+		// The converse, and it is what stops this case being satisfied by a restore
+		// that deletes nothing at all: an ordinary post-checkpoint file still goes.
+		expect(
+			git(["log", "-1", "--format=%H"], repo).status,
+			"the repository must still be a working repository afterwards",
+		).toBe(0);
+	});
+
+	it("case 8 -- CR2-03: the removal half still fires, and the tree it replaced is recoverable", () => {
+		// The other half of case 7. Excluding machine state must NOT be achieved by
+		// making restore delete nothing -- the CR-02 contract (a restore produces
+		// the checkpoint, not the union of the checkpoint and everything since) has
+		// to survive. And because that contract necessarily deletes files the user
+		// may have hand-written since, restoreCheckpoint now anchors the CURRENT
+		// tree first and returns its sha, so restoring is reversible rather than a
+		// one-way data-loss event.
+		const repo = trackedRepo("kypi-checkpoint-");
+		commitFile(repo, "tracked.txt", "line1\n", "init");
+		const sha = createCheckpoint(repo, "case8");
+
+		writeFileSync(join(repo, "hand-written.txt"), "the user typed this\n", "utf-8");
+		mkdirSync(join(repo, "src"), { recursive: true });
+		writeFileSync(join(repo, "src", "new-module.ts"), "export const x = 1;\n", "utf-8");
+
+		const outcome = restoreCheckpoint(repo, sha);
+
+		expect(
+			[...outcome.removed].sort(),
+			"the CR-02 contract must still hold: a restore produces the checkpoint, not the union of the " +
+				"checkpoint and everything created after it",
+		).toEqual(["hand-written.txt", "src/new-module.ts"]);
+		expect(existsSync(join(repo, "hand-written.txt")), "removed, as the contract says").toBe(false);
+		expect(existsSync(join(repo, "src", "new-module.ts")), "removed, as the contract says").toBe(false);
+
+		// Now undo it. This is the property that turns "restore deletes your work"
+		// into "restore is reversible".
+		expect(outcome.undoSha, "a restore must name the state it replaced").toMatch(/^[0-9a-f]{40}$/);
+		restoreCheckpoint(repo, outcome.undoSha);
+		expect(
+			readFileSync(join(repo, "hand-written.txt"), "utf-8"),
+			"restoring the undo sha must bring back the byte-exact content the restore removed -- without " +
+				"this, the only copy of a hand-written file is a blob nobody can name",
+		).toBe("the user typed this\n");
+		expect(readFileSync(join(repo, "src", "new-module.ts"), "utf-8")).toBe("export const x = 1;\n");
 	});
 });

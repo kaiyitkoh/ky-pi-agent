@@ -153,8 +153,18 @@ export default function (pi: ExtensionAPI): void {
 				return;
 			}
 			try {
-				restoreCheckpoint(root, match.sha);
-				ctx.ui.notify(`checkpoint-restore: working tree restored to ${match.sha}`, "info");
+				// CR2-03: the restore's removal half deletes post-checkpoint files, so
+				// the SHA of the tree it replaced is the undo, and the user is told it
+				// rather than left to find it. `removed` is named too -- a restore that
+				// deletes files silently is the failure mode this whole finding is.
+				const outcome = restoreCheckpoint(root, match.sha);
+				ctx.ui.notify(
+					`checkpoint-restore: working tree restored to ${match.sha}\n` +
+						`${outcome.removed.length} file(s) removed as absent from that checkpoint` +
+						(outcome.removed.length > 0 ? `: ${outcome.removed.join(", ")}` : "") +
+						`\nundo with /checkpoint-restore ${outcome.undoSha}`,
+					"info",
+				);
 			} catch (err) {
 				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
 			}
@@ -214,8 +224,12 @@ export default function (pi: ExtensionAPI): void {
 		]);
 		if (choice?.startsWith("Yes")) {
 			try {
-				restoreCheckpoint(root, match.sha);
-				ctx.ui.notify("Code restored to checkpoint", "info");
+				const outcome = restoreCheckpoint(root, match.sha);
+				ctx.ui.notify(
+					`Code restored to checkpoint (${outcome.removed.length} file(s) removed) -- ` +
+						`undo with /checkpoint-restore ${outcome.undoSha}`,
+					"info",
+				);
 			} catch (err) {
 				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
 			}

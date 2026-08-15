@@ -306,18 +306,59 @@ Both cannot be right. `git.ts`'s SCOPE BOUNDARY is the accurate one, and it now
 says so.
 
 **Decision taken: mitigated, not solved.** `git add -A` is now run with
-`SECRET_EXCLUDE_PATHSPECS` — `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`,
-`id_ed25519*`, `credentials`, `*.tfstate`, `*.tfstate.*` — applied to **both**
-`add -A` call sites (the capture, and the "what exists now" side of the
-restore's set difference), so an excluded path is absent from both trees and
-can therefore never be captured *nor deleted by a restore*. That symmetry is
-why the exclusions live in one exported constant rather than two literal
-lists.
+`CHECKPOINT_EXCLUDE_PATHSPECS` applied to **both** `add -A` call sites (the
+capture, and the "what exists now" side of the restore's set difference), so
+an excluded path is absent from both trees and can therefore never be captured
+*nor deleted by a restore*. That symmetry is why the exclusions live in one
+exported constant rather than two literal lists. It is two lists composed into
+one:
+
+- `SECRET_EXCLUDE_PATHSPECS` — `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`,
+  `id_ed25519*`, `*credentials`, `*.tfstate`, `*.tfstate.*`.
+- `MACHINE_STATE_EXCLUDE_PATHSPECS` — `.pi/state`, `.pi/logs`, `node_modules`,
+  `.env`, `.terraform`.
 
 **What is still true:** a secret under an unremarkable name is still captured.
 This repository's own `.gitignore` is thorough, which is why the review rated
 this a warning rather than a blocker; the extension is written to be
 repo-agnostic and cannot assume the next repository's is.
+
+### The restore half of the same residual (CR2-03) — closed, not accepted
+
+The second review iteration found that the argument above had a hole large
+enough to be a blocker on its own, and it is recorded here because
+`docs/EXTENSIONS.md` previously described only the *capture* hazard and said
+nothing about restore.
+
+`git add -A` respects `.gitignore` **and nothing else**. So "gitignored paths
+cannot enter the added set and cannot be deleted" was a statement about the
+repository the session happens to be in, not about this extension. In a
+repository that does not ignore them, `.pi/state/`, `.env`, `node_modules/`
+and `.terraform/` were ordinary untracked-non-ignored paths, landed in the
+added set, and were **deleted by a restore** — including this extension's own
+checkpoint store, which `store.ts` creates moments after each capture.
+Measured on a fresh repository with no `.gitignore`: after one restore,
+`.pi/state/checkpoints.json` was gone and `readCheckpoints()` returned `[]`,
+so every other checkpoint became unreachable and the extension reported "no
+checkpoints recorded yet". `package.json` declares
+`pi.extensions: ["./.pi/extensions"]`, so the documented `pi install` path
+loads this at user scope and it applies to every repository the operator
+opens.
+
+`MACHINE_STATE_EXCLUDE_PATHSPECS` closes it by name rather than by
+`.gitignore`, and `git.ts`'s docstring no longer claims the set difference is
+safer than `git clean -fd` for untracked-non-ignored paths — for those it was
+identical. `tests/integration/git-checkpoint.test.ts` case 7 asserts it **in a
+repository with no `.gitignore` at all**, which is what makes it an assertion
+about the mechanism.
+
+**Restore is reversible.** Whatever survives the exclusions, the CR-02
+contract still requires deleting files created after the checkpoint, some of
+which the user may have written by hand. `restoreCheckpoint` therefore takes a
+checkpoint of the current tree *first*, anchors it under
+`refs/kypi-checkpoints/`, and returns its SHA as `undoSha`; both call sites in
+`index.ts` show the user `/checkpoint-restore <undoSha>`. Case 8 proves the
+round trip byte-exactly.
 
 ---
 

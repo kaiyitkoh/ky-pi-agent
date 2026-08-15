@@ -63,8 +63,12 @@
  * ---------------------------------------------------------------------------
  * SCOPE BOUNDARY, STATED RATHER THAN ASSUMED (T-07-10, T-07-11)
  * ---------------------------------------------------------------------------
- * `git add -A` respects `.gitignore`, so gitignored paths — `node_modules/`,
- * `.pi/logs/`, `.pi/state/`, `.env` — are DELIBERATELY NOT captured. Capturing
+ * `git add -A` respects `.gitignore`, so gitignored paths are DELIBERATELY NOT
+ * captured. `node_modules/`, `.pi/logs/`, `.pi/state/`, `.env` and
+ * `.terraform/` do not depend on that any more — CR2-03 found that "gitignored"
+ * is a property of the repository the SESSION is in, not of this one, and
+ * {@link MACHINE_STATE_EXCLUDE_PATHSPECS} now excludes them by name from both
+ * `add -A` sites so they are neither captured nor deleted. Capturing
  * them would put a full `node_modules` tree, or worse, a secret, into every
  * checkpoint on every turn. Untracked-but-NOT-ignored files ARE captured —
  * that is defect 2's fix, and `tests/integration/git-checkpoint.test.ts`
@@ -81,7 +85,7 @@
  * NOT matched by `.gitignore`, that is a secret persisted on every turn. This
  * repository's `.gitignore` is thorough, which is why the review called it a
  * warning; this module is written to be repo-agnostic and cannot rely on the
- * next repository's being. {@link SECRET_EXCLUDE_PATHSPECS} fails safe on the
+ * next repository's being. {@link CHECKPOINT_EXCLUDE_PATHSPECS} fails safe on the
  * obvious high-risk names that `.gitignore` may have missed. It is a
  * mitigation, not a guarantee: a secret under an unremarkable name
  * (`config.local.yaml`) is still captured. Also recorded in
@@ -206,9 +210,69 @@ export const SECRET_EXCLUDE_PATHSPECS = [
 	":(exclude)*.tfstate.*",
 ] as const;
 
-/** `git add -A` over the whole repo, minus {@link SECRET_EXCLUDE_PATHSPECS}. */
+/**
+ * Machine state that is neither captured nor deleted, WHATEVER `.gitignore`
+ * says (CR2-03).
+ *
+ * THE DEFECT THIS CLOSES. The symmetry argument above is sound but it was
+ * incomplete: `git add -A` respects `.gitignore` AND NOTHING ELSE, so
+ * "gitignored paths cannot enter the added set" only holds in a repository
+ * whose `.gitignore` lists them. `store.ts` CREATES `<repoRoot>/.pi/state/`
+ * itself, on the same turn, moments after {@link createCheckpoint} returns —
+ * so in every repository except this one the store is an ordinary
+ * untracked-non-ignored path, lands in {@link pathsAddedSince}, and is
+ * deleted by the first restore. Executed on a fresh repo with no
+ * `.gitignore`:
+ *
+ *   store written at: <repo>\.pi\state\checkpoints.json
+ *   --- after restoreCheckpoint(repo, sha) ---
+ *   .pi/state/checkpoints.json   false
+ *   readCheckpoints after restore: []
+ *
+ * One restore destroyed the index naming EVERY other checkpoint, and the
+ * extension then reported "no checkpoints recorded yet". `package.json`
+ * declares `pi.extensions: ["./.pi/extensions"]`, so the documented
+ * `pi install` path loads this at user scope and `rootFor(ctx.cwd)` resolves
+ * the SESSION's repository, not this one.
+ *
+ * WHY THESE FIVE. `.pi/state` and `.pi/logs` are this harness's own durable
+ * state — deleting them is the extension destroying itself. `node_modules`,
+ * `.env` and `.terraform` are the exact class Phase 7 success criterion 4 is
+ * about: expensive-or-secret machine state that a `.gitignore` normally
+ * covers and that must not depend on it. Excluding them from BOTH `add -A`
+ * sites means they are in neither tree, so they can never be captured (no
+ * `node_modules` tree in `.git/objects`, no `.env` content persisted) NOR
+ * deleted by a restore.
+ *
+ * Verified by execution that a directory pathspec excludes its contents and
+ * that `*credentials` crosses `/`:
+ *
+ *   $ git add -A -- . ':(exclude).pi/state' ':(exclude)node_modules' \
+ *       ':(exclude).env' ':(exclude).terraform' ':(exclude)*credentials'
+ *   $ git diff --cached --name-only
+ *   keep.txt                       # and nothing else
+ */
+export const MACHINE_STATE_EXCLUDE_PATHSPECS = [
+	":(exclude).pi/state",
+	":(exclude).pi/logs",
+	":(exclude)node_modules",
+	":(exclude).env",
+	":(exclude).terraform",
+] as const;
+
+/**
+ * The single list both `add -A` call sites read. Splitting it would be how the
+ * capture and the restore drift apart, and a restore that deletes what the
+ * capture never saved is the CR2-03 defect itself.
+ */
+export const CHECKPOINT_EXCLUDE_PATHSPECS = [
+	...SECRET_EXCLUDE_PATHSPECS,
+	...MACHINE_STATE_EXCLUDE_PATHSPECS,
+] as const;
+
+/** `git add -A` over the whole repo, minus {@link CHECKPOINT_EXCLUDE_PATHSPECS}. */
 function addAllExceptSecrets(root: string, env: NodeJS.ProcessEnv): void {
-	run(root, ["add", "-A", "--", ".", ...SECRET_EXCLUDE_PATHSPECS], env);
+	run(root, ["add", "-A", "--", ".", ...CHECKPOINT_EXCLUDE_PATHSPECS], env);
 }
 
 /**
@@ -328,19 +392,38 @@ export function createCheckpoint(repoRoot: string, label: string): string {
  * {@link pathsAddedSince} yields exactly the paths present now and absent in
  * the checkpoint; those and only those are removed; directories left empty are
  * pruned; then `git restore` puts the checkpoint's content back over what
- * remains. `git clean -fdx` would additionally destroy `node_modules/`,
- * `.env`, `.pi/logs/` and `.pi/state/` — including this extension's own
- * checkpoint store. A set difference deletes what the contract says and can be
- * enumerated and asserted; a `clean` is a blunt instrument whose blast radius
- * depends on `.gitignore` being right at that moment.
+ * remains.
  *
- * GITIGNORED PATHS ARE STILL NEVER TOUCHED. Both sides of the diff come from
- * `git add -A`, which respects `.gitignore`, so an ignored path cannot enter
- * the added set and cannot be deleted — the exact mirror of
- * {@link createCheckpoint}'s SCOPE BOUNDARY. `git-checkpoint.test.ts` Case 3
- * asserts it by leaving an ignored file in place across a restore, including
- * one created AFTER the checkpoint, instead of deleting it by hand first
- * (which is what made the original defect invisible).
+ * CORRECTION, CR2-03. This docstring previously argued that a set difference
+ * was SAFER than `git clean -fdx` because `clean` "would additionally destroy
+ * `node_modules/`, `.env`, `.pi/logs/` and `.pi/state/` — including this
+ * extension's own checkpoint store". That was false and is deleted rather
+ * than softened. `git add -A` respects `.gitignore` and nothing else, so in
+ * any repository that does not ignore those paths they are ordinary
+ * untracked-non-ignored paths, land in the added set, and were removed —
+ * measured, including this extension's own store, which `store.ts` creates
+ * moments after a checkpoint is taken. For untracked-non-ignored paths the
+ * set difference was not safer than `git clean -fd`; it was identical, with a
+ * larger blast radius than the `-x` `clean` would have needed to be told.
+ *
+ * WHAT IS TRUE NOW, and why it does not depend on `.gitignore`:
+ * {@link CHECKPOINT_EXCLUDE_PATHSPECS} is applied to BOTH `add -A` sites, so
+ * `.pi/state`, `.pi/logs`, `node_modules`, `.env`, `.terraform` and the
+ * secret-name patterns are in NEITHER tree and are therefore invisible to the
+ * diff — never captured, never deleted, whatever the repository ignores.
+ * Gitignored paths remain untouched for the original reason as well.
+ * `git-checkpoint.test.ts` Cases 3, 7 and 8 assert both halves, Case 7 in a
+ * repository with NO `.gitignore` at all — which is what makes the assertion
+ * about the mechanism rather than about this repository's own config.
+ *
+ * RESTORING IS NOT A ONE-WAY DOOR. Whatever survives the exclusions, a
+ * restore still deletes files the user may have written by hand since the
+ * checkpoint, and the only copy of their content would otherwise be a blob
+ * under some LATER checkpoint's tree. So the first thing this function does
+ * is take a checkpoint of the CURRENT tree and return its SHA: the state
+ * being replaced is anchored under `refs/kypi-checkpoints/` before anything
+ * is removed, and `/checkpoint-restore <sha>` reaches it. The caller is
+ * responsible for telling the user that SHA — see `index.ts`.
  *
  * Deliberately takes no `ExtensionContext` and needs no UI — this is defect
  * 1's fix at the mechanism layer: nothing here can distinguish an interactive
@@ -363,12 +446,29 @@ export function dropCheckpointRef(repoRoot: string, sha: string): void {
 	}
 }
 
-export function restoreCheckpoint(repoRoot: string, sha: string): void {
+/** What a restore did, so the caller can tell the user how to undo it. */
+export interface RestoreOutcome {
+	/**
+	 * A checkpoint of the tree AS IT STOOD before this restore ran, anchored
+	 * under `refs/kypi-checkpoints/`. Restoring it undoes this restore.
+	 */
+	readonly undoSha: string;
+	/** Repo-root-relative paths removed because the checkpoint does not hold them. */
+	readonly removed: readonly string[];
+}
+
+export function restoreCheckpoint(repoRoot: string, sha: string): RestoreOutcome {
 	const root = repoTopLevel(repoRoot);
-	for (const rel of pathsAddedSince(root, sha)) {
+	// BEFORE anything is removed. A restore that deletes a file the user wrote by
+	// hand since the checkpoint is only acceptable if the content is still
+	// reachable afterwards, and this is what makes it so (CR2-03).
+	const undoSha = createCheckpoint(root, `pre-restore of ${sha} at ${new Date().toISOString()}`);
+	const removed = pathsAddedSince(root, sha);
+	for (const rel of removed) {
 		const abs = join(root, rel);
 		rmSync(abs, { force: true });
 		pruneEmptyDirsUpTo(root, dirname(abs));
 	}
 	run(root, ["restore", `--source=${sha}`, "--worktree", "--", "."]);
+	return { undoSha, removed };
 }
