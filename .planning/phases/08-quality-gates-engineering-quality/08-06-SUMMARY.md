@@ -103,3 +103,11 @@ None - no external service configuration required.
 ---
 *Phase: 08-quality-gates-engineering-quality*
 *Completed: 2026-08-15*
+
+## Self-Check: PASSED
+
+- FOUND: `.pi/extensions/quality/gates.ts`
+- FOUND: `tests/unit/quality-gates.test.ts`
+- FOUND commit `a3e25a0` (Task 1)
+- FOUND commit `af4e5ca` (Task 2)
+- FOUND commit `eb80aad` (this SUMMARY.md)
