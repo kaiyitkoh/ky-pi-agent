@@ -197,6 +197,16 @@ const UNROUTED_AGENT_ALLOWLIST: readonly { readonly stem: string; readonly reaso
 			"never through the subagent/agentOverrides mechanism AGENT_NAME_BY_ROLE serves -- this agent file " +
 			"exists for the eventual real-subagent path, tracked as RB-08-03, OUTSTANDING",
 	},
+	{
+		stem: "executor-handoff",
+		reason:
+			"plan 09-11 builds and measures the FLOW-09 handoff packet entirely offline -- `pi-subagents` is " +
+			"reviewed and pinned but NOT installed (Phase 7 installed nothing), so no role can route to a " +
+			"subagent that cannot spawn; `probeSubagentAvailability` degrades to UNAVAILABLE rather than " +
+			"silently passing. This agent file exists for the eventual real-subagent path, tracked as " +
+			"RB-09-03, OUTSTANDING, which is itself gated behind RB-07-02 (install the five pinned specs " +
+			"with a human present for the package-legitimacy gate)",
+	},
 ];
 
 describe("subagent-agents-config -- completeness, both directions", () => {
