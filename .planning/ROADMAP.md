@@ -419,7 +419,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 09-03-PLAN.md — ground clearing: `/plan` → `/plan-mode` (DEVIATION 6), `.pi/work/` gitignored, `ARTIFACT_FILES`
+- [x] 09-03-PLAN.md — ground clearing: `/plan` → `/plan-mode` (DEVIATION 6), `.pi/work/` gitignored, `ARTIFACT_FILES`
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -553,7 +553,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
-| 9. Ceremonial Workflows | 2/17 | In Progress|  |
+| 9. Ceremonial Workflows | 3/17 | In Progress|  |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
 | 11. Terminal UI | 0/TBD | Not started | - |
 

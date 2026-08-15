@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-01-PLAN.md
-last_updated: "2026-08-15T12:59:25.844Z"
+stopped_at: Completed 09-03-PLAN.md
+last_updated: "2026-08-15T13:19:08.004Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 88
+  completed_plans: 89
   percent: 73
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 3 of 17
+Plan: 4 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-08-15
 
-Progress: [█████████░] 85%
+Progress: [█████████░] 86%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -158,6 +158,7 @@ credentials can do has been done".
 | Phase 08 P13 | 50m | 3 tasks | 4 files |
 | Phase 09 P01 | 40m | 2 tasks | 1 files |
 | Phase 09 P02 | 20min | 2 tasks | 1 files |
+| Phase 09 P03 | 15min | 2 tasks | 9 files |
 
 ## Accumulated Context
 
@@ -422,6 +423,10 @@ Recent decisions affecting current work:
 - [Phase 09-01]: MIN_TAG_SWITCHES=4, measured from ~150 solo runs (floor 5) plus 3 full-suite-load runs (27-33, higher under contention), not guessed — the first guess (8) flaked 3/10 on a follow-up check; be-suspicious-of-green discipline required real measurement before trusting the threshold
 - [Phase 09]: RESOURCE_EDGES scans .pi/agents/*.md, non-.md skill/prompt assets, and comment-stripped .pi/ path literals; the .md skill/prompt-body half stays closed by the existing discoverWorkflowFiles() completeness check — 09-RESEARCH.md Pitfall 3 -- re-covering the already-closed .md half would spend this phase's own budget on redundant machinery
 - [Phase 09]: WORKFLOW_TEXT_BUDGETS' ceiling is asserted budget === FEATURES_CEILINGS[name], a frozen spec number, never Math.ceil(actual/10)*10 like every other registry in the file — over budget must mean cut text, not raise the ceiling -- Falsification 5 proves raising it turns the assertion red
+- [Phase 09]: 09-03: /plan renamed to /plan-mode as DEVIATION 6 -- the general name goes to the authored ceremonial workflow, the vendored example takes the more specific name, same precedent as the /todos collision
+- [Phase 09]: 09-03: workDir() throws on an illegal slug (fail closed) rather than sanitising -- same posture safety/git.ts:462-465 states for an unclassified glab form
+- [Phase 09]: 09-03: SLUG_PATTERN's leading-alphanumeric anchor alone makes a leading '.' structurally impossible, independent of workDir's containment assertion -- recorded honestly via falsification rather than claiming containment catches something this fixture does not demonstrate
+- [Phase 09]: 09-03 advances FLOW-06 and FLOW-10 but completes neither -- plan 09-03's own objective text says so explicitly; REQUIREMENTS.md left unchecked for both, to be marked complete by the plans that actually build /plan (09-10) and wire ARTIFACT_FILES into all four ceremonial commands (09-08/10/13/15)
 
 ### Pending Todos
 
@@ -474,8 +479,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T12:59:25.833Z
-Stopped at: Completed 09-01-PLAN.md
+Last session: 2026-08-15T13:18:37.156Z
+Stopped at: Completed 09-03-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
