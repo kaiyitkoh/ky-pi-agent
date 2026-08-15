@@ -134,8 +134,22 @@ const SEVERITY_RANK: Readonly<Record<ScorableFinding["severity"], number>> = {
  * and legitimate for a defect with only one describable symptom) working
  * exactly as before — the ceiling only bites once a corpus entry HAS a
  * second independent needle to demand.
+ *
+ * WR3-01 (`08-REVIEW.md` iteration 3): raising the count to two did NOT
+ * close the boilerplate exploit, it only raised its price. A sentence
+ * carrying TWO needles per defect class, reused verbatim for all six
+ * touched files, still scored `catchRate === 1.0` having identified zero
+ * defects — see this module's own {@link findingCatches} for the
+ * cross-contamination check added to close that residual, and
+ * `reviewer-calibration.test.ts`'s `TWO_NEEDLE_KITCHEN_SINK_ARGS`, the
+ * fifth permanent control that measures it.
  */
 const MIN_DISTINCT_NEEDLES = 2;
+
+/** Count of `needles` entries present as a substring of `haystack`, each counted at most once. */
+function countMatchingNeedles(haystack: string, needles: readonly string[]): number {
+	return needles.reduce((count, needle) => (haystack.includes(needle) ? count + 1 : count), 0);
+}
 
 /**
  * True iff `finding` catches `expectation`: its `location` names
@@ -143,20 +157,49 @@ const MIN_DISTINCT_NEEDLES = 2;
  * contains at least `Math.min(MIN_DISTINCT_NEEDLES, expectation.mustMentionAny.length)`
  * DISTINCT entries from `expectation.mustMentionAny` (see
  * {@link MIN_DISTINCT_NEEDLES}'s own docstring for why this is a count, not
- * merely `>= 1`), and its `severity` is at least `expectation.minimumSeverity`.
- * All three conditions are required — a finding naming the right file with a
- * vague concern does not count, and a finding using the right words about
- * the wrong file does not count either.
+ * merely `>= 1`), its text does NOT also independently clear a DIFFERENT,
+ * unrelated expectation's own needle bar (see the WR3-01 note below), and
+ * its `severity` is at least `expectation.minimumSeverity`. All conditions
+ * are required — a finding naming the right file with a vague concern does
+ * not count, and a finding using the right words about the wrong file does
+ * not count either.
+ *
+ * WR3-01 (`08-REVIEW.md` iteration 3): needle-COUNTING alone is still
+ * gameable — a single sentence carrying two needles per defect class,
+ * reused verbatim as the `concreteFailure` of a finding for every one of
+ * the six touched files, clears `MIN_DISTINCT_NEEDLES` for whichever class
+ * it is scored against, because it clears it for ALL SIX simultaneously.
+ * That is the tell: a finding genuinely describing ONE defect at ONE file
+ * does not also organically clear a wholly unrelated defect class's own
+ * two-needle bar (the KNOWN_SUBSET_ARGS positive control's three real
+ * findings only ever mention their own defect's vocabulary — see
+ * `reviewer-calibration.test.ts`). This is what "requires actual defect
+ * identification, not merely needle-counting" means in code: any finding
+ * whose text ALSO clears a different expectation it is not located at is
+ * disqualified as boilerplate, however many of its OWN needles it carries.
  */
-function findingCatches(finding: ScorableFinding, expectation: SeededDefectExpectation): boolean {
+function findingCatches(
+	finding: ScorableFinding,
+	expectation: SeededDefectExpectation,
+	allExpectations: readonly SeededDefectExpectation[],
+): boolean {
 	if (!finding.location.includes(expectation.locationFile)) {
 		return false;
 	}
 	const haystack = `${finding.concreteFailure} ${finding.location}`;
-	const matchedNeedleCount = expectation.mustMentionAny.reduce((count, needle) => (haystack.includes(needle) ? count + 1 : count), 0);
+	const matchedNeedleCount = countMatchingNeedles(haystack, expectation.mustMentionAny);
 	const requiredNeedleCount = Math.min(MIN_DISTINCT_NEEDLES, expectation.mustMentionAny.length);
 	if (matchedNeedleCount < requiredNeedleCount) {
 		return false;
+	}
+	for (const other of allExpectations) {
+		if (other.id === expectation.id) {
+			continue;
+		}
+		const otherRequiredCount = Math.min(MIN_DISTINCT_NEEDLES, other.mustMentionAny.length);
+		if (countMatchingNeedles(haystack, other.mustMentionAny) >= otherRequiredCount) {
+			return false;
+		}
 	}
 	return SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[expectation.minimumSeverity];
 }
@@ -187,7 +230,7 @@ export function scoreCalibration(
 	for (const finding of findings) {
 		let matchedAnyExpectation = false;
 		for (const expectation of expected) {
-			if (findingCatches(finding, expectation)) {
+			if (findingCatches(finding, expectation, expected)) {
 				perDefectClass[expectation.id] = true;
 				matchedAnyExpectation = true;
 			}

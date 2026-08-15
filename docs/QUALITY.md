@@ -247,13 +247,32 @@ identification, never a semantic one** — it requires the right file **and**
 at least two of the phrases the corpus names as describing the specific
 malformed *behaviour*, which is a stronger bar than a bare finding count or
 the right identifier alone, but it is still pattern matching against known
-text, not judgement, and the kitchen-sink control's own `catchRate: 0` is
-the measured CEILING of what a substring proxy can be defeated by, not a
-claim that no cleverer construction exists. **No live reviewer, of any
-kind, has ever run against this corpus.** The live calibration run is
-`RB-08-03` in `docs/RUNBOOK.md`, OUTSTANDING, and its result is expected to
-differ from 3/6 in either direction, since a live model was never tuned to
-this corpus the way the scripted one was.
+text, not judgement.
+
+(WR3-01, `08-REVIEW.md` iteration 3) The two-needle bar above did not close
+the exploit, it only raised its price: a single sentence carrying TWO
+needles per defect class, reused verbatim across all six touched files,
+still scored `catchRate: 1.0` having identified zero defects — one measured
+data point, not a ceiling: extending the same boilerplate by one more
+phrase per class defeats the matcher just as the one-needle version did.
+`findingCatches` was changed again to also reject a finding whose text
+*also* independently clears a DIFFERENT, unrelated expectation's own
+two-needle bar — a genuine finding about one file's one defect does not
+organically use enough of a wholly different defect's vocabulary to catch
+it too, which is exactly what a sentence reused across all six files must
+do. A fifth permanent control, `TWO_NEEDLE_KITCHEN_SINK_ARGS`
+(`tests/integration/reviewer-calibration.test.ts`), pins this: it now
+scores `catchRate: 0`, and is kept alongside the blind/shotgun/name-drop/
+kitchen-sink controls as a permanent regression test for this exploit
+shape, not a claim that the substring-match approach has no further
+exploit — the OR/AND-of-substrings axis this scorer is built on is not
+exhausted by proving four constructions against it, and a live reviewer's
+findings are never phrased to defeat any of this in the first place. **No
+live reviewer, of any kind, has ever run against this corpus.** The live
+calibration run is `RB-08-03` in `docs/RUNBOOK.md`, OUTSTANDING, and its
+result is expected to differ from the scripted number in either direction,
+since a live model was never tuned to this corpus the way the scripted one
+was.
 
 ## 7. The cost record
 

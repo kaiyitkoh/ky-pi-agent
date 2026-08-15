@@ -337,21 +337,61 @@ const SHOTGUN_KITCHEN_SINK_ARGS = {
 	classificationJustification: "The template names failure modes generically without diagnosing any one file's actual defect.",
 };
 
+/**
+ * WR3-01 (`08-REVIEW.md` iteration 3) -- THE TWO-NEEDLE KITCHEN SINK, a
+ * FIFTH permanent control.
+ *
+ * Raising `MIN_DISTINCT_NEEDLES` to 2 (WR2-05) only raised the exploit's
+ * price, it did not close it: one boilerplate sentence, reused verbatim as
+ * the `concreteFailure` of a finding for every one of the six touched
+ * files, engineered to contain exactly TWO matching phrases per defect
+ * class (constructing it still requires the corpus's own answer key, same
+ * as WR2-05's control), scored `catchRate === 1.0` -- 6/6 -- having
+ * identified zero actual defects, because the needles within each defect
+ * class's own `mustMentionAny` set are near-synonyms, not independent
+ * facts ("cannot fail" / "structurally cannot", "performs none" / "no
+ * actual verification", "always returns true" / "unconditionally true",
+ * "writes into the real" / "escapes the test"). `findingCatches` now also
+ * rejects a finding whose text independently clears a DIFFERENT, unrelated
+ * expectation's own needle bar -- which this sentence, by construction,
+ * does for every one of the other five classes simultaneously, however
+ * many of ITS OWN class's needles it also carries. After that fix, this
+ * control must score `catchRate === 0`.
+ */
+const TWO_NEEDLE_KITCHEN_SINK_CONCRETE_FAILURE =
+	"This code structurally cannot be trusted and cannot fail; it performs none of the verification it claims and " +
+	"offers no actual verification; it writes into the real home directory and escapes the test sandbox; it never " +
+	"calls isGuardedCommand and is simply not wired in; it always returns true, unconditionally true; and it does " +
+	"the same regardless of input, so the label survived its own mutation.";
+const TWO_NEEDLE_KITCHEN_SINK_ARGS = {
+	verdicts: [verdictFor("Partial", "src/evidence-claim.ts:1")],
+	findings: SHOTGUN_LOCATION_FILES.map((file, index) => ({
+		severity: "BLOCKER" as const,
+		location: `${file}:${index + 1}`,
+		concreteFailure: TWO_NEEDLE_KITCHEN_SINK_CONCRETE_FAILURE,
+		suggestedFix: "Fix it.",
+	})),
+	checkedAndCleared: "Applied the same general-purpose finding template, now with two phrases per class, to each of the six touched files.",
+	classification: "symptomatic",
+	classificationJustification: "The template names two failure-mode phrases per class generically without diagnosing any one file's actual defect.",
+};
+
 interface CalibrationSuiteResult {
 	knownSubset: CalibrationResult;
 	blind: CalibrationResult;
 	shotgun: CalibrationResult;
 	shotgunNameDrop: CalibrationResult;
 	shotgunKitchenSink: CalibrationResult;
+	twoNeedleKitchenSink: CalibrationResult;
 }
 
 /**
  * Builds a fresh temp repo + faux session, drives the combined corpus through
- * `runReview` FIVE times (known-subset, blind, shotgun, WR-03's name-dropping
- * shotgun, WR2-05's boilerplate kitchen sink), and scores each result against
- * the corpus's own expectations. A fresh session per call is what makes the
- * reproducibility check in group C meaningful -- two INDEPENDENT builds, not
- * one build read twice.
+ * `runReview` SIX times (known-subset, blind, shotgun, WR-03's name-dropping
+ * shotgun, WR2-05's boilerplate kitchen sink, WR3-01's two-needle kitchen
+ * sink), and scores each result against the corpus's own expectations. A
+ * fresh session per call is what makes the reproducibility check in group C
+ * meaningful -- two INDEPENDENT builds, not one build read twice.
  */
 async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResult> {
 	setMode("cheap");
@@ -381,6 +421,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_REVIEWER_ARGS), { stopReason: "toolUse" }),
 			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_NAME_DROP_ARGS), { stopReason: "toolUse" }),
 			() => fauxAssistantMessage(fauxToolCall("submit_review", SHOTGUN_KITCHEN_SINK_ARGS), { stopReason: "toolUse" }),
+			() => fauxAssistantMessage(fauxToolCall("submit_review", TWO_NEEDLE_KITCHEN_SINK_ARGS), { stopReason: "toolUse" }),
 		]);
 
 		handle.modelRuntime.registerNativeProvider(wrapFauxWithPayload(deepseekFaux, undefined));
@@ -395,6 +436,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 		const shotgunResult = await runReview(ctx, { contract, requirementIds });
 		const shotgunNameDropResult = await runReview(ctx, { contract, requirementIds });
 		const shotgunKitchenSinkResult = await runReview(ctx, { contract, requirementIds });
+		const twoNeedleKitchenSinkResult = await runReview(ctx, { contract, requirementIds });
 
 		if (!knownSubsetResult.ok) {
 			throw new Error(`known-subset runReview was rejected: ${knownSubsetResult.reason}`);
@@ -411,6 +453,9 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 		if (!shotgunKitchenSinkResult.ok) {
 			throw new Error(`shotgun kitchen-sink runReview was rejected: ${shotgunKitchenSinkResult.reason}`);
 		}
+		if (!twoNeedleKitchenSinkResult.ok) {
+			throw new Error(`two-needle kitchen-sink runReview was rejected: ${twoNeedleKitchenSinkResult.reason}`);
+		}
 
 		const expected: SeededDefectExpectation[] = SEEDED_DEFECTS.map((defect) => ({
 			id: defect.id,
@@ -425,6 +470,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 			shotgun: scoreCalibration(expected, shotgunResult.review.findings),
 			shotgunNameDrop: scoreCalibration(expected, shotgunNameDropResult.review.findings),
 			shotgunKitchenSink: scoreCalibration(expected, shotgunKitchenSinkResult.review.findings),
+			twoNeedleKitchenSink: scoreCalibration(expected, twoNeedleKitchenSinkResult.review.findings),
 		};
 	} finally {
 		await handle.dispose();
@@ -490,12 +536,29 @@ describe("GATE-08 calibration -- the full corpus driven through runReview", () =
 		},
 	);
 
+	it(
+		"WR3-01 -- THE TWO-NEEDLE KITCHEN SINK, a fifth permanent control: one reused sentence containing " +
+			"exactly TWO needles per defect class scores catchRate === 0 -- findingCatches now also rejects a " +
+			"finding that independently clears a DIFFERENT, unrelated expectation's own needle bar. Before this " +
+			"fix this exact fixture scored 1.0 (6/6) having identified zero real defects, proving " +
+			"MIN_DISTINCT_NEEDLES alone (WR2-05) was not sufficient -- see docs/QUALITY.md and calibration.ts's " +
+			"own findingCatches docstring for why this is 'one measured data point, not a ceiling'.",
+		() => {
+			expect(run1.twoNeedleKitchenSink.catchRate).toBe(0);
+			expect(run1.twoNeedleKitchenSink.unmatchedFindings).toBe(SHOTGUN_LOCATION_FILES.length);
+			for (const id of DEFECT_CLASSES) {
+				expect(run1.twoNeedleKitchenSink.perDefectClass[id], `perDefectClass["${id}"] must be false for the two-needle kitchen sink`).toBe(false);
+			}
+		},
+	);
+
 	it("reproducibility: two independently-built runs produce identical CalibrationResult values", () => {
 		expect(run2.knownSubset).toEqual(run1.knownSubset);
 		expect(run2.blind).toEqual(run1.blind);
 		expect(run2.shotgun).toEqual(run1.shotgun);
 		expect(run2.shotgunNameDrop).toEqual(run1.shotgunNameDrop);
 		expect(run2.shotgunKitchenSink).toEqual(run1.shotgunKitchenSink);
+		expect(run2.twoNeedleKitchenSink).toEqual(run1.twoNeedleKitchenSink);
 	});
 });
 
