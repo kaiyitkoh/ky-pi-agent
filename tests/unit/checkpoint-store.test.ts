@@ -272,13 +272,19 @@ function spawnWriter(script: string, args: string[]): WriterHandle {
  * prove genuine interleaving among the four WR-09 writers, rather than four
  * contiguous per-tag blocks. Four strictly-serial blocks
  * (`AAAA...BBBB...CCCC...DDDD`) produce exactly 3 switches (A->B, B->C,
- * C->D); this is set well above that so FALSIFICATION (b) (forcing the four
- * writers to run strictly serially, one released at a time) turns the
- * assertion red, while genuine OS-scheduled interleaving among four
- * lock-holding, IPC-released processes -- routinely dozens of switches in
- * practice -- stays green.
+ * C->D); this must be > 3 for FALSIFICATION (b) (forcing the four writers to
+ * run strictly serially, one released at a time) to turn the assertion red.
+ *
+ * MEASURED, not guessed: instrumented locally over ~150 solo runs of this
+ * case plus 3 runs of the full suite (where this case competes with every
+ * other vitest fork for CPU). Solo-run tag-switch counts ranged 5-33 (typical
+ * mid-teens); full-suite-load runs were HIGHER (27-33), because contention
+ * for the store's own lock file adds more, finer-grained interleaving, not
+ * less. The observed solo floor across every sample was 5. `4` sits directly
+ * below that floor -- the tightest value that never once flaked across the
+ * measurement runs while still failing outright on the serial case's `3`.
  */
-const MIN_TAG_SWITCHES = 8;
+const MIN_TAG_SWITCHES = 4;
 
 describe("WR-09 -- concurrent recorders do not lose each other's entries", () => {
 	/**
@@ -379,7 +385,8 @@ describe("WR-09 -- concurrent recorders do not lose each other's entries", () =>
 			tagSwitches,
 			"the four writers' rows must be genuinely INTERLEAVED in the store's own recorded order, not four " +
 				`contiguous blocks. Four strictly-serial blocks produce exactly 3 switches; ${String(MIN_TAG_SWITCHES)} ` +
-				"is well above that so a serialised run (FALSIFICATION (b)) turns this red while a genuinely " +
+				"is set just above that (see MIN_TAG_SWITCHES's own docstring for the measured solo-run floor of " +
+				"5 this is held below) so a serialised run (FALSIFICATION (b)) turns this red while a genuinely " +
 				"overlapping run stays green",
 		).toBeGreaterThan(MIN_TAG_SWITCHES);
 	});
