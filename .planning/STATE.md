@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 08-04-PLAN.md
-last_updated: "2026-08-15T03:37:31.855Z"
+stopped_at: Completed 08-05-PLAN.md
+last_updated: "2026-08-15T03:55:29.582Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 7
   total_plans: 86
-  completed_plans: 77
+  completed_plans: 78
   percent: 64
 ---
 
@@ -26,11 +26,11 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 08 (quality-gates-engineering-quality) — EXECUTING
-Plan: 5 of 13
+Plan: 6 of 13
 Status: Ready to execute
 Last activity: 2026-08-15
 
-Progress: [█████████░] 90%
+Progress: [█████████░] 91%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -144,6 +144,7 @@ credentials can do has been done".
 | Phase 08 P02 | 55m | 2 tasks | 2 files |
 | Phase 08 P03 | 35m | 2 tasks | 2 files |
 | Phase 08 P04 | 10m | 2 tasks | 8 files |
+| Phase 08 P05 | 35m | 2 tasks | 2 files |
 
 ## Accumulated Context
 
@@ -381,6 +382,8 @@ Recent decisions affecting current work:
 - [Phase 08]: 08-03: falsification of branches (2)/(5)/(6)/(7) was run in-place against the committed file (commit-then-falsify-then-restore via git checkout --), confirming exactly the matching test group turns red for each
 - [Phase 08]: 08-04: qualityMs/qualityTokens follow the same globalThis-slot pattern as routing/modes.ts and the same omitted-key rule as reasoning/cacheReadRatio; call-model.ts's two recordTurn sites deliberately never drain the accumulator — draining on a kind:nested row would empty the ledger before the main-loop turn row is composed (threat T-08-13); only turn_end may call takeQualityCost()
 - [Phase 08]: 08-04: QUAL-09 stays Pending in REQUIREMENTS.md — this plan builds and proves the ledger mechanism only; the requirement's own text is not true until plans 08-06/08-07/08-09 exist to add real quality-layer cost
+- [Phase 08]: 08-05: splitDelayMs deleted outright, replaced with firstChunkWritten/releaseSecondChunk event gate on QoderLoopbackHandle — Any fixed wall-clock duration races machine load; teardown force-releases the gate then awaits every tracked responder, closing the leaked-timer risk (T-08-16)
+- [Phase 08]: 08-05: WR-07 asserts the lossless afterMs/textChars transcript fields instead of an elapsed-time window — afterMs is the deadline the client actually armed and textChars proves bytes were folded before the stall -- strictly stronger than the deleted 60<=elapsed<400 bound and independent of scheduler timing; classified QUAL-04 root-cause with retry/wider-bound/testTimeout/fileParallelism named and rejected
 
 ### Pending Todos
 
@@ -431,8 +434,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T03:37:31.844Z
-Stopped at: Completed 08-04-PLAN.md
+Last session: 2026-08-15T03:55:29.572Z
+Stopped at: Completed 08-05-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
