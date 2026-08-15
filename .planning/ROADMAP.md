@@ -384,7 +384,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 08-11-PLAN.md — wiring: `/quick` calls the gate stage, `consult_advisor` is registered, the BOOT-10 toll is paid
+- [x] 08-11-PLAN.md — wiring: `/quick` calls the gate stage, `consult_advisor` is registered, the BOOT-10 toll is paid
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
