@@ -8,7 +8,7 @@
  * not an oversight.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { takeQualityCost } from "../diagnostics/quality-cost.ts";
+import { refundQualityCost } from "../diagnostics/quality-cost.ts";
 import { runQuickGateStage } from "../quality/index.ts";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
@@ -41,15 +41,16 @@ export default function (pi: ExtensionAPI): void {
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
 				const gate = runQuickGateStage(ctx.cwd);
 				if (gate.blocking) {
-					// GATE-01 blocked: drain-and-discard the cost gate.ts wrote via
-					// addQualityCost, since no turn_end runs for this invocation:
-					// (i) a blocked gate must not bill a later turn; (ii) a
-					// fabricated {qualityMs:0} is worse than absent (DIAGNOSTICS.md's
-					// omission rule); (iii) the SAME cost IS measured on the
-					// clean-run path below; (iv) a deliberate SECOND takeQualityCost
-					// site outside diagnostics/, per 08-04's T-08-13 (no turn row
-					// composes here).
-					takeQualityCost();
+					// WR-06: refund ONLY this gate's own cost -- takeQualityCost() would
+					// drain the WHOLE ledger, erasing any OTHER contributor (e.g. a
+					// reviewer + refute pass) already recorded earlier in this SAME
+					// still-in-progress turn. (i) this gate's own cost must not bill a
+					// later, unrelated turn; (ii) refundQualityCost clears the slot only
+					// when nothing is left, never fabricates a zero (DIAGNOSTICS.md's
+					// omission rule); (iii) the SAME cost IS measured on the clean-run
+					// path below; (iv) a deliberate SECOND ledger call site outside
+					// diagnostics/, per 08-04's T-08-13 (no turn row composes here).
+					refundQualityCost({ ms: gate.totalMs });
 					return void ctx.ui.notify(gate.report, "error");
 				}
 				startRun(ctx.cwd, currentSha(ctx.cwd), currentTree(ctx.cwd)); // GATE-01: baseTree captured in the same try, so a throw refuses via the catch below and never arms a run

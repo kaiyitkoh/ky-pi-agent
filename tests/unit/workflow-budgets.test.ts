@@ -111,7 +111,11 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"real and visible here rather than offloaded. Plan 08-12 (GATE-01's tree-comparison branch) then passed " +
 			"currentTree(ctx.cwd) alongside currentSha(ctx.cwd) at both startRun and agent_end call sites, inside " +
 			"the same try/catch as before -- no new branch of control flow, one import and two call-site edits. " +
-			"Measured 95 raw lines 2026-08-15, rounded up to the next ten. Still well under the ROADMAP's own " +
+			"Measured 95 raw lines 2026-08-15. Code-review fix pass WR-06: takeQualityCost() on the blocking " +
+			"branch drained the WHOLE process-wide ledger, not just this gate's own contribution, silently erasing " +
+			"any other contributor's already-recorded cost from earlier in the same still-in-progress turn -- " +
+			"replaced with refundQualityCost({ms: gate.totalMs}), which subtracts only its own input. Re-measured " +
+			"96 raw lines 2026-08-15, rounded up to the next ten. Still well under the ROADMAP's own " +
 			"\"above 100 it has FAILED\" line",
 	},
 	{
@@ -230,7 +234,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"Re-measured 430 raw lines 2026-08-15 (index.ts 94 + evidence.ts 336), already an exact multiple " +
 			"of ten. RAISED 430 -> 480 by plan 08-12 (GATE-01's tree-comparison branch) -- see both per-file " +
 			"entries above for what grew. Re-measured 476 raw lines 2026-08-15 (index.ts 95 + evidence.ts 381), " +
-			"rounded up to the next ten",
+			"rounded up to the next ten. Code-review fix pass WR-06 (see the per-file entry above): re-measured " +
+			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381), still rounding up to the same 480",
 	},
 	{
 		dir: ".pi/extensions/routing",
@@ -248,9 +253,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
-		budget: 3920,
+		budget: 3970,
 		why: "WR-03; measured 3913 raw lines across 10 files 2026-08-15 (08-04 added quality-cost.ts; not " +
-			"re-reviewed for tightness), rounded up to the next ten",
+			"re-reviewed for tightness), rounded up to the next ten. Code-review fix pass WR-06 added " +
+			"refundQualityCost() to quality-cost.ts (see workflows/index.ts's own budget entry for the finding). " +
+			"Re-measured 3967 raw lines across 10 files 2026-08-15 (budget.ts 703, call-model.ts 497, index.ts " +
+			"710, jsonl.ts 140, prose.ts 205, quality-cost.ts 241, redact.ts 357, schema.ts 388, turns.ts 324, " +
+			"wire.ts 402), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/checkpoint",

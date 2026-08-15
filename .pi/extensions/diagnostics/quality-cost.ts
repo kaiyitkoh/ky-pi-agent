@@ -166,6 +166,60 @@ export function takeQualityCost(): QualityCost | undefined {
 }
 
 /**
+ * Subtract exactly ONE caller's own prior {@link addQualityCost} contribution
+ * from the current turn's ledger, leaving every OTHER contributor's own
+ * recorded cost untouched.
+ *
+ * WR-06: `/quick`'s blocking branch used to call {@link takeQualityCost} to
+ * drain-and-discard the deterministic gate stage's own cost, on the
+ * reasoning that "no turn_end runs for this invocation, so the cost must not
+ * bleed into a later turn". That reasoning is only true while the gate
+ * stage is the SOLE contributor to a turn. `takeQualityCost` drains the
+ * WHOLE ledger, so if a caller had already recorded its own cost earlier in
+ * the SAME still-in-progress turn (e.g. a reviewer + refute pass that ran
+ * before invoking `/quick` as a sub-step of a larger ceremonial workflow),
+ * that cost silently vanished too — the turn's eventual real `turn_end`
+ * would find nothing to report, understating what quality work genuinely
+ * happened, with nothing on disk saying so.
+ *
+ * `refundQualityCost` fixes this by subtracting only `input`, floored at
+ * zero per field, from whatever the slot currently holds — any OTHER
+ * contribution present before this call is preserved. When the result is
+ * `{ms: 0, tokens: 0}` the slot is cleared to `undefined` entirely (rather
+ * than left as an explicit zero), on the reasoning that a caller using this
+ * function has, by definition, just undone its OWN entire contribution — if
+ * nothing else remains, nothing was genuinely spent by whatever is left of
+ * this turn. KNOWN RESIDUAL LIMITATION: this is indistinguishable from a
+ * different caller having separately recorded a genuine, deliberate `{ms:
+ * 0}` contribution that also nets to exactly zero here — an edge case the
+ * module docstring already calls "the caller's own business to avoid, not
+ * this module's to reject", and one this function accepts the same way.
+ *
+ * NEVER THROWS, same discipline as {@link addQualityCost}/{@link takeQualityCost}.
+ */
+export function refundQualityCost(input: QualityCostInput): void {
+	try {
+		const current = readSlot();
+		if (current === undefined) {
+			// Nothing recorded at all -- there is nothing this call could safely
+			// subtract from, so it is a no-op rather than a guess.
+			return;
+		}
+		const ms = Math.max(0, current.ms - (input.ms ?? 0));
+		const tokens = Math.max(0, current.tokens - (input.tokens ?? 0));
+		if (ms === 0 && tokens === 0) {
+			clearSlot();
+			return;
+		}
+		writeSlot({ ms, tokens });
+	} catch {
+		// The instrument cannot instrument its own inability to refund. Swallow:
+		// an accounting failure must never turn a passing gate result into an
+		// exception.
+	}
+}
+
+/**
  * Read the current turn's quality-cost ledger WITHOUT clearing it.
  *
  * FOR TESTS ONLY. Production code always wants {@link takeQualityCost}: a

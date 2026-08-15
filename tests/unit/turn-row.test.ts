@@ -43,6 +43,7 @@ import {
 import {
 	addQualityCost,
 	peekQualityCost,
+	refundQualityCost,
 	takeQualityCost,
 } from "../../.pi/extensions/diagnostics/quality-cost.ts";
 import {
@@ -349,6 +350,55 @@ describe("QUAL-09 — the quality-cost accumulator sums contributions and drains
 			"an empty contribution is still a contribution: the slot moves from untouched to " +
 				"touched-with-zeros, which is the caller's own business to avoid, not this module's to reject",
 		).toEqual({ qualityMs: 0, qualityTokens: 0 });
+	});
+});
+
+describe("WR-06 -- refundQualityCost subtracts only its own input, never another contributor's", () => {
+	beforeEach(() => {
+		takeQualityCost();
+	});
+
+	it("refunding a slot's ENTIRE contribution clears it to undefined -- never a fabricated {ms:0,tokens:0}", () => {
+		addQualityCost({ ms: 30, tokens: 5 });
+		refundQualityCost({ ms: 30, tokens: 5 });
+		expect(
+			takeQualityCost(),
+			"a fully-refunded, otherwise-untouched slot must read exactly like a slot nothing was ever " +
+				"added to -- the omission rule applies here too",
+		).toBeUndefined();
+	});
+
+	it(
+		"THE REGRESSION THIS FIXES: refunding one contribution leaves an EARLIER, DIFFERENT contribution " +
+			"in the same slot intact",
+		() => {
+			addQualityCost({ ms: 100, tokens: 20 }); // stands in for "a reviewer + refute pass already ran"
+			addQualityCost({ ms: 10 }); // stands in for the deterministic gate stage's own cost
+			refundQualityCost({ ms: 10 }); // /quick's blocking branch refunds ONLY the gate's own cost
+			expect(
+				takeQualityCost(),
+				"the earlier {ms:100, tokens:20} contribution must survive a refund of a LATER, unrelated " +
+					"contribution -- takeQualityCost() would have erased BOTH, which is the exact bug WR-06 fixes",
+			).toEqual({ qualityMs: 100, qualityTokens: 20 });
+		},
+	);
+
+	it("refunding MORE than was ever added floors at zero per field, never goes negative", () => {
+		addQualityCost({ ms: 5, tokens: 1 });
+		expect(() => refundQualityCost({ ms: 999, tokens: 999 })).not.toThrow();
+		expect(takeQualityCost(), "an over-refund must clear to undefined, never a negative number").toBeUndefined();
+	});
+
+	it("refunding from a never-touched slot is a harmless no-op", () => {
+		expect(() => refundQualityCost({ ms: 10 })).not.toThrow();
+		expect(takeQualityCost()).toBeUndefined();
+	});
+
+	it("peekQualityCost sees the same partial-refund result takeQualityCost later drains", () => {
+		addQualityCost({ ms: 50, tokens: 8 });
+		refundQualityCost({ ms: 20 });
+		expect(peekQualityCost()).toEqual({ qualityMs: 30, qualityTokens: 8 });
+		expect(takeQualityCost()).toEqual({ qualityMs: 30, qualityTokens: 8 });
 	});
 });
 

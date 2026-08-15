@@ -70,6 +70,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { logPath } from "../../.pi/lib/jsonl.ts";
+import { addQualityCost, peekQualityCost, takeQualityCost } from "../../.pi/extensions/diagnostics/quality-cost.ts";
 import { TURNS_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
 import { registeredToolNames, runQuickGateStage, setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
 import type { ExecRunner } from "../../.pi/extensions/quality/gates.ts";
@@ -584,8 +585,8 @@ describe("cost", () => {
 						expect(
 							leaked,
 							"LEAK: the unrelated turn's own kind:turn row carries qualityMs -- the blocked gate's cost was " +
-								"billed to a turn that never asked for it. takeQualityCost() must be called (and discarded) on " +
-								"the blocking branch in workflows/index.ts.",
+								"billed to a turn that never asked for it. refundQualityCost({ms: gate.totalMs}) must be " +
+								"called on the blocking branch in workflows/index.ts.",
 						).toBe(false);
 					} finally {
 						setQuickGateExecOverrideForTests(undefined);
@@ -594,4 +595,59 @@ describe("cost", () => {
 			);
 		});
 	});
-});
+
+	it(
+		"WR-06: a BLOCKED gate refunds only its OWN cost -- a reviewer/refute pass's own cost already recorded " +
+				"earlier in the SAME still-in-progress turn survives, never wiped by the blocking branch",
+			async () => {
+				await withConfiguredCandidate(async (candidate) => {
+					await withFauxSession(
+						{
+							extensionSource: composite(),
+							tools: ["bash"],
+							providerId: candidate.provider,
+							models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+							responses: [],
+						},
+						async ({ session, cwd, modelRuntime }) => {
+							setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC);
+							takeQualityCost(); // start from a clean slate -- process-wide slot
+							try {
+								await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+								await waitForConfiguredAuth(modelRuntime, candidate.provider);
+
+								gitInit(cwd, "work");
+								seedOffendingSource(cwd);
+
+								// Stands in for "a reviewer + refute pass already ran earlier in
+								// this SAME turn, before /quick was invoked as a sub-step" --
+								// the exact shape the code review named.
+								addQualityCost({ ms: 123, tokens: 45 });
+
+								const ctx = session.extensionRunner.createCommandContext();
+								const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+								expect(plan.ok, "the executor route did not become servable").toBe(true);
+								if (!plan.ok) return;
+
+								const command = session.extensionRunner.getCommand("quick");
+								expect(command, 'getCommand("quick") returned undefined').toBeDefined();
+								if (command === undefined) return;
+
+								await command.handler("do the forbidden thing yet again", ctx);
+								expect(isRunArmed(), "the blocked run must never arm").toBe(false);
+
+								expect(
+									peekQualityCost(),
+									"the prior contributor's own {ms:123, tokens:45} must survive a blocked gate's refund -- " +
+										"only the gate stage's OWN cost may be removed, never another contributor's",
+								).toEqual({ qualityMs: 123, qualityTokens: 45 });
+							} finally {
+								takeQualityCost(); // drain the slot so it cannot leak into a later test
+								setQuickGateExecOverrideForTests(undefined);
+							}
+						},
+					);
+				});
+			},
+		);
+	});
