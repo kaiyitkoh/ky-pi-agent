@@ -149,12 +149,15 @@ iteration 2, corrected the two claims this paragraph used to overclaim —
 see below.) A file close to its own limit could be "fixed" by moving logic
 into a private helper that only `/quick` ever calls — same total code,
 smaller number on the one file a reviewer checks. There is now ONE ratchet
-per directory reached this way (nine as of this writing — `workflows`,
-`routing`, `harness`, `diagnostics`, `checkpoint`, `loop-police`,
-`plan-mode`, `safety`, `quality`, `providers` and `.pi/lib`, not a single
-combined figure), each raised by a deliberate edit to a committed number, in
-the same commit as the growth that needs it, the same discipline this
-repository already applies to a runbook status. A helper module that would
+per directory reached this way (WR3-06, `08-REVIEW.md` iteration 3: not
+restated as a count here — the prior count and enumeration drifted from
+`DIRECTORY_BUDGETS` in the very commit that wrote them, which is exactly
+what the next paragraph's own rule exists to prevent; see
+`tests/unit/workflow-budgets.test.ts`'s `DIRECTORY_BUDGETS` for the current
+list), not a single combined figure, each raised by a deliberate edit to a
+committed number, in the same commit as the growth that needs it, the same
+discipline this repository already applies to a runbook status. A helper
+module that would
 exist on its own merits, with its own tests, independent of `/quick`, is a
 different thing than an offloading helper — but "legitimate" is a judgement
 no test can make on its own, which is why the ratchets are the mechanism
