@@ -151,6 +151,7 @@ import {
 } from "./advisor.ts";
 import { type ExecRunner, type GateResult, runDeterministicGates } from "./gates.ts";
 import type { QualitySource } from "./rules.ts";
+import { commandFor } from "../../lib/win-quote.ts";
 
 // ---------------------------------------------------------------------------
 // The registered-tool-name closure -- see this file's own docstring.
@@ -198,11 +199,29 @@ function localBin(cwd: string, name: string): string {
 }
 
 /**
+ * A `cmd.exe`-level "the command line could not be found" message, as
+ * opposed to the compiler/vitest's own non-zero exit. CR2-01 (`08-REVIEW.md`
+ * iteration 2): before `commandFor` folded every argument into one correctly
+ * quoted string, an unescaped space or `&` in `cwd` made `cmd.exe` itself
+ * fail to resolve the command, and that failure surfaced as an ordinary
+ * non-zero exit with `cmd.exe`'s own chatter on stderr — indistinguishable,
+ * to a naive caller, from a real compiler FAIL. `commandFor` closes the
+ * *cause*; this pattern is the belt-and-braces check the review's own "also
+ * consider hardening" note asks for, so that if this exact stderr shape ever
+ * recurs (a future edit reintroduces raw concatenation, or some other spawn
+ * path produces it), it is honestly reported `unavailable`, never masquerades
+ * as a compiler verdict.
+ */
+const CMD_EXE_SPAWN_FAILURE = /is not recognized as an internal or external command/i;
+
+/**
  * Production `ExecRunner` — resolves the pinned LOCAL binary under
  * `<cwd>/node_modules/.bin`, never `npx`. See this file's own "CR-01 /
- * CR-02" docstring section for the two failure modes this closes. Exported
- * (not `FOR TESTS ONLY` -- this IS the production implementation) so
- * `tests/unit/quality-production-exec.test.ts` can exercise it directly,
+ * CR-02" docstring section for the two failure modes this closes, and
+ * CR2-01 (`08-REVIEW.md` iteration 2) for why the spawn itself goes through
+ * {@link commandFor} rather than a raw `shell: true` + args-array call.
+ * Exported (not `FOR TESTS ONLY` -- this IS the production implementation)
+ * so `tests/unit/quality-production-exec.test.ts` can exercise it directly,
  * including the real spawn CR-01 requires proof of.
  */
 export const productionExec: ExecRunner = (cmd, args, cwd) => {
@@ -224,18 +243,34 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 			`${cmd} target file(s) not found under ${cwd}: ${missingTargets.join(", ")} -- this leg only runs ky-pi-agent's own structural lint suite`,
 		);
 	}
-	const result = spawnSync(bin, args, {
+	// CR2-01: `shell: true` alongside a raw args array is unescaped
+	// concatenation into `cmd.exe` (Node's own DEP0190 deprecation) -- `bin`
+	// embeds `cwd`, so a cwd containing a space or a shell metacharacter
+	// (`&`, `^`, `|`, `(`, `)`, all legal on NTFS) corrupted the command line.
+	// `commandFor` quotes every argument and folds them into a single string
+	// on Windows (empty args array, the only shape `shell: true` is safe in),
+	// and passes the array through unchanged on POSIX where no shell runs.
+	const isWindows = process.platform === "win32";
+	const [file, spawnArgs] = commandFor(bin, [...args], isWindows);
+	const result = spawnSync(file, spawnArgs, {
 		cwd,
 		// A Windows `.cmd` shim cannot be launched without a shell (Node
 		// refuses to spawn one with shell:false); a real executable
 		// (macOS/Linux, or a non-.cmd Windows binary) can be launched
 		// directly. Branch explicitly on platform rather than relying on
 		// ENOENT, per CR-01.
-		shell: process.platform === "win32",
+		shell: isWindows,
 		windowsHide: true,
 		encoding: "utf-8",
 	});
 	if (result.error) throw result.error;
+	if (result.status !== 0 && CMD_EXE_SPAWN_FAILURE.test(result.stderr ?? "")) {
+		// A cmd.exe-level failure to even resolve the command line is not a
+		// compiler/vitest verdict -- report it honestly as unavailable rather
+		// than letting it masquerade as `fail`. See CMD_EXE_SPAWN_FAILURE's
+		// own docstring.
+		throw new Error(`${cmd} could not be spawned from ${bin} -- cmd.exe reported: ${(result.stderr ?? "").trim()}`);
+	}
 	return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
 };
 
