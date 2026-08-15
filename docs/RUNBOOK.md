@@ -1279,3 +1279,199 @@ genuinely fires when one is present, so the empty result is a measurement
 rather than a broken matcher. It says nothing about **commit objects**, which
 is this entry and cannot be substituted: a working tree can be clean while
 every historical blob still holds the string.
+
+---
+
+## Phase 8 — Quality Gates & Engineering Quality
+
+Phase 8 built the quality layer end to end — a four-leg deterministic gate
+stage (`quality/gates.ts`), the REVIEW artifact's forced schema and validator
+(`quality/review-schema.ts`), a reviewer dispatched through the Phase 2
+chokepoint (`quality/reviewer.ts`), refute-or-promote and the bounded review
+loop (`quality/verdict.ts`), advisor escalation (`quality/advisor.ts`), and a
+seeded-defect calibration harness (`quality/calibration.ts`,
+`tests/fixtures/seeded-defects/`) — and wired the deterministic stage into a
+real, running `/quick` (plan 08-11). Every mechanism is proven offline against
+a scripted `fauxProvider`; none of it has ever run against a live model, a
+really-installed `@narumitw/pi-lsp`, or a real `pi-subagents` spawn, for the
+same two reasons Phase 7 already recorded: **Correction 1** — this machine's
+live AWS SSO / static admin credentials are not a permission to run a
+`[RUNBOOK]` item, and it holds no *provider* inference credentials regardless
+— and **Correction 2** — the five packages Phase 7 pinned, including
+`pi-subagents@0.49.0` and `@narumitw/pi-lsp@0.49.4`, have never been
+installed (`RB-07-02`, OUTSTANDING). Three entries follow, each citing the
+prior-phase entry that blocks it rather than restating that entry's own
+procedure.
+
+`tests/unit/docs-policy.test.ts` guards these statuses exactly as it guards
+every earlier phase's: it parses both the summary-table row and the
+`**Status:**` line of every `RB-<phase>-<n>` entry, and a disagreement
+between the two is reported as `INCONSISTENT`, which is never an acceptable
+status.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-08-01 | GATE-10 — main-loop thinking budgets land on the wire, one real turn per provider | OUTSTANDING |
+| RB-08-02 | GATE-01 — the LSP leg against a really-installed `@narumitw/pi-lsp` and a real language server | OUTSTANDING |
+| RB-08-03 | GATE-02/GATE-08 — the reviewer through a real `pi-subagents` spawn, and a live-model calibration run | OUTSTANDING |
+
+### RB-08-01 — GATE-10: main-loop thinking budgets land on the wire
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Plan 08-01 fixed and proved the NESTED
+half of GATE-10 offline: `buildNestedApiOptions` sends the correct
+per-`model.api` thinking shape for a nested single-shot call (reviewer,
+advisor, vision, summariser), against two faux providers registered under
+the real `ROLE_MAP`-resolved api ids. GATE-10's own requirement text draws
+the line explicitly — *"main-loop budgets apply only if the wire inspector
+proved the parameters land"* — and the main loop's own dispatch
+(`pi.setModel()`, Pi's ordinary session turn loop) is a structurally
+different code path from `runSingleShotRole`, one this repository does not
+control the internals of. Reading a real wire dump is the only way to answer
+it, and that needs the same thing `RB-02-01` needs and does not have: live
+provider credentials and egress from this machine. This entry is gated
+behind `RB-02-01`, itself OUTSTANDING for the identical reason.
+
+**Precondition.** Run this only after `RB-02-01`'s own procedure has been
+run at least once on the work laptop — the same credentials, the same wire
+log location, no separate setup.
+
+**Procedure, on the work laptop, one real turn per provider with a
+main-loop thinking level actually selected:**
+
+1. Run `/balanced` or `/max` (either sets a non-default main-loop thinking
+   level for the `executor` role; `/cheap` does not, and is not a
+   discriminating case for this check).
+2. Run one ordinary turn with each configured provider selected in turn
+   (DeepSeek-direct, DashScope, Bedrock Claude) — reuse `RB-02-01`'s own
+   step 1/3 procedure rather than restating it here.
+3. After each turn, read the last three request records so all three
+   providers' turns are visible in one read:
+   `cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 3`
+4. Compare each provider's payload against the SAME per-`model.api` shape
+   plan 08-01 proved for the nested path — a `thinking`/`reasoning_effort`
+   pair for DeepSeek-direct, `enable_thinking`/`reasoning_effort` for
+   DashScope, a non-empty `additionalModelRequestFields` for Bedrock Claude
+   — and confirm the effort itself matches the mode just selected, not only
+   that some thinking field is present.
+
+**Expected output.** Each provider's `main.request` record carries the
+thinking parameters `RB-02-01` already documents for that provider, with an
+effort value matching the main-loop mode actually selected in step 1 — not
+merely present, but present at the configured level.
+
+**Offline proxy:** `tests/integration/gate10-nested-thinking.test.ts` (plan
+08-01) — proves `buildNestedApiOptions` selects the correct per-`model.api`
+thinking shape for a NESTED single-shot call, on two faux providers
+registered under `ROLE_MAP`'s own resolved candidates. It proves the nested
+path's shape-selection logic is correct. It says nothing about the main
+loop's own dispatch, which never calls `buildNestedApiOptions` at all and is
+this entry, and cannot be substituted.
+
+### RB-08-02 — GATE-01: the LSP leg against a really-installed language server
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** `quality/gates.ts#probeLspAvailability`
+reads the live, registered tool-name list — never `.pi/settings.json` — and
+on this machine that list never contains `lsp_diagnostics`/`lsp_fix`,
+because `@narumitw/pi-lsp@0.49.4` is pinned and **not installed**
+(Correction 2, `RB-07-02`, OUTSTANDING). The LSP leg's `UNAVAILABLE` state,
+now genuinely wired into a real `/quick` run (plan 08-11), is not a finding
+about the leg's own logic — it is the honest, structurally-distinct-from-PASS
+report of an absent dependency. Whether the leg reports `FAIL` against a
+real type error, once the package and a real language server are both
+present, cannot be exercised without them.
+
+**Precondition.** Run this only after `RB-07-02` has completed — installing
+the five pinned specs, including `@narumitw/pi-lsp@0.49.4`, and reconciling
+`pi list` against `.pi/settings.json`.
+
+**Procedure, on the work laptop, after `RB-07-02`:**
+
+1. Start an interactive Pi session in this repository (`cd ky-pi-agent && pi`)
+   with a language server available for TypeScript on this machine (per
+   `docs/EXTENSIONS.md`'s documented invocation for `@narumitw/pi-lsp` — this
+   step is written as the documented invocation, not a verified command,
+   since the package has never run here; treat its exact shape as
+   UNVERIFIED until this procedure runs for real).
+2. Confirm both `lsp_diagnostics` and `lsp_fix` are registered:
+   `pi --list-tools` (or the session's own `/tools` listing, whichever this
+   Pi version ships — UNVERIFIED, record which one actually worked).
+3. Introduce one real, deliberate type error into a tracked `.ts` file
+   outside `.pi/extensions/quality/` (a mismatched return type is enough),
+   save it, and run `/quick` against a task naming that file.
+4. Read the gate report `/quick` prints on a block, or the turn's own
+   `qualityMs`-carrying JSONL row on a clean run, and confirm the LSP leg's
+   entry reads `FAIL` — naming the real error — rather than `UNAVAILABLE`.
+5. Revert the deliberate error before continuing (`git checkout -- <file>`).
+
+**Expected output.** Step 2 lists both tool names. Step 4's gate report
+shows the LSP leg as `FAIL`, carrying the real diagnostic text the language
+server produced — never `UNAVAILABLE`, which is the state this repository
+has only ever observed with nothing installed.
+
+**Offline proxy:** `tests/unit/quality-gates.test.ts` (plan 08-06) — proves
+`probeLspAvailability` correctly reports `UNAVAILABLE` when the supplied
+registered-tool-name list is missing either `lsp_diagnostics` or `lsp_fix`
+(naming which), and correctly reports the leg as a live participant in
+`GateResult` — never silently blocking — when it is. It proves the
+three-state mechanism is sound. It has never observed a real language
+server's own diagnostic output, which is this entry and cannot be
+substituted.
+
+### RB-08-03 — GATE-02/GATE-08: the reviewer through a real subagent spawn, and a live calibration run
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Two separate claims, bundled into one
+entry because both are blocked by the identical fact. `.pi/agents/reviewer.md`
+(plan 08-07) ships deliberately unwired — no `AGENT_NAME_BY_ROLE` mapping —
+because the reviewer is dispatched via `runSingleShotRole` (`call-model`
+mechanism), not a real `pi-subagents` spawn; wiring it up is `pi-subagents`
+work this machine cannot exercise, since the package has never been
+installed (Correction 2, `RB-07-02`, OUTSTANDING). Separately,
+`tests/fixtures/seeded-defects/`'s calibration run (plan 08-10) reports a
+**scripted** faux reviewer's catch rate — 3 of 6, 0.5 — which measures the
+scorer, not a model's judgement: no live reviewer, of any kind, has ever run
+against this corpus. Both halves need the same two things this machine does
+not have: `pi-subagents` actually installed, and a live model credential.
+
+**Precondition.** Run this only after `RB-07-02` has completed.
+
+**Procedure, on the work laptop, after `RB-07-02`:**
+
+1. Wire `.pi/agents/reviewer.md` into `AGENT_NAME_BY_ROLE` (retiring
+   `tests/unit/subagent-agents-config.test.ts`'s `UNROUTED_AGENT_ALLOWLIST`
+   entry this phase added for it) and spawn it as a real subagent on a small
+   real diff, confirming it receives the six-element contract
+   `quality/reviewer.ts#buildReviewerContext` assembles and returns a
+   `submit_review` tool call `quality/review-schema.ts#validateReview`
+   accepts.
+2. Run the seeded-defect calibration corpus (`tests/fixtures/seeded-defects/`)
+   through the now-real reviewer instead of the scripted faux one used in
+   plan 08-10's own test, and record the resulting `CalibrationResult` —
+   `caught`/`total`/`catchRate`/`perDefectClass`/`unmatchedFindings` — exactly
+   as `quality/calibration.ts#scoreCalibration` reports it, never rounded and
+   never accompanied by a verdict string.
+3. Record the real catch rate, distinct from the 0.5 scripted number
+   `08-10-SUMMARY.md` already recorded:
+   `echo "RB-08-03 live catch rate: <caught>/<total>, $(date -u +%FT%TZ)" >> RB-08-03-RESULT.md`
+
+**Expected output.** Step 1: the spawned reviewer's tool call passes
+`validateReview` (or is rejected with a named, specific reason — either
+outcome is informative; a spawn that never calls `submit_review` at all is
+the failure this entry is watching for). Step 2: a `CalibrationResult` with
+a real, non-scripted `catchRate` — expected to differ from 3/6, in either
+direction, since a live model was never tuned to this corpus the way the
+scripted reviewer was.
+
+**Offline proxy:** `tests/integration/reviewer-contract.test.ts` (plan
+08-07) and `tests/integration/reviewer-calibration.test.ts` (plan 08-10) —
+prove the context contract reaches a captured outgoing request intact and
+redacted, and that `scoreCalibration` computes a real, reproducible,
+non-rounded ratio from real input, against a `fauxProvider` this repository
+scripted itself. Both prove the pipeline is sound end to end. Neither has
+ever seen a real model's judgement or a real `pi-subagents` spawn topology,
+which is this entry and cannot be substituted.

@@ -141,6 +141,26 @@ const PHASE_FIVE_IDS = ["RB-05-01"] as const;
  */
 const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02", "RB-07-03"] as const;
 
+/**
+ * The Phase 8 entries this file governs.
+ *
+ * Three ids, each blocked by a fact already recorded in a PRIOR phase's own
+ * runbook section rather than a new one this phase discovers: `RB-08-01`
+ * (GATE-10's main-loop half) needs live provider credentials this machine
+ * does not hold, exactly like `RB-02-01`, and is gated behind it directly.
+ * `RB-08-02` (GATE-01's LSP leg) and `RB-08-03` (GATE-02/GATE-08's live
+ * reviewer and live calibration run) are both gated behind `RB-07-02` —
+ * nothing has ever been installed on this machine, so neither
+ * `@narumitw/pi-lsp` nor a real `pi-subagents` spawn has ever run. All three
+ * ids are cited BY NAME in code and test comments written before this phase's
+ * closing plan (`quality/gates.ts`'s `probeLspAvailability` docstring names
+ * `RB-08-02`; `tests/unit/subagent-agents-config.test.ts`'s
+ * `UNROUTED_AGENT_ALLOWLIST` and `quality/calibration.ts`'s own header name
+ * `RB-08-03`) — this array is what turns those forward references into
+ * governed entries rather than dangling ones.
+ */
+const PHASE_EIGHT_IDS = ["RB-08-01", "RB-08-02", "RB-08-03"] as const;
+
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
 	...PHASE_ONE_IDS,
@@ -149,6 +169,7 @@ const ALL_IDS = [
 	...PHASE_FOUR_IDS,
 	...PHASE_FIVE_IDS,
 	...PHASE_SEVEN_IDS,
+	...PHASE_EIGHT_IDS,
 ] as const;
 
 /**
@@ -470,6 +491,25 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		"pi list",
 		"npx vitest run tests/unit/extension-pins.test.ts",
 	],
+
+	// PHASE 8 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phases 3-7.
+	// RB-08-01 deliberately does NOT re-pin RB-02-01's own
+	// `tail -n 1 .pi/logs/wire-$(date +%F).jsonl` fragment -- that exact whole
+	// line already sits inside RB-02-01's own procedure, and pinning it a
+	// second time here would make BOTH entries' pins go green if either one's
+	// step dropped its own copy. RB-08-01's own read command is a distinct
+	// three-provider form instead. RB-08-02 and RB-08-03 do not re-pin any of
+	// RB-07-02's five `pi install -l ...` lines or its `pi list` line, for the
+	// identical reason RB-07-01 already established for that command.
+	// Verified by grep before commit: every command below occurs exactly once
+	// in docs/RUNBOOK.md, inside its own entry's section.
+	"RB-08-01": [
+		`cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 3`,
+	],
+	"RB-08-02": ["git checkout -- <file>"],
+	"RB-08-03": [
+		'echo "RB-08-03 live catch rate: <caught>/<total>, $(date -u +%FT%TZ)" >> RB-08-03-RESULT.md',
+	],
 };
 
 /** Matches a repo-relative test path mentioned anywhere in the runbook prose. */
@@ -777,6 +817,40 @@ const FIXTURE_PHASE_SEVEN_HALF_FLIPPED = [
 ].join("\n");
 
 /**
+ * The same two-source shape carrying a PHASE 8 id.
+ *
+ * Written for the reason {@link FIXTURE_PHASE_TWO} states and which has not
+ * expired: {@link PHASE_EIGHT_IDS} was appended on the promise that the
+ * generalised parser already covers it. Without this fixture, `RB-08-01`
+ * would be proven only by the real runbook — the file this guard exists to
+ * police — and the disagreement guard below (the whole point of this plan's
+ * own `test_integrity` obligation) would be exercised only against a file
+ * this suite already asserts is consistent, which proves the parser can read
+ * an agreeing pair but not that it CATCHES a disagreeing one.
+ */
+const FIXTURE_PHASE_EIGHT = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-08-01 | example phase 8 check | OUTSTANDING |",
+	"",
+	"### RB-08-01 — example phase 8 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+const FIXTURE_PHASE_EIGHT_HALF_FLIPPED = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-08-01 | example phase 8 check | PASSED — 2026-08-15 |",
+	"",
+	"### RB-08-01 — example phase 8 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+/**
  * A malformed id in the same two-source shape.
  *
  * Widening the pattern is one edit away from widening it too far — `RB-[\d-]+`
@@ -861,6 +935,24 @@ describe("Group C — the parser catches a status flip", () => {
 		expect(runbookEntryStatuses(FIXTURE_PHASE_SEVEN_HALF_FLIPPED)).toEqual({
 			"RB-07-01": "INCONSISTENT",
 		});
+	});
+
+	it("reads a Phase 8 id, so the disagreement guard is proven off a fixture and not only off the real file", () => {
+		expect(
+			runbookEntryStatuses(FIXTURE_PHASE_EIGHT),
+			"PHASE_EIGHT_IDS was appended straight after PHASE_SEVEN_IDS. If the parser silently assumed " +
+				"phase arrays are numbered contiguously or capped at seven, this fixture is where it would " +
+				"show up as RB-08-01 recorded as undefined",
+		).toEqual({ "RB-08-01": "OUTSTANDING" });
+	});
+
+	it("reports a Phase 8 half-flip as INCONSISTENT — the whole point of this plan's own test_integrity obligation", () => {
+		expect(
+			runbookEntryStatuses(FIXTURE_PHASE_EIGHT_HALF_FLIPPED),
+			"a docs-policy test that cannot detect a one-sided status flip on the very phase that introduced " +
+				"it is worthless — this is the disagreement fixture required to go red, and it must do so " +
+				"BEFORE this file is asserted consistent against the real, agreeing docs/RUNBOOK.md below",
+		).toEqual({ "RB-08-01": "INCONSISTENT" });
 	});
 
 	it("does not recognise a malformed id, so the widened pattern stays a shape and not a wildcard", () => {
