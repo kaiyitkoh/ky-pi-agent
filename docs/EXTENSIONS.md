@@ -314,7 +314,13 @@ exported constant rather than two literal lists. It is two lists composed into
 one:
 
 - `SECRET_EXCLUDE_PATHSPECS` — `*.pem`, `*.key`, `*.p12`, `*.pfx`, `id_rsa*`,
-  `id_ed25519*`, `*credentials`, `*.tfstate`, `*.tfstate.*`.
+  `id_ed25519*`, `*credentials`, `*.tfstate`, `*.tfstate.*`. The leading `*`
+  on `*credentials` is load-bearing (WR2-05): a git pathspec with no wildcard
+  is a literal path match, so the bare `credentials` form excluded only a
+  repo-root file of that name while `sub/.aws/credentials` — the shape the
+  exclusion is named for — was captured on every turn. Git's `*` crosses `/`
+  without `:(glob)` magic, which is why `*.pem` beside it always matched at
+  any depth.
 - `MACHINE_STATE_EXCLUDE_PATHSPECS` — `.pi/state`, `.pi/logs`, `node_modules`,
   `.env`, `.terraform`.
 

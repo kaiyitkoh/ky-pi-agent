@@ -208,7 +208,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
-		budget: 1050,
+		budget: 1070,
 		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
 			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
 			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten. " +
@@ -236,7 +236,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"reversible, and the CORRECTION of the docstring that argued the set difference was safer than " +
 			"git clean -fd (for untracked-non-ignored paths it was identical). A false safety argument in a " +
 			"data-loss path is exactly what a line budget must not pressure out. Re-measured 1050 raw lines " +
-			"across 3 files 2026-08-15 (index.ts 244 + git.ts 475 + store.ts 331)",
+			"across 3 files 2026-08-15 (index.ts 244 + git.ts 475 + store.ts 331). RAISED 1050 -> 1070 for " +
+			"WR2-05: `:(exclude)credentials` is a LITERAL path match and excluded only a repo-root file of " +
+			"that name, so sub/.aws/credentials -- the shape the exclusion is named for -- was captured on " +
+			"every turn. Fixed to `*credentials`, with the executed evidence beside it because a pathspec " +
+			"that looks right and matches nothing is exactly the class of bug a comment prevents. " +
+			"Re-measured 1064 raw lines across 3 files 2026-08-15 (index.ts 244 + git.ts 489 + store.ts 331)",
 	},
 	{
 		dir: ".pi/extensions/loop-police",

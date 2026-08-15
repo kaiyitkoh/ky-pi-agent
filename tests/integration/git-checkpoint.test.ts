@@ -542,6 +542,51 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		).toBe(0);
 	});
 
+	it("case 9 -- WR2-05: a secret-name exclusion holds at ANY depth, not only at the repository root", () => {
+		// A git pathspec with no wildcard is a LITERAL path match. `:(exclude)credentials`
+		// therefore matched only a repo-root file called `credentials`, while
+		// `sub/.aws/credentials` -- the exact shape the exclusion is named for, and
+		// what an AWS credentials file in a repo-local config directory actually
+		// looks like -- was written into `.git/objects` on EVERY turn, where it
+		// survives deleting the file and is recoverable by anyone holding the
+		// repository directory. `*.pem` beside it always worked at any depth
+		// because git's `*` crosses `/` without `:(glob)` magic.
+		//
+		// Asserted against the checkpoint TREE, not against `git status`: the tree
+		// is what persists, and it is what the residual note in docs/EXTENSIONS.md
+		// is a claim about.
+		const repo = trackedRepo("kypi-checkpoint-");
+		commitFile(repo, "tracked.txt", "line1\n", "init");
+		mkdirSync(join(repo, "sub", ".aws"), { recursive: true });
+		writeFileSync(join(repo, "sub", ".aws", "credentials"), "aws_secret_access_key = REDACTED\n", "utf-8");
+		mkdirSync(join(repo, "config"), { recursive: true });
+		writeFileSync(join(repo, "config", "credentials"), "token = REDACTED\n", "utf-8");
+		writeFileSync(join(repo, "credentials"), "root level\n", "utf-8");
+		mkdirSync(join(repo, "deep", "nest"), { recursive: true });
+		writeFileSync(join(repo, "deep", "nest", "key.pem"), "-----BEGIN-----\n", "utf-8");
+		// The negative control: an ordinary file at the same depths must still be
+		// captured, or this case passes for a predicate that captures nothing.
+		writeFileSync(join(repo, "sub", "notes.md"), "ordinary\n", "utf-8");
+
+		const sha = createCheckpoint(repo, "case9");
+		const tree = git(["ls-tree", "-r", "--name-only", sha], repo);
+		expect(tree.status, "listing the checkpoint tree must succeed").toBe(0);
+		const captured = tree.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
+
+		for (const secret of ["sub/.aws/credentials", "config/credentials", "credentials", "deep/nest/key.pem"]) {
+			expect(
+				captured,
+				`${secret} must be absent from the checkpoint tree. A captured secret survives deleting the ` +
+					`file and is recoverable by anyone holding the repository directory. Tree was: ${captured.join(", ")}`,
+			).not.toContain(secret);
+		}
+		expect(
+			captured,
+			"and the control: an ordinary untracked file at the same depth must STILL be captured, or the " +
+				"exclusions have simply turned capture off",
+		).toContain("sub/notes.md");
+	});
+
 	it("case 8 -- CR2-03: the removal half still fires, and the tree it replaced is recoverable", () => {
 		// The other half of case 7. Excluding machine state must NOT be achieved by
 		// making restore delete nothing -- the CR-02 contract (a restore produces

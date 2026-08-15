@@ -205,7 +205,21 @@ export const SECRET_EXCLUDE_PATHSPECS = [
 	":(exclude)*.pfx",
 	":(exclude)id_rsa*",
 	":(exclude)id_ed25519*",
-	":(exclude)credentials",
+	// WR2-05: `*credentials`, not `credentials`. A git pathspec with no wildcard
+	// is a LITERAL path match, so the bare form matched only a repo-root file
+	// called `credentials` -- while `sub/.aws/credentials`, `config/credentials`
+	// and `terraform/credentials`, the exact shape the exclusion is NAMED for,
+	// were still captured into `.git/objects` on every turn. Git's `*` crosses
+	// `/` without `:(glob)` magic, which is why `*.pem` beside it always worked
+	// at any depth. Executed:
+	//
+	//   $ git add -A -- . ':(exclude)credentials' ':(exclude)*.pem'
+	//   $ git diff --cached --name-only
+	//     sub/.aws/credentials        <- CAPTURED
+	//   $ git status --porcelain
+	//     ?? credentials              <- excluded (root only)
+	//     ?? sub/key.pem              <- excluded (any depth)
+	":(exclude)*credentials",
 	":(exclude)*.tfstate",
 	":(exclude)*.tfstate.*",
 ] as const;
