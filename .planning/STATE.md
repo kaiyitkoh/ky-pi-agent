@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 09-05-PLAN.md
-last_updated: "2026-08-15T13:51:23.259Z"
+stopped_at: Completed 09-06-PLAN.md
+last_updated: "2026-08-15T14:15:05.900Z"
 last_activity: 2026-08-15
 progress:
   total_phases: 11
   completed_phases: 8
   total_plans: 103
-  completed_plans: 91
+  completed_plans: 92
   percent: 73
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 6 of 17
+Plan: 7 of 17
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-08-15
 
-Progress: [█████████░] 88%
+Progress: [█████████░] 89%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -161,6 +161,7 @@ credentials can do has been done".
 | Phase 09 P03 | 15min | 2 tasks | 9 files |
 | Phase 09 P04 | 70m | 2 tasks | 7 files |
 | Phase 09 P05 | 55m | 2 tasks | 3 files |
+| Phase 09 P06 | ~40min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -433,6 +434,9 @@ Recent decisions affecting current work:
 - [Phase 09-04]: the four legitimate glab mr create ALLOW forms are asserted in git-policy.test.ts/policy-compose.test.ts, never added to tests/fixtures/evasion-corpus.ts -- the corpus's OUT-OF-SCOPE bucket specifically means a published, uncaught bypass limit, and a by-design allow filed there would falsely document legitimate MR creation as a guard failure
 - [Phase 09]: 09-05: gateRequirementsAuthorship (FLOW-03) is a pure predicate over raw SPEC.md markdown, folding branch (6)'s section3-present overlay into branches (1)-(5) via a shared reason-string helper rather than a standalone seventh check -- by construction §2 is already fully valid by the time control reaches past (1)-(5), so a standalone (6) could never fire there
 - [Phase 09]: 09-05: FLOW-03 stays Pending in REQUIREMENTS.md -- this plan completes only the machine-checkable half (the predicate); FLOW-03 closes when plan 09-08 wires gateRequirementsAuthorship into /grill's actual write path
+- [Phase 09]: 09-06: FLOW-04 and QUAL-03 are entirely SPEC-shape requirements, closed by validateSpec now; FLOW-05 stays Partial -- its diff half (comparing expected-files against a real git diff) is plan 09-14's job
+- [Phase 09]: 09-06: EXPECTED_FILE_PATTERN rejects a glob via character-class exclusion (no glob metacharacter is ever in the allowed class) rather than per-symbol lookaheads, plus two lookaheads for leading / and .. segments
+- [Phase 09]: 09-06: falsification (a) (case-insensitive IF_THEN_PATTERN) turns only the lower-case reject case red, not the SHOULD-variant case -- recorded honestly as the mathematically correct, weaker-than-predicted result, since case-insensitivity has no effect on the literal SHALL/SHOULD word mismatch
 
 ### Pending Todos
 
@@ -485,8 +489,8 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T13:51:23.249Z
-Stopped at: Completed 09-05-PLAN.md
+Last session: 2026-08-15T14:15:05.888Z
+Stopped at: Completed 09-06-PLAN.md
 Resume file: None
 
 Next: `/gsd:autonomous` — Phase 1 has CONTEXT.md already, so it resumes at plan-phase.
