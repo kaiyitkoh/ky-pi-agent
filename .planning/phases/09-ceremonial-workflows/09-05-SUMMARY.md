@@ -215,3 +215,13 @@ None - no external service configuration required.
 ---
 *Phase: 09-ceremonial-workflows*
 *Completed: 2026-08-15*
+
+## Self-Check: PASSED
+
+- FOUND: `.pi/extensions/grill/spec-schema.ts`
+- FOUND: `tests/unit/grill-evidence-gate.test.ts`
+- FOUND: `.planning/phases/09-ceremonial-workflows/09-05-SUMMARY.md`
+- FOUND commit: `2d9f17a` (Task 1)
+- FOUND commit: `5a4c4e4` (Task 2, test file)
+- FOUND commit: `a84ac6f` (fixture sharpening)
+- FOUND commit: `e768e60` (this summary)
