@@ -37,6 +37,23 @@
  * commit as the growth that needs it, with a one-line reason in `why` -- it
  * does not delete the entry, and it does not touch the ceiling test.
  *
+ * WR2-03 (ITERATION 3) -- THE ROUNDING RULE IS NOW ASSERTED, NOT RESTATED.
+ * Every `why` says "measured N raw lines ... rounded up to the next ten".
+ * Re-measured with `countRawLines` -- the function the assertions actually
+ * use -- five of six raises from the previous fix pass carried TEN MORE lines
+ * than that rule yields, and several `why` figures were CONTENT-line counts
+ * (one short per file), i.e. produced by a different method than the one they
+ * documented. No single entry was a disguised relaxation and the
+ * anti-offloading control did fire as designed; the problem is that a
+ * maintainer re-measuring by the documented method got different numbers and
+ * could not tell drift from a rounding habit. So both registries now carry a
+ * `budget === Math.ceil(actual / 10) * 10` assertion.
+ *
+ * `toBe`, not `toBeLessThan(actual + 10)`: the registry must state the
+ * CURRENT measured figure, so a file that SHRINKS also requires the edit.
+ * Headroom accumulated by shrinking is exactly the slack a ratchet exists to
+ * prevent, and unlike growth it accumulates silently.
+ *
  * WR-03 -- THE RATCHET APPLIES TO EVERY COMMAND DIRECTORY, NOT ONLY
  * `workflows/`. A per-file budget alone lets a command file stay small while
  * an unbudgeted sibling in the SAME directory grows without limit -- proved
@@ -160,7 +177,9 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"grep/find/ls/questionnaire, and the three PURE selectors were hoisted out of the extension " +
 			"factory and exported (DEVIATION 5) because the round-trip property was otherwise untestable. " +
 			"The reachability trace showing the review's stated path does NOT hold is recorded there too, " +
-			"rather than the finding being overstated. Re-measured 529 raw lines 2026-08-15, rounded up",
+			"rather than the finding being overstated. Re-measured 534 raw lines 2026-08-15 with " +
+			"countRawLines, rounded up to the next ten -- the figure previously stated here was 529, a " +
+			"CONTENT-line count, which is not the function the assertion uses (WR2-03)",
 	},
 	{
 		file: ".pi/extensions/todo.ts",
@@ -168,8 +187,9 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 		why: "Phase 7 plan 08 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/todo.ts, " +
 			"registers the `todo` tool and /todos -- WR-05 widened discovery to catch command surfaces outside " +
 			"workflows/; upstream's own 297 lines plus this plan's vendoring header (the only permitted " +
-			"addition -- code body otherwise unchanged), measured 352 raw lines 2026-08-15, rounded up to the " +
-			"next ten",
+			"addition -- code body otherwise unchanged), measured 357 raw lines 2026-08-15 with countRawLines, " +
+			"rounded up to the next ten -- the figure previously stated here was 352, a CONTENT-line count, " +
+			"which is not the function the assertion uses (WR2-03)",
 	},
 ];
 
@@ -297,7 +317,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
-		budget: 10,
+		budget: 0,
 		why: "Phase 7 plan 08's vendored todo.ts is a FLAT top-level file (`.pi/extensions/todo.ts`, not a " +
 			"nested `<subsystem>/index.ts`), so its own 3-segment path already IS what " +
 			"`p.split('/').slice(0,3).join('/')` resolves to -- commandDirs names the file itself as its own " +
@@ -305,7 +325,9 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"'.pi/extensions/todo.ts/', which cannot exist for a file, so the total is structurally always 0; " +
 			"this entry exists only to satisfy the completeness check for that edge case, not because any " +
 			"sibling file could ever be hidden beside it -- todo.ts has no siblings by construction (it is a " +
-			"flat file, not a directory)",
+			"flat file, not a directory). LOWERED 10 -> 0 by WR2-03: the measured total is 0, and 0 is what " +
+			"the rounding rule yields, so 10 was ten lines of undeclared headroom in the one entry where the " +
+			"correct figure is not even debatable",
 	},
 ];
 
@@ -463,6 +485,33 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 		).toBeLessThanOrEqual(entry.budget);
 	});
 
+	it.each(WORKFLOW_BUDGETS)("$file's budget IS the measured figure rounded up to the next ten", (entry) => {
+		// WR2-03. Every `why` in this registry restates the rule -- "measured N raw
+		// lines ... rounded up to the next ten" -- and restating a rule is not
+		// enforcing it. Re-measured with countRawLines, the function the assertions
+		// actually use, five of six raises granted TEN MORE lines than the stated
+		// rule yields, and several `why` figures were CONTENT-line counts (one
+		// short per file), i.e. produced by a different method than the one
+		// documented. Individually harmless; collectively the audit trail stopped
+		// being checkable, and a ratchet whose numbers cannot be reproduced by its
+		// own documented method is slack with a paper trail.
+		//
+		// So the rule is asserted rather than restated. `toBe` and not
+		// `toBeLessThan(actual + 10)`: the registry must state the CURRENT measured
+		// figure, so a file that SHRINKS also requires the edit. That is the point
+		// -- headroom accumulated by shrinking is exactly the slack a ratchet
+		// exists to prevent, and it accumulates silently.
+		const actual = countRawLines(entry.file);
+		const expected = Math.ceil(actual / 10) * 10;
+		expect(
+			entry.budget,
+			`${entry.file} is ${actual} raw lines, so its budget must be ${expected} -- the next multiple of ` +
+				`ten, which is the rule every 'why' in this registry states. It is declared as ${entry.budget}. ` +
+				"Update the number AND the measured figure in its `why`, in the same commit as the change that " +
+				"moved it",
+		).toBe(expected);
+	});
+
 	it("/quick (index.ts) never exceeds the explicit 80-line ceiling", () => {
 		const actual = countRawLines(".pi/extensions/workflows/index.ts");
 		expect(
@@ -525,6 +574,26 @@ describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
 				`budget of ${entry.budget} (${entry.why}) -- this is the anti-offloading control; a file that ` +
 				"does not itself spell registerCommand( still counts toward this total",
 		).toBeLessThanOrEqual(entry.budget);
+	});
+
+	it.each(DIRECTORY_BUDGETS)("$dir's budget IS the measured total rounded up to the next ten", (entry) => {
+		// WR2-03, the directory half. Same reasoning as the per-file case above --
+		// and this is where the drift was largest: the checkpoint directory's `why`
+		// summed three content-line counts (229+374+330=933) while countRawLines
+		// gave 936, and its budget of 940 was ten above what the rule yields for
+		// either figure. `.pi/extensions/todo.ts` is included deliberately: it is a
+		// flat file, filesInDir returns nothing for it, the measured total is 0,
+		// and 0 is therefore the correct budget. It carried 10.
+		const files = filesInDir(entry.dir);
+		const total = files.reduce((sum, f) => sum + countRawLines(f), 0);
+		const expected = Math.ceil(total / 10) * 10;
+		expect(
+			entry.budget,
+			`${entry.dir} totals ${total} raw lines across ${files.length} files ` +
+				`(${files.map((f) => `${f.split("/").pop()} ${countRawLines(f)}`).join(", ") || "none"}), so its ` +
+				`budget must be ${expected}. It is declared as ${entry.budget}. Update the number AND the ` +
+				"measured figure in its `why`, in the same commit as the change that moved it",
+		).toBe(expected);
 	});
 
 	it("WR-03 proof: filesInDir counts a sibling file that does NOT itself spell registerCommand( (routing/modes.ts)", () => {
