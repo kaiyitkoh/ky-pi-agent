@@ -92,6 +92,19 @@ export function makeBootstrapRepoCopy(prefix: string): BootstrapRepoCopy {
 	mkdirSync(join(root, ".pi", "lib"), { recursive: true });
 	copyFileSync(join(repoRoot(), ".pi", "lib", "jsonl.ts"), join(root, ".pi", "lib", "jsonl.ts"));
 
+	// WR-02: `merge_subagent_config` writes `$REPO_ROOT/.pi/scripts/
+	// worktree-setup-hook.mjs` as an ABSOLUTE path into pi-subagents' user-scope
+	// config, and the new `report_subagent_config` --check-only counterpart then
+	// asserts that path EXISTS. A copy without the script makes every run of the
+	// full bootstrap wire a dangling path, and the check-only report correctly
+	// calls it stale -- so the script has to be here for the same reason
+	// `safety/` is: the copy must contain what the script under test points at.
+	mkdirSync(join(root, ".pi", "scripts"), { recursive: true });
+	copyFileSync(
+		join(repoRoot(), ".pi", "scripts", "worktree-setup-hook.mjs"),
+		join(root, ".pi", "scripts", "worktree-setup-hook.mjs"),
+	);
+
 	return {
 		root,
 		bootstrapSh: join(root, "bin", "bootstrap.sh").replace(/\\/g, "/"),

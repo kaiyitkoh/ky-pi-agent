@@ -1077,6 +1077,61 @@ console.log("  " + stub + " -> " + m[1] + " (target exists)");
 }
 
 # ---------------------------------------------------------------------------
+# WR-02: the --check-only counterpart to merge_subagent_config
+# ---------------------------------------------------------------------------
+# `install_safety_extension` has had a paired `report_safety_extension` since
+# T-04-48, with the reasoning stated inline there: "a stale stub is silently
+# unguarded rather than loudly broken". `merge_subagent_config` had no
+# equivalent, and it carries the IDENTICAL hazard in a wider blast radius: it
+# writes an ABSOLUTE path into a USER-scope, machine-wide config file, so if
+# this ky-pi-agent clone is moved or deleted, every subagent worktree spawn on
+# this machine -- in every repository, not just this one -- points at a
+# nonexistent hook. Whether `pi-subagents` then fails loudly or silently
+# degrades is not something this repository controls and is untested here
+# (RB-07-01 leg 2 is OUTSTANDING), which is precisely why the check must be
+# loud on THIS side of the boundary.
+#
+# Exits non-zero on a broken wiring, exactly like report_safety_extension.
+# An ABSENT config is a WARN and not a failure: a machine that has never run
+# the full bootstrap has nothing broken, it has something not yet done.
+report_subagent_config() {
+	_sa_cfg="$PI_AGENT_DIR/extensions/subagent/config.json"
+	if [ ! -f "$_sa_cfg" ]; then
+		printf '  WARN worktree setup hook not wired: %s is absent\n' "$_sa_cfg"
+		printf '       remedy: run bin/bootstrap.sh with no arguments to apply\n'
+		return 0
+	fi
+	KYPI_SUBAGENT_CONFIG="$_sa_cfg" node -e '
+const fs = require("node:fs");
+const p = process.env.KYPI_SUBAGENT_CONFIG;
+let obj;
+try { obj = JSON.parse(fs.readFileSync(p, "utf8")); } catch (e) {
+  console.error("FATAL: " + p + " is not valid JSON (" + e.message + "). Refusing to trust it.");
+  process.exit(1);
+}
+if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+  console.error("FATAL: " + p + " is not a JSON object. Refusing to trust it.");
+  process.exit(1);
+}
+const hook = obj.worktreeSetupHook;
+if (typeof hook !== "string" || hook === "") {
+  console.error("FATAL: " + p + " carries no worktreeSetupHook.");
+  console.error("       Remedy: re-run bin/bootstrap.sh with no arguments.");
+  process.exit(1);
+}
+if (!fs.existsSync(hook)) {
+  console.error("FATAL: " + p + " points at " + hook + ", which does not exist.");
+  console.error("       This config is written at USER scope, so every subagent worktree spawn on this");
+  console.error("       machine -- in every repository -- is affected, not just this one.");
+  console.error("       This usually means the repository clone that wrote it was moved or deleted.");
+  console.error("       Remedy: run bin/bootstrap.sh with no arguments to rewrite it.");
+  process.exit(1);
+}
+console.log("  " + p + " -> " + hook + " (target exists)");
+'
+}
+
+# ---------------------------------------------------------------------------
 # Modes
 # ---------------------------------------------------------------------------
 
@@ -1150,6 +1205,8 @@ run_check_only() {
 	report_user_scope
 	printf 'Safety extension (user scope):\n'
 	report_safety_extension
+	printf 'Worktree setup hook (user scope, machine-wide):\n'
+	report_subagent_config
 	printf 'check-only complete.\n'
 }
 
