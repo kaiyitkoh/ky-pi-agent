@@ -412,22 +412,69 @@ Plans:
 **Plans**: 17 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 09-01-PLAN.md — WR-09 de-flake: event-gate the checkpoint-store concurrency case, delete the wall-clock margin
 - [ ] 09-02-PLAN.md — the sideways ratchet: `RESOURCE_EDGES` completeness scanner + `WORKFLOW_TEXT_BUDGETS`
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 09-03-PLAN.md — ground clearing: `/plan` → `/plan-mode` (DEVIATION 6), `.pi/work/` gitignored, `ARTIFACT_FILES`
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 09-04-PLAN.md — extend `classifyGlabInvocation` for `glab mr create` (explicit non-protected target only)
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 09-05-PLAN.md — SPEC §2 Verified Codebase Facts evidence gate (FLOW-03)
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 09-06-PLAN.md — SPEC §4 `IF/THEN`, §5 scope pin, conditional Root Cause, renderer (FLOW-04, FLOW-05, QUAL-03)
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 09-07-PLAN.md — ambiguity scorecard: dimensions, floors, hard question budget, rotating perspectives (FLOW-02)
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 09-08-PLAN.md — the `/grill` command + `.pi/skills/grill/SKILL.md` (≤250 lines)
+
+**Wave 8** *(blocked on Wave 7 completion)*
+
 - [ ] 09-09-PLAN.md — PLAN.md task form + two-directional coverage matrix + renderer (FLOW-06)
+
+**Wave 9** *(blocked on Wave 8 completion)*
+
 - [ ] 09-10-PLAN.md — the `/plan` command + `.pi/skills/plan-ceremony/SKILL.md` (≤200 lines)
+
+**Wave 10** *(blocked on Wave 9 completion)*
+
 - [ ] 09-11-PLAN.md — handoff packet builder, honest-degradation subagent probe, agent file (FLOW-09)
+
+**Wave 11** *(blocked on Wave 10 completion)*
+
 - [ ] 09-12-PLAN.md — QUAL-08's pure gate-depth selector, asserted in both directions
+
+**Wave 12** *(blocked on Wave 11 completion)*
+
 - [ ] 09-13-PLAN.md — the `/execute` command: PROGRESS append, evidence gate reuse, fail-closed drift abort (FLOW-07)
+
+**Wave 13** *(blocked on Wave 12 completion)*
+
 - [ ] 09-14-PLAN.md — scope drift computed from `git diff --name-only` + REVIEW.md's Scope Drift section
+
+**Wave 14** *(blocked on Wave 13 completion)*
+
 - [ ] 09-15-PLAN.md — the `/review` command + MR to staging through the classifier + `.pi/skills/review/SKILL.md`
+
+**Wave 15** *(blocked on Wave 14 completion)*
+
 - [ ] 09-16-PLAN.md — FLOW-10: the artifact set capped at four with named consumers; text budgets closed
+
+**Wave 16** *(blocked on Wave 15 completion)*
+
 - [ ] 09-17-PLAN.md — `docs/WORKFLOWS.md` derived from code, `RB-09-01..03` OUTSTANDING, REQUIREMENTS reconciliation
 
 **Research**: Not needed — artifact schemas, gate definitions and line budgets are already prescriptive.

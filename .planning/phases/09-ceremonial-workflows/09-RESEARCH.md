@@ -348,7 +348,12 @@ Not applicable in the usual sense — this is a codebase-verification task, not 
 
 **If this table is empty:** N/A — three assumptions logged above, all LOW or LOW-MEDIUM risk, none load-bearing for the phase's pass/fail gates.
 
-## Open Questions
+## Open Questions (RESOLVED)
+
+> Both questions were settled at planning time and each recommendation was adopted verbatim. Neither is open going into execution.
+>
+> - **Q1 — RESOLVED**, adopted by `09-04-PLAN.md`: `protectedBranches` is threaded as a new, separate parameter (not folded into `GitPolicyFacts`), and both docstrings state the current-branch / destination-branch distinction.
+> - **Q2 — RESOLVED**, adopted by `09-02-PLAN.md`: `RESOURCE_EDGES` lives test-side in `tests/unit/workflow-budgets.test.ts`, following the `importedSubsystemDirs` precedent — no production module, no line-budget cost.
 
 1. **Does `classifyGlabInvocation`'s signature change (adding a `facts`-like parameter for `PROTECTED_BRANCHES`) ripple into `policy.ts`'s evaluation-order docstring, which currently states `classifyGlabInvocation` "takes no branch facts at all"?**
    - What we know: `policy.ts:361` calls it today with no facts argument; the module docstring (`git.ts:76-79`) explicitly argues glab's danger is branch-independent.
