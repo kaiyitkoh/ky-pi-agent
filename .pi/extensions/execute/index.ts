@@ -16,9 +16,9 @@ import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import {
-	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, driftBase,
-	ensureWorkIgnored, executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase, recordedEntries,
-	stallDetected, verificationRecord,
+	REVISION_CAP, appendAttempt, appendProgress, armExecuteRun, attemptState, changedFiles, checkVerification, disarmExecuteRun,
+	driftAbort, driftBase, ensureWorkIgnored, executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase,
+	recordedEntries, verificationRecord,
 } from "./progress.ts";
 
 /** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
@@ -36,15 +36,15 @@ export default function (pi: ExtensionAPI): void {
 	let baseSha = "";
 	let allowance: { spec: readonly string[]; plan: readonly string[] } = { spec: [], plan: [] };
 	let errorCount = 0;
-	let attempts = 0;
-	let lastErrors: number | undefined;
 
 	pi.registerCommand("execute", {
 		description: "Run the next unfinished PLAN.md task, evidence-gated, and append PROGRESS.md on acceptance",
 		handler: async (args, ctx) => {
 			const fail = (msg: string) => void ctx.ui.notify(msg, "error");
 			try {
-				const arg = args.trim();
+				const tokens = args.trim().split(/\s+/).filter((t) => t !== "");
+				const reset = tokens.includes("--reset");
+				const arg = tokens.find((t) => t !== "--reset") ?? "";
 				const candidates = slugsWithPlan(ctx.cwd);
 				if (arg === "" && candidates.length !== 1) {
 					return fail(candidates.length === 0 ? "execute: no .pi/work/<slug>/PLAN.md found -- run /plan first" : `execute: several plans exist (${candidates.join(", ")}) -- pass one: /execute <slug>`);
@@ -72,6 +72,12 @@ export default function (pi: ExtensionAPI): void {
 				if (task === undefined || task.verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
 				if (isRunArmed() || !ctx.isIdle()) return fail("execute: a turn is already in flight -- wait for it to finish");
+
+				if (reset) appendAttempt(ctx.cwd, slug, task.id, "reset");
+				const prior = reset ? { attempts: 0, stalled: false } : attemptState(done, task.id);
+				if (prior.attempts > REVISION_CAP || prior.stalled) {
+					return fail(`execute: ${task.id} is escalated (${prior.attempts} rejected attempts${prior.stalled ? ", errors not dropping" : ""}) -- inspect it, then run /execute ${slug} --reset to allow another attempt`);
+				}
 
 				// The deterministic stage runs on the base tree here, so a failure at settle is the change's own, and again on the commit at settle.
 				const mechanisms = gateDepthFor("execute").mechanisms;
@@ -135,22 +141,20 @@ export default function (pi: ExtensionAPI): void {
 			const verdict = ended?.ok === true && checked?.ok === false ? { ok: false as const, reason: checked.reason } : ended;
 			// Unarmed means another settle handler consumed the run; no verdict, so nothing is written.
 			if (verdict === undefined) return void ctx.ui.notify(`execute: ${run.taskId} had no evidence verdict -- nothing written`, "error");
-			if (!verdict.ok) {
-				attempts += 1;
-				const stalled = lastErrors !== undefined && stallDetected(lastErrors, errorCount);
-				lastErrors = errorCount;
-				const next = attempts > REVISION_CAP || stalled ? "escalate to the user: retries exhausted or errors not dropping" : "fix and run /execute again";
-				return void ctx.ui.notify(`execute: ${run.taskId} rejected -- ${verdict.reason}; ${next}`, "error");
-			}
+			const reject = (reason: string) => {
+				appendAttempt(cwd, run.slug, run.taskId, "rejected", errorCount);
+				const state = attemptState(readFileSync(join(workDir(cwd, run.slug), "PROGRESS.md"), "utf-8"), run.taskId);
+				const next = state.attempts > REVISION_CAP || state.stalled ? "escalated: further attempts are refused until /execute --reset" : "fix and run /execute again";
+				ctx.ui.notify(`execute: ${run.taskId} rejected -- ${reason}; ${next}`, "error");
+			};
+			if (!verdict.ok) return reject(verdict.reason);
 			const drift = driftAbort({ attemptedPaths: changedFiles(cwd, baseSha, verdict.sha), specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
 			if (!drift.ok) return void ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error");
 			if (gateDepthFor("execute").mechanisms.includes("deterministic")) {
 				const gate = runQuickGateStage(cwd, ctx.isProjectTrusted());
-				if (gate.blocking) return void ctx.ui.notify(`execute: ${run.taskId} rejected -- the deterministic gate fails on the committed change:\n${gate.report}`, "error");
+				if (gate.blocking) return reject(`the deterministic gate fails on the committed change:\n${gate.report}`);
 			}
 			appendProgress(cwd, run.slug, { taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
-			attempts = 0;
-			lastErrors = undefined;
 			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode})`, "info");
 		} catch (err) {
 			ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${err instanceof Error ? err.message : String(err)}`, "error");

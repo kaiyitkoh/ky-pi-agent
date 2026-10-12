@@ -9,7 +9,7 @@
  * Not re-proven here: gateCompletion's own predicate table (unit test).
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -75,8 +75,9 @@ function commitIn(repo: string, name: string, body: string): string {
 	return commitFile(repo, name, body, `change ${name}`);
 }
 
+/** Size without the harness's own attempt log, which a rejection is meant to append; everything else must stay put. */
 function bytes(file: string): number {
-	return existsSync(file) ? statSync(file).size : 0;
+	return existsSync(file) ? readFileSync(file, "utf-8").replace(/^<!-- (?:rejected|reset) T\d{3}[^\n]* -->\n/gm, "").length : 0;
 }
 
 /** Load both real extensions into one stand-in Pi, execute first so its settle handler sees the run. */
@@ -260,6 +261,33 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		verify(h, `ok key=AKIA${"B".repeat(16)}`);
 		h.fire("agent_end", {});
 		expect(readFileSync(progressFile(h), "utf-8")).not.toContain(`AKIA${"B".repeat(16)}`);
+	});
+
+	it("the revision cap is enforced per task and survives a fresh extension instance, until an explicit --reset", async () => {
+		const h = harness();
+		for (let i = 0; i < 3; i++) {
+			await h.command(SLUG);
+			h.fire("agent_end", {});
+			expect(h.notes.at(-1)?.text).toContain("rejected");
+		}
+		expect(h.notes.at(-1)?.text).toContain("escalated");
+		const sentBefore = h.sent.length;
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("--reset");
+		expect(h.sent.length, "an escalated task is refused before the model is prompted").toBe(sentBefore);
+		await h.command(`${SLUG} --reset`);
+		expect(h.sent.length).toBe(sentBefore + 1);
+		endRun("", "");
+	});
+
+	it("two rejections whose error count does not drop escalate before the cap", async () => {
+		const h = harness();
+		for (let i = 0; i < 2; i++) {
+			await h.command(SLUG);
+			h.fire("tool_execution_end", toolEnd("boom", true));
+			h.fire("agent_end", {});
+		}
+		expect(h.notes.at(-1)?.text).toContain("escalated");
 	});
 
 	it("fabrication: a commit with narrated output and no structured tool result is rejected, file unchanged", async () => {

@@ -43,19 +43,50 @@ export function renderProgressAppend(entry: ProgressEntry): string {
 const MIN_FENCE = 3;
 const FENCE_LINE = /^(`{3,})/;
 
-/** Entry blocks, each starting at a `## T### @ <sha>` heading that sits outside every fenced block. */
-export function progressBlocks(progress: string): readonly string[] {
-	const blocks: string[][] = [];
+/** Every line, marked when it sits inside a fenced block (fence lines included), so quoted output never poses as a record. */
+function scanLines(progress: string): readonly { readonly line: string; readonly fenced: boolean }[] {
 	let fence: string | undefined;
-	for (const line of progress.split("\n")) {
+	return progress.split("\n").map((line) => {
 		const run = FENCE_LINE.exec(line)?.[1];
-		if (fence === undefined && /^## T\d{3} @ /.test(line)) blocks.push([]);
-		blocks.at(-1)?.push(line);
+		const fenced = fence !== undefined || run !== undefined;
 		if (run !== undefined && (fence === undefined || (run.length >= fence.length && line.trim() === run))) {
 			fence = fence === undefined ? run : undefined;
 		}
+		return { line, fenced };
+	});
+}
+
+/** Entry blocks, each starting at a `## T### @ <sha>` heading that sits outside every fenced block. */
+export function progressBlocks(progress: string): readonly string[] {
+	const blocks: string[][] = [];
+	for (const { line, fenced } of scanLines(progress)) {
+		if (!fenced && /^## T\d{3} @ /.test(line)) blocks.push([]);
+		blocks.at(-1)?.push(line);
 	}
 	return blocks.map((b) => b.join("\n").trim());
+}
+
+const REJECTED_LINE = /^<!-- rejected (T\d{3}) errors=(\d+) -->$/;
+const RESET_LINE = /^<!-- reset (T\d{3}) -->$/;
+
+/** Record one rejected attempt (an HTML comment, invisible in the MR) so the revision cap survives restarts and slugs. */
+export function appendAttempt(cwd: string, slug: string, taskId: string, record: "rejected" | "reset", errors = 0): void {
+	const dir = workDir(cwd, slug);
+	mkdirSync(dir, { recursive: true });
+	appendFileSync(join(dir, "PROGRESS.md"), record === "reset" ? `<!-- reset ${taskId} -->\n` : `<!-- rejected ${taskId} errors=${errors} -->\n`, "utf-8");
+}
+
+/** Rejected attempts for `taskId` since its last reset, and whether the error count stopped dropping between the last two. */
+export function attemptState(progress: string, taskId: string): { readonly attempts: number; readonly stalled: boolean } {
+	let errors: number[] = [];
+	for (const { line, fenced } of scanLines(progress)) {
+		if (fenced) continue;
+		if (RESET_LINE.exec(line)?.[1] === taskId) errors = [];
+		const m = REJECTED_LINE.exec(line);
+		if (m?.[1] === taskId) errors.push(Number(m[2]));
+	}
+	const [prev, cur] = errors.slice(-2);
+	return { attempts: errors.length, stalled: prev !== undefined && cur !== undefined && stallDetected(prev, cur) };
 }
 
 /** Append to the slug's PROGRESS.md. Throws on an unwritable path so a lost append is never mistaken for a written one. */

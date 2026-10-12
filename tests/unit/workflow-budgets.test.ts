@@ -299,11 +299,11 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/execute/index.ts",
-		budget: 160,
+		budget: 170,
 		why: "plan 09-13 (FLOW-07) -- the /execute command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, " +
 			"the write allowance, gate depth via gateDepthFor, the honest subagent probe, evidence arming reused from " +
 			"workflows/evidence.ts, and the settle handler that appends PROGRESS.md only on the accept arm. Measured 142 raw " +
-			"lines 2026-10-13 with countRawLines, rounded up to the next ten. Re-measured 149 raw lines after the verification run began being captured by tool call id, rounded up to the next ten. Re-measured 153 raw lines after the deterministic gate began re-running on the committed change, rounded up to the next ten. Re-measured 156 raw lines after the drift base began being pinned per slug, rounded up to the next ten. Re-measured 157 raw lines after done detection began ignoring fenced output, rounded up to the next ten. Re-measured 160 raw lines after the work-dir exclusion check was wired in, rounded up to the next ten",
+			"lines 2026-10-13 with countRawLines, rounded up to the next ten. Re-measured 149 raw lines after the verification run began being captured by tool call id, rounded up to the next ten. Re-measured 153 raw lines after the deterministic gate began re-running on the committed change, rounded up to the next ten. Re-measured 156 raw lines after the drift base began being pinned per slug, rounded up to the next ten. Re-measured 157 raw lines after done detection began ignoring fenced output, rounded up to the next ten. Re-measured 160 raw lines after the work-dir exclusion check was wired in, rounded up to the next ten. Re-measured 164 raw lines after the revision cap became a refusal with an explicit --reset, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/review/index.ts",
@@ -671,7 +671,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/execute",
-		budget: 660,
+		budget: 690,
 		why: "plan 09-11 (FLOW-09) -- the first file of the /execute subsystem, handoff.ts: the honest-degradation " +
 			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/bg_wait pair, never " +
 			"reading the settings file), the pure buildHandoffPacket/renderHandoffPacket, and the real " +
@@ -683,7 +683,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			".pi/extensions/plan-ceremony. Measured 169 raw lines across 1 file 2026-10-13 (handoff.ts), rounded " +
 			"up to the next ten. RAISED 170 -> 370 by plan 09-13 (FLOW-07): progress.ts, the PROGRESS.md append " +
 			"format, fail-closed driftAbort and per-run output slot. Measured 169 (handoff.ts) + 198 (progress.ts) = " +
-			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 370 -> 510 by plan 09-13 for index.ts, the /execute command: 169 + 198 + 142 = 509 raw lines across 3 files 2026-10-13, rounded up to the next ten. Re-measured 514 raw lines after the drift diff stopped hiding renames, rounded up to the next ten. Re-measured 564 raw lines after progress.ts began recording only the verification run, rounded up to the next ten. Re-measured 568 raw lines after index.ts began re-running the deterministic gate at settle, rounded up to the next ten. Re-measured 590 raw lines after progress.ts gained the pinned drift base, rounded up to the next ten. Re-measured 594 raw lines after progress.ts gained the shared recordedEntries parser, rounded up to the next ten. Re-measured 619 raw lines after progress.ts gained the fence-aware entry parser, rounded up to the next ten. Re-measured 651 raw lines after progress.ts began redacting and bounding output and excluding .pi/work/, rounded up to the next ten",
+			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 370 -> 510 by plan 09-13 for index.ts, the /execute command: 169 + 198 + 142 = 509 raw lines across 3 files 2026-10-13, rounded up to the next ten. Re-measured 514 raw lines after the drift diff stopped hiding renames, rounded up to the next ten. Re-measured 564 raw lines after progress.ts began recording only the verification run, rounded up to the next ten. Re-measured 568 raw lines after index.ts began re-running the deterministic gate at settle, rounded up to the next ten. Re-measured 590 raw lines after progress.ts gained the pinned drift base, rounded up to the next ten. Re-measured 594 raw lines after progress.ts gained the shared recordedEntries parser, rounded up to the next ten. Re-measured 619 raw lines after progress.ts gained the fence-aware entry parser, rounded up to the next ten. Re-measured 651 raw lines after progress.ts began redacting and bounding output and excluding .pi/work/, rounded up to the next ten. Re-measured 686 raw lines after progress.ts began persisting rejected attempts per task, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/review",
@@ -1585,7 +1585,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [],
 		budget: 250,
 		why: "FEATURES.md Part 2 ceiling for /execute -- FROZEN, may not move to absorb growth (D-13). No skill body; " +
-			"measured 160 raw lines 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
+			"measured 164 raw lines 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
 			"the .pi/extensions/execute DIRECTORY_BUDGETS ratchet",
 	},
 	{

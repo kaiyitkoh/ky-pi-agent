@@ -412,6 +412,10 @@ being recorded (seen on `tool_execution_start`, since `tool_execution_end`
 carries no arguments), and `driftAbort` allows every path git reports as
 changed. PROGRESS.md records that run's own output and exit code, bound to a
 harness-read commit SHA; no other tool output is kept. The shared workflows
+Each rejection appends an invisible `<!-- rejected T### errors=N -->` line to
+PROGRESS.md; once a task passes `REVISION_CAP` rejections, or two in a row
+fail to lower the error count, `/execute` refuses it until the user runs
+`/execute <slug> --reset`. The shared workflows
 settle handler stands aside while an `/execute` run is armed, so the result
 does not depend on extension load order, which Pi takes from an unsorted
 directory listing.
