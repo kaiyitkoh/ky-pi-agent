@@ -379,3 +379,23 @@ plainly what a passing check does not cover:
   returns into the SAME executor turn; a refused consult (no configured
   candidate) costs zero requests and is never charged to the QUAL-09
   ledger.
+
+## Entry-point notes (`quality/index.ts`, `quality/gates.ts`)
+
+- **Live tool list through a closure on `globalThis`.** `pi.getAllTools()` exists
+  only on `ExtensionAPI`, so the factory stores `() => pi.getAllTools().map(...)`
+  under a `globalThis` key. Pi loads each entry point through its own module
+  graph, so a module-level `let` would stay empty in the importer's copy; the
+  shared function object does not.
+- **`consult_advisor` is a tool, not a command.** The answer must return into the
+  same executor turn; a command runs between turns. It is registered first in the
+  factory, carries no per-tool prompt metadata (activating such a tool rebuilds
+  the system prompt) and sets no `terminate`, since a consult continues the turn.
+- **The production runner never names `npx`.** `npx` is `npx.cmd` on Windows and
+  unspawnable without a shell; elsewhere an unpinned `npx <pkg>` downloads from
+  the registry. `productionExec` resolves `node_modules/.bin/<name>` (walking up
+  ancestors), refuses a `%` in the command line on Windows, and degrades to
+  `unavailable` for a foreign `cwd` or an untrusted project.
+- **Chokepoint hygiene.** `gates.ts` never reaches a model and never spells the
+  bypass routes or the tool-registration call, even in comments; the raw-source
+  lint tests grant `quality/` no exemption.

@@ -1,141 +1,7 @@
 /**
- * ky-pi-agent — the quality subsystem's extension entry point (GATE-01,
- * GATE-09, QUAL-05).
- *
- * PURPOSE. This file composes waves 1-3's pure/impure pieces into what the
- * running harness actually does: {@link runQuickGateStage} is the ONE thing
- * `.pi/extensions/workflows/index.ts` calls to run `gates.ts`'s deterministic
- * stage for real, so `/quick` never inlines rule or leg logic and stays
- * inside its own line budget (`docs/WORKFLOWS.md`, `tests/unit/
- * workflow-budgets.test.ts`). It reimplements nothing from `gates.ts`,
- * `rules.ts` or `advisor.ts` — it wires their existing exports to a real
- * `cwd`, a real subprocess runner and the live registered-tool-name list.
- * Wiring `verdict.ts`'s stop signal into a live ceremonial workflow is
- * explicitly Phase 9's job (QUAL-08); this plan's own must_haves state that
- * boundary and this file does not cross it.
- *
- * ---------------------------------------------------------------------------
- * THE LSP PROBE IS FED FROM A CLOSURE CAPTURED IN THE FACTORY, NEVER A
- * LOAD-TIME SNAPSHOT
- * ---------------------------------------------------------------------------
- * `pi.getAllTools()` exists only on `ExtensionAPI`
- * [`dist/core/extensions/types.d.ts:948`], never on `ExtensionContext` —
- * `gates.ts`'s own module docstring already states its `ctx` equivalent has
- * no such accessor. So this file captures the closure `() =>
- * pi.getAllTools().map((t) => t.name)` where `pi` is in scope (the factory
- * below), NOT a snapshot array taken at load time — tools may register after
- * startup (registration works from `session_start`, command handlers
- * and event handlers too, not only a factory), and a snapshot taken during the factory would report
- * the LSP absent forever even on a machine where it later loads.
- *
- * The closure itself — not merely data derived from it — is stored under a
- * `globalThis` key, mirroring `diagnostics/quality-cost.ts`'s and
- * `routing/modes.ts`'s own STATE-SLOT HAZARD discipline: Pi loads each
- * top-level extension entry point through its own jiti module graph, so
- * `workflows/index.ts` importing `registeredToolNames` from this file gets a
- * SEPARATE module instance than the one whose factory Pi actually invoked —
- * a plain module-level `let` here would leave the importer's own copy at its
- * initial, empty value forever. Storing the closure itself on `globalThis`
- * survives that split intact: the SAME function object — the one that
- * genuinely closes over the real `pi` — is what every copy of this module
- * reads back, in this or any other process-wide graph.
- *
- * ---------------------------------------------------------------------------
- * THIS FILE REGISTERS A TOOL ON PURPOSE (BOOT-10)
- * ---------------------------------------------------------------------------
- * `pi.registerTool` is called exactly once below, for `consult_advisor`. This
- * is the fifth `TOOL_REGISTRATION_ALLOWLIST` entry
- * (`tests/unit/contributing-boundary.test.ts`) and the fifth
- * `TOOL_COUNT_BASELINE` row (`tests/unit/tool-count-baseline.test.ts`), both
- * landing in this same commit — `advisor.ts`'s own docstring states plainly
- * that it builds the mechanism but defers registration here.
- *
- * (a) The model must call `consult_advisor` MID-TURN — the consult happens at
- *     a decision point INSIDE the executor's own turn, and the advisor's
- *     answer must return into that SAME turn. A command cannot do this:
- *     `system-prompt.ts` carries no reference to registered commands, so a
- *     command runs BETWEEN turns and has no path back into the model's own
- *     reasoning while it is still working.
- * (b) MEASURED, not estimated: 584 bytes / 146 tokens, computed exactly as
- *     `08-08-SUMMARY.md` records — `Buffer.byteLength(JSON.stringify({type:
- *     "function",function:{name,description,parameters}}),"utf8")`,
- *     `Math.ceil(bytes/4)` per `diagnostics/budget.ts:223-224`, run against
- *     the real `consultAdvisorParameters`/`CONSULT_ADVISOR_DESCRIPTION` via a
- *     `node --input-type=module -e` one-liner from this repo's root. The new
- *     LIVE TOTAL this commit produces: 5 tools, 1015 + 146 = 1161 tokens —
- *     Phase 7's own 1015-token, 4-tool figure (`tests/unit/
- *     contributing-boundary.test.ts`'s own honesty paragraph) plus this
- *     tool's 146. Phase 10, not this plan, owns deciding whether that is
- *     acceptable and cutting it.
- * (c) A skill cannot carry this: a skill is text the model reads and
- *     interprets, with no mechanism to make a nested, routed, guarded model
- *     call whose result returns as structured tool output the executor can
- *     branch on inside the SAME turn.
- *
- * `promptMetadata: false` in the `TOOL_COUNT_BASELINE` row: the registration
- * below carries neither of `ToolDefinition`'s two optional per-tool
- * prompt-metadata fields — the one-line "available tools" snippet field and
- * the active-only guideline-bullets field — deliberately never spelled here
- * by name; a directory-wide grep for both field names across this whole
- * subsystem is 0, recorded in that row's own `why`. Activating a tool that
- * carries either REBUILDS THE SYSTEM PROMPT and invalidates the provider
- * cache prefix.
- *
- * No `terminate` field is set on the registration below — `advisor.ts`'s own
- * docstring states why: a consult is mid-turn continuation, never a final
- * answer.
- *
- * A NOTE, NOT AN UPSTREAM COPY — for `tests/unit/tool-count-baseline.test.ts`'s
- * own registry, which discovers a "vendored"-kind row's source by scanning for
- * a case-insensitive "vendored" marker in the file itself. This file is
- * authored in this repository, never copied in from anywhere else — its own
- * `TOOL_COUNT_BASELINE` row's `why` states plainly that `kind: "vendored"`
- * here means only "in-repo source, grep-enforced against tracked source",
- * because that registry's `kind` union has no better member for authored
- * code, not that this directory holds a real upstream vendored copy of
- * something.
- *
- * ---------------------------------------------------------------------------
- * REGISTRATION-ORDER DISCIPLINE (safety/index.ts:32-46's precedent)
- * ---------------------------------------------------------------------------
- * The tool is registered first, in the factory, before anything else this
- * file does — mirroring `safety/index.ts`'s own stated rule that tool
- * registrations sit ahead of hooks so a name collision with a
- * later-registered extension resolves first-registration-wins in this file's
- * favour, not silently against it.
- *
- * ---------------------------------------------------------------------------
- * A TEST-ONLY SEAM, NAMED AS SUCH
- * ---------------------------------------------------------------------------
- * `runQuickGateStage`'s default typecheck/lint legs shell a REAL subprocess
- * (`tsc --noEmit`, `vitest run ...`, resolved locally -- see
- * {@link productionExec}'s own docstring) against `cwd` — correct for
- * production, catastrophic for a session-level test driven against a
- * throwaway `makeTempRepo()` fixture with no `node_modules` at all: a real
- * spawn there would fail (or, before CR-01/CR-02, would have reached `npx`
- * and attempted to fetch a package), which is exactly the "install nothing"
- * rule this phase's own autonomous-run constraints forbid.
- * {@link setQuickGateExecOverrideForTests} is the escape hatch, following
- * `diagnostics/quality-cost.ts#peekQualityCost`'s own "FOR TESTS ONLY" naming
- * convention and the same `globalThis` mechanism this file already uses for
- * {@link registeredToolNames} — production code never calls it.
- *
- * ---------------------------------------------------------------------------
- * CR-01 / CR-02: THE PRODUCTION RUNNER NEVER NAMES `npx`
- * ---------------------------------------------------------------------------
- * `npx` is `npx.cmd` on Windows, and Node refuses to spawn a `.cmd` without a
- * shell (verified on this machine: `spawnSync("npx", [...], {shell:false})`
- * throws ENOENT) -- so both legs degraded to `unavailable` on this project's
- * declared primary platform, and `blocking` never sets on an `unavailable`
- * leg by design (`gates.ts`'s own three-state contract), which made the
- * degradation invisible. On a platform where `npx` DOES spawn, `npx tsc`/
- * `npx vitest` with nothing installed locally silently DOWNLOADS AND
- * EXECUTES an unpinned package from the registry -- a direct violation of
- * this project's supply-chain posture. {@link productionExec} instead
- * resolves the LOCAL, already-pinned binary under
- * `<cwd>/node_modules/.bin/<name>` via {@link localBin} and never reaches the
- * network: a missing binary is an honest `unavailable`, naming the path that
- * was not found, never a network fetch and never a silent pass.
+ * Quality extension entry point: wires gates.ts, rules.ts and advisor.ts to a real cwd, subprocess runner
+ * and the live tool list, and registers `consult_advisor`. Rationale and the registration budget: docs/QUALITY.md.
+ * Authored in this repo, not vendored; the "vendored" kind in the tool-count registry means in-repo source only.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
@@ -153,25 +19,15 @@ import { type ExecRunner, type GateResult, runDeterministicGates } from "./gates
 import type { QualitySource } from "./rules.ts";
 import { commandFor } from "../../lib/win-quote.ts";
 
-// ---------------------------------------------------------------------------
-// The registered-tool-name closure -- see this file's own docstring.
-// ---------------------------------------------------------------------------
-
 const REGISTERED_TOOL_NAMES_KEY = "__kypiQualityRegisteredToolNames";
 
-/** The live registered-tool-name list, read through whichever module instance's copy of the factory-set closure `globalThis` is holding. Empty before the factory has ever run. */
+/** Live tool names via the factory-set closure on `globalThis`; empty before the factory has run. */
 export function registeredToolNames(): readonly string[] {
 	const fn = (globalThis as Record<string, unknown>)[REGISTERED_TOOL_NAMES_KEY];
 	return typeof fn === "function" ? (fn as () => readonly string[])() : [];
 }
 
-// ---------------------------------------------------------------------------
-// runQuickGateStage -- the ONE call /quick makes. Everything impure (file
-// walking, subprocess shelling) lives here so workflows/index.ts stays a
-// budget-honouring caller, never a re-implementer.
-// ---------------------------------------------------------------------------
-
-/** Every `.ts` file under `<cwd>/.pi/extensions/`, read fresh off disk -- the real working tree, not the git index, so uncommitted work is checked too. */
+/** Every `.ts` file under `<cwd>/.pi/extensions/`, read off disk so uncommitted work is checked. */
 function collectQualitySources(cwd: string): QualitySource[] {
 	const root = join(cwd, ".pi", "extensions");
 	const sources: QualitySource[] = [];
@@ -190,18 +46,8 @@ function collectQualitySources(cwd: string): QualitySource[] {
 }
 
 /**
- * The locally-installed binary, resolved per platform — never the `npx`
- * shim. See this file's own "CR-01 / CR-02" docstring section for why.
- *
- * WR2-01 (`08-REVIEW.md` iteration 2): walks UP from `cwd` to each ancestor,
- * exactly the way the `npx` shim it replaced did — `ctx.cwd` is wherever the
- * user launched Pi, which for a large multi-stack repository is frequently a
- * subdirectory with no `node_modules` of its own. A single-level lookup
- * silently degraded both legs to `unavailable` from any such subdirectory,
- * which is CR-01's own "a control that does not run and nobody downstream
- * can tell" shape, only narrower. Returns `undefined` (never a
- * still-missing path) once the filesystem root is reached, so the caller can
- * report an honest, actionable `unavailable`.
+ * The local binary, resolved per platform and never `npx` (unpinned download; `npx.cmd` is unspawnable on Windows).
+ * Walks up through ancestors because `cwd` is often a subdirectory; `undefined` once the root is reached.
  */
 function localBin(cwd: string, name: string): string | undefined {
 	const suffix = process.platform === "win32" ? ".cmd" : "";
@@ -216,77 +62,23 @@ function localBin(cwd: string, name: string): string | undefined {
 }
 
 /**
- * A `cmd.exe`-level "the command line could not be found" message, as
- * opposed to the compiler/vitest's own non-zero exit. CR2-01 (`08-REVIEW.md`
- * iteration 2): before `commandFor` folded every argument into one correctly
- * quoted string, an unescaped space or `&` in `cwd` made `cmd.exe` itself
- * fail to resolve the command, and that failure surfaced as an ordinary
- * non-zero exit with `cmd.exe`'s own chatter on stderr — indistinguishable,
- * to a naive caller, from a real compiler FAIL. `commandFor` closes the
- * *cause*; this pattern is the belt-and-braces check the review's own "also
- * consider hardening" note asks for, so that if this exact stderr shape ever
- * recurs (a future edit reintroduces raw concatenation, or some other spawn
- * path produces it), it is honestly reported `unavailable`, never masquerades
- * as a compiler verdict.
- *
- * WR3-04 (`08-REVIEW.md` iteration 3): this pattern does NOT cover every
- * `cmd.exe`-level spawn failure. A `%VAR%` pair in `cwd` naming a DEFINED
- * environment variable (e.g. `D:\work\%CLIENT%\app`) is expanded by
- * `cmd.exe` BEFORE quote processing — double quotes do not suppress `%`
- * expansion the way they suppress space/metacharacter splitting, so
- * `commandFor`'s quoting does not close this one. Confirmed live: a
- * `%PATH%`-containing cwd produces "The filename, directory name, or volume
- * label syntax is incorrect."; a `%OS%`-containing cwd produces "The system
- * cannot find the path specified." — neither matches this regex, so before
- * the `%`-rejection guard below was added, both were misreported as
- * `fail`, carrying `cmd.exe` chatter as if it were a compiler finding.
- * Rather than widen this regex to a second live-observed message (still not
- * exhaustive — `cmd.exe`'s error text for an unresolvable line is not a
- * closed set), the guard below refuses BEFORE spawning whenever the
- * resolved binary path itself contains `%`, which is a structural property
- * of the path, not a message to pattern-match after the fact.
+ * A `cmd.exe` "command not found" message, which must read as `unavailable`, not as a compiler `fail`.
+ * Not exhaustive (`%VAR%` in a path yields other messages), hence the `%` guard in {@link productionExec}.
  */
 const CMD_EXE_SPAWN_FAILURE = /is not recognized as an internal or external command/i;
 
 /**
- * Production `ExecRunner` — resolves the pinned LOCAL binary under
- * `<cwd>/node_modules/.bin` (or an ancestor's, per {@link localBin}), never
- * `npx`. See this file's own "CR-01 / CR-02" docstring section for the two
- * failure modes this closes, and CR2-01 (`08-REVIEW.md` iteration 2) for why
- * the spawn itself goes through {@link commandFor} rather than a raw
- * `shell: true` + args-array call. Exported (not `FOR TESTS ONLY` -- this IS
- * the production implementation) so `tests/unit/quality-production-exec.test.ts`
- * can exercise it directly, including the real spawn CR-01 requires proof of.
+ * Production `ExecRunner`: the pinned local binary (or an ancestor's) via {@link commandFor}, never `npx`.
+ * Exported for tests/unit/quality-production-exec.test.ts.
  */
 export const productionExec: ExecRunner = (cmd, args, cwd) => {
 	const bin = localBin(cwd, cmd);
 	if (bin === undefined) {
-		// Honest UNAVAILABLE, naming the missing binary -- never falls through
-		// to a network-fetching npx, and never silently reports pass. WR2-01:
-		// this is now true after walking cwd AND every ancestor, not just cwd
-		// itself.
+		// Unavailable, naming the missing binary: never a network fetch, never a silent pass.
 		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin or any ancestor's -- the leg is unavailable, not skipped or passed`);
 	}
-	// WR3-04 (`08-REVIEW.md` iteration 3): `cmd.exe` expands `%VAR%` INSIDE
-	// double quotes, before quote processing runs -- `commandFor`'s quoting
-	// (which closes the space/metacharacter hazard CR2-01 found) cannot
-	// suppress this one. A `%`-delimited pair naming a DEFINED environment
-	// variable in the resolved path (`bin` embeds `cwd`) would otherwise
-	// corrupt the command line and surface as cmd.exe chatter misreported as
-	// a compiler `fail`, exactly CR2-01's failure shape via a different
-	// message. Refuse honestly, before spawning, rather than pattern-match
-	// cmd.exe's error text after the fact -- see CMD_EXE_SPAWN_FAILURE's own
-	// docstring for why that would not be exhaustive. Only reachable on
-	// win32, where `%` has this meaning; POSIX shells never see this branch
-	// (`commandFor`'s own POSIX path never invokes a shell at all).
-	//
-	// WR3C-02 (`08-REVIEW-R3CHECK.md`): `commandFor` folds `[bin, ...args]`
-	// into ONE `cmd.exe` command line -- checking `bin` alone left `args`
-	// half of that same line unguarded. Currently unreachable (the only two
-	// callers pass the literal constants `["--noEmit"]` and `["run",
-	// ...LINT_GATE_FILES]`, neither containing '%'), but the guard's own
-	// docstring justifies itself as closing a structural property of the
-	// WHOLE command line, so it must cover both halves, not one.
+	// `cmd.exe` expands `%VAR%` inside double quotes before quote processing, which `commandFor` cannot suppress.
+	// The check covers `bin` and `args`, the whole command line. Win32 only.
 	const pctBearing = [bin, ...args].filter((a) => a.includes("%"));
 	if (process.platform === "win32" && pctBearing.length > 0) {
 		throw new Error(
@@ -294,44 +86,26 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 				"so this command line cannot be built safely; the leg is unavailable, not failed",
 		);
 	}
-	// CR-02's secondary correctness bug: LINT_GATE_FILES (gates.ts) is THIS
-	// repository's own structural test paths. In any other cwd those paths do
-	// not exist, and vitest would report a false FAIL against files it never
-	// found rather than an honest "this leg does not apply here". Any `.test.ts`
-	// argument that does not exist under `cwd` degrades the leg to unavailable,
-	// naming the missing path(s), before a subprocess is even spawned.
+	// LINT_GATE_FILES names this repo's own tests; elsewhere vitest would report a false FAIL, so degrade to unavailable.
 	const missingTargets = args.filter((a) => a.endsWith(".test.ts") && !existsSync(join(cwd, a)));
 	if (missingTargets.length > 0) {
 		throw new Error(
 			`${cmd} target file(s) not found under ${cwd}: ${missingTargets.join(", ")} -- this leg only runs ky-pi-agent's own structural lint suite`,
 		);
 	}
-	// CR2-01: `shell: true` alongside a raw args array is unescaped
-	// concatenation into `cmd.exe` (Node's own DEP0190 deprecation) -- `bin`
-	// embeds `cwd`, so a cwd containing a space or a shell metacharacter
-	// (`&`, `^`, `|`, `(`, `)`, all legal on NTFS) corrupted the command line.
-	// `commandFor` quotes every argument and folds them into a single string
-	// on Windows (empty args array, the only shape `shell: true` is safe in),
-	// and passes the array through unchanged on POSIX where no shell runs.
+	// `commandFor` quotes every argument on Windows (cwd may hold spaces or `&`); POSIX passes the array through.
 	const isWindows = process.platform === "win32";
 	const [file, spawnArgs] = commandFor(bin, [...args], isWindows);
 	const result = spawnSync(file, spawnArgs, {
 		cwd,
-		// A Windows `.cmd` shim cannot be launched without a shell (Node
-		// refuses to spawn one with shell:false); a real executable
-		// (macOS/Linux, or a non-.cmd Windows binary) can be launched
-		// directly. Branch explicitly on platform rather than relying on
-		// ENOENT, per CR-01.
+		// A Windows `.cmd` shim needs a shell; a real executable does not.
 		shell: isWindows,
 		windowsHide: true,
 		encoding: "utf-8",
 	});
 	if (result.error) throw result.error;
 	if (result.status !== 0 && CMD_EXE_SPAWN_FAILURE.test(result.stderr ?? "")) {
-		// A cmd.exe-level failure to even resolve the command line is not a
-		// compiler/vitest verdict -- report it honestly as unavailable rather
-		// than letting it masquerade as `fail`. See CMD_EXE_SPAWN_FAILURE's
-		// own docstring.
+		// A cmd.exe resolution failure is not a compiler verdict; report unavailable.
 		throw new Error(`${cmd} could not be spawned from ${bin} -- cmd.exe reported: ${(result.stderr ?? "").trim()}`);
 	}
 	return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
@@ -339,27 +113,14 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 
 const EXEC_OVERRIDE_KEY = "__kypiQualityExecOverride";
 
-/** FOR TESTS ONLY. See this file's own "A TEST-ONLY SEAM" section. Pass `undefined` to restore the production runner. */
+/** FOR TESTS ONLY. Pass `undefined` to restore the production runner. */
 export function setQuickGateExecOverrideForTests(exec: ExecRunner | undefined): void {
 	(globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY] = exec;
 }
 
 /**
- * WR2-06 (`08-REVIEW.md` iteration 2): resolves the `ExecRunner` `/quick`
- * actually uses, gating the REAL (production) path behind `projectTrusted`.
- *
- * A test-installed override ALWAYS wins, regardless of `projectTrusted` --
- * an override is a scripted stub that never touches disk or spawns
- * anything, so gating it behind trust would add friction to every existing
- * test (`quality-gate-order.test.ts`, `quick-workflow.test.ts`) for zero
- * security benefit; the hazard this gate closes is specific to
- * {@link productionExec} actually resolving and spawning a binary out of
- * `cwd`. Only when NO override is installed does `projectTrusted` matter:
- * an untrusted `cwd` gets an honest, immediate refusal (never a spawn
- * attempt), naming trust as the reason, which `runTypecheckLeg`/
- * `runLintLeg` (`gates.ts`) turn into an actionable `unavailable` -- the
- * same three-state contract CR-01 already established for a missing
- * binary, now covering an untrusted one too.
+ * The `ExecRunner` `/quick` uses. A test override always wins (a stub never spawns); otherwise an untrusted
+ * `cwd` is refused before any spawn, which the legs turn into `unavailable`.
  */
 function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
 	const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
@@ -376,17 +137,7 @@ function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
 	return productionExec;
 }
 
-/**
- * Run GATE-01's deterministic gate stage for real: real sources off `cwd`,
- * the live registered-tool-name list, and a real (or test-overridden) exec
- * runner. This is the whole surface `/quick` calls -- see the module
- * docstring's PURPOSE section.
- *
- * `projectTrusted` (WR2-06, `08-REVIEW.md` iteration 2): threaded through
- * from `ctx.isProjectTrusted()` at the one production call site
- * (`workflows/index.ts`) -- see {@link resolveExec}'s own docstring for what
- * this gates and why a test override is exempt from it.
- */
+/** Runs the deterministic gate stage for real; `projectTrusted` comes from `ctx.isProjectTrusted()`. */
 export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateResult {
 	return runDeterministicGates({
 		sources: collectQualitySources(cwd),
@@ -397,16 +148,8 @@ export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateRes
 }
 
 export default function (pi: ExtensionAPI): void {
-	// Registration first -- see REGISTRATION-ORDER DISCIPLINE above.
-	//
-	// `name` is the LITERAL "consult_advisor", not CONSULT_ADVISOR_TOOL_NAME --
-	// tests/unit/tool-count-baseline.test.ts's own extractRegisteredToolNames
-	// scans raw source text for a quoted `name: "..."` literal, exactly the
-	// same convention todo.ts/questionnaire.ts/qoder/index.ts already use for
-	// their own registerTool calls. The assertion two lines below is what
-	// keeps this literal and advisor.ts's own constant from silently drifting
-	// apart -- it throws at extension-load time, not merely at test time, if
-	// they ever disagree.
+	// Registered first so a name collision resolves in this file's favour (safety/index.ts:32-46).
+	// `name` stays a literal because tool-count-baseline.test.ts scans source text for it; this check stops drift.
 	if (CONSULT_ADVISOR_TOOL_NAME !== "consult_advisor") {
 		throw new Error(
 			`quality/index.ts: CONSULT_ADVISOR_TOOL_NAME is ${JSON.stringify(CONSULT_ADVISOR_TOOL_NAME)}, not ` +
@@ -418,8 +161,7 @@ export default function (pi: ExtensionAPI): void {
 		label: "consult advisor",
 		description: CONSULT_ADVISOR_DESCRIPTION,
 		parameters: consultAdvisorParameters,
-		// No terminate field -- see this file's own docstring and advisor.ts's
-		// WHY NO terminate FIELD section.
+		// No terminate field: a consult continues the turn.
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const text = await executeConsultAdvisor(ctx, params);
 			return { content: [{ type: "text", text }], details: undefined };
