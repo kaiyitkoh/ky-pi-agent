@@ -84,42 +84,44 @@ export const BUDGET_COMMAND_DESCRIPTION =
 export const BUDGET_COMMAND_WHERE = "command.budget";
 
 /**
- * Opening delimiter of the context-file block, transcribed from the builder.
+ * Opening delimiter of the context-file block.
  *
- * `prompt += "\n\n<project_context>\n\n"`
- * [VERIFIED: pi 0.84.1 src/core/system-prompt.ts:146, recovered from
- * `dist/core/system-prompt.js.map`]. The two leading newlines are part of the
- * block: they exist only because the block does, so attributing them to the
- * base prompt would understate the cost of having context files at all.
+ * Pi 1.1.0 renders the prompt as named sections, each wrapped
+ * `<name>\n${content}\n</name>`; the context-file section is named
+ * `project_context` [VERIFIED: pi 1.1.0 dist/core/system-prompt.js:100 (section)
+ * and :118 (wrapper)]. This replaced the 0.84.1 literal
+ * `"\n\n<project_context>\n\n"`; the separator newlines are now part of `base`.
  */
-export const CONTEXT_FILES_OPEN_MARKER = "\n\n<project_context>\n\n";
+export const CONTEXT_FILES_OPEN_MARKER = "<project_context>\n";
 
-/** Closing delimiter, including its newline [VERIFIED: system-prompt.ts:151]. */
-export const CONTEXT_FILES_CLOSE_MARKER = "</project_context>\n";
+/** Closing delimiter [VERIFIED: pi 1.1.0 dist/core/system-prompt.js:118]. */
+export const CONTEXT_FILES_CLOSE_MARKER = "</project_context>";
 
 /**
- * Opening sentence of the skills index [VERIFIED: pi 0.84.1
- * src/core/skills.ts:343, recovered from `dist/core/skills.js.map`].
+ * Opening sentence of the skills index [VERIFIED: pi 1.1.0
+ * dist/core/skills.js:284; system-prompt.js:106 `.trim()`s the formatter output,
+ * so the 0.84.1 leading blank lines are no longer in the prompt].
  *
  * Truncated at "instructions" deliberately: the full line continues "for
  * specific tasks." and matching less of it is one fewer character that a
  * harmless copy-edit upstream could move past.
  */
-export const SKILLS_OPEN_MARKER = "\n\nThe following skills provide specialized instructions";
+export const SKILLS_OPEN_MARKER = "The following skills provide specialized instructions";
 
-/** Closing tag of the skills index [VERIFIED: skills.ts:358]. */
+/** Closing tag of the skills index [VERIFIED: pi 1.1.0 dist/core/skills.js:301]. */
 export const SKILLS_CLOSE_MARKER = "</available_skills>";
 
 /**
  * Characters the per-file wrapper adds around each context file.
  *
  * Written as the literal template with an empty path and empty content rather
- * than as the number 57, so the expression IS the citation:
- * `<project_instructions path="${filePath}">\n${content}\n</project_instructions>\n\n`
- * [VERIFIED: pi 0.84.1 src/core/system-prompt.ts:149].
+ * than as a bare number, so the expression IS the citation:
+ * `<project_instructions path="${path}">\n${content}\n</project_instructions>`
+ * [VERIFIED: pi 1.1.0 dist/core/system-prompt.js:28]. The blank line between
+ * files is a join separator in 1.1.0, not part of the per-file wrapper.
  */
 export const PROJECT_INSTRUCTIONS_WRAPPER_CHARS =
-	'<project_instructions path="">\n\n</project_instructions>\n\n'.length;
+	'<project_instructions path="">\n\n</project_instructions>'.length;
 
 /** Prefix marking a figure as an estimate rather than a measurement. */
 export const TOKEN_ESTIMATE_MARKER = "~";
@@ -643,7 +645,8 @@ export function registerBudgetCommand(
 				// Reproduces the literal block Pi appends, including the
 				// `disableModelInvocation` filter, so the cross-check is against Pi's
 				// own formatter rather than a re-implementation of it.
-				const skillsBlock = formatSkillsForPrompt(skills);
+				// Pi 1.1.0 trims the formatter output before embedding it (system-prompt.js:106).
+				const skillsBlock = formatSkillsForPrompt(skills).trim();
 
 				const active = new Set(pi.getActiveTools());
 				const tools = pi

@@ -83,7 +83,7 @@ const SKILL: Skill = {
 };
 
 /** The block Pi itself would append. Computed, never transcribed. */
-const REAL_SKILLS_BLOCK = formatSkillsForPrompt([SKILL]);
+const REAL_SKILLS_BLOCK = formatSkillsForPrompt([SKILL]).trim();
 
 /** Pi's own per-file wrapper [VERIFIED: pi 0.84.1 src/core/system-prompt.ts:149]. */
 const CONTEXT_BLOCK =
