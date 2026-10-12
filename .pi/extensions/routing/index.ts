@@ -15,7 +15,7 @@ import { appendJsonl } from "../../lib/jsonl.ts";
 import { agentOverridesFor, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
-import { applyProfile, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
+import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
 /** Test-only seam threaded to `agentOverridesFor` so integration tests can inject a guard-blocked planner. */
@@ -312,6 +312,8 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 		try {
 			const branch = ctx.sessionManager.getBranch();
 			restoreModeFromBranch(branch);
+			const flag = pi.getFlag("ky-profile");
+			if (typeof flag === "string" && resolveProfile(flag) !== flag && ctx.hasUI) ctx.ui.notify(`unknown --ky-profile "${flag}"; using ${DEFAULT_PROFILE}`, "warning");
 			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
 			if (event.reason === "reload" || branch.some((entry) => entry.type === "message")) return;
 			const next = applyProfile(pi.getActiveTools(), profile());
