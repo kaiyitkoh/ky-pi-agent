@@ -4,14 +4,14 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-08-15T16:50:48.864Z"
+last_updated: "2026-10-12T15:46:26.734Z"
 last_activity: 2026-08-15
 progress:
-  total_phases: 11
+  total_phases: 13
   completed_phases: 8
   total_plans: 103
   completed_plans: 98
-  percent: 73
+  percent: 62
 ---
 
 # Project State
@@ -170,6 +170,11 @@ credentials can do has been done".
 | Phase 09 P12 | 35m | 2 tasks | 3 files |
 
 ## Accumulated Context
+
+### Roadmap Evolution
+
+- Phase 08.1 inserted after Phase 8: Pi 0.84.1 -> 1.1.0 upgrade before finishing Phase 9 (user decision 2026-10-12) (URGENT)
+- Phase 08.2 inserted after Phase 08.1: AGENTS.md comment rules + ID check + cleanup (user decision 2026-10-12) (URGENT)
 
 ### Decisions
 

@@ -25,6 +25,8 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size (completed 2026-08-14)
 - [x] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified (all 13 plans executed 2026-08-15; **two live checks `RB-07-01` and `RB-07-02` are OUTSTANDING** and EXT-01/03/04/05/09 are partial until they run — see `docs/RUNBOOK.md`)
 - [x] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects (completed 2026-08-15)
+- [ ] **Phase 08.1: Pi 1.x Upgrade & Install Health** (INSERTED) - Re-pin to Pi 1.1.0, migrate tests/diagnostics, guard new tool paths, re-review composed extensions
+- [ ] **Phase 08.2: Comment Discipline & AGENTS.md** (INSERTED) - AGENTS.md comment rules shipped by the harness, ID-in-comment check, cleanup pass
 - [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
 - [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
@@ -395,6 +397,33 @@ Plans:
 - [x] 08-13-PLAN.md — `RB-08-01..03` (OUTSTANDING), `docs/QUALITY.md`, and requirement-status reconciliation
 
 **Research**: Not needed — the comparative survey produced prescriptive artifact schemas, gate definitions and the anti-review-theatre protocol. Implement from it.
+
+### Phase 08.1: Pi 1.x Upgrade & Install Health (INSERTED)
+
+**Goal:** The harness runs on `@earendil-works/pi-coding-agent@1.1.0` with every authored extension, test helper and composed extension verified against 1.1.0 source, and no new 1.x tool path (powershell, codemode, MCP, tool_search) can bypass the safety guard.
+**Requirements**: UPG-01..06 (inserted 2026-10-12, see 08.1-CONTEXT.md)
+**Depends on:** Phase 8
+**Plans:** 0 plans
+
+**Success Criteria:**
+1. Pi family (`pi-coding-agent`, `pi-ai`, `pi-tui`, `pi-agent-core`) pinned to exactly 1.1.0 in devDependencies; `typebox`/`vitest` match Pi's own pins; global `pi` reinstalled at 1.1.0 and `~/.pi/agent/settings.json` `piPinned` updated (RUNBOOK entry if it needs the user).
+2. `tests/helpers/faux.ts` and every test using the provider context migrated to `TranscriptContext` + `getCurrentSystemPrompt()`/`getCurrentTools()`; diagnostics (`wire`, `budget`, `call-model`), `harness`, `routing` re-verified against 1.1.0 types; stale `[VERIFIED: ... 0.84.1 ...]` citations updated or removed.
+3. Safety guard covers the `powershell` tool and codemode nested calls, or those built-ins are disabled by default with a test proving it; allowlist/subagent-block tests account for the new built-in tools.
+4. Composed extensions re-pinned to Pi-1.x-compatible exact versions after source review; `pi-background-tasks` vendored and its peer range patched; vendored extensions (plan-mode, todo, questionnaire, loop-police, checkpoint) checked against 1.1.0.
+5. `vitest.config.ts` caps workers (`maxWorkers: 2`); `tsc --noEmit` and the full suite pass once at phase verification.
+
+### Phase 08.2: Comment Discipline & AGENTS.md (INSERTED)
+
+**Goal:** Code comments in this repo — and code written by the harness's models in the user's other projects — state only non-obvious WHY in one or two lines, and the rule is enforced rather than hoped for.
+**Requirements**: CMT-01..05 (inserted 2026-10-12, see 08.2-CONTEXT.md)
+**Depends on:** Phase 08.1
+**Plans:** 0 plans
+
+**Success Criteria:**
+1. Root `AGENTS.md` exists with the code-comment rules (≤15 lines) and other cross-agent conventions; `CLAUDE.md` begins with `@AGENTS.md` so Claude Code and Pi read the same rules with no duplication.
+2. The harness delivers the comment rules to every project Pi runs in (mechanism chosen from Pi 1.1.0 source), not only this repo.
+3. A vitest check fails on plan/requirement/review IDs inside comments in authored `.pi/extensions/**` files (vendored files exempt), and reports per-file comment ratio.
+4. One-off cleanup pass across authored extensions removes history, IDs and narration while keeping real WHY (safety invariants, Pi source facts); overall comment ratio drops from 55% to ≤35%; no behavioural change (typecheck + targeted tests green).
 
 ### Phase 9: Ceremonial Workflows
 
