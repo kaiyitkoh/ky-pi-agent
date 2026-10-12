@@ -405,7 +405,7 @@ plus every active tool schema. `/budget` prints it as one line
 outgoing request and runs `computeBudget` over the prompt and tool list. Unit:
 `/budget`'s formula, `Math.ceil(chars/4)`, tools counted as
 `name + description + JSON(parameters)`. Before counting, the temp dirs and the repo root
-(raw, `/` and `` forms) become `<cwd>`, `<agent>` and `<repo>`, separators after a
+(raw, forward-slash and back-slash forms) become `<cwd>`, `<agent>` and `<repo>`, separators after a
 placeholder become `/`, the background shell policy is pinned to bash and its executable
 becomes `<shell>`. The figures are therefore the same for any checkout path, OS and login
 shell. A real session differs from them by the length of its actual paths (three Pi doc
