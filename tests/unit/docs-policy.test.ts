@@ -164,6 +164,7 @@ const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02", "RB-07-03"] as const;
  */
 const PHASE_EIGHT_IDS = ["RB-08-01", "RB-08-02", "RB-08-03"] as const;
 const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
+const PHASE_NINE_IDS = ["RB-09-01", "RB-09-02", "RB-09-03"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
@@ -175,6 +176,7 @@ const ALL_IDS = [
 	...PHASE_SEVEN_IDS,
 	...PHASE_EIGHT_IDS,
 	...PHASE_EIGHT_TWO_IDS,
+	...PHASE_NINE_IDS,
 ] as const;
 
 /**
@@ -515,6 +517,17 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-08-03": [
 		'echo "RB-08-03 live catch rate: <caught>/<total>, $(date -u +%FT%TZ)" >> RB-08-03-RESULT.md',
 	],
+
+	// Whole one-line commands, each occurring exactly once in the runbook (asserted in Group B).
+	"RB-09-01": [
+		"cat .pi/work/<slug>/PROGRESS.md",
+		"git diff --name-only $(git merge-base HEAD staging)..HEAD",
+	],
+	"RB-09-02": ["glab mr create --help | grep -i description", "glab mr view <iid>"],
+	"RB-09-03": [
+		"npx vitest run tests/unit/handoff-packet.test.ts --maxWorkers=2",
+		'echo "RB-09-03 parent-token delta: <live>, packet <tokens>, $(date -u +%FT%TZ)" >> RB-09-03-RESULT.md',
+	],
 };
 
 /** Matches a repo-relative test path mentioned anywhere in the runbook prose. */
@@ -554,6 +567,17 @@ describe("Group B — the runbook is structurally complete", () => {
 			}
 		});
 	}
+
+	it("every Phase 9 pin occurs exactly once in the runbook", () => {
+		for (const id of PHASE_NINE_IDS) {
+			for (const cmd of ENTRY_COMMANDS[id]) {
+				expect(
+					runbook.split(cmd).length - 1,
+					`${id} pin ${JSON.stringify(cmd)} must occur exactly once; a repeat lets another entry satisfy it`,
+				).toBe(1);
+			}
+		}
+	});
 
 	it("names an offline proxy test for each entry, and every named test exists on disk", () => {
 		const referenced = Array.from(new Set(runbook.match(PROXY_PATH_RE) ?? []));
@@ -855,6 +879,22 @@ const FIXTURE_PHASE_EIGHT_HALF_FLIPPED = [
 	"",
 ].join("\n");
 
+const FIXTURE_PHASE_NINE_HALF_FLIPPED = [
+	"| ID | Check | Status |",
+	"|----|-------|--------|",
+	"| RB-09-01 | example phase 9 check | PASSED — 2026-10-13 |",
+	"",
+	"### RB-09-01 — example phase 9 check",
+	"",
+	"**Status:** OUTSTANDING",
+	"",
+].join("\n");
+
+const FIXTURE_PHASE_NINE_BOTH_FLIPPED = FIXTURE_PHASE_NINE_HALF_FLIPPED.replace(
+	"**Status:** OUTSTANDING",
+	"**Status:** PASSED — 2026-10-13",
+);
+
 /**
  * A malformed id in the same two-source shape.
  *
@@ -949,6 +989,11 @@ describe("Group C — the parser catches a status flip", () => {
 				"phase arrays are numbered contiguously or capped at seven, this fixture is where it would " +
 				"show up as RB-08-01 recorded as undefined",
 		).toEqual({ "RB-08-01": "OUTSTANDING" });
+	});
+
+	it("reports a Phase 9 half-flip as INCONSISTENT, and a full flip as PASSED (which the live-check guard rejects)", () => {
+		expect(runbookEntryStatuses(FIXTURE_PHASE_NINE_HALF_FLIPPED)).toEqual({ "RB-09-01": "INCONSISTENT" });
+		expect(runbookEntryStatuses(FIXTURE_PHASE_NINE_BOTH_FLIPPED)).toEqual({ "RB-09-01": "PASSED" });
 	});
 
 	it("reports a Phase 8 half-flip as INCONSISTENT — the whole point of this plan's own test_integrity obligation", () => {

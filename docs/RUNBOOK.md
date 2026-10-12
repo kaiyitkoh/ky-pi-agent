@@ -1535,3 +1535,68 @@ Steps:
 2. Run the exact command `pi -p "Quote the first bullet under the Code comments heading in your system prompt, verbatim."`
 3. Expected output begins `Default to no comment`.
 4. Record the date and result.
+
+## Phase 9 — Ceremonial Workflows
+
+Phase 9 built `/grill`, `/plan`, `/execute` and `/review` and proved each offline: the SPEC and PLAN gates, the evidence-gated PROGRESS append, computed scope drift, the REVIEW.md renderer, the MR step against a stubbed `glab`, and the pure handoff-packet builder. None of it has run against a live model, a real GitLab, or a real `pi-subagents` spawn, for the two reasons recorded in Phases 7 and 8: **Correction 1** (this machine holds live static AWS admin credentials and no provider inference key, so it must not be used to exercise a live check) and **Correction 2** (`pi-subagents` is pinned and never installed, `RB-07-02`). Three entries follow. `docs/WORKFLOWS.md` describes what the code does and states the same limits.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-09-01 | FLOW-08 — one real feature shipped end to end through `/grill`, `/plan`, `/execute`, `/review` on the work laptop | OUTSTANDING |
+| RB-09-02 | FLOW-08 — a real `glab mr create --target-branch staging` against the work GitLab | OUTSTANDING |
+| RB-09-03 | FLOW-09 — a real `pi-subagents` handoff spawn consuming a packet, and the measured parent-token delta | OUTSTANDING |
+
+### RB-09-01 — FLOW-08: one feature end to end through the four workflows
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs a live provider inference key and a real work repository. This machine holds live static IAM admin credentials in plaintext at `~/.aws/credentials` and no provider inference key is configured for Pi (Corrections 1 and 2), so it must not run a live feature.
+
+**Procedure, on the work laptop.**
+
+1. In `<work-repo>`, pick one small real feature and run `/grill`, then `/plan`, then `/execute` until every task is done, then `/review`.
+2. Read the artifacts the run left: `cat .pi/work/<slug>/PROGRESS.md`
+3. Compare what changed against what SPEC.md declared: `git diff --name-only $(git merge-base HEAD staging)..HEAD`
+4. Record the date, the slug and whether REVIEW.md's Scope Drift section agreed with step 3.
+
+**Expected output.** Four files under `.pi/work/<slug>/` (SPEC.md, PLAN.md, PROGRESS.md, REVIEW.md) and nothing else; PROGRESS.md entries each carry a real commit SHA and pasted command output; REVIEW.md's drift lists match step 3. A refusal at any gate with a named reason is also informative.
+
+**Offline proxy:** `tests/integration/grill-command.test.ts`, `tests/integration/plan-command.test.ts`, `tests/integration/execute-workflow.test.ts`, `tests/integration/scope-drift.test.ts` and `tests/unit/artifact-count.test.ts`. They prove each command's gates against scripted input and a temp git repo. They are not the check: no model has ever driven the four commands in sequence.
+
+### RB-09-02 — FLOW-08: a real merge request targeting staging
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs the work GitLab and an authenticated `glab`. The repository is named `<work-repo>` here and never by URL: this file is public, and account-identifying hosts and paths do not belong in it (`RB-07-03`).
+
+**Procedure, on the work laptop.**
+
+1. Confirm the flag `/review` uses for the MR body exists in the installed glab: `glab mr create --help | grep -i description`
+2. Run `/review` on a branch of `<work-repo>` that has a staging target.
+3. Inspect the result: `glab mr view <iid>`
+4. Record whether the MR opened, its target branch, and whether the body matches the evidence in PROGRESS.md.
+
+**Expected output.** The MR exists, its target is `staging`, and its description carries the evidence-built body with the disclosure line. Open question this run settles: `mr.ts` passes the body with `--description-file`, and that flag name has never been checked against a real glab. If step 1 shows no such flag, `/review` fails on a real MR even though the stub passes, and that is a bug to fix in `mr.ts`. `/review` diffs against `git merge-base HEAD staging`, so the run also needs a local `staging` ref.
+
+**Offline proxy:** `tests/integration/review-mr.test.ts` drives the MR step against an injected executor and a stubbed `glab` on PATH. It proves the harness classifies the argv before executing and always names an explicit staging target. It proves nothing about GitLab accepting the request, the target existing, or server-side branch protection (`RB-04-01`).
+
+### RB-09-03 — FLOW-09: a real subagent handoff and the measured token delta
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** `pi-subagents` is pinned and not installed.
+
+**Precondition.** `RB-07-02` (install the five pinned specs, with a human physically present for the package-legitimacy gate) must complete FIRST. Nothing is installed to satisfy this entry.
+
+**Procedure, on the work laptop, after `RB-07-02`:**
+
+1. Confirm the offline builder still passes: `npx vitest run tests/unit/handoff-packet.test.ts --maxWorkers=2`
+2. Run `/execute` on a PLAN.md with at least four tasks so it dispatches a task as a real subagent consuming a handoff packet. Without the subagent tools it degrades to the ordinary prompt loop and says so; that outcome does not satisfy this entry.
+3. Read the parent session's token usage for the dispatch turn and the packet size, and compare with the baseline below.
+4. Record the result: `echo "RB-09-03 parent-token delta: <live>, packet <tokens>, $(date -u +%FT%TZ)" >> RB-09-03-RESULT.md`
+
+**Offline baseline (estimate, not a tokenizer).** For a five-requirement SPEC and four-task PLAN fixture, `estimateTokensFromChars` (`Math.ceil(chars / 4)`) gave packetTokens=134, parentTokens=581, deltaTokens=-447 (534 vs 2322 chars). The packet was smaller than the context it replaces for that fixture. The live run reports its own sign as measured; a positive delta is a real result and is recorded as one.
+
+**Expected output.** A spawned subagent that works from the packet alone, and a recorded live delta beside the -447 estimate.
+
+**Offline proxy:** `tests/unit/handoff-packet.test.ts` covers the pure packet builder, the `UNAVAILABLE` availability probe and the delta arithmetic. No subagent has ever spawned, and the arithmetic asserts no sign.
