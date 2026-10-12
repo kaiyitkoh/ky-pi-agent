@@ -298,6 +298,14 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"validatePlan. Measured 140 raw lines 2026-08-15 with countRawLines, already an exact multiple of ten",
 	},
 	{
+		file: ".pi/extensions/execute/index.ts",
+		budget: 150,
+		why: "plan 09-13 (FLOW-07) -- the /execute command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, " +
+			"the write allowance, gate depth via gateDepthFor, the honest subagent probe, evidence arming reused from " +
+			"workflows/evidence.ts, and the settle handler that appends PROGRESS.md only on the accept arm. Measured 142 raw " +
+			"lines 2026-10-13 with countRawLines, rounded up to the next ten",
+	},
+	{
 		file: ".pi/skills/plan-ceremony/SKILL.md",
 		budget: 50,
 		why: "plan 09-10 (FLOW-06) -- the task-line grammar, the both-directions coverage rule, the three " +
@@ -650,7 +658,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/execute",
-		budget: 370,
+		budget: 510,
 		why: "plan 09-11 (FLOW-09) -- the first file of the /execute subsystem, handoff.ts: the honest-degradation " +
 			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/bg_wait pair, never " +
 			"reading the settings file), the pure buildHandoffPacket/renderHandoffPacket, and the real " +
@@ -662,7 +670,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			".pi/extensions/plan-ceremony. Measured 169 raw lines across 1 file 2026-10-13 (handoff.ts), rounded " +
 			"up to the next ten. RAISED 170 -> 370 by plan 09-13 (FLOW-07): progress.ts, the PROGRESS.md append " +
 			"format, fail-closed driftAbort and per-run output slot. Measured 169 (handoff.ts) + 198 (progress.ts) = " +
-			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten",
+			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 370 -> 510 by plan 09-13 for index.ts, the /execute command: 169 + 198 + 142 = 509 raw lines across 3 files 2026-10-13, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
@@ -1561,6 +1569,15 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 			"plan-schema.ts and requirement-ids.ts are supporting modules bound only by the " +
 			".pi/extensions/plan-ceremony DIRECTORY_BUDGETS ratchet above, per this registry's own " +
 			"module-docstring rule (D-13) that a merged closure budget would be meaningless",
+	},
+	{
+		name: "execute",
+		commandFile: ".pi/extensions/execute/index.ts",
+		bodies: [],
+		budget: 250,
+		why: "FEATURES.md Part 2 ceiling for /execute -- FROZEN, may not move to absorb growth (D-13). No skill body; " +
+			"measured 142 raw lines (index.ts) 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
+			"the .pi/extensions/execute DIRECTORY_BUDGETS ratchet",
 	},
 ];
 
