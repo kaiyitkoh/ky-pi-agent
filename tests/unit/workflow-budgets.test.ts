@@ -351,12 +351,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
-		budget: 2780,
+		budget: 1930,
 		why: "WR-03; measured 3913 raw lines across 10 files 2026-08-15 (08-04 added quality-cost.ts; not " +
 			"re-reviewed for tightness), rounded up to the next ten. Code-review fix pass WR-06 added " +
 			"refundQualityCost() to quality-cost.ts (see workflows/index.ts's own budget entry for the finding). " +
-			"Re-measured 2780 raw lines across 10 files 2026-08-15 (budget.ts 435, call-model.ts 217, index.ts " +
-			"305, jsonl.ts 140, prose.ts 205, quality-cost.ts 241, redact.ts 357, schema.ts 388, turns.ts 324, " +
+			"Re-measured 1930 raw lines across 10 files 2026-08-15 (budget.ts 435, call-model.ts 217, index.ts " +
+			"305, jsonl.ts 73, prose.ts 74, quality-cost.ts 115, redact.ts 159, schema.ts 208, turns.ts 176, " +
 			"wire.ts 168), rounded up to the next ten",
 	},
 	{
