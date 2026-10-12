@@ -131,7 +131,15 @@ describe("a transcript's loadout is never narrowed again", () => {
 		});
 	});
 
-	it("session_start on reload leaves a mid-session addition in place", async () => {
+	it("session_start on reload in a session with no messages leaves the active set alone", async () => {
+		await withHarnessSession({}, async (h) => {
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+			await h.session.extensionRunner.emit({ type: "session_start", reason: "reload" });
+			expect(h.session.getActiveToolNames()).toContain("bg_run");
+		});
+	});
+
+	it("a reload after a request records no removal", async () => {
 		const sink: TranscriptContext[] = [];
 		await withHarnessSession({ responses: steps(2, sink) }, async (h) => {
 			await h.session.prompt("one");
@@ -169,6 +177,8 @@ describe("a transcript's loadout is never narrowed again", () => {
 
 	it("a new empty session is still narrowed", async () => {
 		await withHarnessSession({}, async (h) => {
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+			expect(h.session.getActiveToolNames(), "non-vacuity: bg_run is active before session_start").toContain("bg_run");
 			await h.session.extensionRunner.emit({ type: "session_start", reason: "new" });
 			expect(h.session.getActiveToolNames()).not.toContain("bg_run");
 		});
