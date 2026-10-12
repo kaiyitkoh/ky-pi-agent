@@ -112,6 +112,13 @@ describe("openMr classification (injected executor)", () => {
 		expect(r.calls).toHaveLength(0);
 	});
 
+	it("counts quotes and backslashes twice, as Windows argv quoting does", () => {
+		const r = recorder();
+		const out = openMr({ targetBranch: "staging", title: "T", body: '"'.repeat(MAX_MR_BODY_CHARS / 2 + 1) }, { exec: r.exec });
+		expect(out.kind).toBe("refused");
+		expect(r.calls).toHaveLength(0);
+	});
+
 	it("mrCreateArgv always carries an explicit target", () => {
 		expect(mrCreateArgv(input("anything"))).toContain("--target-branch");
 	});
@@ -217,6 +224,16 @@ describe("stubbed glab on PATH", () => {
 		let log = "";
 		try { log = readFileSync(logTo, "utf-8"); } catch { /* never created */ }
 		expect(log).toBe("");
+	});
+
+	it("a missing binary is reported as not installed, a timeout as possibly already created", () => {
+		const dir = mkdtempSync(join(tmpdir(), "kypi-mrlog-"));
+		dirs.push(dir);
+		expect(spawnExec(dir, undefined)("kypi-no-such-glab", []).stderr).toContain("native executable");
+		const slow = spawnExec(dir, undefined, 200)(process.execPath, ["-e", "setTimeout(() => {}, 5000)"]);
+		expect(slow.status).toBeNull();
+		expect(slow.stderr).toContain("may already have created the MR");
+		expect(slow.stderr).not.toContain("native executable");
 	});
 
 	it("a blocked target never reaches the stub", () => {

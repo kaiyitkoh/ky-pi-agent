@@ -15,7 +15,10 @@ import { PROTECTED_BRANCHES } from "../safety/index.ts";
 export const MR_TARGET_BRANCH = "staging";
 export const MR_TARGET_BRANCH_FLAG = "--target-branch";
 export const MR_BODY_FLAG = "--description";
-/** Windows caps a whole command line at 32,767 characters (CreateProcess); leave room for the rest of the argv. */
+/**
+ * Windows caps a whole command line at 32,767 characters (CreateProcess); leave room for the rest of the argv.
+ * Compared against the quoted length, since Node escapes each `"` and `\` in an argument.
+ */
 export const MAX_MR_BODY_CHARS = 30_000;
 
 export const AI_AUTHORSHIP_DISCLOSURE =
@@ -128,13 +131,19 @@ const GLAB_TIMEOUT_MS = 60_000;
  * Real executor, never through a shell: the body is free text, and cmd.exe would expand `%VAR%` and metacharacters
  * in it. glab ships as a native executable; a `.cmd` shim is not found without a shell and is reported, not run.
  */
-export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined): MrExec {
+export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined, timeoutMs = GLAB_TIMEOUT_MS): MrExec {
 	return (file, args) => {
-		const r = spawnSync(file, args, { cwd, env, encoding: "utf-8", shell: false, timeout: GLAB_TIMEOUT_MS, windowsHide: true });
-		if (r.error !== undefined) {
-			return { status: null, stdout: "", stderr: `${file} could not be started without a shell (${r.error.message}); install glab as a native executable on PATH` };
-		}
-		return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+		const r = spawnSync(file, args, { cwd, env, encoding: "utf-8", shell: false, timeout: timeoutMs, windowsHide: true });
+		if (r.error === undefined) return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
+		const code = (r.error as NodeJS.ErrnoException).code;
+		// A timeout may land after GitLab already created the MR, so a blind retry would open a second one.
+		const stderr =
+			code === "ENOENT"
+				? `${file} could not be started without a shell (${r.error.message}); install glab as a native executable on PATH`
+				: code === "ETIMEDOUT"
+					? `${file} timed out after ${timeoutMs} ms and may already have created the MR -- check \`glab mr list --source-branch <branch>\` before retrying`
+					: `${file} failed to run: ${r.error.message}`;
+		return { status: null, stdout: "", stderr };
 	};
 }
 
@@ -143,8 +152,9 @@ export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined): MrEx
  * executes is not a block.
  */
 export function openMr(input: MrInput, deps: OpenMrDeps): MrOutcome {
-	if (input.body.length > MAX_MR_BODY_CHARS) {
-		return { kind: "refused", reason: `the MR body is ${input.body.length} characters, over the ${MAX_MR_BODY_CHARS}-character command-line limit -- not truncating evidence` };
+	const quotedLength = input.body.length + (input.body.match(/["\\]/g)?.length ?? 0);
+	if (quotedLength > MAX_MR_BODY_CHARS) {
+		return { kind: "refused", reason: `the MR body is ${quotedLength} characters once quoted, over the ${MAX_MR_BODY_CHARS}-character command-line limit -- not truncating evidence` };
 	}
 	const argv = mrCreateArgv(input);
 	const [subcommand = "", ...rest] = argv;
