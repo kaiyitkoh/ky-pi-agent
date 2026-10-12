@@ -23,9 +23,6 @@ const USAGE = [
 // Trial ids contain ':' which Windows filesystems reject.
 const fileId = (id) => id.replace(/[^A-Za-z0-9_.-]/g, "_");
 
-// Prose is judged against the tools each arm actually exposes; harness arms are approximated by the minimal four.
-const ACTIVE_TOOLS = ["read", "bash", "edit", "write"];
-
 function flag(argv, name, fallback) {
 	const i = argv.indexOf(name);
 	return i === -1 ? fallback : argv[i + 1];
@@ -180,7 +177,7 @@ async function main(argv) {
 			const excluded = core.isInfrastructureFailure(output, exitStatus.get(id));
 			return { arm, defect, repeat: Number(repeat), score: core.scoreTrial(output.finalText, defect, expectations), output, excluded };
 		});
-		const tools = { A: ACTIVE_TOOLS, B: ACTIVE_TOOLS, F: ACTIVE_TOOLS, C: ACTIVE_TOOLS };
+		const tools = Object.fromEntries(core.ARMS.map((a) => [a.id, core.armActiveTools(a.id)]));
 		const arms = core.summarise(scored, tools);
 		const compare = (a, b) => {
 			const first = arms[a];

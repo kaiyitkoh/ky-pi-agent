@@ -583,7 +583,8 @@ calibration grader, so a trial is "caught" only when a finding names the right f
 shuffled, so provider drift lands on every arm alike. First stage R=10 repeats (6 defects x 10 x 4 arms = 240 trials); a second
 stage of R=20 only if the first is inconclusive. The seed is `KY_EXP_SEED` (default 20261013).
 
-**Metrics.** Catch rate per arm, excluded-trial count, malformed-output count, prose-tool-call rate, unmatched findings, input and cache-read tokens.
+**Metrics.** Catch rate per arm, excluded-trial count, malformed-output count, prose-tool-call rate, unmatched findings, input and cache-read tokens. A prose tool call is judged against the tools its arm declares (`armActiveTools`): the four built-ins for A and C, the
+`implement` subset for B, and the measured `full` list (`FULL_ARM_TOOLS`) for F.
 
 **Pre-registered decision rule.** Pinned by `scripts/ctx-experiment-core.ts` and its tests, so changing it after seeing data
 shows up as a test edit. With d = catch(F) - catch(A) and a 90% Newcombe interval (z = 1.6449):

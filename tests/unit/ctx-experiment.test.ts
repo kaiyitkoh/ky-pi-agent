@@ -11,8 +11,10 @@ import { SEEDED_DEFECTS } from "../fixtures/seeded-defects/index.ts";
 import { measureFloor } from "../helpers/harness-session.ts";
 import {
 	ARMS,
+	FULL_ARM_TOOLS,
 	PAD_TOKENS,
 	TRIAL_REQUIREMENT_IDS,
+	armActiveTools,
 	armArgs,
 	buildTrialPrompt,
 	padFileText,
@@ -456,6 +458,36 @@ describe("summarise", () => {
 			cacheReadTokens: 80,
 		});
 		expect(result.F).toBeUndefined();
+	});
+});
+
+describe("per-arm tool lists", () => {
+	it("FULL_ARM_TOOLS is what the full harness declares", async () => {
+		const full = await measureFloor({ profile: "full", agentsMd: false });
+		expect([...full.toolNames].sort()).toEqual([...FULL_ARM_TOOLS].sort());
+	}, 90_000);
+
+	it("each arm is judged against its own tools", () => {
+		expect(armActiveTools("A")).toEqual(["read", "bash", "edit", "write"]);
+		expect(armActiveTools("C")).toEqual(armActiveTools("A"));
+		expect([...armActiveTools("B")].sort()).toEqual(["approve_ky_command", "bash", "consult_advisor", "edit", "read", "todo", "write"]);
+		expect(armActiveTools("F")).toEqual(FULL_ARM_TOOLS);
+	});
+
+	it("a prose call to a harness-only tool counts in the harness arm", () => {
+		const prose = fauxAssistantMessage([fauxText("todo({ action: 'add', text: 'x' })")], { stopReason: "stop" });
+		const output = { finalText: "", assistantMessages: [prose], usage: undefined, stopReason: "stop" as const };
+		const score = { caught: false, malformed: true, unmatchedFindings: 0 };
+		const tools = { A: armActiveTools("A"), B: armActiveTools("B"), F: armActiveTools("F"), C: armActiveTools("C") };
+		const result = summarise(
+			[
+				{ arm: "F", defect: "d1", repeat: 0, score, output },
+				{ arm: "A", defect: "d1", repeat: 0, score, output },
+			],
+			tools,
+		);
+		expect(result.F?.proseMessages).toBe(1);
+		expect(result.A?.proseMessages).toBe(0);
 	});
 });
 

@@ -8,6 +8,7 @@ import type { AssistantMessage } from "@earendil-works/pi-ai";
 import { scoreCalibration, type SeededDefectExpectation } from "../.pi/extensions/quality/calibration.ts";
 import { isProseToolCall } from "../.pi/extensions/diagnostics/prose.ts";
 import { validateReview } from "../.pi/extensions/quality/review-schema.ts";
+import { applyProfile } from "../.pi/extensions/routing/profiles.ts";
 import {
 	REVIEWER_SYSTEM_PROMPT,
 	buildImportGraph,
@@ -456,10 +457,41 @@ export function summarise(
 	return Object.fromEntries(totals) as ExperimentSummary;
 }
 
+/** The full harness's declared tools; a test re-measures them against the composed harness. */
+export const FULL_ARM_TOOLS: readonly string[] = [
+	"read",
+	"bash",
+	"edit",
+	"write",
+	"approve_ky_command",
+	"consult_advisor",
+	"todo",
+	"questionnaire",
+	"bg_run",
+	"bg_status",
+	"bg_logs",
+	"bg_kill",
+];
+
+/** The tools an arm declares, so a prose tool call is judged against what that arm actually offers. */
+export function armActiveTools(arm: ArmId): readonly string[] {
+	switch (arm) {
+		case "A":
+		case "C":
+			return MINIMAL_TOOLS;
+		case "B":
+			return applyProfile(FULL_ARM_TOOLS, "implement") ?? FULL_ARM_TOOLS;
+		case "F":
+			return FULL_ARM_TOOLS;
+	}
+}
+
 /** Flags common to every arm: one-shot JSON events on stdout. */
 const COMMON_FLAGS = ["--mode", "json", "-p"] as const;
 
-const MINIMAL_FLAGS = ["-ne", "-ns", "-nc", "-np", "--tools", "read,bash,edit,write"] as const;
+const MINIMAL_TOOLS: readonly string[] = ["read", "bash", "edit", "write"];
+
+const MINIMAL_FLAGS = ["-ne", "-ns", "-nc", "-np", "--tools", MINIMAL_TOOLS.join(",")] as const;
 
 /** CLI flags (before the prompt) for one arm. The padded arm needs the path of its filler file. */
 export function armArgs(arm: ArmId, options: { readonly padFile?: string }): string[] {
