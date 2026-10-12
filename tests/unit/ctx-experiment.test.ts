@@ -198,6 +198,13 @@ describe("discriminate", () => {
 		expect(discriminate(summary(50, 48, 20, 50, { F: { excluded: 4 } }))).toBe("inconclusive");
 		expect(discriminate(summary(50, 48, 20, 50, { C: { excluded: 10 } }))).toBe("inconclusive");
 	});
+
+	it("a prose reading from an arm over the exclusion ceiling is inconclusive", () => {
+		const prose = { proseMessages: 20, proseTrials: 20, missesInProseTrials: 20, misses: 20, caught: 40 };
+		expect(discriminate(summary(40, 40, 40, 40, { F: { ...prose, excluded: 3 } }))).toBe("prose-tool-calls");
+		expect(discriminate(summary(40, 40, 40, 40, { F: { ...prose, excluded: 4 } }))).toBe("inconclusive");
+		expect(discriminate(summary(40, 40, 40, 40, { F: prose, B: { excluded: 30 } }))).toBe("inconclusive");
+	});
 });
 
 describe("exclusions", () => {

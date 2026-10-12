@@ -216,6 +216,10 @@ function proseBlamed(summary: ArmSummary): boolean {
  * against baseline stays above -DEGRADE_POINTS. A second-route run of the minimal arm separates provider faults.
  */
 export function discriminate(summary: ExperimentSummary, secondRouteMinimal?: ArmSummary): RootCause {
+	// The prose reading spans every arm, so one arm's self-selected survivors make all of it untrustworthy.
+	if (Object.values(summary).some((arm) => arm !== undefined && !exclusionsAcceptable(arm))) {
+		return "inconclusive";
+	}
 	for (const arm of Object.values(summary)) {
 		if (arm !== undefined && proseBlamed(arm)) {
 			return "prose-tool-calls";

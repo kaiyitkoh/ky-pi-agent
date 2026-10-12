@@ -604,7 +604,8 @@ shows up as a test edit. With d = catch(F) - catch(A) and a 90% Newcombe interva
 `stopReason` `error` or `aborted` measured the infrastructure, not the model. It is excluded: neither a catch nor a miss, and
 counted per arm as `excluded` in `summary.json` and on stdout. Failures are not arm-neutral (the largest prompt draws the most
 rate-limit and schema rejections), so any comparison involving an arm with more than 5% of its planned trials excluded
-(`MAX_EXCLUDED_SHARE`) is `INCONCLUSIVE`, and so is the discrimination that depends on it.
+(`MAX_EXCLUDED_SHARE`) is `INCONCLUSIVE`. The prose reading spans every arm, so any arm over the ceiling makes the
+whole discrimination `inconclusive`, `prose-tool-calls` included.
 
 **Discrimination.**
 
