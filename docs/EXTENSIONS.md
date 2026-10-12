@@ -340,10 +340,9 @@ file is untracked and **not** matched by `.gitignore` — a `config.local.yaml`,
 a downloaded `.pem` under a name the patterns miss, a `terraform.tfstate`
 variant — a secret is persisted there on every turn.
 
-Note also that `index.ts`'s provenance header frames the *opposite* as the
-defect being fixed ("`.env`-class untracked work is silently never captured").
-Both cannot be right. `git.ts`'s SCOPE BOUNDARY is the accurate one, and it now
-says so.
+Note also that Pi's upstream example frames the *opposite* as the defect
+("`.env`-class untracked work is silently never captured"). Both cannot be
+right; the residual described here is the accurate one.
 
 **Decision taken: mitigated, not solved.** `git add -A` is now run with
 `CHECKPOINT_EXCLUDE_PATHSPECS` applied to **both** `add -A` call sites (the
@@ -392,8 +391,7 @@ loads this at user scope and it applies to every repository the operator
 opens.
 
 `MACHINE_STATE_EXCLUDE_PATHSPECS` closes it by name rather than by
-`.gitignore`, and `git.ts`'s docstring no longer claims the set difference is
-safer than `git clean -fd` for untracked-non-ignored paths — for those it was
+`.gitignore`. The restore's set difference is not safer than `git clean -fd` for untracked-non-ignored paths — for those it was
 identical. `tests/integration/git-checkpoint.test.ts` case 7 asserts it **in a
 repository with no `.gitignore` at all**, which is what makes it an assertion
 about the mechanism.
