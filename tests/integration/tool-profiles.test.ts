@@ -268,6 +268,21 @@ describe("plan mode survives the default profile", () => {
 		});
 	});
 
+	// Pi starts a triggerTurn turn without emitting `input`, so it is not narrowed; docs/ROUTING.md states this limit.
+	it("a turn an extension starts with triggerTurn after leaving plan mode is not narrowed", async () => {
+		const sink: TranscriptContext[] = [];
+		await withHarnessSession({ profile: "implement", flags: { plan: true }, responses: steps(2, sink) }, async (h) => {
+			await h.session.prompt("one");
+			await h.session.prompt("/plan-mode");
+			await h.session.sendCustomMessage({ customType: "x", content: "go", display: true }, { triggerTurn: true });
+			expect(sink.length, "non-vacuity: the triggered turn reached the provider").toBe(2);
+			const names = getCurrentTools(sink[1]!.messages).map((t) => t.name);
+			expect(names).toContain("qoder_delegate");
+			expect(names).toContain("bg_run");
+			expect(removedNames(sink[1]!)).toEqual([]);
+		});
+	});
+
 	it("a restored plan-mode entry keeps the read-only loadout", async () => {
 		check(
 			await declared({
