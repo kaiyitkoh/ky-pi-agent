@@ -15,7 +15,7 @@ import { appendJsonl } from "../../lib/jsonl.ts";
 import { agentOverridesFor, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
-import { applyProfile, resolveProfile } from "./profiles.ts";
+import { applyProfile, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
 /** Test-only seam threaded to `agentOverridesFor` so integration tests can inject a guard-blocked planner. */
@@ -306,13 +306,15 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 
 	// Best-effort like safety/index.ts's session_start prune: a bad payload must not stop session start.
 	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
+	// Pi gives extensions no view of a `--tools` allowlist, so read argv; the user's named tools must never be narrowed.
+	const profile = () => (hasExplicitToolAllowlist(process.argv) ? "full" : resolveProfile(pi.getFlag("ky-profile")));
 	pi.on("session_start", (event, ctx) => {
 		try {
 			const branch = ctx.sessionManager.getBranch();
 			restoreModeFromBranch(branch);
 			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
 			if (event.reason === "reload" || branch.some((entry) => entry.type === "message")) return;
-			const next = applyProfile(pi.getActiveTools(), resolveProfile(pi.getFlag("ky-profile")));
+			const next = applyProfile(pi.getActiveTools(), profile());
 			if (next !== undefined) pi.setActiveTools(next);
 		} catch {
 			// Swallowed deliberately.
@@ -323,7 +325,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.on("before_agent_start", (_event, ctx) => {
 		try {
 			const active = pi.getActiveTools();
-			const next = applyProfile(active, resolveProfile(pi.getFlag("ky-profile")));
+			const next = applyProfile(active, profile());
 			if (next === undefined) return;
 			const declared = new Set(getCurrentTools(ctx.sessionManager.buildSessionProjection().messages).map((t) => t.name));
 			const kept = active.filter((name) => next.includes(name) || declared.has(name));

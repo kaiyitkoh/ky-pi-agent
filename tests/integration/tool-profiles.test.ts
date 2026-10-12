@@ -159,6 +159,24 @@ describe("a transcript's loadout is never narrowed again", () => {
 	});
 });
 
+describe("an explicit --tools allowlist is never narrowed", () => {
+	const tools = ["read", "bash", "edit", "write", "bg_run"];
+
+	it("negative control: without --tools on argv the default profile drops bg_run", async () => {
+		expect(await declared({ tools })).not.toContain("bg_run");
+	});
+
+	it("with --tools on argv every named tool is declared", async () => {
+		const saved = process.argv;
+		process.argv = [...saved, "--tools", tools.join(",")];
+		try {
+			expect((await declared({ tools })).sort()).toEqual([...tools].sort());
+		} finally {
+			process.argv = saved;
+		}
+	});
+});
+
 describe("completeness", () => {
 	it("every registered tool is classified", async () => {
 		await withHarnessSession({ profile: "full" }, async (h) => {

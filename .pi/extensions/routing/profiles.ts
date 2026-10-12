@@ -55,6 +55,11 @@ export function findUnclassified(
 	return names.filter((name) => !(name in table) && !PROFILE_NEUTRAL_TOOLS.includes(name));
 }
 
+/** True when a command line carries Pi's `--tools`/`-t` allowlist. */
+export function hasExplicitToolAllowlist(argv: readonly string[]): boolean {
+	return argv.some((arg) => arg === "--tools" || arg === "-t");
+}
+
 export function resolveProfile(flag: unknown): ProfileName {
 	return typeof flag === "string" && (PROFILE_NAMES as readonly string[]).includes(flag)
 		? (flag as ProfileName)

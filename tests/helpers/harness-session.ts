@@ -52,6 +52,8 @@ export interface HarnessSessionOptions {
 	beforeBind?: (session: AgentSession) => void;
 	/** Faux steps. Default: one "ok" reply. */
 	responses?: FauxResponseStep[];
+	/** Pi's `--tools` allowlist; it filters extension tool registration too. Default: none. */
+	tools?: string[];
 	/** Reuse a session manager, e.g. to reopen an earlier transcript. Default: a fresh in-memory one. */
 	sessionManager?: SessionManager;
 }
@@ -179,6 +181,7 @@ export async function createHarnessSession(
 				{},
 			),
 			sessionManager: opts.sessionManager ?? SessionManager.inMemory(cwd),
+			...(opts.tools !== undefined ? { tools: opts.tools } : {}),
 		});
 
 		const flags: Record<string, boolean | string> = { ...(opts.flags ?? {}) };
