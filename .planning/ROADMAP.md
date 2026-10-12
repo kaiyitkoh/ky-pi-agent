@@ -577,7 +577,7 @@ Plans:
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
-- [ ] 10-05-PLAN.md — pre-registered minimal-vs-full experiment core (TDD): run plan, Newcombe interval, decision and discrimination, scoring with controls *(Wave 5)*
+- [x] 10-05-PLAN.md — pre-registered minimal-vs-full experiment core (TDD): run plan, Newcombe interval, decision and discrimination, scoring with controls *(Wave 5)*
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
