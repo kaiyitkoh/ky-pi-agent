@@ -26,7 +26,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified (all 13 plans executed 2026-08-15; **two live checks `RB-07-01` and `RB-07-02` are OUTSTANDING** and EXT-01/03/04/05/09 are partial until they run — see `docs/RUNBOOK.md`)
 - [x] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects (completed 2026-08-15)
 - [x] **Phase 08.1: Pi 1.x Upgrade & Install Health** (INSERTED) - Re-pin to Pi 1.1.0, migrate tests/diagnostics, guard new tool paths, re-review composed extensions (completed 2026-10-12)
-- [ ] **Phase 08.2: Comment Discipline & AGENTS.md** (INSERTED) - AGENTS.md comment rules shipped by the harness, ID-in-comment check, cleanup pass
+- [x] **Phase 08.2: Comment Discipline & AGENTS.md** (INSERTED) - AGENTS.md comment rules shipped by the harness, ID-in-comment check, cleanup pass (completed 2026-10-12)
 - [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
 - [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
@@ -429,7 +429,7 @@ Plans:
 **Goal:** Code comments in this repo — and code written by the harness's models in the user's other projects — state only non-obvious WHY in one or two lines, and the rule is enforced rather than hoped for.
 **Requirements**: CMT-01..05 (inserted 2026-10-12, see 08.2-CONTEXT.md)
 **Depends on:** Phase 08.1
-**Plans:** 12/13 plans executed
+**Plans:** 13/13 plans complete
 
 **Success Criteria:**
 
@@ -452,7 +452,7 @@ Plans:
 - [x] 08.2-10-PLAN.md — cleanup: quality gates/index/reviewer/calibration/advisor
 - [x] 08.2-11-PLAN.md — cleanup: providers + qoder
 - [x] 08.2-12-PLAN.md — cleanup: grill + plan-ceremony (ratchet empties)
-- [ ] 08.2-13-PLAN.md — empty-ratchet lock, 35% aggregate check, tsc + single full-suite run, sign-off
+- [x] 08.2-13-PLAN.md — empty-ratchet lock, 35% aggregate check, tsc + single full-suite run, sign-off
 
 **Cross-cutting constraints:**
 
