@@ -55,8 +55,8 @@ function nextRequestNumber(): number {
 }
 
 /**
- * Issue the next id, `<sessionId>#<n>`. One id per logical request: retries reuse the headers hook
- * (docs/extensions.md:676), so no per-attempt id exists to claim.
+ * Issue the next id, `<sessionId>#<n>`. One id per logical request: provider-level retries reuse the headers
+ * resolved once per stream call (pi-ai 1.1.0 models.js:435-436), so no per-attempt id exists to claim.
  */
 export function nextCorrelationId(sessionId: string): string {
 	lastCorrelationId = `${sessionId}#${nextRequestNumber()}`;

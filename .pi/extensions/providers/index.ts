@@ -1,7 +1,7 @@
 /**
  * Rewrites an expired-AWS-credential error into one line naming `aws sso login --profile <resolved>`.
  * Uses `message_end`, not `after_provider_response`, which never sees a thrown provider error
- * (pi-ai dist/api/bedrock-converse-stream.js; docs/DIAGNOSTICS.md:341-354). Registers no tool, provider or command.
+ * (pi-ai dist/api/bedrock-converse-stream.js; docs/DIAGNOSTICS.md "`after_provider_response` never fires on a provider error"). Registers no tool, provider or command.
  */
 import type {
 	ExtensionAPI,

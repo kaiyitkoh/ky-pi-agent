@@ -96,9 +96,9 @@ export function isExempt(path: string): boolean {
 	return VENDORED_EXEMPT.some((prefix) => path.startsWith(prefix));
 }
 
-const LINE_CITATION = /((?:[\w.-]+\/)+[\w.-]+\.ts):\d+/g;
+const LINE_CITATION = /((?:[\w.-]+\/)+[\w.-]+\.(?:ts|md|json)):\d+/g;
 
-/** In-repo `path.ts:N` citations go stale on any edit; cite a symbol (`path.ts#name`) instead. */
+/** In-repo `path.ts:N` (or `.md`/`.json`) citations go stale on any edit; cite a symbol (`path.ts#name`) instead. */
 export function findRepoLineCitations(commentText: string, repoFiles: readonly string[]): string[] {
 	const hits: string[] = [];
 	for (const m of commentText.matchAll(LINE_CITATION)) {
@@ -108,7 +108,7 @@ export function findRepoLineCitations(commentText: string, repoFiles: readonly s
 	return hits;
 }
 
-const ANY_LINE_CITATION = /[\w@./-]+\.(?:js|ts):\d+/g;
+const ANY_LINE_CITATION = /[\w@./-]+\.(?:js|ts|md|json):\d+/g;
 const VERSION = /\b\d+\.\d+\.\d+\b/;
 
 /** External `file.js:N` citations drift with every upstream release, so the comment must name the version it was read at. */

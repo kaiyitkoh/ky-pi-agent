@@ -372,7 +372,7 @@ export function registerBudgetCommand(
 		description: BUDGET_COMMAND_DESCRIPTION,
 		handler: async (_args: string, ctx: ExtensionCommandContext): Promise<void> => {
 			try {
-				// Reflects `before_agent_start` chaining only (docs/extensions.md:1066-1073).
+				// Built from the run's prompt options, so payload rewrites are not reflected (pi 1.1.0 agent-session.js:1057-1058).
 				const prompt = ctx.getSystemPrompt();
 				const opts = ctx.getSystemPromptOptions();
 				const skills = opts.skills ?? [];

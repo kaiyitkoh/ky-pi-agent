@@ -147,10 +147,11 @@ describe("comment discipline", () => {
 		expect(findRepoLineCitations("// see .pi/extensions/safety/git.ts:1-2", repo)).toEqual([".pi/extensions/safety/git.ts:1"]);
 		expect(findRepoLineCitations("// see safety/git.ts#currentSha", repo)).toEqual([]);
 		expect(findRepoLineCitations("// pi-ai src/types.ts:179", repo)).toEqual([]);
+		expect(findRepoLineCitations("// see docs/SAFETY.md:12", ["docs/SAFETY.md"])).toEqual(["docs/SAFETY.md:12"]);
 	});
 
 	it("cites in-repo code by symbol, never by line number", () => {
-		const repoFiles = trackedFiles().filter((p) => p.endsWith(".ts") && !isExempt(p));
+		const repoFiles = trackedFiles().filter((p) => /\.(?:ts|md|json)$/.test(p) && !isExempt(p));
 		const offenders: string[] = [];
 		for (const f of files) {
 			for (const c of extractComments(sources.get(f) ?? "")) {
@@ -165,10 +166,11 @@ describe("comment discipline", () => {
 		expect(findUnversionedCitations("// see pi 1.1.0 runner.js:410", [])).toEqual([]);
 		expect(findUnversionedCitations("// see pkg@2.6.9 src/x.ts:3", [])).toEqual([]);
 		expect(findUnversionedCitations("// see runner.js#emitMessageEnd", [])).toEqual([]);
+		expect(findUnversionedCitations("// see docs/extensions.md:676", [])).toEqual(["docs/extensions.md:676"]);
 	});
 
 	it("anchors every external file:line citation to a version", () => {
-		const repoFiles = trackedFiles().filter((p) => p.endsWith(".ts") && !isExempt(p));
+		const repoFiles = trackedFiles().filter((p) => /\.(?:ts|md|json)$/.test(p) && !isExempt(p));
 		const offenders: string[] = [];
 		for (const f of files) {
 			for (const c of extractComments(sources.get(f) ?? "")) {

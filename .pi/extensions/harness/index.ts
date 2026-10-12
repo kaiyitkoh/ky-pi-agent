@@ -1,6 +1,6 @@
 /**
  * Load-path sentinel: a provider whose unique model id makes `pi --list-models` prove the extension loaded.
- * registerProvider calls in the factory are queued and flushed (docs/extensions.md:1709), which makes them listable.
+ * registerProvider calls in the factory are queued and flushed (pi 1.1.0 loader.js:163-166, runner.js:248-267), which makes them listable.
  * Ungated on purpose: registration is the observation. The id stays `ky-harness-selftest`; every load-path assertion greps it.
  * Registers commands and a provider, never a tool: tools[] is serialised into every request
  * (pi-ai src/api/openai-completions.ts), commands cost zero per-turn tokens.
