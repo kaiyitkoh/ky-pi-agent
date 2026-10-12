@@ -158,7 +158,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 ### Comment Discipline
 
 - [x] **CMT-01**: Root `AGENTS.md` carries the code-comment rules (15 lines or fewer) plus cross-agent conventions, and `CLAUDE.md` begins with `@AGENTS.md`
-- [x] **CMT-02**: The harness delivers the same rules to every project Pi runs in, with no manual step and a stable cache prefix
+- [ ] **CMT-02**: The harness delivers the same rules to every project Pi runs in, with no manual step and a stable cache prefix
 - [x] **CMT-03**: A vitest check fails on plan, requirement, review or phase IDs inside comments of tracked authored `.pi/extensions/**/*.ts` (vendored files exempt)
 - [x] **CMT-04**: The same check reports per-file and total comment ratio
 - [x] **CMT-05**: A cleanup pass brings the authored comment ratio to 35% or less with no behaviour change, keeping safety invariants and Pi-source facts
@@ -344,7 +344,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | UI-04 | Phase 11 | Pending |
 | UI-05 | Phase 11 | Pending |
 | CMT-01 | Phase 08.2 | Complete |
-| CMT-02 | Phase 08.2 | Complete |
+| CMT-02 | Phase 08.2 | Complete offline - faux-session delivery proven by tests/unit/comment-rules-delivery.test.ts; live check RB-08-04, OUTSTANDING |
 | CMT-03 | Phase 08.2 | Complete |
 | CMT-04 | Phase 08.2 | Complete |
 | CMT-05 | Phase 08.2 | Complete |

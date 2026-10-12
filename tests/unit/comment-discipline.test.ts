@@ -14,7 +14,7 @@ import {
 } from "../helpers/comment-scan.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
-// Remove an entry in the same commit that cleans it; must be empty at phase end.
+// Must stay empty: do not add entries back.
 const PENDING_CLEANUP: readonly string[] = [];
 
 const isPending = (path: string): boolean => PENDING_CLEANUP.some((prefix) => path.startsWith(prefix));
@@ -87,6 +87,10 @@ describe("comment discipline", () => {
 		for (const prefix of VENDORED_EXEMPT) {
 			expect(tracked.some((p) => p.startsWith(prefix)), prefix).toBe(true);
 		}
+	});
+
+	it("PENDING_CLEANUP is empty: every authored file is under the ID gate", () => {
+		expect(PENDING_CLEANUP).toEqual([]);
 	});
 
 	it("keeps PENDING_CLEANUP free of stale entries", () => {
