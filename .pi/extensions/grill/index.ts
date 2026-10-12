@@ -1,23 +1,6 @@
 /**
- * FLOW-02 / FLOW-03 -- the /grill command. Two entry points, no flags,
- * gated. The interrogation procedure, the four ambiguity dimensions, the
- * perspective rotation and the SPEC.md outline live in the "grill" skill
- * (.pi/skills/grill/SKILL.md, loaded on demand) and docs/WORKFLOWS.md (plan
- * 09-17). Terseness here IS the WORKFLOW_TEXT_BUDGETS ceiling being
- * honoured, matching workflows/index.ts's own header discipline.
- *
- * CHOKEPOINT HYGIENE (DIAG-03 / QUAL-02): this file never reaches a model
- * directly -- interrogation is handed to the ordinary prompt loop via
- * pi.sendUserMessage, never a nested model call. It does not spell, even in
- * a comment, the documented direct-completion method on the model registry,
- * its simple-options or streaming siblings, the method that hands back a raw
- * provider object, the other route to a raw provider object, a deep import
- * under the pi-ai package's adapter path, or the model runtime class name --
- * the same six-plus-one bypass routes tests/unit/chokepoint-lint.test.ts
- * enumerates for DIAG-03.
- *
- * BOUNDARY RULE (BOOT-10): registers exactly one command, zero tools. Does
- * not spell the tool-registration call, in code or in prose.
+ * /grill command: two entry points, no flags, gated. Procedure lives in the "grill" skill and docs/WORKFLOWS.md.
+ * Registers one command, zero tools; interrogation goes through pi.sendUserMessage, never a nested model call.
  */
 import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -32,7 +15,7 @@ import { gateRequirementsAuthorship, renderSpecMarkdown, validateSpec, type Spec
 /** The one artifact this subsystem ever writes -- named once, reused everywhere below. */
 const SPEC_FILE_NAME = "SPEC.md";
 
-/** A `.pi/work/<slug>/` slug derived from a free-text description. `workDir` is the SLUG_PATTERN authority; an illegal result surfaces as a thrown, caught refusal, not a second check here. */
+/** A `.pi/work/<slug>/` slug from free text; `workDir` is the SLUG_PATTERN authority, so an illegal result surfaces as a caught refusal. */
 function deriveSlug(description: string): string {
 	return description
 		.trim()
@@ -55,15 +38,7 @@ function latestWorkSlug(cwd: string): string | undefined {
 	return dirs[0]?.name;
 }
 
-/**
- * The ONLY function in this subsystem that writes SPEC.md. Runs
- * `gateRequirementsAuthorship`, then `validateSpec`, then `gateAmbiguity` on
- * the parsed §8 scorecard -- refusing with the predicate's own reason on the
- * first failure. Never writes the raw `markdown` parameter straight to disk:
- * only `renderSpecMarkdown`'s own re-rendering of the VALIDATED artifact ever
- * reaches `writeFileSync`, so the file on disk is always the shape the
- * validator accepted, never whatever text happened to arrive.
- */
+/** The only function that writes SPEC.md. Runs the authorship, validateSpec and ambiguity gates in order; only `renderSpecMarkdown` output of the validated artifact reaches disk, never the raw `markdown`. */
 export function writeSpecIfGated(cwd: string, slug: string, markdown: string): SpecGateVerdict {
 	const factsVerdict = gateRequirementsAuthorship(markdown);
 	if (!factsVerdict.ok) {
@@ -87,7 +62,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("grill", {
 		description: "Interrogate a change into a gated SPEC.md before any plan or code exists",
 		handler: async (args, ctx) => {
-			// Order is the whole claim: parse -> git guard -> resolve slug -> idle guard -> hand off.
+			// Order is the claim: parse -> git guard -> resolve slug -> idle guard -> hand off.
 			const task = args.trim();
 			const usage = () => ctx.ui.notify('grill: usage is "/grill <description>" or "/grill --resume"', "error");
 			if (task === "" || (task !== "--resume" && task.startsWith("-"))) {
