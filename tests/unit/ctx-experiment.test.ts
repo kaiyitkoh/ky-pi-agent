@@ -2,10 +2,23 @@
  * The minimal-vs-full experiment core is pure; these tests pin the pre-registered constants and prove the
  * statistics against a published reference value before any live data can exist.
  */
+import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 
+import type { SeededDefectExpectation } from "../../.pi/extensions/quality/calibration.ts";
+import { REVIEWER_SYSTEM_PROMPT } from "../../.pi/extensions/quality/reviewer.ts";
+import { SEEDED_DEFECTS } from "../fixtures/seeded-defects/index.ts";
+import { measureFloor } from "../helpers/harness-session.ts";
 import {
 	ARMS,
+	PAD_TOKENS,
+	TRIAL_REQUIREMENT_IDS,
+	armArgs,
+	buildTrialPrompt,
+	padFileText,
+	parseJsonModeOutput,
+	scoreTrial,
+	summarise,
 	DEGRADE_POINTS,
 	FIRST_STAGE_REPEATS,
 	LOW_CATCH_RATE,
@@ -174,4 +187,234 @@ describe("discriminate", () => {
 		const second = arm("A", 54);
 		expect(discriminate(summary(6, 6, 6, 6), second)).toBe("provider-misconfiguration");
 	});
+});
+
+const EXPECTED: SeededDefectExpectation[] = SEEDED_DEFECTS.map((d) => ({ id: d.id, ...d.expected }));
+
+function reviewBlock(findings: unknown[]): string {
+	const review = {
+		verdicts: [{ requirementId: TRIAL_REQUIREMENT_IDS[0], status: "Partial", evidence: "src/x.ts:1" }],
+		findings,
+		checkedAndCleared: "Read every touched file in full.",
+		classification: "root-cause",
+		classificationJustification: "Addresses the stated purpose.",
+	};
+	return `Here is my review.\n\n\`\`\`json\n${JSON.stringify(review)}\n\`\`\`\n`;
+}
+
+function catchingFinding(e: SeededDefectExpectation): unknown {
+	return {
+		severity: e.minimumSeverity,
+		location: `${e.locationFile}:1`,
+		concreteFailure: `This change ${e.mustMentionAny.slice(0, 2).join(" and ")}.`,
+		suggestedFix: "Fix it.",
+	};
+}
+
+describe("buildTrialPrompt", () => {
+	const built = { diff: "+export const a = 1;", touchedFiles: [{ path: "src/a.ts", contents: "export const a = 1;" }] };
+
+	it("carries the reviewer prompt, the contract context and the output instruction", () => {
+		const prompt = buildTrialPrompt(built);
+		expect(prompt).toContain(REVIEWER_SYSTEM_PROMPT);
+		expect(prompt).toContain("export const a = 1;");
+		expect(prompt).toContain("src/a.ts");
+		expect(prompt).toContain("```json");
+		expect(prompt).toContain("do not call a tool");
+	});
+
+	it("has no arm parameter, so every arm receives identical text", () => {
+		expect(buildTrialPrompt.length).toBe(1);
+		expect(buildTrialPrompt(built)).toBe(buildTrialPrompt(built));
+	});
+});
+
+describe("parseJsonModeOutput", () => {
+	const assistant = (text: string) => fauxAssistantMessage([fauxText(text)], { stopReason: "stop" });
+	const line = (event: unknown) => JSON.stringify(event);
+
+	it("assembles the final assistant message from a stream with noise", () => {
+		const first = assistant("thinking aloud");
+		const last = { ...assistant("final answer"), usage: { ...assistant("x").usage, input: 321, cacheRead: 100 } };
+		const text = [
+			line({ type: "session", version: 3 }),
+			"",
+			"not json at all",
+			line({ type: "message_start", message: { role: "user", content: "hi" } }),
+			line({ type: "message_end", message: first }),
+			line({ type: "message_end", message: last }),
+			line({ type: "agent_settled", aborted: false }),
+			'{"type":"message_end","mess',
+		].join("\n");
+		const parsed = parseJsonModeOutput(text);
+		expect(parsed.assistantMessages).toHaveLength(2);
+		expect(parsed.finalText).toBe("final answer");
+		expect(parsed.usage).toEqual({ input: 321, cacheRead: 100 });
+		expect(parsed.stopReason).toBe("stop");
+	});
+
+	it("never throws on garbage, empty or oversized input", () => {
+		for (const text of ["", "\n\n", "{", "[]", "null", "\u0000\u0001", "x".repeat(50_000_000)]) {
+			const parsed = parseJsonModeOutput(text);
+			expect(parsed.finalText).toBe("");
+			expect(parsed.usage).toBeUndefined();
+		}
+	});
+});
+
+describe("scoreTrial", () => {
+	for (const e of EXPECTED) {
+		it(`catches ${e.id} with a specific answer and misses it with a generic one`, () => {
+			expect(scoreTrial(reviewBlock([catchingFinding(e)]), e.id, EXPECTED)).toMatchObject({ caught: true, malformed: false });
+			const generic = { severity: "BLOCKER", location: `${e.locationFile}:1`, concreteFailure: "Could be improved somehow.", suggestedFix: "Refactor." };
+			expect(scoreTrial(reviewBlock([generic]), e.id, EXPECTED)).toMatchObject({ caught: false, malformed: false });
+		});
+	}
+
+	it("blind control scores zero on every defect", () => {
+		for (const e of EXPECTED) {
+			expect(scoreTrial(reviewBlock([]), e.id, EXPECTED)).toMatchObject({ caught: false, malformed: false });
+		}
+	});
+
+	it("shotgun control scores zero on every defect", () => {
+		const shotgun = Array.from({ length: 20 }, (_unused, i) => ({
+			severity: "BLOCKER",
+			location: `${EXPECTED[i % EXPECTED.length]?.locationFile}:${i + 1}`,
+			concreteFailure: "General code quality concern -- this area could probably be improved somehow.",
+			suggestedFix: "Consider refactoring for clarity.",
+		}));
+		for (const e of EXPECTED) {
+			const score = scoreTrial(reviewBlock(shotgun), e.id, EXPECTED);
+			expect(score.caught).toBe(false);
+			expect(score.malformed).toBe(false);
+			expect(score.unmatchedFindings).toBe(20);
+		}
+	});
+
+	it("counts malformed output without throwing", () => {
+		const bad = [
+			"",
+			"no block here",
+			"```json\n{not json}\n```",
+			"```json\n[]\n```",
+			'```json\n{"verdicts":[],"findings":[]}\n```',
+			'```json\n{"verdicts":',
+			"```json".repeat(50_000),
+		];
+		for (const text of bad) {
+			expect(scoreTrial(text, EXPECTED[0]?.id ?? "", EXPECTED)).toMatchObject({ malformed: true, caught: false });
+		}
+	});
+
+	it("uses the last json block", () => {
+		const e = EXPECTED[0] as SeededDefectExpectation;
+		const text = `${reviewBlock([])}\nCorrection:\n${reviewBlock([catchingFinding(e)])}`;
+		expect(scoreTrial(text, e.id, EXPECTED).caught).toBe(true);
+	});
+});
+
+describe("armArgs", () => {
+	const NO_FLAGS = ["-ne", "-ns", "-nc", "-np"];
+
+	it("A and C differ only by the append-system-prompt pair", () => {
+		const a = armArgs("A", {});
+		const c = armArgs("C", { padFile: "/tmp/pad.md" });
+		expect(c).toEqual([...a, "--append-system-prompt", "/tmp/pad.md"]);
+	});
+
+	it("B and F differ only by the profile value", () => {
+		const b = armArgs("B", {});
+		const f = armArgs("F", {});
+		expect(b.map((v) => (v === "implement" ? "full" : v))).toEqual(f);
+		expect(b[b.indexOf("--ky-profile") + 1]).toBe("implement");
+		expect(f[f.indexOf("--ky-profile") + 1]).toBe("full");
+	});
+
+	it("every arm runs one-shot JSON mode", () => {
+		for (const id of ["A", "B", "F", "C"] as const) {
+			const args = armArgs(id, { padFile: "p" });
+			expect(args.join(" ")).toContain("--mode json");
+			expect(args).toContain("-p");
+		}
+	});
+
+	it("minimal arms strip everything and pin the four built-in tools; harness arms strip nothing", () => {
+		for (const id of ["A", "C"] as const) {
+			const args = armArgs(id, { padFile: "p" });
+			for (const flag of NO_FLAGS) expect(args).toContain(flag);
+			expect(args[args.indexOf("--tools") + 1]).toBe("read,bash,edit,write");
+		}
+		for (const id of ["B", "F"] as const) {
+			const args = armArgs(id, {});
+			for (const flag of NO_FLAGS) expect(args).not.toContain(flag);
+			expect(args).not.toContain("--tools");
+		}
+	});
+
+	it("the padded arm needs a pad file", () => {
+		expect(() => armArgs("C", {})).toThrow();
+	});
+});
+
+describe("padFileText", () => {
+	const sources = ["alpha prose.", "beta prose that is a little longer.", "gamma."];
+
+	it("returns exactly the requested size, deterministically, from the sources only", () => {
+		const text = padFileText(1000, sources);
+		expect(text).toHaveLength(1000);
+		expect(padFileText(1000, sources)).toBe(text);
+		const leftover = text.replace(/alpha prose\.|beta prose that is a little longer\.|gamma\.|\s/g, "");
+		expect(leftover.length).toBeLessThanOrEqual(8);
+	});
+
+	it("scales linearly (negative control)", () => {
+		expect(padFileText(2000, sources)).toHaveLength(2 * padFileText(1000, sources).length);
+	});
+
+	it("rejects empty sources", () => {
+		expect(() => padFileText(10, [])).toThrow();
+	});
+});
+
+describe("summarise", () => {
+	const msg = (text: string) => fauxAssistantMessage([fauxText(text)], { stopReason: "stop" });
+	const output = (...messages: ReturnType<typeof msg>[]) => ({
+		finalText: "",
+		assistantMessages: messages,
+		usage: { input: 100, cacheRead: 40 },
+		stopReason: "stop" as const,
+	});
+	const tools = { A: ["bash"], B: ["bash"], F: ["bash"], C: ["bash"] };
+
+	it("counts catches, malformed output, prose trials and tokens per arm", () => {
+		const result = summarise(
+			[
+				{ arm: "A", defect: "d1", repeat: 0, score: { caught: true, malformed: false, unmatchedFindings: 1 }, output: output(msg("done")) },
+				{ arm: "A", defect: "d2", repeat: 0, score: { caught: false, malformed: true, unmatchedFindings: 0 }, output: output(msg("bash({ command: 'ls' })")) },
+			],
+			tools,
+		);
+		expect(result.A).toMatchObject({
+			trials: 2,
+			caught: 1,
+			malformed: 1,
+			proseMessages: 1,
+			proseTrials: 1,
+			misses: 1,
+			missesInProseTrials: 1,
+			unmatchedFindings: 1,
+			inputTokens: 200,
+			cacheReadTokens: 80,
+		});
+		expect(result.F).toBeUndefined();
+	});
+});
+
+describe("PAD_TOKENS", () => {
+	it("equals the measured full-harness floor minus the bare floor", async () => {
+		const full = await measureFloor({ profile: "full" });
+		const bare = await measureFloor({ entryPoints: [], agentsMd: false, skills: false });
+		expect(PAD_TOKENS).toBe(full.budget.floor.estimatedTokens - bare.budget.floor.estimatedTokens);
+	}, 90_000);
 });
