@@ -223,6 +223,20 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(text).toContain("- Exit code: 0");
 	});
 
+	it("a committed change the deterministic gate fails is rejected at settle, file unchanged", async () => {
+		const bad = ".pi/extensions/bad.ts";
+		const spec = renderSpecMarkdown({ ...SPEC, scopePin: { ...SPEC.scopePin, expectedFiles: [bad] } });
+		const h = harness({ spec, plan: `- [ ] T001 [R1] Add the guard to ${bad} | verify: npm test\n` });
+		await h.command(SLUG);
+		expect(h.sent.length, "the base tree passes the gate, so the run starts").toBe(1);
+		const before = bytes(progressFile(h));
+		commitIn(h.repo, bad, "export function f(): void {\n\ttry {\n\t\tJSON.parse(\"x\");\n\t} catch {}\n}\n");
+		verify(h);
+		h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("deterministic gate fails on the committed change");
+		expect(bytes(progressFile(h))).toBe(before);
+	});
+
 	it("fabrication: a commit with narrated output and no structured tool result is rejected, file unchanged", async () => {
 		const h = harness();
 		await h.command(SLUG);

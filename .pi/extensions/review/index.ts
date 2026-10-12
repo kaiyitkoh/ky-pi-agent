@@ -12,6 +12,7 @@ import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
 import { gateDepthFor } from "../quality/gates.ts";
+import { runQuickGateStage } from "../quality/index.ts";
 import { buildImportGraph, runReview, type ReviewerContractInput } from "../quality/reviewer.ts";
 import { renderReviewMarkdown, type ReviewArtifact } from "../quality/review-schema.ts";
 import { decideWorkflowStop, runRefuteOrPromote } from "../quality/verdict.ts";
@@ -66,6 +67,13 @@ export default function (pi: ExtensionAPI): void {
 				const mechanisms = gateDepthFor("review").mechanisms;
 				ctx.ui.notify(`review: gate depth: ${mechanisms.join(", ")}`, "info");
 
+				let gateReport = "The deterministic stage is outside this workflow's gate depth and did not run.";
+				if (mechanisms.includes("deterministic")) {
+					const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
+					if (gate.blocking) return fail(`review: the deterministic gate fails at HEAD -- not reviewing:\n${gate.report}`);
+					gateReport = gate.report;
+				}
+
 				const base = git(ctx.cwd, ["merge-base", "HEAD", MR_TARGET_BRANCH]).trim();
 				const changed = changedFilesSince(ctx.cwd, base);
 				const touched = changed.filter((p) => existsSync(join(ctx.cwd, p))).map((p) => ({ path: p, contents: readFileSync(join(ctx.cwd, p), "utf-8") }));
@@ -73,8 +81,7 @@ export default function (pi: ExtensionAPI): void {
 				const contract: ReviewerContractInput = {
 					diff: git(ctx.cwd, ["diff", `${base}..HEAD`]),
 					touchedFiles: touched,
-					// The deterministic output was captured when each task was recorded; it is passed, not re-run.
-					gateReport: progress,
+					gateReport,
 					requirements: ids.map((id) => ({ id, text: (spec.spec.requirementsBody.split("\n").find((l) => new RegExp(`\\b${id}\\b`).test(l)) ?? id).trim() })),
 					filesTouchedUnion,
 					importGraph: buildImportGraph(touched.filter((t) => /\.[cm]?[tj]sx?$/.test(t.path)).map((t) => ({ path: t.path, text: t.contents }))),

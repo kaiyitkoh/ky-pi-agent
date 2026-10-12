@@ -71,7 +71,7 @@ export default function (pi: ExtensionAPI): void {
 
 				if (isRunArmed() || !ctx.isIdle()) return fail("execute: a turn is already in flight -- wait for it to finish");
 
-				// The dial is one table; the deterministic stage runs here, later mechanisms are announced for the review step.
+				// The deterministic stage runs on the base tree here, so a failure at settle is the change's own, and again on the commit at settle.
 				const mechanisms = gateDepthFor("execute").mechanisms;
 				if (mechanisms.includes("deterministic")) {
 					const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
@@ -137,6 +137,10 @@ export default function (pi: ExtensionAPI): void {
 			}
 			const drift = driftAbort({ attemptedPaths: changedFiles(cwd, baseSha, verdict.sha), specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
 			if (!drift.ok) return void ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error");
+			if (gateDepthFor("execute").mechanisms.includes("deterministic")) {
+				const gate = runQuickGateStage(cwd, ctx.isProjectTrusted());
+				if (gate.blocking) return void ctx.ui.notify(`execute: ${run.taskId} rejected -- the deterministic gate fails on the committed change:\n${gate.report}`, "error");
+			}
 			appendProgress(cwd, run.slug, { taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
 			attempts = 0;
 			lastErrors = undefined;
