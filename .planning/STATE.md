@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-12T16:57:10.140Z"
+last_updated: "2026-10-12T17:06:31.406Z"
 last_activity: 2026-10-12
 progress:
   total_phases: 14
   completed_phases: 8
   total_plans: 110
-  completed_plans: 102
+  completed_plans: 103
   percent: 57
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 08.1 (pi-1-x-upgrade-install-health) — EXECUTING
-Plan: 5 of 7
+Plan: 6 of 7
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-10-12
 
-Progress: [█████████░] 93%
+Progress: [█████████░] 94%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -168,6 +168,7 @@ credentials can do has been done".
 | Phase 09 P10 | 14min | 2 tasks | 5 files |
 | Phase 09 P11 | 20m | 2 tasks | 4 files |
 | Phase 09 P12 | 35m | 2 tasks | 3 files |
+| Phase 08.1 P05 | ~1h | 4 tasks | 25 files |
 
 ## Accumulated Context
 
@@ -463,6 +464,7 @@ Recent decisions affecting current work:
 - [Phase 09-11]: Probe only subagent/subagent_wait -- the minimum genuinely needed for spawn-and-wait, not all four pi-subagents parent-session tool names — subagent_supervisor/intercom exist only for mid-run steering, which /execute's one-subagent-per-task shape does not need
 - [Phase 09-11]: Verified-fact selection for a handoff packet is a declared substring rule, not 'all of them' — a fact travels with the packet iff its claim text appears case-insensitively inside the task's concatenated requirement excerpts -- real and checkable, asserted with both a presence and an absence case
 - [Phase 09]: QUAL-08: gateDepthFor is a pure selector beside shouldRunDesignReview in gates.ts -- quick runs deterministic only, ceremonial workflows run all four, proved by equality in both directions and falsified by inversion; /quick's own command file never touched
+- [Phase 08.1]: 08.1-05: pi-background-tasks@2.6.9 vendored process-only at .pi/extensions/background-tasks/ (not vendor/); npm pin removed
 
 ### Pending Todos
 
@@ -515,7 +517,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-10-12T16:57:10.127Z
+Last session: 2026-10-12T17:06:24.664Z
 Stopped at: Completed 09-12-PLAN.md
 Resume file: None
 
