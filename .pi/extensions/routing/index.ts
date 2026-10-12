@@ -1,6 +1,7 @@
 /**
  * Routing entry point: `/cheap`, `/balanced`, `/max`, `/escalate` and `/mode`.
- * The only routing file that touches a live session; registers commands only (never a tool, never a direct model call).
+ * The only routing file that touches a live session; registers commands and a flag, narrows the starting tool set once
+ * (never registers a tool, never a direct model call).
  */
 import type {
 	CustomEntry,
@@ -13,6 +14,7 @@ import { appendJsonl } from "../../lib/jsonl.ts";
 import { agentOverridesFor, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
+import { applyProfile, resolveProfile } from "./profiles.ts";
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
 /** Test-only seam threaded to `agentOverridesFor` so integration tests can inject a guard-blocked planner. */
@@ -302,9 +304,12 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	});
 
 	// Best-effort like safety/index.ts's session_start prune: a bad payload must not stop session start.
+	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
 	pi.on("session_start", (_event, ctx) => {
 		try {
 			restoreModeFromBranch(ctx.sessionManager.getBranch());
+			const next = applyProfile(pi.getActiveTools(), resolveProfile(pi.getFlag("ky-profile")));
+			if (next !== undefined) pi.setActiveTools(next);
 		} catch {
 			// Swallowed deliberately.
 		}

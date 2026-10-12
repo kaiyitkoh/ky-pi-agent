@@ -93,6 +93,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { classifiedToolNames } from "../../.pi/extensions/routing/profiles.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
 const SETTINGS_PATH = join(".pi", "settings.json");
@@ -431,6 +432,17 @@ describe("tool-count-baseline Direction 3 -- completeness, both ways, both sides
 			const offenders = [...declaredSources].filter((source) => !discovered.includes(source));
 			expect(offenders, `these TOOL_COUNT_BASELINE vendored rows no longer resolve on disk (${offenders.join(", ")})`).toEqual([]);
 		});
+	});
+});
+
+describe("tool-count-baseline -- profile completeness", () => {
+	it("every baseline tool is classified in the routing profile table", () => {
+		const classified = new Set(classifiedToolNames());
+		for (const row of TOOL_COUNT_BASELINE) {
+			for (const name of row.toolNames) {
+				expect(classified.has(name), `${name} (${row.source}) is unclassified: classify it in routing/profiles.ts`).toBe(true);
+			}
+		}
 	});
 });
 

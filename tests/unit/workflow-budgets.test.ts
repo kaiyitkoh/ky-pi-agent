@@ -355,9 +355,10 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/routing",
-		budget: 1020,
+		budget: 1110,
 		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 1019 " +
-			"raw lines across 5 files 2026-10-13, rounded up to the next ten",
+			"raw lines across 5 files 2026-10-13, rounded up to the next ten. RAISED 1020 -> 1110: profiles.ts (78 lines, " +
+			"the tool-profile table and resolver) plus 5 lines of wiring in index.ts. Re-measured 1102 raw lines across 6 files 2026-10-13",
 	},
 	{
 		dir: ".pi/extensions/harness",

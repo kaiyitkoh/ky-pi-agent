@@ -30,7 +30,7 @@ let bareAgents: FloorMeasurement;
 // Mutation check: lowering composedBefore below the measured value fails this block.
 describe("composed default", () => {
 	it("stays under the BEFORE ceiling", async () => {
-		composed = await measureFloor();
+		composed = await measureFloor({ profile: "full" });
 		const entries = listEntryPoints();
 		expect(entries.length, "entry-point discovery must not be vacuous").toBeGreaterThanOrEqual(15);
 		for (const wanted of [".pi/extensions/background-tasks/index.ts", ".pi/extensions/loop-police/index.ts"]) {
@@ -72,7 +72,7 @@ describe("per-extension attribution", () => {
 		const rows: { entry: string; chars: number; tokens: number; added: string[] }[] = [];
 		let sum = 0;
 		for (const entry of listEntryPoints()) {
-			const one = await measureFloor({ entryPoints: [entry], skills: false });
+			const one = await measureFloor({ entryPoints: [entry], skills: false, profile: "full" });
 			const chars = one.budget.floor.chars - bareAgents.budget.floor.chars;
 			const added = one.toolNames.filter((n) => !bareAgents.toolNames.includes(n));
 			rows.push({ entry, chars, tokens: estimateTokensFromChars(Math.max(chars, 0)), added });
