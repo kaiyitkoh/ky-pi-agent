@@ -25,7 +25,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 6: Walking Skeleton — `/quick` & the Evidence Gate** - Prove route → guard → execute → evidence → commit end-to-end at minimum size (completed 2026-08-14)
 - [x] **Phase 7: Composed Extensions, Pinned & Reviewed** - Subagents, plan mode, todos, LSP, web, checkpointing — exact-pinned and re-verified (all 13 plans executed 2026-08-15; **two live checks `RB-07-01` and `RB-07-02` are OUTSTANDING** and EXT-01/03/04/05/09 are partial until they run — see `docs/RUNBOOK.md`)
 - [x] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects (completed 2026-08-15)
-- [ ] **Phase 08.1: Pi 1.x Upgrade & Install Health** (INSERTED) - Re-pin to Pi 1.1.0, migrate tests/diagnostics, guard new tool paths, re-review composed extensions
+- [x] **Phase 08.1: Pi 1.x Upgrade & Install Health** (INSERTED) - Re-pin to Pi 1.1.0, migrate tests/diagnostics, guard new tool paths, re-review composed extensions (completed 2026-10-12)
 - [ ] **Phase 08.2: Comment Discipline & AGENTS.md** (INSERTED) - AGENTS.md comment rules shipped by the harness, ID-in-comment check, cleanup pass
 - [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
 - [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
@@ -404,7 +404,7 @@ Plans:
 **Goal:** The harness runs on `@earendil-works/pi-coding-agent@1.1.0` with every authored extension, test helper and composed extension verified against 1.1.0 source, and no new 1.x tool path (powershell, codemode, MCP, tool_search) can bypass the safety guard.
 **Requirements**: UPG-01..06 (inserted 2026-10-12, see 08.1-CONTEXT.md)
 **Depends on:** Phase 8
-**Plans:** 6/7 plans executed
+**Plans:** 7/7 plans complete
 
 **Success Criteria:**
 1. Pi family (`pi-coding-agent`, `pi-ai`, `pi-tui`, `pi-agent-core`) pinned to exactly 1.1.0 in devDependencies; `typebox`/`vitest` match Pi's own pins; global `pi` reinstalled at 1.1.0 and `~/.pi/agent/settings.json` `piPinned` updated (RUNBOOK entry if it needs the user).
@@ -420,7 +420,7 @@ Plans:
 - [x] 08.1-04-PLAN.md — re-pin pi-subagents/pi-web-access/pi-lsp/pi-session-finder after review; registries, evidence, compiled-JS exception, /execute probe
 - [x] 08.1-05-PLAN.md — vendor pi-background-tasks@2.6.9 process-only with PROVENANCE, load + guard test, registries npm->vendored
 - [x] 08.1-06-PLAN.md — vendored extensions re-checked at 1.1.0; supply-chain posture, install log, citation policy, 1.x notes
-- [ ] 08.1-07-PLAN.md — phase verification: typecheck + the single full-suite run, evidence map, validation sign-off
+- [x] 08.1-07-PLAN.md — phase verification: typecheck + the single full-suite run, evidence map, validation sign-off
 
 ### Phase 08.2: Comment Discipline & AGENTS.md (INSERTED)
 
