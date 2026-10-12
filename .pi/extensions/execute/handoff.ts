@@ -16,6 +16,9 @@ import { estimateTokensFromChars } from "../diagnostics/budget.ts";
  */
 export const SUBAGENT_TOOL_NAMES = ["subagent", "bg_wait"] as const;
 
+/** The isolated-context agent the packet is written for; must match `name:` in .pi/agents/executor-handoff.md. */
+export const HANDOFF_AGENT = "executor-handoff";
+
 /**
  * The subagent-dispatch leg: requires BOTH names in `registeredToolNames` and names the missing set.
  * Never reads settings: that reports what is configured, not what is loaded.

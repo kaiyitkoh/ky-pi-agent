@@ -14,7 +14,7 @@ import { registeredToolNames, runQuickGateStage } from "../quality/index.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
-import { buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
+import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import {
 	REVISION_CAP, appendAttempt, appendProgress, armExecuteRun, attemptState, changedFiles, checkVerification, disarmExecuteRun,
 	driftAbort, driftBase, ensureWorkIgnored, executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase,
@@ -92,7 +92,8 @@ export default function (pi: ExtensionAPI): void {
 				let mode: "delegated" | "degraded (ordinary prompt loop)";
 				if (probe.status === "pass") {
 					mode = "delegated";
-					brief = `Dispatch this packet to the subagent tool and wait with bg_wait:\n\n${renderHandoffPacket(buildHandoffPacket({ spec: spec.spec, task }))}`;
+					// A child's tool results never reach this session's evidence, so the parent re-runs the verification itself.
+					brief = `Dispatch this packet to the subagent tool with agent: "${HANDOFF_AGENT}" and wait with bg_wait. Its report is not evidence:\n\n${renderHandoffPacket(buildHandoffPacket({ spec: spec.spec, task }))}`;
 				} else {
 					mode = "degraded (ordinary prompt loop)";
 					ctx.ui.notify(`execute: subagent layer unavailable (${probe.status === "unavailable" ? probe.reason : "not usable"}) -- running ${task.id} in this session, not delegated`, "warning");

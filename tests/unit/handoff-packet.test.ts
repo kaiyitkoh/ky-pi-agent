@@ -12,9 +12,14 @@
  * triple, and adds `buildHandoffPacket`'s own presence-and-absence pair --
  * presence alone would pass on a builder that includes everything.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
+import { repoRoot } from "../helpers/git.ts";
 import {
+	HANDOFF_AGENT,
 	SUBAGENT_TOOL_NAMES,
 	buildHandoffPacket,
 	measurePacketDelta,
@@ -285,5 +290,12 @@ describe("FLOW-09 -- the recorded realistic-fixture measurement", () => {
 		expect(measurement.packetTokens).toBe(estimateTokensFromChars(packetText.length));
 		expect(measurement.parentTokens).toBe(estimateTokensFromChars(parentContextText.length));
 		expect(measurement.deltaTokens).toBe(measurement.packetTokens - measurement.parentTokens);
+	});
+});
+
+describe("the dispatched agent name matches the shipped agent file", () => {
+	it("HANDOFF_AGENT is the name declared in .pi/agents/executor-handoff.md", () => {
+		const md = readFileSync(join(repoRoot(), ".pi", "agents", "executor-handoff.md"), "utf-8");
+		expect(md).toMatch(new RegExp(`^name: ${HANDOFF_AGENT}$`, "m"));
 	});
 });

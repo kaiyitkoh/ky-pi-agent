@@ -16,6 +16,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { logPath } from "../../.pi/lib/jsonl.ts";
 import executeExtension from "../../.pi/extensions/execute/index.ts";
+import { HANDOFF_AGENT } from "../../.pi/extensions/execute/handoff.ts";
 import { driftAbort, progressBlocks, recordedEntries, renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import workflowsExtension from "../../.pi/extensions/workflows/index.ts";
@@ -355,6 +356,25 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(h.notes.at(-1)?.text).toContain("src/b.ts");
 		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
 		expect(bytes(progressFile(h)), "the second arm reuses the pinned base and appends nothing").toBe(before);
+	});
+
+	it("delegated dispatch names the executor-handoff agent and still requires the parent's own verification run", async () => {
+		const key = "__kypiQualityRegisteredToolNames";
+		const g = globalThis as Record<string, unknown>;
+		const prior = g[key];
+		g[key] = () => ["subagent", "bg_wait"];
+		try {
+			const h = harness();
+			await h.command(SLUG);
+			expect(h.sent[0]).toContain(`agent: "${HANDOFF_AGENT}"`);
+			expect(h.sent[0]).toContain("run the verification command yourself");
+			commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+			bash(h, "subagent", "child says: 3 passed");
+			h.fire("agent_end", {});
+			expect(h.notes.at(-1)?.text, "a child's report is not the parent's verification run").toContain("never run");
+		} finally {
+			g[key] = prior;
+		}
 	});
 
 	it("degraded dispatch: with no subagent tool registered the entry records the degraded mode and never claims delegation", async () => {
