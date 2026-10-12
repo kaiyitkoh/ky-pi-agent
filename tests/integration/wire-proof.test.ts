@@ -23,7 +23,7 @@
  * A single switch proves nothing: if the session's starting model already
  * happened to be the target, the "proof" would hold even for a router that
  * does nothing. `/balanced` and `/max` resolve DIFFERENT executor candidates
- * in `routing/schema.ts`'s `ROLE_MAP` (`deepseek-v4-flash` vs
+ * in `routing/schema.ts`'s `ROLE_MAP` (`deepseek-flash` vs
  * `deepseek-v4-pro`), so driving both and asserting the two observed models
  * differ is what makes either assertion mean anything.
  *
@@ -728,7 +728,7 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 		// restart-at-CHAIN[0] path -- it is impossible for this assertion to
 		// pass on the strength of a hardcoded chain head, unlike the reviewer
 		// route WR-01 originally flagged.
-		expect(run.advisorRef.id).not.toBe("deepseek-v4-flash");
+		expect(run.advisorRef.id).not.toBe("deepseek-flash");
 	});
 
 	it("case 11 -- the advisor call's nested.request wire record, joined by corr, independently names the same model", () => {

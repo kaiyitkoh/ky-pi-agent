@@ -498,7 +498,7 @@ async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResu
 			provider: "deepseek",
 			models: [
 				{
-					id: "deepseek-v4-flash",
+					id: "deepseek-flash",
 					reasoning: true,
 					input: ["text"],
 					cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 },

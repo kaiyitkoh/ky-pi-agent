@@ -6,7 +6,7 @@
  * ---------------------------------------------------------------------------
  * This file proves one preparation step works: that a one-line `modelOverrides`
  * entry in `models.json` makes Pi able to *select* `reasoning_effort: "low"` for
- * `deepseek/deepseek-v4-flash`, which the built-in catalogue makes impossible.
+ * `deepseek/deepseek-flash`, which the built-in catalogue makes impossible.
  *
  * It does **not** answer whether `api.deepseek.com` accepts that value, and it
  * does not answer whether the value yields materially fewer reasoning tokens
@@ -80,7 +80,7 @@ import { withModelsConfig } from "../helpers/models.ts";
 
 /** The DeepSeek-direct executor. Bounded impact: see the note below. */
 const PROVIDER = "deepseek";
-const MODEL = "deepseek-v4-flash";
+const MODEL = "deepseek-flash";
 
 /**
  * The level the whole question is about, spelled once. `"low"` is a
@@ -121,7 +121,7 @@ function levelMap(model: Model<Api>): Record<string, unknown> {
 }
 
 describe("PROV-07 — the R1 unclamp (offline; the answer is RB-03-04, OUTSTANDING)", () => {
-	it("case 1 — as shipped, Pi cannot select `low`: it clamps to `high`", async () => {
+	it("case 1 — as shipped (Pi 1.1.0), the built-in entry already maps `low`: no clamp to `high`", async () => {
 		await withModelsConfig({ models: NO_OVERRIDE }, (handle) => {
 			const model = handle.requireModel(PROVIDER, MODEL);
 			const map = levelMap(model);
@@ -139,21 +139,21 @@ describe("PROV-07 — the R1 unclamp (offline; the answer is RB-03-04, OUTSTANDI
 
 			expect(
 				getSupportedThinkingLevels(model),
-				"the levels Pi offers for the built-in entry. This is the finding that settles " +
+				"[Pi 1.1.0: deepseek-flash ships low:\"low\" upstream, so the unclamp is no longer needed for this tier; was [off, high, max] on 0.84.1.] the levels Pi offers for the built-in entry. This is the finding that settles " +
 					'the "what will Pi actually send" half of R1, and it must be an assertion ' +
 					"rather than a comment: `low`, `minimal` and `medium` map to null, and " +
 					"getSupportedThinkingLevels drops every null-mapped level. If `low` appears " +
 					"here, the catalogue changed and RB-03-04's preparation step is unnecessary",
-			).toEqual(["off", "high", "max"]);
+			).toEqual(["off", "low", "high", "max"]);
 
 			expect(
 				clampThinkingLevel(model, LOW),
-				"asking Pi for `low` on the model as shipped must yield `high`. This is why " +
+				"[Pi 1.1.0: asking for `low` now yields `low`; on 0.84.1 it clamped to `high`.] This was why " +
 					"PROV-07 cannot be answered by reading DeepSeek's API docs: the API admits " +
 					'"low", and Pi 0.84.1 with the built-in catalogue can never send it. A ' +
 					"`/cheap` route defined on a cheap thinking tier would silently be a `high` " +
 					"tier at `high` prices",
-			).toBe("high");
+			).toBe("low");
 		});
 	});
 

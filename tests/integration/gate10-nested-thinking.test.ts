@@ -48,7 +48,7 @@
  * WHY `reviewer` IN BOTH `cheap` AND `max`, NOT TWO DIFFERENT ROLES
  * ---------------------------------------------------------------------------
  * `ROLE_MAP.cheap.reviewer`'s first candidate is byte-identical to `CHAIN[0]`
- * in `.pi/extensions/providers/schema.ts` (`deepseek/deepseek-v4-flash`), so
+ * in `.pi/extensions/providers/schema.ts` (`deepseek/deepseek-flash`), so
  * this run's openai-completions call is dispatched through the fallback-chain
  * wrapper rather than a direct chokepoint call — see `runSingleShotRole`'s own
  * `resolvedIsChainHead` check. That is deliberately exercised here rather than

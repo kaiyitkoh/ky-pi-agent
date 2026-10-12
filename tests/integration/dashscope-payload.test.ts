@@ -647,7 +647,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 		).toBe("24h");
 	});
 
-	it("case 4 — Q7: no function carries a `strict` key, and detection's default would", () => {
+	it("case 4 — Q7: no function carries a `strict` key, and detection never turns it on", () => {
 		const shippedBody = wireBody(shipped);
 		const controlBody = wireBody(detectionDefaults);
 
@@ -681,14 +681,24 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 			controlTools.length,
 			"the control emitted no tools, so it cannot demonstrate what the default does",
 		).toBe(shippedTools.length);
+		// Q7 re-decided against pi-ai 1.1.0 (08.1-02 deferred item). 0.84.1 detection
+		// defaulted `supportsStrictMode` true and so emitted `"strict": false` on every
+		// function. 1.1.0 detection defaults it to FALSE ("OpenAI compatibility alone
+		// does not imply strict JSON-schema tool support",
+		// `openai-completions.js` detectCompat), so `convertTools` omits `strict` in
+		// the control body as well. Omission is acceptable for DashScope: `strict` is
+		// optional in the OpenAI tools schema and the endpoint never needed it. The
+		// template KEEPS the explicit `supportsStrictMode: false` so the shipped wire
+		// no longer depends on a detection default that has already flipped once.
+		// What is still worth asserting: detection must never silently turn strict ON.
 		for (const [index, tool] of controlTools.entries()) {
 			expect(
 				tool.function?.strict,
-				`with \`supportsStrictMode\` left to detection, tools[${index}].function should ` +
-					'carry `"strict": false` — the Q7 finding. If this is now absent or `true`, ' +
-					"pi-ai's strict handling has changed and the finding Phase 8/10 inherits is " +
-					"stale: re-read `convertTools` before editing this case.",
-			).toBe(false);
+				`with \`supportsStrictMode\` left to detection, tools[${index}].function must not ` +
+					"carry `strict: true`. pi-ai 1.1.0 omits the key (detection default false); " +
+					"`true` would mean detection started opting DashScope into strict " +
+					"JSON-schema tools: re-read `convertTools` before editing this case.",
+			).not.toBe(true);
 		}
 	});
 });

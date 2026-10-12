@@ -180,7 +180,7 @@ export interface RoleRoute {
 // DashScope ids come from `.pi/templates/models-template.json`
 // (`deepseek-v4-flash`, `deepseek-v4-pro`, both `"input":["text"]`,
 // `contextWindow: 393216` — the daily drivers). DeepSeek-direct ids come from
-// Pi's built-in `deepseek` catalogue, which serves the identically-named ids
+// Pi's built-in `deepseek` catalogue (flash is `deepseek-flash` since Pi 1.1.0; pro is identically named)
 // at `contextWindow: 1000000` (PROV-06's deliberate collision).
 //
 // The Bedrock Claude id was enumerated, not guessed:
@@ -198,8 +198,8 @@ export interface RoleRoute {
 // been seen in that catalogue: `tests/unit/routing-map.test.ts` resolves
 // every one of them and will fail on a fabricated id.
 
-/** DeepSeek V4 Flash, direct — first hop, per the candidate ordering rule. */
-const DEEPSEEK_DIRECT_FLASH: ModelRef = { provider: "deepseek", id: "deepseek-v4-flash" };
+/** DeepSeek V4.1 Flash, direct (Pi 1.1.0 built-in id `deepseek-flash`; `deepseek-v4-flash` was retired upstream) -- first hop. */
+const DEEPSEEK_DIRECT_FLASH: ModelRef = { provider: "deepseek", id: "deepseek-flash" };
 
 /** DeepSeek V4 Pro, direct. */
 const DEEPSEEK_DIRECT_PRO: ModelRef = { provider: "deepseek", id: "deepseek-v4-pro" };

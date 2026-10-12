@@ -91,9 +91,11 @@ const TEMPLATED_MAX_TOKENS = 65536;
  * changed underneath — and a catalogue change is exactly the event that should
  * make somebody re-read this file.
  */
-const CONTEXT_WINDOW_OF_RECORD: { model: string; dashscope: number; deepseek: number }[] = [
+const CONTEXT_WINDOW_OF_RECORD: { model: string; builtin: string; dashscope: number; deepseek: number }[] = [
 	{
 		model: "deepseek-v4-flash",
+		// Pi 1.1.0 renamed the direct-DeepSeek flash id; the DashScope id is unchanged.
+		builtin: "deepseek-flash",
 		// VERIFIED-with-URL: "393,216 in total"
 		// [CITED: alibabacloud.com/help/en/model-studio/deepseek-api].
 		dashscope: 393216,
@@ -103,6 +105,7 @@ const CONTEXT_WINDOW_OF_RECORD: { model: string; dashscope: number; deepseek: nu
 	},
 	{
 		model: "deepseek-v4-pro",
+		builtin: "deepseek-v4-pro",
 		dashscope: 393216,
 		deepseek: 1000000,
 	},
@@ -171,12 +174,12 @@ describe("PROV-06 — the cross-provider invariant", () => {
 	});
 
 	for (const record of CONTEXT_WINDOW_OF_RECORD) {
-		it(`${TEMPLATED_PROVIDER}/${record.model} keeps its own context window, and ${BUILTIN_PROVIDER}/${record.model} keeps its`, () => {
+		it(`${TEMPLATED_PROVIDER}/${record.model} keeps its own context window, and ${BUILTIN_PROVIDER}/${record.builtin} keeps its`, () => {
 			const ours = all.find(
 				(model) => model.provider === TEMPLATED_PROVIDER && model.id === record.model,
 			);
 			const builtin = all.find(
-				(model) => model.provider === BUILTIN_PROVIDER && model.id === record.model,
+				(model) => model.provider === BUILTIN_PROVIDER && model.id === record.builtin,
 			);
 
 			expect(
@@ -186,7 +189,7 @@ describe("PROV-06 — the cross-provider invariant", () => {
 			).toBeDefined();
 			expect(
 				builtin,
-				`${BUILTIN_PROVIDER}/${record.model} is not in Pi's built-in catalogue any more. ` +
+				`${BUILTIN_PROVIDER}/${record.builtin} is not in Pi's built-in catalogue any more. ` +
 					"That is the OTHER side of this invariant and its disappearance is a real " +
 					"platform change: re-verify the template's numbers against whatever " +
 					"replaced it rather than dropping this assertion.",
@@ -203,7 +206,7 @@ describe("PROV-06 — the cross-provider invariant", () => {
 
 			expect(
 				builtin?.contextWindow,
-				`Pi's built-in ${BUILTIN_PROVIDER}/${record.model} no longer reports ` +
+				`Pi's built-in ${BUILTIN_PROVIDER}/${record.builtin} no longer reports ` +
 					`${record.deepseek}. Both sides are pinned deliberately: asserting only the ` +
 					"DashScope number would leave this test green while the figure it is " +
 					"supposed to differ FROM moved underneath it.",
@@ -262,10 +265,10 @@ describe("PROV-06 — the cross-provider invariant", () => {
 				(model) => model.provider === TEMPLATED_PROVIDER && model.id === record.model,
 			);
 			const builtin = all.find(
-				(model) => model.provider === BUILTIN_PROVIDER && model.id === record.model,
+				(model) => model.provider === BUILTIN_PROVIDER && model.id === record.builtin,
 			);
 			expect(ours, `${TEMPLATED_PROVIDER}/${record.model} did not compose`).toBeDefined();
-			expect(builtin, `${BUILTIN_PROVIDER}/${record.model} is not in the catalogue`).toBeDefined();
+			expect(builtin, `${BUILTIN_PROVIDER}/${record.builtin} is not in the catalogue`).toBeDefined();
 
 			// Positive control: the built-in table has real numbers in it. Without
 			// this, two all-zero cost blocks would satisfy the inequality below by
@@ -277,7 +280,7 @@ describe("PROV-06 — the cross-provider invariant", () => {
 			);
 			expect(
 				builtinTotal,
-				`Pi's built-in ${BUILTIN_PROVIDER}/${record.model} now reports an all-zero cost, ` +
+				`Pi's built-in ${BUILTIN_PROVIDER}/${record.builtin} now reports an all-zero cost, ` +
 					"so the inequality below no longer distinguishes 'we kept our placeholder' " +
 					"from 'we copied their table'. Re-verify the catalogue.",
 			).toBeGreaterThan(0);
@@ -285,7 +288,7 @@ describe("PROV-06 — the cross-provider invariant", () => {
 			expect(
 				ours?.cost,
 				`${TEMPLATED_PROVIDER}/${record.model} composed the SAME cost table as ` +
-					`${BUILTIN_PROVIDER}/${record.model}. DashScope's per-token price is not ` +
+					`${BUILTIN_PROVIDER}/${record.builtin}. DashScope's per-token price is not ` +
 					"published in the English docs (RB-03-05 measures it), so an identical " +
 					"table means the direct-DeepSeek numbers were copied across and every " +
 					"cost report from here on would quietly bill the wrong provider's rates.",
@@ -411,11 +414,11 @@ describe("PROV-06 — the unverified output cap keeps its mark", () => {
 		// Paired positive: the built-in entry for the same ids caps at 384,000, so
 		// this is a number the template chose rather than one it inherited.
 		const builtin = all.find(
-			(model) => model.provider === BUILTIN_PROVIDER && model.id === "deepseek-v4-flash",
+			(model) => model.provider === BUILTIN_PROVIDER && model.id === "deepseek-flash",
 		);
 		expect(
 			builtin?.maxTokens,
-			"Pi's built-in deepseek-v4-flash no longer caps at 384,000; the contrast that " +
+			"Pi's built-in deepseek-flash no longer caps at 384,000; the contrast that " +
 				"makes the templated 65,536 visibly a choice has moved.",
 		).toBe(384000);
 	});

@@ -31,7 +31,7 @@
  * sibling file in the same worker) left behind.
  *
  * ---------------------------------------------------------------------------
- * WHY `deepseek` CARRIES BOTH `deepseek-v4-flash` AND `deepseek-v4-pro`
+ * WHY `deepseek` CARRIES BOTH `deepseek-flash` AND `deepseek-v4-pro`
  * ---------------------------------------------------------------------------
  * `ROLE_MAP.cheap.executor` resolves to the flash tier (`FLASH_CANDIDATES`);
  * `ROLE_MAP.max.executor` (the `ESCALATION_MODE`) resolves to the pro tier
@@ -39,7 +39,7 @@
  * so a single `setRuntimeApiKey("deepseek", ...)` grant (measured, polled --
  * see `mode-switch.test.ts`'s own header for the cached-snapshot gap this
  * closes) configures auth for both models at once, and a real escalate
- * therefore changes the executor from `deepseek/deepseek-v4-flash` to
+ * therefore changes the executor from `deepseek/deepseek-flash` to
  * `deepseek/deepseek-v4-pro` -- a genuine model change, not a same-model
  * no-op.
  */
@@ -154,7 +154,7 @@ async function withEscalateSession<T>(fn: (handle: FauxSessionHandle) => Promise
 		const deepseekFaux = fauxProvider({
 			provider: "deepseek",
 			models: [
-				{ id: "deepseek-v4-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
+				{ id: "deepseek-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
 				{ id: "deepseek-v4-pro", reasoning: true, cost: { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 4.5 } },
 			],
 		});
@@ -275,11 +275,11 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			await command.handler("off", ctx);
 
 			expect(ctx.model?.provider, "escalate off did not restore the executor's provider").toBe("deepseek");
-			expect(ctx.model?.id, "escalate off did not restore the flash tier").toBe("deepseek-v4-flash");
+			expect(ctx.model?.id, "escalate off did not restore the flash tier").toBe("deepseek-flash");
 
 			expect(notifications.length).toBeGreaterThan(0);
 			expect(notifications.at(-1)?.level).toBe("info");
-			expect(notifications.at(-1)?.text).toContain("deepseek/deepseek-v4-flash");
+			expect(notifications.at(-1)?.text).toContain("deepseek/deepseek-flash");
 
 			expect(getModeState().escalated, "the module state still reports an active escalation after off").toBe(false);
 			expect(getModeState().escalatedFrom, "escalatedFrom was not cleared by escalate off").toBeUndefined();
@@ -291,7 +291,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			await session.prompt("a further turn after clearing escalation");
 
 			expect(ctx.model?.provider).toBe("deepseek");
-			expect(ctx.model?.id, "the restored model did not survive a further turn").toBe("deepseek-v4-flash");
+			expect(ctx.model?.id, "the restored model did not survive a further turn").toBe("deepseek-flash");
 			expect(getModeState().escalated).toBe(false);
 		});
 	});
@@ -361,7 +361,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			// mode-switch.test.ts's case 3.
 			const deepseekFaux = fauxProvider({
 				provider: "deepseek",
-				models: [{ id: "deepseek-v4-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } }],
+				models: [{ id: "deepseek-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } }],
 			});
 			handle.modelRuntime.registerNativeProvider(deepseekFaux.provider);
 
@@ -509,7 +509,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			).toBe(false);
 			expect(last?.mode, "the off-record does not name the mode the switch landed on").toBe("cheap");
 			expect(last?.newModel, "the off-record does not name the model now serving the executor").toBe(
-				"deepseek/deepseek-v4-flash",
+				"deepseek/deepseek-flash",
 			);
 			expect(
 				last?.previousModel,

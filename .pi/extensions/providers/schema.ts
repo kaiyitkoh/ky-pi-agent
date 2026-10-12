@@ -357,7 +357,7 @@ export interface ChainEntry {
  * why the chain test asserts every entry resolves. [threat T-03-10-05]
  */
 export const CHAIN: readonly ChainEntry[] = [
-	{ provider: "deepseek", id: "deepseek-v4-flash" },
+	{ provider: "deepseek", id: "deepseek-flash" },
 	{ provider: "dashscope", id: "deepseek-v4-flash" },
 ];
 

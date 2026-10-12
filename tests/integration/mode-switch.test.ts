@@ -356,10 +356,10 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 
 			expect(
 				after?.provider,
-				`the session's model did not become deepseek/deepseek-v4-flash. Before: ` +
+				`the session's model did not become deepseek/deepseek-flash. Before: ` +
 					`${JSON.stringify(before)}. Notifications: ${JSON.stringify(notifications)}`,
 			).toBe("deepseek");
-			expect(after?.id).toBe("deepseek-v4-flash");
+			expect(after?.id).toBe("deepseek-flash");
 
 			expect(
 				notifications.length,
@@ -370,7 +370,7 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 				"a successful switch is informational, not an error",
 			).toBe("info");
 			expect(notifications.at(-1)?.text).toContain("balanced");
-			expect(notifications.at(-1)?.text).toContain("deepseek/deepseek-v4-flash");
+			expect(notifications.at(-1)?.text).toContain("deepseek/deepseek-flash");
 
 			const branch = session.sessionManager.getBranch();
 			const modeEntry = findModeEntry(branch);
@@ -474,7 +474,7 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 			expect(
 				notifications.at(-1)?.text,
 				"the refusal does not name the deepseek candidate that was tried",
-			).toContain("deepseek/deepseek-v4-flash");
+			).toContain("deepseek/deepseek-flash");
 			expect(
 				notifications.at(-1)?.text,
 				"the refusal does not name the dashscope candidate that was tried",
@@ -565,7 +565,7 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 					ctx.model?.provider,
 					`the executor switch itself did not succeed (notifications: ${JSON.stringify(notifications)})`,
 				).toBe("deepseek");
-				expect(ctx.model?.id).toBe("deepseek-v4-flash");
+				expect(ctx.model?.id).toBe("deepseek-flash");
 
 				// THE ASSERTION WR-10 EXISTS FOR: the notification names the
 				// refusal AND the blocked role, driven through the REAL command
@@ -618,14 +618,14 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
  * flash` -- MEASURED, NOT ASSUMED. `AgentSession#_emitModelSelect` skips the
  * event ENTIRELY when `modelsAreEqual(previousModel, nextModel)`
  * [VERIFIED: `dist/core/agent-session.js:1182-1191`]. Every mode this file
- * drives resolves the executor to `deepseek/deepseek-v4-flash`, so if the
+ * drives resolves the executor to `deepseek/deepseek-flash`, so if the
  * session already started there, a "successful" switch would still leave
  * `pi.setModel` returning `true` while firing NO `model_select` event at
  * all -- case 1 caught exactly this the first time this file was run: the
  * ordering log held only `"waitForIdle"`, because the switch was a genuine
  * no-op change. The session therefore starts on the DEFAULT faux model
  * (`faux/faux-flash`, `session.ts`'s own default, registered under faux's
- * own provider id rather than a real one), and `deepseek/deepseek-v4-flash`
+ * own provider id rather than a real one), and `deepseek/deepseek-flash`
  * is registered SEPARATELY, after construction, as a second native
  * provider -- so every switch this file drives is a genuine change.
  *
@@ -646,7 +646,7 @@ async function withModeSwitchSession<T>(
 			provider: "deepseek",
 			models: [
 				{
-					id: "deepseek-v4-flash",
+					id: "deepseek-flash",
 					reasoning: true,
 					cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 },
 				},

@@ -75,18 +75,18 @@ has a result.
 
 | Mode | Role | Candidates (ordered) | Reasoning effort |
 |---|---|---|---|
-| cheap | executor | `deepseek/deepseek-v4-flash` → `dashscope/deepseek-v4-flash` | — |
-| cheap | planner | `deepseek/deepseek-v4-flash` → `dashscope/deepseek-v4-flash` | — |
-| cheap | reviewer | `deepseek/deepseek-v4-flash` → `dashscope/deepseek-v4-flash` | high |
+| cheap | executor | `deepseek/deepseek-flash` → `dashscope/deepseek-v4-flash` | — |
+| cheap | planner | `deepseek/deepseek-flash` → `dashscope/deepseek-v4-flash` | — |
+| cheap | reviewer | `deepseek/deepseek-flash` → `dashscope/deepseek-v4-flash` | high |
 | cheap | advisor | `deepseek/deepseek-v4-pro` → `dashscope/deepseek-v4-pro` | high |
 | cheap | vision | `amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0` | — |
-| cheap | summariser | `deepseek/deepseek-v4-flash` → `dashscope/deepseek-v4-flash` | — |
-| balanced | executor | `deepseek/deepseek-v4-flash` → `dashscope/deepseek-v4-flash` | — |
+| cheap | summariser | `deepseek/deepseek-flash` → `dashscope/deepseek-v4-flash` | — |
+| balanced | executor | `deepseek/deepseek-flash` → `dashscope/deepseek-v4-flash` | — |
 | balanced | planner | `deepseek/deepseek-v4-pro` → `dashscope/deepseek-v4-pro` | — |
 | balanced | reviewer | `deepseek/deepseek-v4-pro` → `dashscope/deepseek-v4-pro` | high |
 | balanced | advisor | `amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0` | high |
 | balanced | vision | `amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0` | — |
-| balanced | summariser | `deepseek/deepseek-v4-flash` → `dashscope/deepseek-v4-flash` | — |
+| balanced | summariser | `deepseek/deepseek-flash` → `dashscope/deepseek-v4-flash` | — |
 | max | executor | `deepseek/deepseek-v4-pro` → `dashscope/deepseek-v4-pro` | — |
 | max | planner | `amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0` | — |
 | max | reviewer | `amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0` | high |

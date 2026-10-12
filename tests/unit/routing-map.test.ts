@@ -280,7 +280,7 @@ describe("ROUTE-01 — non-vacuity: the map is not one model copy-pasted six tim
 		// Named directly, not just asserted generically: this is the concrete case
 		// the plan itself states ("cheap ... executor ... on deepseek-v4-flash",
 		// "max: executor ... on deepseek-v4-pro").
-		expect(ROLE_MAP.cheap.executor.candidates[0].id).toBe("deepseek-v4-flash");
+		expect(ROLE_MAP.cheap.executor.candidates[0].id).toBe("deepseek-flash");
 		expect(ROLE_MAP.max.executor.candidates[0].id).toBe("deepseek-v4-pro");
 	});
 });

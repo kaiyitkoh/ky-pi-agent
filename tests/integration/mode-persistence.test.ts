@@ -33,7 +33,7 @@
  * instrument is live, not merely silent.
  *
  * ---------------------------------------------------------------------------
- * WHY `deepseek` CARRIES BOTH `deepseek-v4-flash` AND `deepseek-v4-pro`,
+ * WHY `deepseek` CARRIES BOTH `deepseek-flash` AND `deepseek-v4-pro`,
  * WRAPPED FOR PAYLOAD CAPTURE
  * ---------------------------------------------------------------------------
  * `createFauxSession`'s own `buildPayload` option only wraps the DEFAULT faux
@@ -159,7 +159,7 @@ async function withPersistenceSession<T>(
 		const deepseekFaux = fauxProvider({
 			provider: "deepseek",
 			models: [
-				{ id: "deepseek-v4-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
+				{ id: "deepseek-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } },
 				{ id: "deepseek-v4-pro", reasoning: true, cost: { input: 3, output: 6, cacheRead: 0.3, cacheWrite: 4.5 } },
 			],
 		});

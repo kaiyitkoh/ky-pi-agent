@@ -71,7 +71,7 @@
  * `callModel`
  * ---------------------------------------------------------------------------
  * `ROLE_MAP.cheap.reviewer`'s first candidate is `{provider:"deepseek",
- * id:"deepseek-v4-flash"}`, which is byte-identical to `CHAIN[0]` in
+ * id:"deepseek-flash"}`, which is byte-identical to `CHAIN[0]` in
  * `.pi/extensions/providers/schema.ts`. `usesFallbackChain` therefore reports
  * `true` for it and `runSingleShotRole` dispatches through
  * `callWithFallback`, which itself resolves the model FRESH from
@@ -250,7 +250,7 @@ async function runFixture(): Promise<Run> {
 			provider: "deepseek",
 			models: [
 				{
-					id: "deepseek-v4-flash",
+					id: "deepseek-flash",
 					reasoning: true,
 					// Explicitly text-only: the guard-refusal case below needs a
 					// resolvable, AUTHED candidate that the capability guard still
@@ -291,7 +291,7 @@ async function runFixture(): Promise<Run> {
 		const ctx = handle.session.extensionRunner.createCommandContext();
 
 		// ---- case 0 fixture: the identity guard ------------------------------
-		const resolvedDeepseek = ctx.modelRegistry.find("deepseek", "deepseek-v4-flash");
+		const resolvedDeepseek = ctx.modelRegistry.find("deepseek", "deepseek-flash");
 		const identityGuardOk = resolvedDeepseek?.api === deepseekFaux.api;
 
 		const turnsFile = logPath(handle.cwd, TURNS_LOG_BASE);
@@ -554,7 +554,7 @@ describe("ROUTE-04 — single-shot roles through runSingleShotRole", () => {
 		expect(
 			run.guardRefusalMessage,
 			"the thrown error does not name the model the guard refused",
-		).toContain("deepseek/deepseek-v4-flash");
+		).toContain("deepseek/deepseek-flash");
 		expect(
 			run.guardRefusalMessage,
 			"the thrown error does not carry the guard's own text-only reasoning — a caller reading this " +

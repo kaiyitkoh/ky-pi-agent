@@ -426,7 +426,7 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	// `modelOverrides` edit invalidates every measurement below it -- and steps 4
 	// and 5 are the two records the four recorded fragments come from.
 	"RB-03-04": [
-		"pi --list-models | grep deepseek-v4-flash",
+		"pi --list-models | grep deepseek-flash",
 		`tail -n 5 .pi/logs/wire-$(date +%F).jsonl`,
 		`cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"kind":"turn"' | tail -n 1`,
 	],

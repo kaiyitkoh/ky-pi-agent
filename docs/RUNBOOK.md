@@ -633,7 +633,7 @@ does `"low"` produce materially fewer reasoning tokens than `"high"`. Two
 researchers reached opposite conclusions on (a) without either issuing a
 request. (b) is a **token count** from a real provider and cannot be desk-work
 at all. Note the mechanical obstacle, which is settled and is not the question:
-`deepseek-v4-flash` ships `thinkingLevelMap.low = null`, so
+`deepseek-flash` (Pi 1.1.0) was assumed to ship `thinkingLevelMap.low = null`, so
 `clampThinkingLevel` walks `"low"` forward to `"high"` and **Pi 0.84.1 with the
 built-in catalogue can never send `"low"`**. The null mapping suppresses
 *selection*, not *emission* — unclamping is therefore sufficient and no adapter
@@ -649,7 +649,7 @@ compat block and the cost table are untouched:
   "providers": {
     "deepseek": {
       "modelOverrides": {
-        "deepseek-v4-flash": { "thinkingLevelMap": { "low": "low" } }
+        "deepseek-flash": { "thinkingLevelMap": { "low": "low" } }
       }
     }
   }
@@ -658,12 +658,12 @@ compat block and the cost table are untouched:
 
 **Procedure:**
 
-1. `pi --list-models | grep deepseek-v4-flash`
+1. `pi --list-models | grep deepseek-flash`
 
    Confirms the override parsed. A `Warning: errors loading models.json` line
    means the edit is malformed and **everything below is invalid** — stop and
    fix the file first.
-2. Start `pi`, select `deepseek/deepseek-v4-flash`, and set the thinking level
+2. Start `pi`, select `deepseek/deepseek-flash`, and set the thinking level
    to **low**. If the picker does not offer `low`, the override did not apply —
    stop. `tests/unit/r1-unclamp.test.ts` proves the picker *does* offer it once
    the override is present, so this step failing is about the edit and not
