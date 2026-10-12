@@ -581,7 +581,7 @@ Plans:
 
 **Wave 6** *(blocked on Wave 5 completion)*
 
-- [ ] 10-06-PLAN.md — POSIX launcher + node CLI with scrubbed env, fake-pi end-to-end test, protocol doc *(Wave 6)*
+- [x] 10-06-PLAN.md — POSIX launcher + node CLI with scrubbed env, fake-pi end-to-end test, protocol doc *(Wave 6)*
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
