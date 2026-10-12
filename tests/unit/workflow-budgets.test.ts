@@ -183,7 +183,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{
 		file: ".pi/extensions/routing/index.ts",
 		budget: 340,
-		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 313 raw lines 2026-08-14, rounded up to the next ten. RAISED 320 -> 340: the profile wiring stopped narrowing a session whose transcript already declared tools and gained a before_agent_start pass that drops only undeclared out-of-profile tools; measured 336 raw lines 2026-10-13, rounded up to the next ten",
+		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 313 raw lines 2026-08-14, rounded up to the next ten. RAISED 320 -> 340: the profile wiring stopped narrowing a session whose transcript already declared tools and gained a pre-prompt pass (now on `input`) that drops only undeclared out-of-profile tools; measured 336 raw lines 2026-10-13, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/harness/index.ts",
@@ -359,7 +359,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 1019 " +
 			"raw lines across 5 files 2026-10-13, rounded up to the next ten. RAISED 1020 -> 1110: profiles.ts (78 lines, " +
 			"the tool-profile table and resolver) plus 5 lines of wiring in index.ts. Re-measured 1102 raw lines across 6 files 2026-10-13. " +
-			"RAISED 1110 -> 1120: index.ts grew by the transcript-loadout guard and the before_agent_start pass (see its per-file entry); " +
+			"RAISED 1110 -> 1120: index.ts grew by the transcript-loadout guard and the pre-prompt pass (see its per-file entry); " +
 			"measured 1120 raw lines across 6 files 2026-10-13. RAISED 1120 -> 1130: an explicit --tools allowlist now bypasses " +
 			"narrowing (hasExplicitToolAllowlist in profiles.ts plus 2 lines in index.ts); measured 1121 raw lines across 6 files " +
 			"2026-10-13, rounded up to the next ten",

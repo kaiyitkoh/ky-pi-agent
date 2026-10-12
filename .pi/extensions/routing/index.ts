@@ -322,12 +322,12 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			// Swallowed deliberately.
 		}
 	});
-	// Catches tools activated after the start-up narrowing (a later session_start handler, leaving plan mode).
-	// Only names the transcript has not declared are dropped, so the request records no removal.
-	pi.on("before_agent_start", (_event, ctx) => {
+	// Before each idle prompt, drop out-of-profile tools the transcript has not declared, so no removal is recorded.
+	// `input` precedes before_agent_start, so no handler builds a prompt section for a tool dropped here.
+	pi.on("input", (_event, ctx) => {
 		try {
 			const active = pi.getActiveTools();
-			const next = applyProfile(active, profile());
+			const next = ctx.isIdle() ? applyProfile(active, profile()) : undefined;
 			if (next === undefined) return;
 			const declared = new Set(getCurrentTools(ctx.sessionManager.buildSessionProjection().messages).map((t) => t.name));
 			const kept = active.filter((name) => next.includes(name) || declared.has(name));

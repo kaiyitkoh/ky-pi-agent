@@ -21,6 +21,8 @@ import {
 	TOOL_PROFILES,
 	type ProfileName,
 } from "../../.pi/extensions/routing/profiles.ts";
+import { SHELL_POLICY_SECTION } from "../../.pi/extensions/background-tasks/src/core/shell-policy.ts";
+import { transcriptView } from "../helpers/faux.ts";
 import { createHarnessSession, listEntryPoints, withHarnessSession } from "../helpers/harness-session.ts";
 
 function steps(n: number, sink: TranscriptContext[]): FauxResponseStep[] {
@@ -148,6 +150,20 @@ describe("a transcript's loadout is never narrowed again", () => {
 			await h.session.prompt("one");
 			expect(getCurrentTools(sink[0]!.messages).map((t) => t.name)).not.toContain("qoder_delegate");
 			expect(removedNames(sink[0]!)).toEqual([]);
+		});
+	});
+
+	it("a dropped bg_run leaves no shell-policy section and the system prompt byte-stable across turns", async () => {
+		const sink: TranscriptContext[] = [];
+		await withHarnessSession({ responses: steps(2, sink) }, async (h) => {
+			await h.session.prompt("one");
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+			await h.session.prompt("two");
+			const [first, second] = [transcriptView(sink[0]!), transcriptView(sink[1]!)];
+			expect(second.tools.map((t) => t.name)).not.toContain("bg_run");
+			expect(second.systemPrompt).not.toContain(SHELL_POLICY_SECTION);
+			expect(second.systemPrompt).toBe(first.systemPrompt);
+			expect(systemCount(sink[1]!)).toBe(1);
 		});
 	});
 
