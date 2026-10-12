@@ -131,11 +131,11 @@ const COMMAND_MARKER = "registerCommand(";
 const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[] = [
 	{
 		file: ".pi/extensions/background-tasks/src/extension.ts",
-		budget: 990,
+		budget: 1000,
 		why: "08.1-05 (UPG-04)'s vendored pi-background-tasks@2.6.9, process-only: registers /bg, /tasks, /bg-tasks, " +
 			"/bg-clear, /jobs, /logs and /kill. Upstream's own size after trimming the delegate/fusion/attested " +
 			"registrations and the update check (see .pi/extensions/background-tasks/PROVENANCE.md); not hand-written " +
-			"workflow logic. Measured 988 raw lines 2026-10-13, rounded up to the next ten",
+			"workflow logic. Measured 988 raw lines 2026-10-13, rounded up to the next ten. RAISED 990 -> 1000 by the 08.1 review fixes (WR-01 local patch: guardBgRun call in bg_run execute(), PROVENANCE deviation 8); re-measured 992 raw lines 2026-10-13, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/workflows/index.ts",
@@ -318,10 +318,10 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[] = [
 	{
 		dir: ".pi/extensions/background-tasks",
-		budget: 10350,
+		budget: 10340,
 		why: "08.1-05 (UPG-04) -- vendored pi-background-tasks@2.6.9 trimmed to the process feature (D-02); " +
 			"upstream's source, not authored logic (PROVENANCE.md lists every file and deviation). Measured 10345 raw " +
-			"lines across 14 files 2026-10-13, rounded up to the next ten",
+			"lines across 14 files 2026-10-13, rounded up to the next ten. Re-measured 10340 after the 08.1 review fixes (CR-01 shell-default patch in common.ts shrank it by 9 lines, execute() guard added 4; PROVENANCE deviations 7-8), rounded up to the next ten",
 	},
 	{
 		dir: WORKFLOWS_DIR,
@@ -478,7 +478,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/safety",
-		budget: 4710,
+		budget: 4760,
 		why: "CR-04 (code-review fix pass): another directory importedSubsystemDirs newly discovers -- " +
 			"workflows/index.ts imports classifyGitInvocation/currentBranch/currentSha/currentTree from " +
 			"../safety/git.ts and PROTECTED_BRANCHES from ../safety/index.ts, and safety/ spells " +
@@ -499,7 +499,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"grew the powershell/MCP/codemode/tool_search/background-tasks deny + bg_run-as-bash branch, audit.ts " +
 			"records parentToolCallId, schema.ts gained the matching field. Re-measured 4,709 raw lines across the " +
 			"same 9 files 2026-10-13 (approvals.ts 411, audit.ts 138, git.ts 621, index.ts 973, infra.ts 431, " +
-			"paths.ts 585, policy.ts 664, schema.ts 81, shell.ts 805), rounded up to the next ten",
+			"paths.ts 585, policy.ts 664, schema.ts 81, shell.ts 805), rounded up to the next ten. RAISED 4710 -> 4760 by the 08.1 review fixes (CR-01/WR-01/WR-02 guardBgRun, WR-04 redactSecrets in audit.ts). Re-measured 4,755 raw lines across the same 9 files 2026-10-13, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/quality",

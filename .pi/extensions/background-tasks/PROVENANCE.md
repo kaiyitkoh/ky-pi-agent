@@ -121,6 +121,17 @@ Commands registered: `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/jobs`,
    the safety hook classifies. It cannot widen what `bg_run` executes or where.
    No patch needed; recorded here as the audit result. Task metadata and output
    are written but never read back from disk.
+7. **Windows shell defaults to bash (08.1 CR-01 local patch)**: `resolveShellPolicy()` in
+   `src/core/common.ts` used to default to cmd.exe on win32 unless `PI_BG_SHELL` was set. The
+   safety guard classifies `bg_run` commands with the bash parser, so the executed shell must
+   be the parsed shell. The default is now `bash` (Pi's resolved Git Bash via
+   `resolveWindowsBash`); `PI_BG_SHELL_PATH` no longer requires `PI_BG_SHELL`. Explicit
+   `PI_BG_SHELL=cmd` still works, and the guard then denies `bg_run` (fail closed).
+   Regression: `tests/unit/bg-run-guard.test.ts`.
+8. **Second enforcement layer in `bg_run` execute() (08.1 WR-01 local patch)**: `src/extension.ts`
+   imports `guardBgRun` from `../../safety/index.ts` and throws on a non-allow verdict for the
+   FINAL params, so an `event.input` mutation after the tool_call hook is still caught. It also
+   denies `isAgent` other than false (WR-02).
 
 ## What was not vendored
 

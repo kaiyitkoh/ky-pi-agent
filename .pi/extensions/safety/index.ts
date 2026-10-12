@@ -264,6 +264,60 @@ function classifyAtWrapper(toolName: string, input: unknown, ctx: ExtensionConte
 }
 
 /**
+ * Local mirror of the background-tasks shell policy's dialect choice (kept free of imports from other
+ * extensions so safety/ stays reviewable and loadable in isolation). Returns a reason when the
+ * effective bg shell is NOT bash/POSIX. win32: the background-tasks default is bash (PROVENANCE
+ * deviation 7), only an explicit non-bash PI_BG_SHELL is a problem. POSIX: the inherited
+ * $SHELL (or PI_BG_POSIX_SHELL bash|sh) must be a POSIX-family shell.
+ */
+export function bgShellProblem(platform: NodeJS.Platform, env: NodeJS.ProcessEnv): string | undefined {
+	if (platform === "win32") {
+		const requested = env.PI_BG_SHELL;
+		return requested === undefined || requested === "bash"
+			? undefined
+			: `PI_BG_SHELL=${requested} runs commands outside the bash dialect the guard parses`;
+	}
+	const configured = env.PI_BG_POSIX_SHELL;
+	if (configured === "bash" || configured === "sh") return undefined;
+	if (configured !== undefined && configured !== "inherit") return `PI_BG_POSIX_SHELL=${configured} is not recognised`;
+	const name = (env.SHELL && env.SHELL.length > 0 ? env.SHELL : "/bin/sh").split(/[\\/]/).pop()?.toLowerCase() ?? "";
+	return ["bash", "sh", "dash", "ash", "ksh", "zsh"].includes(name)
+		? undefined
+		: `the inherited shell "${name}" is not a POSIX-family shell`;
+}
+
+/**
+ * CR-01/WR-01/WR-02: the single bg_run policy, called from BOTH the tool_call hook and the
+ * background-tasks bg_run `execute()` (local patch, PROVENANCE deviation 8), so a later extension that
+ * mutates `event.input` after the hook is still caught (same "enforce twice" stance as bash).
+ *  - the effective background shell must be bash/POSIX: the command is parsed as bash, so a
+ *    cmd.exe-executed command (caret escapes, %VAR%) must never be classified as bash;
+ *  - `isAgent: true` is denied: a child pi may start without this guard (headless trust);
+ *  - the command is then classified exactly like a `bash` call; confirm blocks (no grant wrapper).
+ */
+export function guardBgRun(input: unknown, ctx: ExtensionContext): Verdict {
+	const rec = input !== null && typeof input === "object" ? (input as Record<string, unknown>) : {};
+	if (typeof rec.command !== "string" || rec.command.trim() === "") {
+		return { kind: "block", reason: "bg_run called without a non-empty string command -- blocked (fail closed)" };
+	}
+	if (rec.isAgent !== false) {
+		return {
+			kind: "block",
+			reason: "bg_run with isAgent other than false is blocked: a child agent may start without the ky-pi-agent guard",
+		};
+	}
+	const shellProblem = bgShellProblem(process.platform, process.env);
+	if (shellProblem !== undefined) {
+		return { kind: "block", reason: `bg_run is blocked: ${shellProblem} (fail closed)` };
+	}
+	const v = classifyAtWrapper("bash", { command: rec.command }, ctx);
+	if (v.kind === "confirm") {
+		return { kind: "block", reason: `${v.reason} -- bg_run cannot use the approval protocol; run it through bash instead` };
+	}
+	return v;
+}
+
+/**
  * Act on a wrapped tool's verdict: write exactly one audit row, then either
  * return normally (allow, or a confirm verdict whose one-shot grant was just
  * consumed) or THROW (block, or confirm with nothing to consume). A throw
@@ -702,7 +756,8 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 		// 08.1-03 (a): DENY table -- fail closed, even on malformed input.
 		if (isDeniedToolName(event.toolName)) {
 			const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
-			const raw = typeof rec.command === "string" ? rec.command : safeStringify(event.input);
+			// WR-04: never persist raw input of a denied tool (may carry tokens): command string or top-level keys only.
+			const raw = typeof rec.command === "string" ? rec.command : `[input keys: ${Object.keys(rec).join(",")}]`;
 			const reason =
 				`"${event.toolName}" is not covered by the ky-pi-agent guard (unparseable or unreviewed tool path) -- ` +
 				"it is blocked. Use bash, read, write or edit instead.";
@@ -718,53 +773,21 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			return { block: true, reason };
 		}
 
-		// 08.1-03 (b): bg_run -> classified EXACTLY as bash with the same command.
-		const isBgRun = event.toolName === "bg_run";
-		if (isBgRun) {
+		// 08.1-03 (b): bg_run -> classified EXACTLY as bash with the same command
+		// (see guardBgRun: shell-dialect match, no child agents, bash verdict).
+		if (event.toolName === "bg_run") {
 			const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
-			if (typeof rec.command !== "string" || rec.command.trim() === "") {
-				const reason = "bg_run called without a non-empty string command -- blocked (fail closed)";
-				writeAuditRow(ctx.cwd, {
-					event: HOOK_AUDIT_EVENT,
-					tool: "bg_run",
-					command: safeStringify(event.input).slice(0, DENY_COMMAND_MAX),
-					cwd: ctx.cwd,
-					verdict: "block",
-					reason,
-					parentToolCallId,
-				});
-				return { block: true, reason };
-			}
-			const bgVerdict = classifyAtWrapper("bash", { command: rec.command }, ctx);
-			if (bgVerdict.kind === "allow") {
-				writeAuditRow(ctx.cwd, {
-					event: HOOK_AUDIT_EVENT,
-					tool: "bg_run",
-					command: rec.command,
-					cwd: ctx.cwd,
-					verdict: "allow",
-					reason: "hook: allowed (bg_run classified as bash)",
-					parentToolCallId,
-				});
-				return undefined;
-			}
-			// A confirm verdict BLOCKS for bg_run: the approve-and-reissue protocol
-			// consumes grants in the bash wrapper's execute(), and bg_run has no
-			// wrapper, so deferring would let it run unconsumed. Never defer here.
-			const reason =
-				bgVerdict.kind === "confirm"
-					? `${bgVerdict.reason} -- bg_run cannot use the approval protocol; run it through bash instead`
-					: bgVerdict.reason;
+			const bg = guardBgRun(event.input, ctx);
 			writeAuditRow(ctx.cwd, {
 				event: HOOK_AUDIT_EVENT,
 				tool: "bg_run",
-				command: rec.command,
+				command: (typeof rec.command === "string" ? rec.command : safeStringify(event.input)).slice(0, DENY_COMMAND_MAX),
 				cwd: ctx.cwd,
-				verdict: "block",
-				reason,
+				verdict: bg.kind === "allow" ? "allow" : "block",
+				reason: bg.kind === "allow" ? "hook: allowed (bg_run classified as bash)" : bg.reason,
 				parentToolCallId,
 			});
-			return { block: true, reason };
+			return bg.kind === "allow" ? undefined : { block: true, reason: bg.reason };
 		}
 
 		if (

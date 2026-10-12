@@ -35,6 +35,7 @@ import {
   ReloadSurvivalError,
   rejectSurvivalForTaskKind,
 } from './core/common.ts';
+import { guardBgRun } from '../../safety/index.ts';
 import { BackgroundTaskRegistry, type BackgroundTaskContext } from './core/registry.ts';
 import {
   getProcessReloadShellOwnerV1,
@@ -824,6 +825,9 @@ export async function backgroundTasksExtension(pi: ExtensionAPI): Promise<void> 
       return prepared;
     },
     async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
+      // LOCAL PATCH (PROVENANCE deviation 8): second enforcement layer for the final params.
+      const denial = guardBgRun(params, ctx);
+      if (denial.kind !== 'allow') throw new Error(denial.reason);
       if (typeof params.isAgent !== 'boolean') {
         throw new Error(
           'bg_run requires isAgent boolean. Set true only for LLM/agent tasks; set false for scripts, tests, servers, sleeps, and ordinary shell commands.',

@@ -934,21 +934,12 @@ export function resolveShellPolicy(
   activationCwd: string = process.cwd(),
 ): ResolvedShellPolicy {
   if (platform === 'win32') {
-    const requestedShell = env['PI_BG_SHELL'];
+    // LOCAL PATCH (PROVENANCE deviation 7, 08.1 CR-01): default to bash, not cmd.exe.
+    // The safety guard classifies bg_run commands with the bash parser, so the executed
+    // shell must be the parsed shell. Explicit PI_BG_SHELL=cmd still works, and the guard
+    // then denies bg_run (fail closed).
+    const requestedShell = env['PI_BG_SHELL'] ?? 'bash';
     const requestedPath = env['PI_BG_SHELL_PATH'];
-    if (requestedShell === undefined) {
-      if (requestedPath !== undefined)
-        failShellInvocation('PI_BG_SHELL_PATH requires PI_BG_SHELL');
-      const comSpec = env['ComSpec'];
-      return freezeShellPolicy({
-        policy: 'cmd',
-        executable: comSpec && comSpec.length > 0 ? comSpec : 'cmd.exe',
-        argvPrefix: ['/d', '/s', '/c'],
-        dialect: 'cmd',
-        supportsPosixFunctionWrapper: false,
-        windowsVerbatimArguments: true,
-      });
-    }
     if (requestedShell !== 'cmd' && requestedShell !== 'bash') {
       failShellInvocation('PI_BG_SHELL must be exactly cmd or bash');
     }

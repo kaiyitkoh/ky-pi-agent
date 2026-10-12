@@ -74,6 +74,29 @@ export interface WriteAuditRowOptions {
 }
 
 /**
+ * WR-04: minimal, local secret redaction for audit text (safety/ imports nothing from
+ * diagnostics/, so the shared redactor is deliberately not reused). Replaces the VALUE of
+ * obvious credential shapes with `[REDACTED]`; the command shape stays readable. Best effort,
+ * not a guarantee -- the log is also gitignored.
+ */
+const SECRET_PATTERNS: readonly [RegExp, string][] = [
+	[/\b(AKIA|ASIA)[0-9A-Z]{16}/g, "[REDACTED]"],
+	[/\bsk-[A-Za-z0-9_-]{16,}/g, "[REDACTED]"],
+	[/\b(gh[pousr]_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/g, "[REDACTED]"],
+	[/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [REDACTED]"],
+	[
+		/((?:password|passwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential)[A-Za-z0-9_-]*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"'&;]+)/gi,
+		"$1[REDACTED]",
+	],
+];
+
+export function redactSecrets(text: string): string {
+	let out = text;
+	for (const [re, replacement] of SECRET_PATTERNS) out = out.replace(re, replacement);
+	return out;
+}
+
+/**
  * Append one audit row — allow or block — to `<cwd>/.pi/logs/audit-*.jsonl`.
  *
  * Returns the absolute path written on success, or `undefined` on failure.
@@ -90,10 +113,10 @@ export function writeAuditRow(
 		ts: input.ts ?? Date.now(),
 		event: input.event,
 		tool: input.tool,
-		command: input.command,
+		command: redactSecrets(input.command),
 		cwd: input.cwd,
 		verdict: input.verdict,
-		reason: input.reason,
+		reason: redactSecrets(input.reason),
 		pid: input.pid ?? process.pid,
 	};
 	if (input.parentToolCallId !== undefined) {
