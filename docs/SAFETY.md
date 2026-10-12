@@ -52,7 +52,9 @@ docstring for the structural argument). Concretely, it catches:
   unclassified subcommand. `git push` ALSO blocks independently of `HEAD`
   whenever its own refspec names a protected branch as the destination
   (`git push --force origin main` from a feature branch, or
-  `git push origin HEAD:main`) — the refspec target cannot be trusted from
+  `git push origin HEAD:main`, including the forced `+main` and
+  `+refs/heads/main` spellings), and whenever it pushes every branch
+  (`--all`, `--branches`, `--mirror`) — the refspec target cannot be trusted from
   argv alone, so it is checked regardless of the checked-out branch.
   `glab mr merge` blocks unconditionally on every branch, because in this
   project's work repo an MR merge *is* the deploy trigger. `glab mr create`

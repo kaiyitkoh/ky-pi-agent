@@ -130,6 +130,13 @@ const ROWS: readonly Row[] = [
 		expected: "block",
 		why: "same as above -- the SOURCE side names the current feature branch, but the DESTINATION is main",
 	},
+	{ command: "git push origin +main", rest: "push origin +main", kind: "git", currentBranch: "feature/x", expected: "block", why: "a leading + is the force-push spelling of the same destination" },
+	{ command: "git push origin +refs/heads/main", rest: "push origin +refs/heads/main", kind: "git", currentBranch: "feature/x", expected: "block", why: "force marker and refs/heads/ prefix are both stripped" },
+	{ command: "git push origin +feature/x:main", rest: "push origin +feature/x:main", kind: "git", currentBranch: "feature/x", expected: "block", why: "forced src:dst refspec naming a protected destination" },
+	{ command: "git push --mirror origin", rest: "push --mirror origin", kind: "git", currentBranch: "feature/x", expected: "block", why: "--mirror pushes every ref, protected ones included" },
+	{ command: "git push --all --force origin", rest: "push --all --force origin", kind: "git", currentBranch: "feature/x", expected: "block", why: "--all pushes every branch, protected ones included" },
+	{ command: "git push --branches origin", rest: "push --branches origin", kind: "git", currentBranch: "feature/x", expected: "block", why: "--branches is the newer spelling of --all" },
+	{ command: "git push origin +feature/x", rest: "push origin +feature/x", kind: "git", currentBranch: "feature/x", expected: "allow", why: "force-pushing a non-protected branch stays allowed" },
 	{
 		command: "git push origin feature/x",
 		rest: "push origin feature/x",

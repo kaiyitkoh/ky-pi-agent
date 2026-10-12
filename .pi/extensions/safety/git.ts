@@ -180,19 +180,23 @@ function isProtected(facts: GitPolicyFacts): boolean {
 	return facts.protectedBranches.some((b) => b.toLowerCase() === facts.currentBranch.toLowerCase());
 }
 
+const PUSH_EVERY_BRANCH_FLAGS: ReadonlySet<string> = new Set(["--all", "--mirror", "--branches"]);
+
 /**
- * Does a `push` argv name a protected branch as destination, whatever `HEAD` is? Without this
- * `git push --force origin main` from a feature branch reached allow. A positional token is
- * `src:dst` when it has `:`, else a bare ref; `refs/heads/` is stripped; comparison is
- * case-insensitive. `origin feature/x` must not match.
+ * Does a `push` argv name a protected branch as destination, whatever `HEAD` is? A positional token is `src:dst`
+ * when it has `:`, else a bare ref; a leading `+` (force) and `refs/heads/` are stripped; comparison is
+ * case-insensitive. Flags that push every branch count as naming every protected one.
  */
 function pushTargetsProtected(args: readonly string[], protectedBranches: readonly string[]): boolean {
+	if (args.some((a) => PUSH_EVERY_BRANCH_FLAGS.has(a))) {
+		return true;
+	}
 	return args.some((a) => {
 		if (a.startsWith("-")) {
 			return false;
 		}
 		const dst = a.includes(":") ? a.slice(a.indexOf(":") + 1) : a;
-		const leaf = dst.replace(/^refs\/heads\//, "");
+		const leaf = dst.replace(/^\+/, "").replace(/^refs\/heads\//, "");
 		return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
 	});
 }
