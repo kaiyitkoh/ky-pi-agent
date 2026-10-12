@@ -52,6 +52,8 @@ export interface HarnessSessionOptions {
 	beforeBind?: (session: AgentSession) => void;
 	/** Faux steps. Default: one "ok" reply. */
 	responses?: FauxResponseStep[];
+	/** Reuse a session manager, e.g. to reopen an earlier transcript. Default: a fresh in-memory one. */
+	sessionManager?: SessionManager;
 }
 
 export interface HarnessHandle {
@@ -176,7 +178,7 @@ export async function createHarnessSession(
 				{ extensions: ["-builtin:mcp", "-builtin:llama.cpp", "-builtin:codemode", "-builtin:tool-search"] },
 				{},
 			),
-			sessionManager: SessionManager.inMemory(cwd),
+			sessionManager: opts.sessionManager ?? SessionManager.inMemory(cwd),
 		});
 
 		const flags: Record<string, boolean | string> = { ...(opts.flags ?? {}) };

@@ -153,7 +153,7 @@ Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1
 
 Two rules keep this safe. Pi's registered-but-inactive built-ins (`grep`, `find`, `ls`) are neutral and never removed, because if they are active something chose them. A loadout with neither `edit` nor `write` was already chosen read-only (plan mode, a read-only subagent), so the profile leaves it alone.
 
-A profile is chosen once per session. Changing it means starting a new session, because any mid-session tool change re-prices the cached prefix on DeepSeek and Bedrock.
+A profile is chosen once per session. Changing it means starting a new session, because any mid-session tool change re-prices the cached prefix on DeepSeek and Bedrock. Narrowing applies only to a session with no messages yet: resuming (`pi -c`), forking or `/reload`ing a conversation keeps the loadout its transcript declared, whatever `--ky-profile` says now.
 
 ---
 

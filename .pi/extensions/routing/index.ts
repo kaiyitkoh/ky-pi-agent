@@ -305,9 +305,12 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 
 	// Best-effort like safety/index.ts's session_start prune: a bad payload must not stop session start.
 	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
-	pi.on("session_start", (_event, ctx) => {
+	pi.on("session_start", (event, ctx) => {
 		try {
-			restoreModeFromBranch(ctx.sessionManager.getBranch());
+			const branch = ctx.sessionManager.getBranch();
+			restoreModeFromBranch(branch);
+			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
+			if (event.reason === "reload" || branch.some((entry) => entry.type === "message")) return;
 			const next = applyProfile(pi.getActiveTools(), resolveProfile(pi.getFlag("ky-profile")));
 			if (next !== undefined) pi.setActiveTools(next);
 		} catch {

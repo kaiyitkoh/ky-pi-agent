@@ -11,6 +11,9 @@ import {
 	hasNonAdditiveToolChanges,
 	resolveTranscriptTools,
 } from "@earendil-works/pi-ai";
+import { tmpdir } from "node:os";
+
+import { SessionManager } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -104,6 +107,44 @@ describe("T2: a removal after start poisons anchoring", () => {
 			h.session.setActiveToolsByName(active);
 			await h.session.prompt("three");
 			expect(resolveTranscriptTools(sink[2]!.messages, true).anchorsAdditions).toBe(false);
+		});
+	});
+});
+
+const removedNames = (c: TranscriptContext): string[] =>
+	c.messages.flatMap((m) => (m.role === "system" ? ((m as { toolsRemoved?: { name: string }[] }).toolsRemoved ?? []) : []).map((t) => t.name));
+
+describe("a transcript's loadout is never narrowed again", () => {
+	it("reopening a full-profile transcript under the default keeps bg_run and writes no removal", async () => {
+		const sessionManager = SessionManager.inMemory(tmpdir());
+		await withHarnessSession({ profile: "full", sessionManager, responses: steps(1, []) }, async (h) => {
+			await h.session.prompt("one");
+		});
+		const sink: TranscriptContext[] = [];
+		await withHarnessSession({ sessionManager, responses: steps(1, sink) }, async (h) => {
+			expect(h.session.getActiveToolNames()).toContain("bg_run");
+			await h.session.prompt("two");
+			expect(getCurrentTools(sink[0]!.messages).map((t) => t.name)).toContain("bg_run");
+			expect(removedNames(sink[0]!)).toEqual([]);
+		});
+	});
+
+	it("session_start on reload leaves a mid-session addition in place", async () => {
+		const sink: TranscriptContext[] = [];
+		await withHarnessSession({ responses: steps(2, sink) }, async (h) => {
+			await h.session.prompt("one");
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+			await h.session.extensionRunner.emit({ type: "session_start", reason: "reload" });
+			expect(h.session.getActiveToolNames()).toContain("bg_run");
+			await h.session.prompt("two");
+			expect(removedNames(sink[1]!)).toEqual([]);
+		});
+	});
+
+	it("a new empty session is still narrowed", async () => {
+		await withHarnessSession({}, async (h) => {
+			await h.session.extensionRunner.emit({ type: "session_start", reason: "new" });
+			expect(h.session.getActiveToolNames()).not.toContain("bg_run");
 		});
 	});
 });
