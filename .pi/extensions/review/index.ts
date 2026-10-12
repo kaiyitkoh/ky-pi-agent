@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workDir } from "../../lib/work-artifacts.ts";
+import { uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
@@ -64,6 +65,8 @@ export default function (pi: ExtensionAPI): void {
 				const progress = readFileSync(join(dir, "PROGRESS.md"), "utf-8");
 				const mismatch = historyMismatch(ctx.cwd, plan.plan.tasks.map((t) => t.id), progress);
 				if (mismatch !== undefined) return fail(`review: ${mismatch}`);
+				const dirty = uncommittedPaths(ctx.cwd);
+				if (dirty !== "") return fail(`review: the working tree is not HEAD (uncommitted or untracked: ${dirty}) -- commit or remove them first`);
 
 				const mechanisms = gateDepthFor("review").mechanisms;
 				// Calibration scores seeded-defect fixtures and has no meaning for a live diff, so it is never announced here.

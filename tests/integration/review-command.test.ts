@@ -149,6 +149,15 @@ describe("/review -- the real handler", () => {
 		expect(mocks.calls).toHaveLength(0);
 	});
 
+	it("refuses a working tree that is not HEAD before any review runs", async () => {
+		const h = setup();
+		writeFileSync(join(h.repo, "src", "stray.ts"), "export const s = 1;\n");
+		await h.run(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("src/stray.ts");
+		expect(existsSync(mocks.reviewPath)).toBe(false);
+		expect(mocks.calls).toHaveLength(0);
+	});
+
 	it("refuses to open an MR for an unpushed HEAD", async () => {
 		const h = setup();
 		git(h.repo, ["branch", "--unset-upstream"]);

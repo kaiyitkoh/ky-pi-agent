@@ -218,6 +218,30 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(bytes(progressFile(h))).toBe(before);
 	});
 
+	it("a verification run on a tree holding an uncommitted file is rejected: the commit is not what was tested", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		const before = bytes(progressFile(h));
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		writeFileSync(join(h.repo, "src", "helper.ts"), "export const helper = 1;\n");
+		verify(h);
+		await h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("src/helper.ts");
+		expect(h.notes.at(-1)?.text).toContain("not the commit");
+		expect(bytes(progressFile(h))).toBe(before);
+	});
+
+	it("a file left uncommitted after a clean verification run is still rejected at settle", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h);
+		writeFileSync(join(h.repo, "src", "late.ts"), "export const late = 1;\n");
+		await h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("src/late.ts");
+		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
+	});
+
 	it("PROGRESS carries the verification run's own output and exit code, not other tool output", async () => {
 		const h = harness();
 		await h.command(SLUG);

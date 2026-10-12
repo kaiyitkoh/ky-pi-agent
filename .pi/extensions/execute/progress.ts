@@ -226,12 +226,14 @@ export interface ExecuteRunContext {
 	readonly mode: "delegated" | "degraded (ordinary prompt loop)";
 }
 
-/** One observed bash run of the task's verification command: its own output and exit status, and the HEAD it ran at. */
+/** One observed bash run of the task's verification command: its own output and exit status, and the tree it ran on. */
 export interface VerificationRecord {
 	readonly output: string;
 	readonly exitCode: number;
 	readonly isError: boolean;
 	readonly sha: string;
+	/** Uncommitted or untracked paths at the time, "" when the working tree was exactly the commit. */
+	readonly dirty: string;
 }
 
 interface ExecuteRunState extends ExecuteRunContext {
@@ -268,8 +270,8 @@ export function noteToolStart(toolCallId: string, toolName: string, args: unknow
 	if (toolName === "bash" && typeof command === "string") runState()?.pending.set(toolCallId, normaliseCommand(command));
 }
 
-/** Keep the latest run of exactly the verification command; every other tool result is ignored here. */
-export function noteToolEnd(toolCallId: string, isError: boolean, result: unknown, sha: string): void {
+/** Keep the latest run of exactly the verification command; `at` reads the tree it ran on, only for that run. */
+export function noteToolEnd(toolCallId: string, isError: boolean, result: unknown, at: () => { sha: string; dirty: string }): void {
 	const state = runState();
 	const command = state?.pending.get(toolCallId);
 	if (state === undefined || command === undefined) return;
@@ -277,7 +279,20 @@ export function noteToolEnd(toolCallId: string, isError: boolean, result: unknow
 	if (command !== normaliseCommand(state.verificationCommand)) return;
 	const reported = (result as { structuredContent?: { exit_code?: unknown } } | null)?.structuredContent?.exit_code;
 	const exitCode = typeof reported === "number" ? reported : isError ? 1 : 0;
-	state.verification = { output: boundOutput(renderToolResultText(result)), exitCode, isError, sha };
+	state.verification = { output: boundOutput(renderToolResultText(result)), exitCode, isError, ...at() };
+}
+
+const MAX_DIRTY_LISTED = 10;
+
+/**
+ * Uncommitted or untracked paths anywhere in the repo except the harness's own `.pi/work/` and `.pi/logs/`, comma-joined; "" when the working tree is
+ * exactly HEAD. A file left out of the commit would otherwise let a check pass that the commit cannot.
+ */
+export function uncommittedPaths(cwd: string): string {
+	const r = spawnSync("git", ["status", "--porcelain", "--untracked-files=all", "--", ":/", ":(exclude).pi/work", ":(exclude).pi/logs"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	if (r.status !== 0) return `(git status failed in ${cwd})`;
+	const paths = (r.stdout ?? "").split("\n").filter((l) => l.trim() !== "").map((l) => l.slice(3));
+	return paths.length <= MAX_DIRTY_LISTED ? paths.join(", ") : `${paths.slice(0, MAX_DIRTY_LISTED).join(", ")} and ${paths.length - MAX_DIRTY_LISTED} more`;
 }
 
 const MAX_OUTPUT_CHARS = 8_000;
@@ -325,6 +340,9 @@ export function checkVerification(record: VerificationRecord | undefined, comman
 	if (record.isError || record.exitCode !== 0) return { ok: false, reason: `the verification command \`${command}\` exited ${record.exitCode}` };
 	if (record.sha !== headSha) {
 		return { ok: false, reason: `the verification command last ran at ${record.sha || "an unknown HEAD"}, not at the recorded commit ${headSha} -- run it after committing` };
+	}
+	if (record.dirty !== "") {
+		return { ok: false, reason: `the verification command ran on a working tree that is not the commit (uncommitted or untracked: ${record.dirty}) -- commit or remove them, then run it again` };
 	}
 	return { ok: true };
 }

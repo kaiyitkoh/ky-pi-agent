@@ -427,7 +427,8 @@ PROGRESS.md on a slug's first run, never from the HEAD of a fresh attempt: a
 rejected or halted commit stays in every later diff until it is reverted.
 `/review` diffs from `git merge-base HEAD staging`, and any drifted path needs
 explicit approval before the MR opens. It reads the
-committed diff only; uncommitted and untracked work is not covered. A rename
+committed diff only, and `/review` refuses to start while anything outside
+`.pi/work/` and `.pi/logs/` is uncommitted or untracked. A rename
 reports both paths (`--no-renames`), so a move out of an undeclared path
 drifts.
 
@@ -437,8 +438,11 @@ command equals the task's verification command ran cleanly at the commit
 being recorded (seen on `tool_execution_start`, since `tool_execution_end`
 carries no arguments), and `driftAbort` allows every path git reports as
 changed. PROGRESS.md records that run's own output and exit code, bound to a
-harness-read commit SHA; no other tool output is kept. The shared workflows
-Each rejection appends an invisible `<!-- rejected T### errors=N -->` line to
+harness-read commit SHA; no other tool output is kept. The verification run
+and the settle gate both run on the working tree, so both require
+`git status` to be clean apart from the harness's own `.pi/work/` and
+`.pi/logs/`: a file the model forgot to `git add` would otherwise let a check
+pass that the commit cannot. Each rejection appends an invisible `<!-- rejected T### errors=N -->` line to
 PROGRESS.md; once a task passes `REVISION_CAP` rejections, or two in a row
 fail to lower the error count, `/execute` refuses it until the user runs
 `/execute <slug> --reset`. The shared workflows

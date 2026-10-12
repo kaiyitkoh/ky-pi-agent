@@ -1,6 +1,6 @@
 /**
  * Scope drift for /review: changed paths come from git, never from a model. Pure except changedFilesSince, which
- * reads the committed diff only; uncommitted and untracked work is deliberately not covered.
+ * reads the committed diff only, so callers must first refuse a working tree that is not HEAD.
  */
 import { changedFiles, normalisePathForDrift } from "../execute/progress.ts";
 

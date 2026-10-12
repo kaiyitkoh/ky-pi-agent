@@ -18,7 +18,7 @@ import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHan
 import {
 	REVISION_CAP, appendAttempt, appendProgress, armExecuteRun, attemptState, changedFiles, checkVerification, disarmExecuteRun,
 	driftAbort, driftBase, ensureWorkIgnored, executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase,
-	recordedEntries, verificationRecord,
+	recordedEntries, uncommittedPaths, verificationRecord,
 } from "./progress.ts";
 
 /** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("tool_execution_end", (event) => {
 		const run = executeRunContext();
 		if (run === undefined) return;
-		noteToolEnd(event.toolCallId, event.isError, event.result, headShaOrEmpty(run.cwd));
+		noteToolEnd(event.toolCallId, event.isError, event.result, () => ({ sha: headShaOrEmpty(run.cwd), dirty: uncommittedPaths(run.cwd) }));
 		if (event.isError) errorCount += 1;
 	});
 
@@ -147,6 +147,8 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(`execute: ${run.taskId} rejected -- ${reason}; ${next}`, "error");
 			};
 			if (!verdict.ok) return reject(verdict.reason);
+			const dirty = uncommittedPaths(cwd);
+			if (dirty !== "") return reject(`the working tree is not the commit (uncommitted or untracked: ${dirty}), so the gate would not check what was committed`);
 			const changed = changedFiles(cwd, baseSha, verdict.sha);
 			const drift = driftAbort({ attemptedPaths: changed, specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
 			if (!drift.ok) return void ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error");
