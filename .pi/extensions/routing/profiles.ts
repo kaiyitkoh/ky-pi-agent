@@ -1,5 +1,5 @@
 /**
- * Named tool profiles. Pure table and resolver; the routing entry point applies one once at session start.
+ * Named tool profiles. Pure table and resolver; the routing entry point applies one at session start and on each idle prompt.
  * Profiles are a cost control, not an access control: the safety hook still gates every call.
  * Named exports only: a default export would reclassify this file as an extension entry point.
  */

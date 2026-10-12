@@ -1,5 +1,5 @@
 /**
- * Tool profiles narrow the active set once, before the first provider request.
+ * Tool profiles narrow the active set at session start, and on each idle prompt to tools the transcript has not declared.
  * Mutation proofs: T1 fails if routing applies the profile "full" always (recon would declare bg_run);
  * T2 fails if a mid-session removal stopped writing toolsRemoved; completeness fails if a table entry is dropped
  * (the injectable-table block proves findUnclassified reports it); the plan cases fail if the read-only guard is removed.
