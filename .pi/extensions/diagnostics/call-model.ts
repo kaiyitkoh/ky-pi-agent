@@ -24,7 +24,7 @@
  * ---------------------------------------------------------------------------
  * Pi wires `before_provider_headers`, `before_provider_request` and
  * `after_provider_response` into the constructor options of the ONE `Agent`
- * instance the session owns [VERIFIED: pi 0.84.1 src/core/sdk.ts:294-360]. A
+ * instance the session owns [VERIFIED: pi 1.1.0 dist/core/sdk.js:225-230, 274]. A
  * nested `ModelRegistry` completion does not go through that agent, so it fires
  * none of them.
  *

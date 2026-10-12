@@ -29,7 +29,7 @@
  *
  *     const handlerResult = await handler(event, ctx);
  *     if (handlerResult !== undefined) { currentPayload = handlerResult; }
- *     [VERIFIED: pi 0.84.1 src/core/extensions/runner.ts:1030-1033;
+ *     [VERIFIED: pi 1.1.0 dist/core/extensions/runner.js:1066-1079 (payload is the provider body, not the TranscriptContext; sdk.js:225-230,274);
  *      CITED: docs/extensions.md:680]
  *
  * So an arrow function with an EXPRESSION body — `(event, ctx) =>

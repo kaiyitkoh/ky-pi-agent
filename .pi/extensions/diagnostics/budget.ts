@@ -29,7 +29,7 @@
  * `getSystemPromptOptions()` — the only exact source of the context-file list
  * and the skill list — exists on `ExtensionCommandContext` and NOT on the
  * `ExtensionContext` an event handler or a tool receives
- * [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:256 (command context)
+ * [VERIFIED: pi 1.1.0 dist/core/extensions/types.d.ts:288 (command context getSystemPromptOptions; getSystemPrompt :252)
  * versus :219-249 (plain context)]. A tool could not compute this report at
  * all. RESEARCH §7.1.
  *
