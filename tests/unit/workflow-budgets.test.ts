@@ -463,7 +463,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/safety",
-		budget: 4570,
+		budget: 4710,
 		why: "CR-04 (code-review fix pass): another directory importedSubsystemDirs newly discovers -- " +
 			"workflows/index.ts imports classifyGitInvocation/currentBranch/currentSha/currentTree from " +
 			"../safety/git.ts and PROTECTED_BRANCHES from ../safety/index.ts, and safety/ spells " +
@@ -480,7 +480,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"comment plus the facts.protectedBranches threading at its one classifyGlabInvocation call site. " +
 			"Re-measured 4,569 raw lines across the same 9 files 2026-08-15 (approvals.ts 411, audit.ts 133, " +
 			"git.ts 621, index.ts 840, infra.ts 431, paths.ts 585, policy.ts 664, schema.ts 79, shell.ts 805), " +
-			"rounded up to the next ten",
+			"rounded up to the next ten. RAISED 4570 -> 4710 by plan 08.1-03 (UPG-03, Pi 1.x tool paths): index.ts " +
+			"grew the powershell/MCP/codemode/tool_search/background-tasks deny + bg_run-as-bash branch, audit.ts " +
+			"records parentToolCallId, schema.ts gained the matching field. Re-measured 4,709 raw lines across the " +
+			"same 9 files 2026-10-13 (approvals.ts 411, audit.ts 138, git.ts 621, index.ts 973, infra.ts 431, " +
+			"paths.ts 585, policy.ts 664, schema.ts 81, shell.ts 805), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/quality",

@@ -19,3 +19,8 @@
 
 - **tests/unit/workflow-budgets.test.ts directory budgets are red (4 cases), not caused by 08.1-04.** `.pi/extensions/safety` is 4709 raw lines vs declared budget 4570 (grown by 08.1-03: index.ts 973, audit.ts 138, schema.ts 81). `.pi/extensions/execute` totals 673 vs declared 340 because the UNTRACKED `progress.ts` (341 lines, belongs to a paused plan, must not be touched) is counted. Both need a budget raise with a `why` update; the execute figure should be re-measured when progress.ts lands. Needs a plan before phase verification.
 - Typecheck error in `tests/integration/new-tool-paths.test.ts:113` (08.1-03, `Record<string, unknown>` vs Pi 1.1.0 `JsonObject`) was blocking `npm run typecheck`; fixed with a one-line cast in 08.1-04 (Rule 3).
+
+## Resolution of the 08.1-04 workflow-budgets item (orchestrator, 2026-10-13)
+
+- **safety/ budget: RESOLVED.** Raised 4570 -> 4710 with the re-measured per-file breakdown (4,709 raw lines) in the entry's `why`, attributed to 08.1-03 (UPG-03).
+- **execute/ budget: ENVIRONMENTAL, not a defect.** The 2 failing cases count the untracked `progress.ts` (paused plan 09-13; must not be touched). Tracked content is `handoff.ts` alone at 332 raw lines, within the 340 budget, so a clean checkout and CI pass. Plan 09-13 must raise the budget when it commits `progress.ts`.
