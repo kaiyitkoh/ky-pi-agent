@@ -182,8 +182,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	// a number this phase re-reviewed for tightness.
 	{
 		file: ".pi/extensions/routing/index.ts",
-		budget: 690,
-		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 681 raw lines 2026-08-14, rounded up to the next ten",
+		budget: 320,
+		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 313 raw lines 2026-08-14, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/harness/index.ts",
