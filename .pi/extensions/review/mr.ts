@@ -5,7 +5,7 @@
 import { spawnSync } from "node:child_process";
 
 import { redactString } from "../diagnostics/redact.ts";
-import { recordedEntries } from "../execute/progress.ts";
+import { progressBlocks, recordedEntries } from "../execute/progress.ts";
 import type { SpecArtifact } from "../grill/spec-schema.ts";
 import type { PlanArtifact } from "../plan-ceremony/plan-schema.ts";
 import type { ReviewArtifact } from "../quality/review-schema.ts";
@@ -28,11 +28,6 @@ export interface MrBodyInput {
 	readonly review: ReviewArtifact;
 }
 
-// Each PROGRESS entry starts at its own "## T### @ sha" heading; lifting whole entries keeps the output verbatim.
-function progressEntries(progress: string): string[] {
-	return progress.split(/^(?=## )/m).map((s) => s.trim()).filter((s) => s.startsWith("## "));
-}
-
 /** Evidence-built MR description. No diff parameter on purpose: a diff restates what the reviewer can already read. */
 export function buildMrBody(input: MrBodyInput): string {
 	const { spec, plan, review } = input;
@@ -45,7 +40,7 @@ export function buildMrBody(input: MrBodyInput): string {
 	if (coverage.length > 0) lines.push("Planned tasks per requirement:", "", ...coverage.map((c) => `- ${c}`), "");
 
 	lines.push("## Verification", "");
-	const entries = progressEntries(input.progress);
+	const entries = progressBlocks(input.progress);
 	if (entries.length === 0) lines.push("No recorded verification evidence.", "");
 	for (const entry of entries) lines.push(entry.replace(/^## /, "### "), "");
 

@@ -29,11 +29,32 @@ export function renderProgressAppend(entry: ProgressEntry): string {
 	lines.push(`- Exit code: ${entry.exitCode}`);
 	lines.push(`- Recorded: ${new Date(entry.recordedAt).toISOString()}`);
 	lines.push("");
-	lines.push("```");
+	// Longer than any backtick run in the output, so the output can never close the fence early.
+	const longestRun = Math.max(0, ...[...entry.output.matchAll(/`+/g)].map((m) => m[0].length));
+	const fence = "`".repeat(Math.max(MIN_FENCE, longestRun + 1));
+	lines.push(fence);
 	lines.push(entry.output);
-	lines.push("```");
+	lines.push(fence);
 	lines.push("");
 	return lines.join("\n");
+}
+
+const MIN_FENCE = 3;
+const FENCE_LINE = /^(`{3,})/;
+
+/** Entry blocks, each starting at a `## T### @ <sha>` heading that sits outside every fenced block. */
+export function progressBlocks(progress: string): readonly string[] {
+	const blocks: string[][] = [];
+	let fence: string | undefined;
+	for (const line of progress.split("\n")) {
+		const run = FENCE_LINE.exec(line)?.[1];
+		if (fence === undefined && /^## T\d{3} @ /.test(line)) blocks.push([]);
+		blocks.at(-1)?.push(line);
+		if (run !== undefined && (fence === undefined || (run.length >= fence.length && line.trim() === run))) {
+			fence = fence === undefined ? run : undefined;
+		}
+	}
+	return blocks.map((b) => b.join("\n").trim());
 }
 
 /** Append to the slug's PROGRESS.md. Throws on an unwritable path so a lost append is never mistaken for a written one. */
@@ -46,11 +67,14 @@ export function appendProgress(cwd: string, slug: string, entry: ProgressEntry):
 }
 
 const DRIFT_BASE_LINE = /^Drift base: ([0-9a-f]{40})$/m;
-const ENTRY_HEAD_LINE = /^## (T\d{3}) @ ([0-9a-f]{40})$/gm;
+const ENTRY_HEAD_LINE = /^## (T\d{3}) @ ([0-9a-f]{40})$/;
 
-/** Every recorded `## T### @ <sha>` entry, in file order. */
+/** Every recorded `## T### @ <sha>` entry outside fenced output, in file order. */
 export function recordedEntries(progress: string): readonly { readonly taskId: string; readonly sha: string }[] {
-	return [...progress.matchAll(ENTRY_HEAD_LINE)].map((m) => ({ taskId: m[1] ?? "", sha: m[2] ?? "" }));
+	return progressBlocks(progress)
+		.map((b) => ENTRY_HEAD_LINE.exec(b.split("\n")[0] ?? ""))
+		.filter((m): m is RegExpExecArray => m !== null)
+		.map((m) => ({ taskId: m[1] ?? "", sha: m[2] ?? "" }));
 }
 
 /**

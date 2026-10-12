@@ -17,7 +17,7 @@ import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import {
 	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, driftBase,
-	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase, stallDetected, verificationRecord,
+	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase, recordedEntries, stallDetected, verificationRecord,
 } from "./progress.ts";
 
 /** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
@@ -66,7 +66,8 @@ export default function (pi: ExtensionAPI): void {
 				}
 
 				const done = existsSync(join(dir, "PROGRESS.md")) ? readFileSync(join(dir, "PROGRESS.md"), "utf-8") : "";
-				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !done.includes(`## ${t.id} @ `));
+				const recorded = new Set(recordedEntries(done).map((e) => e.taskId));
+				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !recorded.has(t.id));
 				if (task === undefined || task.verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
 				if (isRunArmed() || !ctx.isIdle()) return fail("execute: a turn is already in flight -- wait for it to finish");
