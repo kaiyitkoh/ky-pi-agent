@@ -346,7 +346,10 @@ end of the turn: a passing SPEC is re-rendered and the interrogation ends; a
 refusal is handed to the next turn. When the hard question budget runs out
 without a passing SPEC, `/grill` stops with an error. A dimension still below
 its floor is not overridable: SPEC.md stays refused, and `/grill --resume`
-starts a fresh budget as the user's explicit choice to keep asking.
+starts a fresh budget as the user's explicit choice to keep asking. The
+overall score that is gated is the stricter of the model's own `Overall:`
+value and 1 minus the mean dimension score, so every dimension at its 0.7
+floor still fails the 0.2 gate.
 
 `validateGatedSpec` in `.pi/extensions/grill/spec-gate.ts` is the one SPEC
 gate. `/grill` writes through it, and `/plan`, `/execute` and `/review`

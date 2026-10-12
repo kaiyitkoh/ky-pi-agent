@@ -213,14 +213,28 @@ export function gateAmbiguity(scorecard: AmbiguityScorecard): AmbiguityVerdict {
 		};
 	}
 
-	if (scorecard.overall > SCORE_GATE) {
+	// The model's own overall is never trusted downward: the stricter of it and 1 - mean(dimensions) is gated.
+	const derived = derivedOverall(scorecard);
+	const effective = Math.max(scorecard.overall, derived);
+	if (effective > SCORE_GATE) {
 		return {
 			ok: false,
-			reason: `the overall ambiguity score is ${scorecard.overall}, above the gate of ${SCORE_GATE} -- an over-gate score blocks regardless of the individual floors`,
+			reason:
+				`the overall ambiguity score is ${Number(effective.toFixed(SCORE_DIGITS))} (self-reported ${scorecard.overall}, ` +
+				`derived from the dimensions ${Number(derived.toFixed(SCORE_DIGITS))}), above the gate of ${SCORE_GATE} -- an ` +
+				"over-gate score blocks regardless of the individual floors",
 		};
 	}
 
 	return { ok: true };
+}
+
+const SCORE_DIGITS = 2;
+
+/** Overall ambiguity implied by the dimension scores: 1 - their mean, on the same lower-is-better scale as SCORE_GATE. */
+export function derivedOverall(scorecard: AmbiguityScorecard): number {
+	const scores = scorecard.dimensions.map((d) => d.score);
+	return scores.length === 0 ? 1 : 1 - scores.reduce((a, b) => a + b, 0) / scores.length;
 }
 
 /** Dimensions scored below their own `floor` (equal passes, inclusive), with the score received. Assumes one score per declared dimension; missing ones are skipped. */

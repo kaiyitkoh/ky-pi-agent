@@ -16,7 +16,7 @@ The spec-schema.ts and scorecard.ts modules under .pi/extensions/grill/ are AUTH
 5. Score the four dimensions below honestly and write the §8 scorecard as a table of `| <dimension-id> | <score> |` rows plus an `Overall: <score>` line.
 6. Write SPEC.md with the write tool. At the end of every turn the harness runs the full gate on it; a refusal comes back to you on the next turn.
 
-## Ambiguity dimensions (floor 0.7, higher is better; overall gate <= 0.20, lower is better -- two separate scales, see scorecard.ts)
+## Ambiguity dimensions (floor 0.7, higher is better; overall gate <= 0.20, lower is better, and gated as the stricter of your Overall and 1 - the mean dimension score -- two separate scales, see scorecard.ts)
 
 | id | meaning | a low score means |
 | --- | --- | --- |

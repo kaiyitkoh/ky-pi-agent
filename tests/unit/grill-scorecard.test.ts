@@ -71,10 +71,17 @@ describe("FLOW-02 -- gateAmbiguity, both directions", () => {
 			why: "boundary, inclusive per FEATURES.md's own '≤ 0.20' wording",
 		},
 		{
-			name: "every floor scored EXACTLY at its own floor value",
-			card: scorecard(Object.fromEntries(AMBIGUITY_DIMENSIONS.map((d) => [d.id, d.floor])), 0.1),
+			name: "a dimension scored EXACTLY at its own floor value",
+			card: scorecard({ "factual-grounding": 0.7 }, 0.1),
 			expected: "accept",
 			why: "score === floor is not a floor violation -- boundary, inclusive",
+		},
+		{
+			name: "every floor met exactly, with a self-reported overall of 0.1",
+			card: scorecard(Object.fromEntries(AMBIGUITY_DIMENSIONS.map((d) => [d.id, d.floor])), 0.1),
+			expected: "reject",
+			reasonIncludes: ["0.3", "self-reported 0.1"],
+			why: "the dimensions imply 1 - 0.7 = 0.3 ambiguity; a model-written overall cannot argue it down",
 		},
 		{
 			// HARDCODED to FEATURES.md line 176's literal 0.20 gate, deliberately
