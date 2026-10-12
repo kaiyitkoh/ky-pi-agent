@@ -427,13 +427,28 @@ Plans:
 **Goal:** Code comments in this repo — and code written by the harness's models in the user's other projects — state only non-obvious WHY in one or two lines, and the rule is enforced rather than hoped for.
 **Requirements**: CMT-01..05 (inserted 2026-10-12, see 08.2-CONTEXT.md)
 **Depends on:** Phase 08.1
-**Plans:** 0 plans
+**Plans:** 13 plans
 
 **Success Criteria:**
 1. Root `AGENTS.md` exists with the code-comment rules (≤15 lines) and other cross-agent conventions; `CLAUDE.md` begins with `@AGENTS.md` so Claude Code and Pi read the same rules with no duplication.
 2. The harness delivers the comment rules to every project Pi runs in (mechanism chosen from Pi 1.1.0 source), not only this repo.
 3. A vitest check fails on plan/requirement/review IDs inside comments in authored `.pi/extensions/**` files (vendored files exempt), and reports per-file comment ratio.
 4. One-off cleanup pass across authored extensions removes history, IDs and narration while keeping real WHY (safety invariants, Pi source facts); overall comment ratio drops from 55% to ≤35%; no behavioural change (typecheck + targeted tests green).
+
+Plans:
+- [ ] 08.2-01-PLAN.md — comment-rules constant + harness before_agent_start section, AGENTS.md, CLAUDE.md @AGENTS.md, CMT reqs, RB-08-04
+- [ ] 08.2-02-PLAN.md — AST comment scanner, ID gate with PENDING_CLEANUP ratchet, ratio report, comment-only transpile verifier
+- [ ] 08.2-03-PLAN.md — cleanup: diagnostics index/budget/call-model/wire
+- [ ] 08.2-04-PLAN.md — cleanup: diagnostics remaining six files
+- [ ] 08.2-05-PLAN.md — cleanup: routing
+- [ ] 08.2-06-PLAN.md — cleanup: checkpoint, harness header, workflows, execute/handoff
+- [ ] 08.2-07-PLAN.md — cleanup: safety index/policy/approvals/audit/schema
+- [ ] 08.2-08-PLAN.md — cleanup: safety shell/git/paths/infra
+- [ ] 08.2-09-PLAN.md — cleanup: quality rules/review-schema/verdict
+- [ ] 08.2-10-PLAN.md — cleanup: quality gates/index/reviewer/calibration/advisor
+- [ ] 08.2-11-PLAN.md — cleanup: providers + qoder
+- [ ] 08.2-12-PLAN.md — cleanup: grill + plan-ceremony (ratchet empties)
+- [ ] 08.2-13-PLAN.md — empty-ratchet lock, 35% aggregate check, tsc + single full-suite run, sign-off
 
 ### Phase 9: Ceremonial Workflows
 
