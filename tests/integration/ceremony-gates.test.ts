@@ -2,18 +2,20 @@
  * /grill and /plan driven through their real command handlers and settle hooks with a minimal Pi stand-in: the
  * gated writers run on whatever the model wrote, and every reader refuses a SPEC that fails the full gate.
  */
+import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
+import { appendLedger, readLedger } from "../../.pi/extensions/execute/ledger.ts";
 import grillExtension from "../../.pi/extensions/grill/index.ts";
 import { HARD_QUESTION_BUDGET } from "../../.pi/extensions/grill/scorecard.ts";
 import { validateGatedSpec } from "../../.pi/extensions/grill/spec-gate.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import planExtension from "../../.pi/extensions/plan-ceremony/index.ts";
 import { claimWorkflow } from "../../.pi/lib/active-workflow.ts";
-import { makeTempRepo } from "../helpers/git.ts";
+import { commitFile, makeTempRepo } from "../helpers/git.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
@@ -143,6 +145,27 @@ describe("/grill -- the settle hook gates whatever SPEC.md the model wrote", () 
 		await h.run("grill", "--resume");
 		h.fire("session_start");
 		expect(h.fire("before_agent_start")[0]).toBeUndefined();
+	});
+});
+
+describe("/grill -- an earlier /execute ledger for the same slug", () => {
+	it("refuses a fresh slug whose ledger still exists in this worktree, and hands nothing to the model", async () => {
+		const h = harness(grillExtension as (pi: unknown) => void);
+		appendLedger(h.repo, SLUG, { kind: "accepted", taskId: "T001", sha: "a".repeat(40), entry: "old" });
+		await h.run("grill", "add the a module");
+		expect(h.notes.at(-1)?.text).toContain("earlier /execute run");
+		expect(h.sent).toHaveLength(0);
+	});
+
+	it("another worktree of the same repo does not inherit the slug's ledger", () => {
+		const h = harness(grillExtension as (pi: unknown) => void);
+		commitFile(h.repo, "README.md", "base", "base");
+		appendLedger(h.repo, SLUG, { kind: "accepted", taskId: "T001", sha: "a".repeat(40), entry: "old" });
+		const other = `${h.repo}-wt`;
+		repos.push(other);
+		expect(spawnSync("git", ["worktree", "add", "-b", "other", other], { cwd: h.repo }).status).toBe(0);
+		expect(readLedger(h.repo, SLUG)).toHaveLength(1);
+		expect(readLedger(other, SLUG)).toHaveLength(0);
 	});
 });
 

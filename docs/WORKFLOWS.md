@@ -484,8 +484,12 @@ an `/execute` slot with no shared run armed can only be a leak.
 **Why the record is a signed ledger, not PROGRESS.md.** The executor can
 write any file, so state kept in PROGRESS.md could be edited to erase the
 revision cap, move the drift base or add a finished task. `/execute` keeps
-that state in `<git common dir>/kypi-ledger/<slug>.jsonl`, outside the work
-tree. This covers the pinned base, the write allowance pinned with it,
+that state in `<git common dir>/kypi-ledger/<slug>.<worktree>.jsonl`,
+outside the work tree. `<worktree>` is a short hash of the worktree's top
+level, so another worktree of the same repo never inherits a slug's rows. The
+ledger outlives `.pi/work/<slug>/`, so `/grill` refuses a new task whose slug
+still has a ledger in this worktree and names the file. Deleting that file
+yourself is the way to reuse the description. This covers the pinned base, the write allowance pinned with it,
 rejections, resets, and each accepted entry's full text. Every row is
 HMAC-SHA256 signed with a random key in the same directory, and carries its
 slug inside the signed body. A row that fails its signature refuses

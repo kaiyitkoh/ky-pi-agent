@@ -9,7 +9,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { LEDGER_DIR, allowanceOf, appendLedger } from "../../.pi/extensions/execute/ledger.ts";
+import { allowanceOf, appendLedger, ledgerFile } from "../../.pi/extensions/execute/ledger.ts";
 import { renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
@@ -180,7 +180,7 @@ describe("/review -- the real handler", () => {
 
 	it("a ledger row that fails its signature refuses the review", async () => {
 		const h = setup();
-		const file = join(h.repo, ".git", LEDGER_DIR, `${SLUG}.jsonl`);
+		const file = ledgerFile(h.repo, SLUG);
 		writeFileSync(file, readFileSync(file, "utf-8").replace("ok", "99 passed"));
 		await h.run(SLUG);
 		expect(h.notes.at(-1)?.text).toContain("fails its signature");

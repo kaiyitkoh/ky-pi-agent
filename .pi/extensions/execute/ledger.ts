@@ -5,9 +5,9 @@
  * writes through LEDGER_DIR, so forging a row needs a key the model is kept from reading. Unverifiable rows throw.
  */
 import { spawnSync } from "node:child_process";
-import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
 import { workDir } from "../../lib/work-artifacts.ts";
 import { HARNESS_LEDGER_SEGMENT } from "../safety/paths.ts";
@@ -31,6 +31,15 @@ function ledgerRoot(cwd: string): string {
 	return join(resolve(cwd, (r.stdout ?? "").trim()), LEDGER_DIR);
 }
 
+/** The ledger file for `slug` in this worktree; the common dir is shared, so the name carries the worktree's top level. */
+export function ledgerFile(cwd: string, slug: string): string {
+	workDir(cwd, slug);
+	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	if (top.status !== 0) throw new Error(`execute: cannot locate the worktree root in ${cwd} for the harness ledger`);
+	const worktree = createHash("sha256").update(resolve((top.stdout ?? "").trim())).digest("hex").slice(0, 12);
+	return join(ledgerRoot(cwd), `${slug}.${worktree}.jsonl`);
+}
+
 function signingKey(root: string): Buffer {
 	const file = join(root, KEY_FILE);
 	if (existsSync(file)) return Buffer.from(readFileSync(file, "utf-8").trim(), "hex");
@@ -48,19 +57,16 @@ const sign = (key: Buffer, body: string): string => createHmac("sha256", key).up
 
 /** Append one signed row; the slug is inside the signed body, so a row cannot be moved to another slug's file. */
 export function appendLedger(cwd: string, slug: string, row: LedgerRow): void {
-	workDir(cwd, slug);
-	const root = ledgerRoot(cwd);
+	const file = ledgerFile(cwd, slug);
 	const body = JSON.stringify({ slug, ...row });
-	appendFileSync(join(root, `${slug}.jsonl`), `${JSON.stringify({ body, mac: sign(signingKey(root), body) })}\n`, "utf-8");
+	appendFileSync(file, `${JSON.stringify({ body, mac: sign(signingKey(dirname(file)), body) })}\n`, "utf-8");
 }
 
 /** Every row for `slug`, oldest first. Throws when any row fails its signature or names another slug. */
 export function readLedger(cwd: string, slug: string): readonly LedgerRow[] {
-	workDir(cwd, slug);
-	const root = ledgerRoot(cwd);
-	const file = join(root, `${slug}.jsonl`);
+	const file = ledgerFile(cwd, slug);
 	if (!existsSync(file)) return [];
-	const key = signingKey(root);
+	const key = signingKey(dirname(file));
 	return readFileSync(file, "utf-8").split("\n").filter((l) => l.trim() !== "").map((line, i) => {
 		const tampered = new Error(`execute: row ${i + 1} of the harness ledger ${file} fails its signature -- the record was altered; refusing`);
 		let parsed: { body?: unknown; mac?: unknown };

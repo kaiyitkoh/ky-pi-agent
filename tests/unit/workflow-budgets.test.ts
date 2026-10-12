@@ -276,7 +276,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"derivation/resolution via .pi/lib/work-artifacts.ts#workDir, and writeSpecIfGated -- the ONLY " +
 			"function in this subsystem that writes SPEC.md, running gateRequirementsAuthorship then " +
 			"validateSpec then gateAmbiguity before any write. Measured 110 raw lines 2026-08-15 with " +
-			"countRawLines, rounded up to the next ten. Re-measured 162 raw lines after the settle hook began gating each turn's SPEC.md, rounded up to the next ten. Re-measured 171 raw lines after /grill began git-ignoring the harness state directories, rounded up to the next ten",
+			"countRawLines, rounded up to the next ten. Re-measured 162 raw lines after the settle hook began gating each turn's SPEC.md, rounded up to the next ten. Re-measured 171 raw lines after /grill began git-ignoring the harness state directories, rounded up to the next ten. Re-measured 175 raw lines after /grill began refusing a slug with an earlier ledger, rounded up to the next ten",
 	},
 	{
 		file: ".pi/skills/grill/SKILL.md",
@@ -638,7 +638,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"gateAmbiguity, kept out of index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 250-line grill " +
 			"ceiling headroom for the skill body -- see that registry's own entry for this file). Measured " +
 			"110 (index.ts) + 21 (scorecard-parse.ts) + 246 (scorecard.ts) + 689 (spec-schema.ts) = 1066 raw " +
-			"lines across 4 files 2026-08-15, rounded up to the next ten. Re-measured 1,142 raw lines after spec-gate.ts and the settle hook were added, rounded up to the next ten. Re-measured 1,156 raw lines after scorecard.ts began deriving the overall score from the dimensions, rounded up to the next ten. Re-measured 1,160 raw lines after spec-gate.ts began refusing ids with no entry, rounded up to the next ten. Re-measured 1166 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 1158 raw lines after the unused assumption-stamp helper was removed, rounded up to the next ten. Re-measured 1161 raw lines after /grill began git-ignoring the harness state directories, rounded up to the next ten",
+			"lines across 4 files 2026-08-15, rounded up to the next ten. Re-measured 1,142 raw lines after spec-gate.ts and the settle hook were added, rounded up to the next ten. Re-measured 1,156 raw lines after scorecard.ts began deriving the overall score from the dimensions, rounded up to the next ten. Re-measured 1,160 raw lines after spec-gate.ts began refusing ids with no entry, rounded up to the next ten. Re-measured 1166 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 1158 raw lines after the unused assumption-stamp helper was removed, rounded up to the next ten. Re-measured 1161 raw lines after /grill began git-ignoring the harness state directories, rounded up to the next ten. Re-measured 1165 raw lines after /grill began refusing a slug with an earlier ledger, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/plan-ceremony",
@@ -671,7 +671,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/execute",
-		budget: 810,
+		budget: 820,
 		why: "plan 09-11 (FLOW-09) -- the first file of the /execute subsystem, handoff.ts: the honest-degradation " +
 			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/bg_wait pair, never " +
 			"reading the settings file), the pure buildHandoffPacket/renderHandoffPacket, and the real " +
@@ -683,7 +683,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			".pi/extensions/plan-ceremony. Measured 169 raw lines across 1 file 2026-10-13 (handoff.ts), rounded " +
 			"up to the next ten. RAISED 170 -> 370 by plan 09-13 (FLOW-07): progress.ts, the PROGRESS.md append " +
 			"format, fail-closed driftAbort and per-run output slot. Measured 169 (handoff.ts) + 198 (progress.ts) = " +
-			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 370 -> 510 by plan 09-13 for index.ts, the /execute command: 169 + 198 + 142 = 509 raw lines across 3 files 2026-10-13, rounded up to the next ten. Re-measured 514 raw lines after the drift diff stopped hiding renames, rounded up to the next ten. Re-measured 564 raw lines after progress.ts began recording only the verification run, rounded up to the next ten. Re-measured 568 raw lines after index.ts began re-running the deterministic gate at settle, rounded up to the next ten. Re-measured 590 raw lines after progress.ts gained the pinned drift base, rounded up to the next ten. Re-measured 594 raw lines after progress.ts gained the shared recordedEntries parser, rounded up to the next ten. Re-measured 619 raw lines after progress.ts gained the fence-aware entry parser, rounded up to the next ten. Re-measured 651 raw lines after progress.ts began redacting and bounding output and excluding .pi/work/, rounded up to the next ten. Re-measured 686 raw lines after progress.ts began persisting rejected attempts per task, rounded up to the next ten. Re-measured 669 raw lines after handoff.ts switched to the shared requirement entry parser, rounded up to the next ten. Re-measured 673 raw lines after the delegated brief began naming its agent, rounded up to the next ten. Re-measured 681 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 701 raw lines after the verification run and the settle gate began requiring a clean working tree, rounded up to the next ten. Re-measured 782 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. Re-measured 805 raw lines after the user-approved --rebase-base re-pin was added, rounded up to the next ten",
+			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 370 -> 510 by plan 09-13 for index.ts, the /execute command: 169 + 198 + 142 = 509 raw lines across 3 files 2026-10-13, rounded up to the next ten. Re-measured 514 raw lines after the drift diff stopped hiding renames, rounded up to the next ten. Re-measured 564 raw lines after progress.ts began recording only the verification run, rounded up to the next ten. Re-measured 568 raw lines after index.ts began re-running the deterministic gate at settle, rounded up to the next ten. Re-measured 590 raw lines after progress.ts gained the pinned drift base, rounded up to the next ten. Re-measured 594 raw lines after progress.ts gained the shared recordedEntries parser, rounded up to the next ten. Re-measured 619 raw lines after progress.ts gained the fence-aware entry parser, rounded up to the next ten. Re-measured 651 raw lines after progress.ts began redacting and bounding output and excluding .pi/work/, rounded up to the next ten. Re-measured 686 raw lines after progress.ts began persisting rejected attempts per task, rounded up to the next ten. Re-measured 669 raw lines after handoff.ts switched to the shared requirement entry parser, rounded up to the next ten. Re-measured 673 raw lines after the delegated brief began naming its agent, rounded up to the next ten. Re-measured 681 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 701 raw lines after the verification run and the settle gate began requiring a clean working tree, rounded up to the next ten. Re-measured 782 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. Re-measured 805 raw lines after the user-approved --rebase-base re-pin was added, rounded up to the next ten. Re-measured 816 raw lines after the ledger file began naming its worktree, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/review",
@@ -1561,7 +1561,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [".pi/skills/grill/SKILL.md"],
 		budget: 250,
 		why: "FEATURES.md Part 2 line 158's ceiling for the flagship workflow -- FROZEN, may not move to absorb " +
-			"growth (D-13). Measured 171 raw lines (index.ts) + 60 raw lines (SKILL.md) = 231 raw lines " +
+			"growth (D-13). Measured 175 raw lines (index.ts) + 60 raw lines (SKILL.md) = 235 raw lines " +
 			"2026-10-13 with countRawLines, inside 250 -- scorecard.ts, spec-schema.ts and " +
 			"scorecard-parse.ts are supporting modules bound only by the .pi/extensions/grill DIRECTORY_BUDGETS " +
 			"ratchet above, per this registry's own module-docstring rule (D-13) that a merged closure budget " +

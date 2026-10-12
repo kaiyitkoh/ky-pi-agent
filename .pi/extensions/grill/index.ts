@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow, isActiveWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
+import { ledgerFile } from "../execute/ledger.ts";
 import { ensureHarnessIgnored } from "../execute/progress.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
@@ -113,6 +114,9 @@ export default function (pi: ExtensionAPI): void {
 					if (existsSync(workDir(ctx.cwd, slug))) {
 						return void ctx.ui.notify(`grill: .pi/work/${slug} already exists -- run "/grill --resume" instead`, "error");
 					}
+					// A fresh SPEC must not inherit an earlier run's accepted tasks, whose ids restart at T001.
+					const stale = ledgerFile(ctx.cwd, slug);
+					if (existsSync(stale)) return void ctx.ui.notify(`grill: ${stale} still records an earlier /execute run of "${slug}" -- delete that file yourself, or reword the task`, "error");
 				}
 				const ignoredNow = ensureHarnessIgnored(ctx.cwd);
 				if (ignoredNow !== undefined) ctx.ui.notify(`grill: ${ignoredNow}`, "info");
