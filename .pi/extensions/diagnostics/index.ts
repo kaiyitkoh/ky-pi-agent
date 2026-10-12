@@ -1,96 +1,6 @@
 /**
- * ky-pi-agent — Phase 2 diagnostics extension.
- *
- * PURPOSE. This subsystem is the instrument. Everything downstream of Phase 2 —
- * routing (Phase 5), the quality gates (Phase 8), the root-cause discrimination
- * (Phase 10) — is a decision made on numbers, and until those numbers exist on
- * disk every one of them is a guess. This file is where the hooks that produce
- * them are registered.
- *
- * LIFETIME. Permanent. It grows across this phase: plan 02-05 added the wire
- * capture, 02-08 the per-turn rows, 02-09 the prose-tool-call retry and 02-10
- * the `/budget` command. Today it registers eight hooks — `session_start`, the
- * three main-loop provider hooks, the three turn hooks and `agent_start` — plus
- * exactly one COMMAND, `/budget`. The hook count and the command are both
- * asserted in `tests/unit/diagnostics-entry.test.ts`, so neither can grow
- * unnoticed.
- *
- * THE TURN ROW IS BUILT FROM THE HOOKS THAT ALWAYS FIRE. `turn_start` supplies
- * the clock, `message_end` the finalized assistant message, `turn_end` the turn
- * index and tool-result count. `after_provider_response` contributes NOTHING to
- * a turns row and must not: it sits after the retry wrapper
- * [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:239] so a 4xx/5xx
- * throws into the catch at `:590` and the hook never fires at all. A row derived
- * from it would be missing exactly the turns most worth having, and the warning
- * sign is a day with errors visible on screen and zero rows carrying
- * `outcome: "error"` (RESEARCH §3.2, Pitfall 3).
- *
- * BOUNDARY RULE (BOOT-10). This subsystem registers **commands and event hooks
- * only**. It must never register a tool. A tool's name, description and
- * complete JSON Schema are serialised into `tools[]` on every single provider
- * request [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:1337-1370],
- * so a diagnostic tool would tax every turn of the cheap model this whole
- * project exists to make reliable — the instrument would become the thing it is
- * measuring. A command costs exactly zero per-turn tokens. This file therefore
- * does not spell the tool-registration call even in prose, the same dodge
- * `harness/index.ts:36` uses, because
- * `tests/unit/contributing-boundary.test.ts` matches that name as a plain
- * substring across every tracked source under `.pi/extensions/`, comments
- * included.
- *
- * LAYOUT. Sibling modules, and the requirement each serves:
- *
- *   schema.ts     — row types and every literal a test asserts on. DIAG-04/08.
- *   jsonl.ts      — the append-only writer, rotation and retention. DIAG-08.
- *   redact.ts     — credential redaction at capture time.           DIAG-07.
- *   wire.ts       — the three main-loop provider hooks: capture,
- *                   redact, append. Redaction happens INSIDE the hook,
- *                   which is what makes DIAG-07's "at capture time"
- *                   true rather than aspirational.             DIAG-01/07.
- *   turns.ts      — the pure per-turn row composer. This file supplies it
- *                   the message, the clock and the model; it supplies the
- *                   tokens, the cost and the outcome.               DIAG-04.
- *   call-model.ts — THE chokepoint for nested model calls. It writes its
- *                   own `kind:"nested"` rows and counts them through
- *                   {@link noteRowWritten}.                      DIAG-02/03.
- *   prose.ts      — the prose-tool-call PREDICATE. Its EFFECT — the row,
- *                   the capped follow-up and the exhaustion record —
- *                   lives in the `message_end` handler below.       DIAG-05.
- *   budget.ts     — `/budget`: the system-prompt slicer, the budget
- *                   computation and the command registration. A
- *                   COMMAND, so it costs zero per-turn tokens — and it
- *                   could not be anything else, because
- *                   `getSystemPromptOptions()` exists only on the
- *                   command context (RESEARCH §7.1).                DIAG-06.
- *
- * THE PROSE RETRY IS A FOLLOW-UP MESSAGE, NOT A FABRICATED TOOL CALL. The
- * alternative — returning `{ message }` from `message_end` with the parsed
- * prose promoted into a real `toolCall` content block — was executed during
- * research and it works, at zero extra model calls [RESEARCH §6.4, executed
- * 2026-08-13]. It is deliberately not built here for three reasons: it executes
- * a tool whose arguments were regex-scraped out of untrusted prose, on a laptop
- * where merging to `main` auto-deploys and Phase 4's command guard has not
- * shipped; it rewrites session history to claim the model emitted a call it
- * never emitted, corrupting the very measurement Phase 10 reads; and a wrong
- * parse produces a silently wrong ACTION rather than a visible retry. It becomes
- * an available lever for read-only tools once Phase 4 ships, and
- * `docs/DIAGNOSTICS.md` (plan 02-11) documents it as one. Nothing in this file
- * constructs a content block. [threat T-02-09-01]
- *
- * Only this file is an entry point: `.pi/extensions/<dir>/index.ts` is one of
- * the four auto-discovered shapes [CITED: pi 0.84.1 docs/extensions.md:115-120]
- * and the documented precondition for `/reload` hot-reload. The siblings carry
- * no default export, which is exactly what
- * `tests/unit/extension-layout.test.ts` uses to tell a module from an entry
- * point.
- *
- * FAILING LOUDLY IS NOT AUTOMATIC HERE. Pi catches every exception thrown by an
- * extension handler and routes it to `emitError`, which produces no visible
- * output [VERIFIED: pi 0.84.1 src/core/extensions/runner.ts:861-870 — observed
- * live during Phase 2 research, where a bad regex produced no error anywhere
- * until a local try/catch was added]. A diagnostics extension that dies that
- * way looks identical to a quiet one: the log simply stops. {@link safeHandler}
- * and {@link rowsWrittenThisSession} exist for that single reason.
+ * Diagnostics entry point: event hooks plus the `/budget` command, never a tool
+ * (a tool's schema is sent on every provider request). Rationale: docs/DIAGNOSTICS.md.
  */
 import type {
 	AgentStartEvent,
@@ -124,155 +34,45 @@ import {
 import { composeTurnRow } from "./turns.ts";
 import { currentCorrelationId, registerWireHooks, UNCORRELATED } from "./wire.ts";
 
-/**
- * `event` value on the row written once per session start.
- *
- * Exported so a test imports it rather than re-typing the literal — the house
- * rule from `harness/index.ts:50-56`.
- */
+/** `event` on the row written once per session start. */
 export const SESSION_START_EVENT = "diagnostics.session_start";
 
-/**
- * `role` carried by every main-loop turn row.
- *
- * The main loop has no `opts.role` to pass — that field belongs to
- * `callModel`, where a nested call names the executor it ran as. A constant
- * here keeps the column present and joinable on every row rather than optional
- * on some, so Phase 8's per-role cost query does not need a special case for
- * "the rows with no role".
- */
+/** `role` on every main-loop turn row, so per-role cost queries need no special case. */
 export const SESSION_TURN_ROLE = "session";
 
-/**
- * `where` on the error row a turn that produced no assistant message leaves.
- *
- * A turn MUST leave a row. Skipping the append when the accumulator is empty
- * would make a broken instrument indistinguishable from a quiet session, which
- * is the single failure class this phase exists to eliminate.
- * [threat T-02-08-02]
- */
+/** `where` on the error row left by a turn with no assistant message: a turn must always leave a row. */
 export const TURN_NO_MESSAGE_WHERE = "turn_end.no_message";
 
-/**
- * `event` on a row whose cost was computed from a DEGRADED model shape.
- *
- * `ctx.model` is `Model<any> | undefined` [VERIFIED: pi 0.84.1
- * dist/core/extensions/types.d.ts:223]. When it is undefined there are no cost
- * rates to compute with, so the row's `cost` is all zeros — and a zero cost that
- * looks exactly like a computed one is a fabricated measurement. This marker is
- * what lets Phase 8 exclude the row from a spend total instead of quietly
- * under-counting it. [threat T-02-08-05]
- */
+/** `event` on a row costed from a degraded model shape; lets spend totals exclude it. */
 export const MODEL_UNAVAILABLE_EVENT = "diagnostics.model_unavailable";
 
 /**
- * Whether the prose retry forces `tool_choice: "required"` on its one extra
- * request. **`false`, and it must stay `false` until Phase 10 says otherwise.**
- *
- * THE MECHANISM EXISTS. On the main loop it is a second `before_provider_request`
- * handler returning a payload with `tool_choice: "required"` for exactly the
- * retry request — Pi treats any non-`undefined` return from that hook as a
- * REPLACEMENT for the outgoing body [RESEARCH §1.2]. On the nested path it is
- * `options.toolChoice` [RESEARCH §4.2]. Neither is hard to build.
- *
- * ITS EFFECT IS **UNVERIFIED**, which is why it is off. Nobody here has measured
- * whether DeepSeek honours the field, and PITFALLS Pitfall 7 note 3 flags the
- * open possibility that it trades a prose tool call for a *wrong* tool call —
- * which would look like a fixed turn and be a worse one. Turning it on before
- * the detector has produced a baseline prose rate would also destroy the
- * baseline: the retry would be measuring the intervention rather than the
- * problem. RESEARCH Open Question 1 assigns the experiment to Phase 10.
- *
- * NO HANDLER IS REGISTERED WHILE THIS IS FALSE. A registered-but-inert handler
- * is one edit away from being live and, worse, would appear in the hook list
- * `tests/unit/diagnostics-entry.test.ts` asserts, implying a capability this
- * subsystem does not have. [threat T-02-09-06, disposition: accept]
+ * Whether the prose retry forces `tool_choice: "required"`. Must stay `false` until the
+ * effect on DeepSeek is measured; no handler is registered while it is off.
  */
 export const PROSE_RETRY_FORCES_TOOL_CHOICE = false;
 
 /**
- * Where the rows-written counter lives, so it is PER PROCESS and not per module
- * instance.
- *
- * THE SAME OBSERVED FAILURE THAT FORCED `wire.ts`'s `COUNTER_KEY`, applied to the
- * counter that has exactly the same exposure. Pi loads each extension through
- * jiti, which keeps its own module registry, so `.pi/extensions/foo` importing
- * `call-model.ts` and the diagnostics entry point importing `index.ts` can hold
- * two separate copies of this module in one process. That is not hypothetical: it
- * was OBSERVED between a test file's import graph and Pi's jiti graph while plan
- * 02-07 was being written, which is why the request counter was moved to
- * `globalThis` and why `turns-log.test.ts:196-201` and
- * `prose-retry.test.ts:216-219` both read bytes on disk instead of this number.
- *
- * A module-level `let` here meant that when Phase 5 or Phase 8 imports
- * `call-model.ts` — its documented cross-phase contract — the `noteRowWritten`
- * it calls belonged to whichever instance its own import graph produced, and
- * `/budget`, running in Pi's instance, printed a count that excluded every nested
- * row. That is precisely the failure {@link noteRowWritten} says the export exists
- * to prevent: a counter that only some append paths increment reports a number
- * that looks like a measurement and is not.
- *
- * With the value on `globalThis`, `call-model.ts` importing `noteRowWritten`
- * directly is harmless — every instance of this module reads and writes the one
- * slot — so the import is left alone rather than turned into another injected
- * parameter on an exported cross-phase signature.
- *
- * EXPORTED so `tests/unit/diagnostics-entry.test.ts` asserts against the real key
- * instead of re-typing the literal — the house rule from
- * `harness/index.ts:50-56`. A second spelling of this string is a second counter
- * that nothing would report on.
+ * Process-wide slot for the rows-written counter: jiti can load this module twice, so a
+ * module-level `let` would undercount (same reason as `wire.ts` COUNTER_KEY).
  */
 export const ROWS_WRITTEN_KEY = "__kypiDiagnosticsRowsWritten";
 
-/**
- * Prose-tool-call retries spent in the CURRENT agent run. Reset on `agent_start`.
- *
- * PER RUN, NOT PER SESSION AND NOT PER TURN. Per turn would be no cap at all —
- * the retry creates a new turn, so the counter would reset the instant it
- * mattered. Per session would silently stop retrying after the first prose call
- * of the day, which is a different behaviour wearing the same name.
- * [threat T-02-09-02]
- */
+/** Prose-tool-call retries spent in the current agent run (per run, not per turn); reset on `agent_start`. */
 let proseRetriesThisRun = 0;
 
-/**
- * How many diagnostic rows this process has written.
- *
- * `/budget` (plan 02-08) reports this number so that "0 rows" is something a
- * reader SEES rather than something they infer from an empty file they never
- * thought to open. A silently dead instrument is indistinguishable from a quiet
- * session, and that ambiguity is the failure this phase exists to eliminate.
- * [threat T-02-03-05]
- *
- * Reads the PROCESS-WIDE slot — see {@link ROWS_WRITTEN_KEY} for the jiti
- * duplication that makes a module-level `let` the wrong place for it.
- */
+/** Rows written by this process, so `/budget` can show "0 rows" instead of leaving it to inference. */
 export function rowsWrittenThisSession(): number {
 	const value = (globalThis as Record<string, unknown>)[ROWS_WRITTEN_KEY];
 	return typeof value === "number" ? value : 0;
 }
 
-/**
- * Record that one row reached disk.
- *
- * Exported because the sibling modules added later in this phase append rows
- * too, and a counter that only some append paths increment is worse than no
- * counter: it reports a number that looks like a measurement and is not.
- * `call-model.ts` imports this directly; {@link ROWS_WRITTEN_KEY} is what makes
- * that safe across module instances.
- */
+/** Record that one row reached disk; every append path must call this. */
 export function noteRowWritten(): void {
 	(globalThis as Record<string, unknown>)[ROWS_WRITTEN_KEY] = rowsWrittenThisSession() + 1;
 }
 
-/**
- * Append one row to the turns stream and count it.
- *
- * The rotation cap is passed explicitly even though `appendJsonl` resolves the
- * same numbers from the base name: `call-model.ts` spells them out at its own
- * append, and a reader comparing the two append sites should not have to know
- * that one of them relies on a default to reach the same value.
- */
+/** Append one row to the turns stream and count it. */
 function writeTurnsRow(cwd: string, record: TurnRow | Record<string, unknown>): void {
 	appendJsonl(cwd, TURNS_LOG_BASE, record, {
 		rotateBytes: TURNS_ROTATE_BYTES,
@@ -281,66 +81,25 @@ function writeTurnsRow(cwd: string, record: TurnRow | Record<string, unknown>): 
 	noteRowWritten();
 }
 
-/**
- * What the three turn hooks accumulate between `turn_start` and `turn_end`.
- *
- * ONE MUTABLE RECORD, NOT A MAP. The agent loop is serial: `turn_start` →
- * (provider request) → `message_end` → tool execution → `turn_end`, then the
- * next turn. Keying by `turnIndex` would suggest an interleaving that does not
- * happen and would leak an entry for every turn that never ended.
- */
+/** State accumulated between `turn_start` and `turn_end`; one record, because the loop is serial. */
 interface TurnAccumulator {
-	/** `turn_start.timestamp`, which is `Date.now()` [VERIFIED: pi 0.84.1 dist/core/agent-session.js:448-453]. */
+	/** `turn_start.timestamp` (dist/core/agent-session.js:448-453). */
 	startedAt: number;
-	/** The correlation id live at `message_end`. See {@link captureCorrelationId}. */
 	corr?: string;
-	/** The finalized assistant message, or `undefined` if none was seen. */
 	message?: AssistantMessage;
-	/** `ctx.thinkingLevel` as REQUESTED at turn start. */
 	thinkingLevel?: string;
-	/**
-	 * Out-of-band verdict to stamp on this turn's row — today only
-	 * {@link PROSE_EVENT}.
-	 *
-	 * It rides on the accumulator rather than being appended as its own turn row
-	 * because `turn_end` already writes exactly one row per turn and counts it;
-	 * a second `kind:"turn"` row from `message_end` would double every per-turn
-	 * total Phase 8 computes (02-08's handover note).
-	 */
+	/** Verdict stamped on this turn's row (only {@link PROSE_EVENT}); a second row would double per-turn totals. */
 	event?: string;
 }
 
-/** The turn currently in flight, or `undefined` between turns. */
 let inFlight: TurnAccumulator | undefined;
 
-/**
- * Why the correlation id is captured at `message_end` and not at `turn_end`.
- *
- * `currentCorrelationId()` returns the LAST id this module instance issued.
- * Between the assistant message and the end of the turn, tool execution runs —
- * and a tool (or a Phase 5 router, or a Phase 8 gate) may make a nested
- * `callModel` invocation, which issues its own id. Reading the id at `turn_end`
- * would therefore stamp the turn row with the nested call's correlation and
- * join the turn to bytes it never sent. Reading it at `message_end`, which
- * fires immediately after the provider response, captures the id of the request
- * that produced this very message.
- */
+/** Read at `message_end`, not `turn_end`: tools may make nested calls in between that issue their own id. */
 function captureCorrelationId(): string {
 	return currentCorrelationId() ?? UNCORRELATED;
 }
 
-/**
- * A `Model<Api>` standing in for an absent `ctx.model`, with ZERO cost rates.
- *
- * The rates are zero because there are none to read, not because the turn was
- * free — which is precisely why every row composed against this shape also
- * carries {@link MODEL_UNAVAILABLE_EVENT}. The identifying strings come from the
- * message itself, so the row still says which provider and model ran even when
- * the catalogue entry is gone.
- *
- * `contextWindow` and `maxTokens` are zero and unused: `calculateCost` reads
- * only `model.cost` [VERIFIED: pi-ai 0.84.1 src/models.ts:878-898].
- */
+/** Stand-in for an absent `ctx.model`; zero rates, so rows carry {@link MODEL_UNAVAILABLE_EVENT}. */
 function degradedModel(message: AssistantMessage): Model<Api> {
 	return {
 		id: message.model,
@@ -357,25 +116,9 @@ function degradedModel(message: AssistantMessage): Model<Api> {
 }
 
 /**
- * Wrap a handler so a throw leaves a row instead of vanishing.
- *
- * On catch it appends a turns-log row carrying {@link DIAGNOSTICS_ERROR_EVENT},
- * the handler's name in `where`, and `String(err)` passed through
- * {@link redactString} — an exception message can quote the input that caused
- * it, and that input may be a `.env` the model just read. [threat T-02-03-06]
- *
- * It returns `undefined` from the catch path and never rethrows. Rethrowing
- * would put the exception straight back into the swallowing path this wrapper
- * exists to escape, and several Pi hooks treat any non-`undefined` return as a
- * REPLACEMENT for the thing being hooked (`runner.ts:1031-1033`), so a wrapper
- * that invented a return value on failure could silently rewrite every provider
- * request. The success path's return value is passed through untouched with one
- * deliberate exception — `null` is coerced to `undefined`, see below — which is
- * what lets a hook with a real return contract be wrapped too.
- *
- * The write itself is inside a second `try`. If the log cannot be written there
- * is nothing further this code can do, and throwing from the error path would
- * be the original failure all over again.
+ * Wrap a handler so a throw leaves an error row instead of vanishing. Never rethrows and
+ * returns `undefined` on failure: several Pi hooks treat any other return as a replacement
+ * (runner.ts:1031-1033). The error text is redacted before logging.
  */
 export function safeHandler<E, R = undefined>(
 	where: string,
@@ -384,34 +127,8 @@ export function safeHandler<E, R = undefined>(
 	return async (event: E, ctx: ExtensionContext): Promise<R | undefined> => {
 		try {
 			const result = await fn(event, ctx);
-			// [WR-03R, reverting IN-07] `null` is NOT passed through. IN-07 removed this
-			// `??` on the stated grounds that "some Pi hooks distinguish null from
-			// undefined". That justification is FALSE, and I checked rather than reasoned:
-			// no event-result type in Pi declares `null` as meaningful, and the only
-			// documented `null` semantics in the whole extension API is a HEADER MAP VALUE
-			// meaning "delete this header"
-			// [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:511], which is not a
-			// return value at all.
-			//
-			// What removing it did cost is exact. `BeforeProviderRequestEventResult` is
-			// `unknown` [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:777], so
-			// `null` is a well-typed return from that hook, and the runner replaces on
-			// anything that is not `undefined`:
-			//
-			//     const handlerResult = await handler(event, ctx);
-			//     if (handlerResult !== undefined) { currentPayload = handlerResult; }
-			//     [VERIFIED: pi 0.84.1 dist/core/extensions/runner.js:789-792,
-			//      = src/core/extensions/runner.ts:1030-1033 via dist sourcesContent]
-			//
-			// and `currentPayload` is what is handed back to the adapter
-			// (`runner.js:806`). So a wrapped handler that returned `null` — `return match
-			// ?? null`, a mapped lookup that misses — would set the real outgoing request
-			// BODY to `null`. That is the single catastrophe `wire.ts:26-40` is organised
-			// around. The coercion costs nothing real and is the only thing standing
-			// between a `?? null` typo and every request in the harness being destroyed.
-			// `tests/unit/diagnostics-entry.test.ts` proves both halves: the coercion
-			// happens, and the coerced value does not reach `currentPayload` under the
-			// runner's own replacement rule. [threat T-02-05-03]
+			// `null` becomes `undefined`: a `null` from before_provider_request would replace the request body
+						// (dist/core/extensions/runner.js:789-792).
 			return (result ?? undefined) as R | undefined;
 		} catch (err) {
 			try {
@@ -423,7 +140,6 @@ export function safeHandler<E, R = undefined>(
 				});
 			} catch {
 				// The instrument cannot instrument its own inability to write.
-				// Swallow: a diagnostics failure must never take the session down.
 			}
 			return undefined;
 		}
@@ -431,9 +147,7 @@ export function safeHandler<E, R = undefined>(
 }
 
 export default function (pi: ExtensionAPI): void {
-	// Retention runs at session start: cheap, deterministic, off the hot path
-	// (RESEARCH §10.5). Later plans in this phase register the turn, prose and
-	// budget handlers on this same function.
+	// Retention runs at session start, off the hot path.
 	pi.on(
 		"session_start",
 		safeHandler<SessionStartEvent>("session_start", (_event, ctx) => {
@@ -446,37 +160,19 @@ export default function (pi: ExtensionAPI): void {
 		}),
 	);
 
-	// DIAG-01 / DIAG-07 — the three main-loop provider hooks.
-	//
-	// `safeHandler` and `noteRowWritten` are passed IN rather than imported by
-	// `wire.ts`: this file already imports that module, and an import back the
-	// other way would make the pair a cycle. Passing the counter explicitly is
-	// also what keeps there being exactly ONE counter, incremented by every
-	// append path — a counter only some paths increment reports a number that
-	// looks like a measurement and is not.
+	// `safeHandler` and `noteRowWritten` are passed in because an import back from wire.ts would be a cycle.
 	registerWireHooks(pi, safeHandler, noteRowWritten);
 
-	// DIAG-04 — the three turn hooks. See the module docstring for why the row
-	// is built from these and never from `after_provider_response`.
+	// Turn rows come from these hooks, never from `after_provider_response` (it does not fire on errors).
 
 	pi.on(
 		"turn_start",
 		safeHandler<TurnStartEvent>("turn_start", (event, ctx) => {
-			// A FRESH record, which is also how a stale message from a turn that
-			// somehow never ended is cleared: carrying one forward would attribute
-			// the previous turn's tokens and cost to this one.
+			// Fresh record: clears any stale message from a turn that never ended.
 			inFlight = {
-				// `timestamp` is `Date.now()` at emit
-				// [VERIFIED: pi 0.84.1 dist/core/agent-session.js:448-453], so the
-				// subtraction at `turn_end` is a real wall-clock latency. The
-				// fallback exists for a synthetic event in a unit harness, not for
-				// production.
+				// Fallback is for synthetic events in unit tests.
 				startedAt: typeof event.timestamp === "number" ? event.timestamp : Date.now(),
-				// The REQUESTED level, recorded here rather than at `turn_end`
-				// because that is when it was requested — and because Bedrock never
-				// reports a reasoning-token breakdown, so the request is the only
-				// thing about thinking a Bedrock row can honestly carry
-				// (RESEARCH §5.4, §5.5).
+				// Requested level, recorded now because Bedrock reports no reasoning breakdown.
 				thinkingLevel: ctx.thinkingLevel,
 			};
 		}),
@@ -485,9 +181,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on(
 		"message_end",
 		safeHandler<MessageEndEvent>("message_end", (event, ctx) => {
-			// `message_end` fires for user and toolResult messages too
-			// [pi 0.84.1 dist/core/extensions/types.d.ts:573], so the role check is
-			// what keeps a tool result from overwriting the turn's real message.
+			// `message_end` also fires for user and toolResult messages (types.d.ts:573).
 			if (event.message.role !== "assistant") {
 				return;
 			}
@@ -497,39 +191,21 @@ export default function (pi: ExtensionAPI): void {
 			turn.corr = captureCorrelationId();
 			inFlight = turn;
 
-			// DIAG-05 — the prose-tool-call effect. The predicate is `prose.ts`;
-			// everything from here down is what the harness DOES about it.
-			//
-			// The active-tool list comes from `pi.getActiveTools()` and is never
-			// hardcoded: `isProseToolCall` refuses on an empty list by design
-			// (gate 3), so a mis-wired call is a detector that reports 0% rather
-			// than one that reports 100% against a generic `\w+\(\{`.
+			// The active-tool list is live, never hardcoded: `isProseToolCall` refuses an empty list.
 			const activeTools = pi.getActiveTools();
 			if (!isProseToolCall(event.message, activeTools)) {
 				return;
 			}
 
-			// ALONGSIDE `stopReason`, NEVER INSTEAD OF IT. `composeTurnRow` writes
-			// both columns, so the row still says the provider stopped cleanly AND
-			// that this project judged the turn a prose tool call. RESEARCH §3.3 is
-			// explicit that the verdict sits next to the provider's own word: the
-			// mapping is an interpretation and the evidence for it must stay
-			// readable by someone who disagrees. [threat T-02-09-03]
+			// Verdict sits alongside `stopReason`, never instead of it, so the provider's word stays readable.
 			turn.event = PROSE_EVENT;
 
 			const sessionId = ctx.sessionManager.getSessionId();
-			// The tool the model MEANT to call. This is the column Phase 10 groups
-			// by, and it is read here rather than re-derived later because the
-			// active-tool list is a live value that may differ by the time anyone
-			// reads the log.
+			// Read now: the active-tool list may differ by the time anyone reads the log.
 			const tool = proseToolCallName(event.message, activeTools);
 
 			if (proseRetriesThisRun >= MAX_PROSE_RETRIES) {
-				// A SECOND PROSE RESPONSE IS A SIGNAL, NOT SOMETHING TO KEEP PAYING
-				// FOR (RESEARCH §6.6). Against a model that reliably writes prose an
-				// uncapped detector is an unbounded spend, and the loop would be
-				// invisible: every iteration looks like an ordinary extra turn.
-				// [threat T-02-09-02]
+				// Capped: an uncapped detector against a prose-prone model is unbounded spend.
 				writeTurnsRow(ctx.cwd, {
 					ts: Date.now(),
 					event: PROSE_EXHAUSTED_EVENT,
@@ -542,12 +218,7 @@ export default function (pi: ExtensionAPI): void {
 
 			proseRetriesThisRun += 1;
 
-			// AN IMMEDIATE RECORD, IN ADDITION TO THE VERDICT ON THE TURN ROW. The
-			// turn row is written later, by `turn_end`, and this record is what
-			// survives if that never happens — a handler that throws there is
-			// swallowed by Pi (runner.ts:861-870). It carries no `kind`, exactly
-			// like the `session_start` and `diagnostics.error` rows, so it is never
-			// counted as a turn: `kind:"turn"` is what a per-turn total sums over.
+			// Immediate record that survives if `turn_end` throws (runner.ts:861-870). No `kind`, so it is not counted as a turn.
 			writeTurnsRow(ctx.cwd, {
 				ts: Date.now(),
 				event: PROSE_EVENT,
@@ -556,39 +227,19 @@ export default function (pi: ExtensionAPI): void {
 				corr: turn.corr,
 			});
 
-			// `deliverAs` IS MANDATORY HERE. Inside `message_end` the agent is
-			// always streaming (`isIdle()` logged `false` in the research probe),
-			// and `AgentSession.prompt` throws "Agent is already processing" when
-			// no streaming behaviour is given [VERIFIED: pi 0.84.1
-			// agent-session.ts:1167-1172]. `followUp` resumes the SAME agent run at
-			// the loop's own resumption point [VERIFIED: pi-agent-core
-			// agent-loop.ts:262-268], so there is one `agent_end` for the pair and
-			// `/session` accounting stays coherent. `steer` would also be drained
-			// (agent-loop.ts:259) but means "interrupt", and the stream has already
-			// finished — a follow-up is the honest queue.
+			// `deliverAs` is mandatory: `prompt` throws mid-stream (agent-session.ts:1167-1172).
+						// `followUp` resumes the same run (pi-agent-core agent-loop.ts:262-268).
 			pi.sendUserMessage(PROSE_RETRY_PROMPT, { deliverAs: "followUp" });
 
-			// THIS HANDLER RETURNS NOTHING, AND THAT IS A CONTRACT, NOT A STYLE.
-			// A returned `{ message }` REPLACES the finalized message, and the
-			// replacement must keep the original role
-			// [VERIFIED: pi 0.84.1 src/core/extensions/types.ts:1097-1100]; the
-			// runner applies it by deleting every key on the live object and
-			// `Object.assign`-ing the replacement onto it
-			// (`agent-session.ts:710-724`), which the agent loop then reads back
-			// immediately (`pi-agent-core agent-loop.ts:350-352`). Diagnostics never
-			// replaces a message. The prose retry above is the one thing in this
-			// subsystem with a reason to want to, and it deliberately does not: the
-			// replacement path is how a regex-scraped argument becomes an executed
-			// tool call. See the promotion paragraph in the module docstring.
-			// [threats T-02-08-04, T-02-09-04]
+			// Returns nothing by contract: a returned `{ message }` replaces the finalized message
+						// (types.ts:1097-1100), which is how scraped prose would become an executed call.
 		}),
 	);
 
 	pi.on(
 		"turn_end",
 		safeHandler<TurnEndEvent>("turn_end", (event, ctx) => {
-			// Taken and cleared FIRST, so an exception below cannot leave a
-			// half-consumed accumulator to contaminate the next turn.
+			// Taken and cleared first so an exception cannot contaminate the next turn.
 			const turn = inFlight;
 			inFlight = undefined;
 
@@ -596,11 +247,7 @@ export default function (pi: ExtensionAPI): void {
 			const message = turn?.message;
 
 			if (message === undefined) {
-				// A VISIBLE HOLE, not a skipped append. Zero rows on a turn that
-				// really happened is the same picture as a dead instrument, and
-				// `rowsWrittenThisSession()` would still count this one — so
-				// `/budget` reports a number that matches the file.
-				// [threat T-02-08-02]
+				// A visible hole, not a skipped append: zero rows looks like a dead instrument.
 				writeTurnsRow(ctx.cwd, {
 					ts: Date.now(),
 					event: DIAGNOSTICS_ERROR_EVENT,
@@ -611,19 +258,10 @@ export default function (pi: ExtensionAPI): void {
 					toolResults: event.toolResults.length,
 				});
 			} else {
-				// `ctx.model` is `Model<any> | undefined`. When it is missing the row
-				// is still written — with zero rates and a marker saying so — because
-				// a missing row is worse than an honestly-degraded one.
+				// A missing model still writes a row, with zero rates and a marker.
 				const model = ctx.model as Model<Api> | undefined;
 
-				// TAKEN ONCE, HERE, AND NOWHERE ELSE. `call-model.ts`'s two
-				// `recordTurn` sites (the success path and the error path) never
-				// call `takeQualityCost()`: those produce `kind:"nested"` rows for a
-				// call that may itself BE a quality-layer contributor (the reviewer,
-				// the refute pass), and draining the accumulator there would empty
-				// it before this main-loop turn row is composed — the exact
-				// repudiation threat T-08-13 names. Only the turn that actually ends
-				// drains the ledger the whole turn accumulated.
+				// Drained only here: nested `recordTurn` sites must not empty the quality ledger before this row.
 				const qualityCost = takeQualityCost();
 
 				writeTurnsRow(
@@ -635,58 +273,25 @@ export default function (pi: ExtensionAPI): void {
 						corr: turn?.corr ?? captureCorrelationId(),
 						message,
 						model: model ?? degradedModel(message),
-						// `startedAt` falls back to now only when `turn_start` never
-						// ran, which yields 0 rather than a fabricated duration.
+						// Falls back to now only if `turn_start` never ran, giving 0 rather than a fabricated duration.
 						latencyMs: Date.now() - (turn?.startedAt ?? Date.now()),
 						turnIndex: event.turnIndex,
 						toolResults: event.toolResults.length,
 						thinkingLevel: turn?.thinkingLevel,
 						qualityMs: qualityCost?.qualityMs,
 						qualityTokens: qualityCost?.qualityTokens,
-						// `composeTurnRow` omits the key when this is undefined, so a
-						// healthy row carries no `event` at all.
-						//
-						// PRECEDENCE, AND WHY THIS WAY ROUND. `event` is one string and
-						// two things want it: the degraded-cost marker, and the prose
-						// verdict `message_end` stamped on the accumulator. The marker
-						// wins, because losing it means a fabricated zero cost enters a
-						// Phase 8 spend total with nothing anywhere saying so
-						// [threat T-02-08-05]. Losing the prose verdict here costs less:
-						// `message_end` left a standalone record for this turn either
-						// way — carrying PROSE_EVENT if a retry was issued, or
-						// PROSE_EXHAUSTED_EVENT if the budget was already spent — so the
-						// turn is still visible, just not in the rate's numerator.
-						// [WR-01R] That is a real hole in the numerator and it is why
-						// RB-02-03 carries the reconciliation identity "retries issued +
-						// retries refused = prose turn rows": this is the one case where
-						// the two sides disagree, and the runbook says so rather than
-						// leaving the operator to discover it.
+						// The degraded-cost marker wins over the prose verdict: losing it would hide a fabricated zero cost.
+												// The prose verdict is still recorded by the standalone `message_end` record.
 						event: model === undefined ? MODEL_UNAVAILABLE_EVENT : turn?.event,
 					}),
 				);
 			}
-			// No `return` anywhere in this handler, and none in the two above it.
-			// Pi ignores what `turn_start` and `turn_end` return, but the shape is
-			// kept identical to `message_end` — where a return value is a
-			// REPLACEMENT — so a reader never has to remember which is which.
-			// `tests/unit/wire-nonmutating.test.ts` asserts the value, rather than
-			// trusting this comment.
+			// No `return` in these handlers; wire-nonmutating.test.ts asserts it.
 		}),
 	);
 
-	// DIAG-05 — the retry budget is per agent RUN, so it is reset here.
-	//
-	// Registered last and fired first: Pi emits `agent_start` before the run's
-	// first `turn_start`, and registration order across different events has no
-	// bearing on emission order. It sits at the bottom so the whole prose effect
-	// reads in one place — the detector and the cap in `message_end` above, the
-	// reset here — rather than being spliced into the DIAG-04 block.
-	//
-	// It goes through `safeHandler` like everything else. A reset that threw and
-	// vanished would leave the counter at its cap forever, and the symptom would
-	// be a detector that logs `prose_tool_call_retry_exhausted` on every single
-	// prose turn and never retries once — a plausible-looking log with no error
-	// in it anywhere.
+	// Retry budget is per agent run, so it resets here. Goes through `safeHandler`: a silent
+		// failure would leave the counter at its cap forever.
 	pi.on(
 		"agent_start",
 		safeHandler<AgentStartEvent>("agent_start", () => {
@@ -694,16 +299,6 @@ export default function (pi: ExtensionAPI): void {
 		}),
 	);
 
-	// DIAG-06 — `/budget`, the only registration in this subsystem that is not a
-	// hook. It reports the system-prompt decomposition, the active tool schemas,
-	// the provider-reported cache-read-versus-input figures, and
-	// `rowsWrittenThisSession()` — so a session that recorded nothing says so on
-	// screen instead of leaving a reader to infer it from a file they never
-	// opened (RESEARCH Pitfall 5). [threat T-02-10-04]
-	//
-	// Both counters are passed IN for the same reason `registerWireHooks` takes
-	// them: this file imports `budget.ts`, and an import back the other way would
-	// make the pair a cycle. It also keeps there being exactly ONE counter, which
-	// is what makes the printed number match the file.
+	// `/budget` is the only non-hook registration. Counters are passed in to avoid an import cycle.
 	registerBudgetCommand(pi, rowsWrittenThisSession, noteRowWritten);
 }
