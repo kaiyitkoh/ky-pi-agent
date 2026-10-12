@@ -1,55 +1,12 @@
 /**
- * SAFE-14 — the ALLOW-and-BLOCK audit row writer.
- *
- * A thin binding over `.pi/lib/jsonl.ts`, exactly like
- * `.pi/extensions/diagnostics/jsonl.ts`. Imports NOTHING from
- * `.pi/extensions/diagnostics/` — CONTEXT.md decision 7 ("`safety/` imports
- * nothing from routing or workflows... source-reviewable in isolation") is
- * the reason the shared writer moved to a neutral `.pi/lib/` location in the
- * first place; this file is where that decision gets exercised rather than
- * just stated.
- *
- * DECISION TAKEN HERE (flagged plan-time in 04-PATTERNS.md): this binding does
- * NOT import `safeHandler` from `diagnostics/index.ts`, even though
- * `providers/index.ts` established that reuse as acceptable elsewhere in this
- * project. Decision 7's "source-reviewable in isolation" is the stricter
- * reading, and it is the one a security reviewer needs for code that sits in
- * the credential and command-execution path. Plan 08 defines a minimal local
- * equivalent inside `safety/index.ts` if one turns out to be needed there.
- *
- * WHY `writeAuditRow` NEVER THROWS. An audit write that fails must not turn a
- * BLOCK into an ALLOW: if the caller's control flow depended on `writeAuditRow`
- * succeeding before executing (or refusing) a command, an unhandled exception
- * here could bypass the guard decision entirely, which is a strictly worse
- * outcome than an unrecorded one. So failures are caught and reported as
- * `undefined`, never rethrown. [threat T-04-15, disposition: accept]
- *
- * THE RESIDUAL RISK, STATED RATHER THAN HIDDEN. A silently-unwritten audit log
- * is real: if `writeAuditRow` starts failing on every call, nothing here makes
- * that loud. Two compensating controls exist elsewhere rather than in this
- * file: Plan 10's concurrency/liveness proof, and the SAFE-12 subagent test,
- * which reads this log as its evidence and would itself go red on an empty
- * file.
- *
- * BOUNDARY RULE (BOOT-10). This module registers nothing. It does not spell
- * the tool-registration call, in code or in prose —
- * `tests/unit/contributing-boundary.test.ts` matches that name as a plain
- * substring across every tracked source under `.pi/extensions/`.
+ * Allow-and-block audit row writer over .pi/lib/jsonl.ts; imports nothing from diagnostics/ so safety/ is reviewable in isolation.
+ * writeAuditRow NEVER THROWS: a failed write must not become an exception that bypasses the guard decision.
+ * A silently failing log is a residual risk, covered by the concurrency and subagent tests that read this log as evidence.
  */
 import { appendJsonl, pruneLogs } from "../../lib/jsonl.ts";
 import { AUDIT_LOG_BASE, AUDIT_ROTATE_BYTES, type AuditRow, type AuditVerdict } from "./schema.ts";
 
-/**
- * What a caller supplies to {@link writeAuditRow}.
- *
- * `ts` and `pid` are OPTIONAL and exist only for deterministic tests — in
- * production use they default to `Date.now()` and `process.pid`. Deliberately
- * NOT a `Partial<AuditRow>` or a spread of the caller's object into the
- * written row: {@link writeAuditRow} assigns each field by name, so an extra
- * key on a caller's object (tool output, file contents, anything not in
- * {@link AuditRow}) can never reach the file even if TypeScript's structural
- * typing lets a wider object satisfy this interface at a call site.
- */
+/** Input to writeAuditRow. ts/pid exist for deterministic tests. The row is built field-by-field, never spread, so extra caller keys cannot reach the file. */
 export interface AuditRowInput {
 	event: string;
 	tool: string;
@@ -57,28 +14,18 @@ export interface AuditRowInput {
 	cwd: string;
 	verdict: AuditVerdict;
 	reason: string;
-	/** Injected clock, for deterministic tests. Defaults to `Date.now()`. */
 	ts?: number;
-	/** Injected pid, for deterministic tests. Defaults to `process.pid`. */
 	pid?: number;
 	/** Parent tool call id for nested calls (Pi 1.x `parentToolCallId`). Omitted from the row when undefined. */
 	parentToolCallId?: string;
 }
 
-/** Options accepted by {@link writeAuditRow}. */
 export interface WriteAuditRowOptions {
-	/** Which dated file this row lands in. Defaults to `new Date()`. */
 	now?: Date;
-	/** Size cap in bytes. Defaults to {@link AUDIT_ROTATE_BYTES}. */
 	rotateBytes?: number;
 }
 
-/**
- * WR-04: minimal, local secret redaction for audit text (safety/ imports nothing from
- * diagnostics/, so the shared redactor is deliberately not reused). Replaces the VALUE of
- * obvious credential shapes with `[REDACTED]`; the command shape stays readable. Best effort,
- * not a guarantee -- the log is also gitignored.
- */
+/** Local secret redaction (safety/ must not import diagnostics/): masks credential values, keeps the command shape. Best effort. */
 const SECRET_PATTERNS: readonly [RegExp, string][] = [
 	[/\b(AKIA|ASIA)[0-9A-Z]{16}/g, "[REDACTED]"],
 	[/\bsk-[A-Za-z0-9_-]{16,}/g, "[REDACTED]"],
@@ -96,14 +43,7 @@ export function redactSecrets(text: string): string {
 	return out;
 }
 
-/**
- * Append one audit row — allow or block — to `<cwd>/.pi/logs/audit-*.jsonl`.
- *
- * Returns the absolute path written on success, or `undefined` on failure.
- * NEVER THROWS — see the module docstring for why. The row is built
- * field-by-field from `input`, never spread, so nothing outside the
- * {@link AuditRow} shape can reach the file.
- */
+/** Append one audit row to <cwd>/.pi/logs/audit-*.jsonl; returns the path, or undefined on failure. NEVER THROWS. */
 export function writeAuditRow(
 	cwd: string,
 	input: AuditRowInput,
@@ -129,32 +69,18 @@ export function writeAuditRow(
 			now: opts.now,
 		});
 	} catch {
-		// A failed write is reported as `undefined`, never rethrown. See the
-		// module docstring: a throw here could let an audit failure short-circuit
-		// the caller's own guard logic, turning a BLOCK into an unhandled
-		// exception that reaches production code expecting a normal return.
+		// Never rethrown: a throw here could bypass the caller's guard logic.
 		return undefined;
 	}
 }
 
-/** Options accepted by {@link pruneAuditLogs}. */
 export interface PruneAuditLogsOptions {
-	/** Rotated files kept per dated stream. Defaults to the shared writer's own default. */
 	maxRotated?: number;
-	/** Days of history kept. Defaults to the shared writer's own default. */
 	retentionDays?: number;
-	/** Injected clock, for deterministic tests. */
 	now?: Date;
 }
 
-/**
- * Delete aged audit logs, scoped to {@link AUDIT_LOG_BASE} only.
- *
- * `wire-*`, `turns-*` and anything else under `.pi/logs/` are untouched no
- * matter what this call is given, because `ownedBases` is injected here
- * rather than accepted from the caller — the same ownership-not-shape rule
- * `diagnostics/jsonl.ts`'s `pruneLogs` binding follows. [threat T-04-14]
- */
+/** Delete aged audit logs, scoped to AUDIT_LOG_BASE via an injected ownedBases so wire-* and turns-* are never touched. */
 export function pruneAuditLogs(cwd: string, opts: PruneAuditLogsOptions = {}): string[] {
 	return pruneLogs(cwd, { ...opts, ownedBases: [AUDIT_LOG_BASE] });
 }
