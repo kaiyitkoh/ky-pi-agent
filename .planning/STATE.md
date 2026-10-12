@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-12T19:42:09.413Z"
+status: ready_to_plan
+stopped_at: Phase 9 complete (17/17) — ready to discuss Phase 12
+last_updated: 2026-10-12T21:38:34.584Z
 last_activity: 2026-10-12
 progress:
   total_phases: 14
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 08.2 — comment-discipline-agents-md
+**Current focus:** Phase 12 — openspec opt in skill
 
 ## Current Position
 
-Phase: 08.2 (comment-discipline-agents-md) — EXECUTING
-Plan: 13 of 13
-Status: Phase complete — ready for verification
+Phase: 12
+Plan: Not started
+Status: Ready to plan
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
@@ -49,7 +49,7 @@ credentials can do has been done".
 
 **Velocity:**
 
-- Total plans completed: 67
+- Total plans completed: 84
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -64,6 +64,7 @@ credentials can do has been done".
 | 05 | 12 | - | - |
 | 06 | 4 | - | - |
 | 08.1 | 7 | - | - |
+| 9 | 17 | - | - |
 
 **Recent Trend:**
 

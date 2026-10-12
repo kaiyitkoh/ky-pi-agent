@@ -27,7 +27,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 8: Quality Gates & Engineering Quality** - Deterministic gates first, then a reviewer that cannot rubber-stamp, calibrated against seeded defects (completed 2026-08-15)
 - [x] **Phase 08.1: Pi 1.x Upgrade & Install Health** (INSERTED) - Re-pin to Pi 1.1.0, migrate tests/diagnostics, guard new tool paths, re-review composed extensions (completed 2026-10-12)
 - [x] **Phase 08.2: Comment Discipline & AGENTS.md** (INSERTED) - AGENTS.md comment rules shipped by the harness, ID-in-comment check, cleanup pass (completed 2026-10-12)
-- [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
+- [x] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main` (completed 2026-10-12)
 - [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
 - [ ] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost
@@ -617,7 +617,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
-| 9. Ceremonial Workflows | 17/17 | In Progress|  |
+| 9. Ceremonial Workflows | 17/17 | Complete    | 2026-10-12 |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
 | 11. Terminal UI | 0/TBD | Not started | - |
 
