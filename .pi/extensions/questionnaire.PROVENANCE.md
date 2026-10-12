@@ -51,3 +51,7 @@ The vendoring header at the top of `questionnaire.ts` itself. Nothing else.
 `tests/unit/vendor-license-audit.test.ts`, `tests/unit/extension-composition.test.ts`,
 `tests/unit/tool-count-baseline.test.ts` (measured schema cost: 1258 bytes /
 315 tokens), `tests/unit/extension-layout.test.ts`.
+
+## Re-checked against Pi 1.1.0 (Phase 08.1)
+
+Date: 2026-10-13. Upstream `examples/extensions/questionnaire.ts` at 1.1.0: SHA-256 `3f1f719d81152ff013f5d36a97cc3976388d43f2d89bff0f19827d3443d903e6` - unchanged at 1.1.0. No hunk ported.

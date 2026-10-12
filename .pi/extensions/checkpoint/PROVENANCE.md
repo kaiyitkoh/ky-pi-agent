@@ -82,3 +82,10 @@ future reader comparing against upstream will find nothing to compare:
 `tests/integration/git-checkpoint.test.ts` (6 cases against real temp
 repositories), `tests/unit/checkpoint-store.test.ts` (17 cases),
 `tests/unit/vendor-license-audit.test.ts`, `tests/unit/workflow-budgets.test.ts`.
+
+## Re-checked against Pi 1.1.0 (Phase 08.1)
+
+Date: 2026-10-13. Upstream `examples/extensions/git-checkpoint.ts` at 1.1.0:
+SHA-256 `b60c85f797091a1f21ccb2a998027c6229fe995bdd62dbb1cdcc22946768f40b` (recorded 0.84.1: `cd8741c9...e188`) - CHANGED.
+
+Classification: (b) upstream preference, not ported. The upstream change moved its checkpoint trigger from `agent_end` to `agent_settled`. The vendored copy never used `agent_end`; it hooks tool_result, turn_start and session_before_fork, all present in the 1.1.0 event union. No hunk ported. Recorded 0.84.1 hash untouched.

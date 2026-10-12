@@ -98,3 +98,14 @@ repository whose entire safety posture is built on not doing this.
 - `tests/unit/plan-mode-read-only.test.ts` — deviations 4 and 5, both
   falsified against the pre-fix code.
 - `tests/unit/extension-composition.test.ts`, `tests/unit/tool-count-baseline.test.ts`.
+
+## Re-checked against Pi 1.1.0 (Phase 08.1)
+
+Date: 2026-10-13. Upstream 1.1.0 bytes, hashed from the installed package:
+
+| Upstream file | SHA-256 (1.1.0) | Result |
+|---|---|---|
+| `examples/extensions/plan-mode/index.ts` | `90fae53e2fada97165f7488520bd54f3cbfe5d2c7e4cfd3bd2aa07ee796e61e8` | unchanged at 1.1.0 |
+| `examples/extensions/plan-mode/utils.ts` | `12ea28d57cc55e68e8d52a2f1d16df8b2e7f2749cd694d41453028002a2bdad9` | unchanged at 1.1.0 |
+
+Events used (tool_call, context, before_agent_start, turn_end, agent_end, session_start) all exist in the 1.1.0 event union. No hunk ported. Recorded 0.84.1 hashes above are untouched.

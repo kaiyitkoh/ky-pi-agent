@@ -55,3 +55,7 @@ to the capability EXT-05 names (plan 07-07's recorded decision).
 `tests/unit/vendor-license-audit.test.ts`, `tests/unit/extension-composition.test.ts`,
 `tests/unit/tool-count-baseline.test.ts` (measured schema cost: 383 bytes / 96
 tokens), `tests/unit/extension-layout.test.ts`.
+
+## Re-checked against Pi 1.1.0 (Phase 08.1)
+
+Date: 2026-10-13. Upstream `examples/extensions/todo.ts` at 1.1.0: SHA-256 `e46824d00217e25242c186d41837cc84ca81b23f978500323448502a9a424ee2` - unchanged at 1.1.0. Events used (session_start, session_tree) exist in 1.1.0. No hunk ported.

@@ -269,3 +269,7 @@ per decision D-07-D (`docs/EXTENSIONS.md`, "Vendored, not depended on"
 section) and `tests/unit/extension-layout.test.ts`'s `NESTED_INDEX` regex
 (`^\.pi\/extensions\/[^/]+\/index\.ts$`), which matches only one directory
 level. No file was created under `.pi/extensions/vendor/`.
+
+## Re-checked against Pi 1.1.0 (Phase 08.1)
+
+Date: 2026-10-13. `npm view pi-loop-police versions time` result: latest published is 1.14.1 (2026-08-11), the vendored version; no newer release exists, so there is nothing to upgrade to. Events used (agent_start, turn_start, message_update, message_end, context, tool_call) all exist in the 1.1.0 union; typecheck and the loop-police hook-egress test pass against 1.1.0. No change.
