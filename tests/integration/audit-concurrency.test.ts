@@ -15,7 +15,7 @@
  * narrower claim than "the shipped `appendJsonl`/`writeAuditRow` writer is
  * safe under concurrency". A rewrite of `appendJsonl` that held a stream open
  * and lost every post-rotation record would have stayed GREEN here under the
- * old hand-rolled shape, which is precisely the hazard `.pi/lib/jsonl.ts:52-58`
+ * old hand-rolled shape, which is precisely the hazard `.pi/lib/jsonl.ts`'s header
  * says this test exists to rule out.
  *
  * `writeAuditRow(cwd, row, opts)` resolves the live file path itself (via

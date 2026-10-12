@@ -59,15 +59,19 @@ export function lineMetrics(raw: string): { comment: number; code: number } {
 
 export const ID_PATTERN = new RegExp(
 	String.raw`\b(?:` +
-		String.raw`[A-Z][A-Z0-9]{0,5}-\d{1,3}(?:\.\d+)?(?:-\d{1,3})?` +
+		String.raw`[A-Z][A-Z0-9]{0,5}-\d{1,4}(?:\.\d+)?(?:-\d{1,3})?` +
+		String.raw`|D-[A-Z]` +
+		String.raw`|(?:cr|wr|bl|in|ev)\d?-\d{2}` +
 		String.raw`|(?:[Pp]hase|[Pp]lan|[Ii]teration)\s+\d+(?:\.\d+)?(?:-\d+)?` +
 		String.raw`|\d{2}(?:\.\d)?-(?:\d{2}-)?(?:RESEARCH|REVIEW|CONTEXT|PLAN|SUMMARY|VERIFICATION|UAT)` +
-		String.raw`)\b`,
+		String.raw`)\b` +
+		String.raw`|(?<![\w.])\d{2}\.\d-\d{2}\b` +
+		String.raw`|(?<![\w&])#\d{3,}\b`,
 	"g",
 );
 
 /** Extend only with evidence of a real false positive. */
-export const NON_ID_TOKENS = /^(?:UTF-8|UTF-16|SHA-1|SHA-256|SHA-512|AES-256|ISO-8601|HTTP-2|GPT-\d|TLS-1)$/;
+export const NON_ID_TOKENS = /^(?:UTF-8|UTF-16|SHA-1|SHA-256|SHA-512|AES-256|ISO-8601|HTTP-2|GPT-\d|TLS-1|CVE-\d{4})$/;
 
 export function findIdTokens(commentText: string): string[] {
 	ID_PATTERN.lastIndex = 0;
@@ -114,13 +118,17 @@ export function findUnversionedCitations(commentText: string, repoFiles: readonl
 	return [...commentText.matchAll(ANY_LINE_CITATION)].map((m) => m[0]).filter((c) => !repo.has(c));
 }
 
+/** Authored runtime code: every extension plus the shared `.pi/lib` modules they import. */
+export const AUTHORED_ROOTS: readonly string[] = [".pi/extensions", ".pi/lib"];
+
 export function authoredFiles(): string[] {
-	return trackedFiles(".pi/extensions")
+	return AUTHORED_ROOTS.flatMap((root) => trackedFiles(root))
 		.filter((p) => p.endsWith(".ts") && !isExempt(p))
 		.sort();
 }
 
 export function subsystemOf(path: string): string {
+	if (path.startsWith(".pi/lib/")) return "lib";
 	return path.slice(".pi/extensions/".length).split("/")[0];
 }
 

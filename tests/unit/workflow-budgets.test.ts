@@ -560,7 +560,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/lib",
-		budget: 840,
+		budget: 660,
 		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs no longer filters to `.pi/extensions/` " +
 			"only -- `.pi/lib/jsonl.ts` is imported (via `../../lib/jsonl.ts`) by quality/index.ts (indirectly, " +
 			"through .pi/lib/win-quote.ts's own CR2-01 wiring), routing/index.ts, safety/audit.ts and " +
@@ -577,7 +577,10 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"in this phase's later plans will import -- it counts toward this total per WR-03's whole-directory " +
 			"discipline even though it is imported by test files only today (its production consumers do not " +
 			"exist until plans 09-08/10/13/15). Measured 839 raw lines across 3 files 2026-08-15 (jsonl.ts 606, " +
-			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten",
+			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten. LOWERED 840 -> 660 by the " +
+			"08.2 review fix WR-07: .pi/lib joined the comment-discipline gate and its history/ID comments were " +
+			"condensed. Re-measured 655 raw lines on 2026-10-13 (jsonl.ts 497, win-quote.ts 67, " +
+			"work-artifacts.ts 91), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/grill",

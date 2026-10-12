@@ -1,123 +1,20 @@
 /**
- * Generic append-only JSONL writer with size-based rotation and dated
- * retention. Owned base names and per-stream size caps are the caller's
- * business; this module knows nothing about which subsystem is calling it.
+ * Append-only JSONL writer with size-based rotation and dated retention, shared by diagnostics and safety.
+ * Lives in `.pi/lib/` because `safety/` may import nothing from `diagnostics/`, and Pi auto-discovers only `.pi/extensions`.
  *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE EXISTS, AND WHY IT LIVES OUTSIDE `.pi/extensions/`
- * ---------------------------------------------------------------------------
- * Phase 2 built and hardened this writer inside `.pi/extensions/diagnostics/
- * jsonl.ts`: rotation races, path-confinement falsification (`..` slips past
- * containment, `wire/../../evil` slips past a loosened allowlist — each catches
- * inputs the other does not) and a four-concurrent-process append proof all
- * happened against that file. Phase 4's safety audit log (SAFE-14) needs the
- * SAME hardened writer, not a second one written under time pressure — but
- * `safety/` may import nothing from `diagnostics/` (CONTEXT.md decision 7: the
- * credential/exec path must be source-reviewable in isolation). So the generic
- * machinery moved here, to a location neither subsystem owns, and both
- * `diagnostics/jsonl.ts` and `safety/audit.ts` bind to it instead of to each
- * other.
+ * `appendFileSync` only, never a stream: a held descriptor keeps writing into the file rotation renamed away.
+ * The stream constructor is deliberately not spelled here, so jsonl-append-only.test.ts can grep for it.
+ * Rename-based rotation needs no lock: four concurrent appending processes lost no record (verified on
+ * Windows, node 24.16.0; macOS unverified; POSIX `O_APPEND` atomicity for very large writes is not guaranteed).
+ * `withFileMutationQueue` is not used: its state is per process (pi 1.1.0 `core/tools/file-mutation-queue.ts:4`)
+ * and subagents are separate processes.
  *
- * `.pi/lib/` is deliberately NOT under `.pi/extensions/`: `package.json`'s
- * `pi.extensions` is `["./.pi/extensions"]` only, so Pi never tries to
- * auto-discover this directory as an extension, and
- * `tests/unit/extension-layout.test.ts`'s BOOT-05 shape assertion never has to
- * be scoped around it.
- *
- * ---------------------------------------------------------------------------
- * The rule, stated up front: `appendFileSync` only, never a buffered stream
- * ---------------------------------------------------------------------------
- * The `node:fs` stream constructor is deliberately NOT spelled anywhere in this
- * file, exactly the way `harness/index.ts` refuses to spell the
- * tool-registration call. A plain-substring grep over this file for that
- * constructor is the mechanical proof that no stream is opened here, and naming
- * it in a warning would turn that proof into a permanent false positive —
- * blocker B3's lesson, which this repo has already paid for twice. So: the rule
- * is written out in words, and the check stays live.
- *
- * THAT GREP IS `tests/unit/jsonl-append-only.test.ts`. It bans four routes to a
- * held or buffered descriptor — the stream factory, the stream class, the raw
- * descriptor opener, and the callback-form append whose asynchrony lets two writes
- * interleave inside one line — across every tracked source that can now write a
- * log: `.pi/extensions/diagnostics`, `.pi/lib` and `.pi/extensions/safety`. It
- * proves each pattern against an inline offending fixture and asserts this file
- * still contains the SYNCHRONOUS append, so gutting the writer cannot turn the
- * gate green by leaving nothing to object to.
- *
- * Four concurrent Node processes appending ~950 B records to one shared file
- * produced 6000 of 6000 lines with zero unparseable records, and `renameSync`
- * on that file succeeded with an append handle open in this process and in a
- * child [VERIFIED: executed 2026-08-13, win32, node v24.16.0 — RESEARCH §10.3].
- * Rename-based rotation of a single shared file is therefore viable and needs
- * no lock file.
- *
- * That result depends entirely on open-write-close per record. A held file
- * descriptor keeps writing into the file that was renamed away, so every record
- * after a rotation would land in the rotated file and be lost from the live
- * one. `appendFileSync` opens, writes and closes per call, which narrows that
- * window to a single write. **Never introduce a stream here.**
- *
- * Two caveats recorded rather than hidden: the concurrency evidence was
- * executed on Windows only — the macOS leg belongs to CI's `macos-latest` job,
- * which is itself BOOT-07 OUTSTANDING — and POSIX `O_APPEND` atomicity for very
- * large single writes is not formally guaranteed.
- *
- * ---------------------------------------------------------------------------
- * Why `withFileMutationQueue` is deliberately not used
- * ---------------------------------------------------------------------------
- * Pi exports it (`src/index.ts`), but its state is a module-level `Map`
- * inside one process (pi 1.1.0 `core/tools/file-mutation-queue.ts:4`). Subagents are
- * separate `pi` child processes, so it serialises nothing across them — the
- * only case that matters here. Its real purpose is stopping our writes racing
- * the built-in `edit`/`write` tools on a path they share, and nothing else
- * touches these logs. RESEARCH §10.3 proved the shared file needs no lock.
- *
- * ---------------------------------------------------------------------------
- * Path discipline
- * ---------------------------------------------------------------------------
- * Every path is built from the caller's `cwd` plus Pi's exported
- * `CONFIG_DIR_NAME` plus {@link LOG_DIR_SEGMENT}, joined with `node:path.join`
- * — never a hardcoded `.pi`, never string concatenation (the Windows rule in
- * CLAUDE.md). A `base` is validated against a strict character allowlist and
- * the resolved file is asserted to sit inside `logDir(cwd)` before anything is
- * written, so no path can be steered out of the log directory by a caller —
- * and no path is ever built from model-supplied input. [threats T-02-03-01,
- * T-02-03-07]
- *
- * Rotation and prune touch existing paths, so both check `lstatSync` and skip
- * anything that is not a regular file: a symlink planted in the log directory
- * must not become a rename target or an unlink victim. [threat T-02-03-02]
- *
- * ---------------------------------------------------------------------------
- * Ownership, not shape — {@link PruneOptions.ownedBases} is REQUIRED
- * ---------------------------------------------------------------------------
- * `LOG_DIR_SEGMENT` is `"logs"` — the most obvious name any extension would pick
- * under Pi's config dir — and this project composes roughly eleven third-party
- * extensions, several of which keep durable state (`pi-background-tasks`,
- * `@juicesharp/rpiv-todo`), on top of its own diagnostics and safety streams.
- * {@link pruneLogs} takes its owned base names from the CALLER, with no default
- * and no shared hardcoded list: a shared list would let the diagnostics binding
- * delete the audit log or vice versa, which is precisely the ownership-not-shape
- * rule the original `diagnostics/jsonl.ts` docstring stated. Each binding
- * (`diagnostics/jsonl.ts`, `safety/audit.ts`) supplies its OWN base names.
- * [threat T-04-14]
- *
- * ---------------------------------------------------------------------------
- * The jiti duplicate-module-instance hazard, and why module state lives on
- * `globalThis`
- * ---------------------------------------------------------------------------
- * Pi loads each extension through jiti, which keeps its own module registry.
- * Two module instances of THIS file — one reached through
- * `diagnostics/jsonl.ts`, one through `safety/audit.ts` — would otherwise keep
- * two separate `sizeCache` maps and two separate `produced` sets, and
- * `logs-gitignored.test.ts` reads `producedPaths()` expecting ONE process-wide
- * view. This is the same class of hazard `.pi/extensions/diagnostics/index.ts`
- * already documents and fixes for its own rows-written counter (see
- * `diagnostics/index.ts#ROWS_WRITTEN_KEY`): a module-level `let`/`Map`/`Set` is
- * per JITI INSTANCE, not per process, so both pieces of mutable state here are
- * kept in a `globalThis`-keyed slot instead. That makes the state genuinely
- * per-process regardless of how many times this file is loaded through
- * different import graphs.
+ * Paths are `cwd` + `CONFIG_DIR_NAME` + {@link LOG_DIR_SEGMENT}; a `base` is allowlisted and the resolved file must
+ * sit inside `logDir(cwd)`. Rotation and prune skip anything that is not a regular file, so a planted symlink is
+ * never renamed or unlinked. {@link pruneLogs} takes owned base names from the caller with no default, so one
+ * binding can never delete another's logs.
+ * Mutable state lives on `globalThis` because jiti can load this file twice through different import graphs
+ * (same hazard as `diagnostics/index.ts#ROWS_WRITTEN_KEY`).
  */
 import {
 	appendFileSync,
@@ -150,7 +47,7 @@ const EXT = ".jsonl";
 /**
  * Rotated files kept per stream, per day, when a caller does not override it.
  *
- * Matches the value Phase 2 proved in production (`diagnostics/schema.ts`'s
+ * Matches the production value (`diagnostics/schema.ts`'s
  * `MAX_ROTATED_FILES`): 10 x a stream's own cap bounds a bad day at a fixed
  * multiple of the per-file size. A binding that wants a different bound passes
  * its own `maxRotated`.
@@ -160,7 +57,7 @@ const DEFAULT_MAX_ROTATED_FILES = 10;
 /**
  * Days of history kept, when a caller does not override it.
  *
- * Matches Phase 2's proven value (`diagnostics/schema.ts`'s `RETENTION_DAYS`):
+ * Matches the production value (`diagnostics/schema.ts`'s `RETENTION_DAYS`):
  * long enough to answer "was last week different?", short enough that a
  * working tree in a public repo never accumulates months of log bodies.
  */
@@ -327,19 +224,13 @@ function escapeForRegExp(literal: string): string {
  * Highest index first, so no rename ever overwrites a file that has not been
  * moved yet. Indices at or beyond `maxRotated` are unlinked — including any
  * stragglers left by a previously larger cap — so the on-disk count is bounded
- * by the current setting rather than by whatever it used to be. [threat
- * T-02-03-03]
+ * by the current setting rather than by whatever it used to be.
  *
  * Nothing here follows a symlink: every candidate is checked with `lstatSync`
- * and skipped unless it is a regular file. [threat T-02-03-02]
+ * and skipped unless it is a regular file.
  *
- * TAKES `cwd` SO IT CAN BE CONFINED LIKE ITS SIBLINGS. This is a public export
- * that performs `readdirSync`, `renameSync` and `unlinkSync` relative to whatever
- * directory it derives from `file`. `logPath` validates its `base` against
- * `BASE_RE` and runs {@link assertInsideLogDir}, and `appendJsonl` goes through
- * `logPath` — so without this the module docstring's claim ("the resolved
- * file is asserted to sit inside `logDir(cwd)` before anything is written") was
- * simply untrue for one of the two exported writers. [threat T-02-03-07]
+ * Takes `cwd` so it is confined like `logPath`: it reads, renames and unlinks
+ * relative to `file`'s directory, so `file` must sit inside `logDir(cwd)` too.
  */
 export function rotate(cwd: string, file: string, maxRotated: number = DEFAULT_MAX_ROTATED_FILES): void {
 	// The same second line of defence `logPath` applies, for the entry point a
@@ -509,7 +400,7 @@ function ageInDays(stamp: { y: number; m: number; d: number }, now: Date): numbe
  * SCOPE. Only files whose base name is in `opts.ownedBases` are considered at
  * all. `.pi/logs/` is a directory shared with whatever else picks the same
  * obvious name, and a retention rule that deleted by NAME SHAPE would quietly
- * destroy another component's state. [threat T-02-03-02, T-04-14]
+ * destroy another component's state.
  */
 export function pruneLogs(cwd: string, opts: PruneOptions): string[] {
 	const dir = logDir(cwd);
@@ -547,7 +438,7 @@ export function pruneLogs(cwd: string, opts: PruneOptions): string[] {
 		}
 		const path = join(dir, name);
 		// Not a regular file: a symlink or directory shaped like a log name is
-		// never followed and never unlinked. [threat T-02-03-02]
+		// never followed and never unlinked.
 		if (!isRegularFile(path)) {
 			continue;
 		}

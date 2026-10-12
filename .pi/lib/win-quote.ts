@@ -1,22 +1,8 @@
 /**
  * One Windows argument quoter, for the one Windows hazard.
  *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE LIVES OUTSIDE `.pi/extensions/`
- * ---------------------------------------------------------------------------
- * CR2-01 (`08-REVIEW.md` iteration 2): `quality/index.ts#productionExec`
- * originally called `spawnSync(bin, args, {shell: process.platform ===
- * "win32"})` -- `shell: true` alongside an args array is *unescaped
- * concatenation* into `cmd.exe`, which corrupts the command line the moment
- * `cwd` (and therefore `bin`, which embeds it) contains a space or a shell
- * metacharacter. This repository already had the correct, tested answer, but
- * it lived under `tests/helpers/`, and production code under
- * `.pi/extensions/` does not import from `tests/` (`calibration.ts`'s own
- * docstring states the same rule; `safety/git.ts` too). So the quoter
- * moved here, to `.pi/lib/`, exactly the way `jsonl.ts` moved here for
- * `safety`/`diagnostics` to share without crossing that same boundary.
- * `tests/helpers/win-quote.ts` now re-exports from this file rather than
- * holding a second copy -- one implementation, not two that can drift apart.
+ * Lives in `.pi/lib/` because production code under `.pi/extensions/` must not import from `tests/`;
+ * `tests/helpers/win-quote.ts` re-exports it so there is one implementation, not two that can drift.
  *
  * ---------------------------------------------------------------------------
  * Why any of this exists

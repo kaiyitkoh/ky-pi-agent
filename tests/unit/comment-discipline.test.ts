@@ -63,10 +63,27 @@ describe("comment scanner self-tests", () => {
 	});
 
 	it("matches ID-shaped tokens and skips technical ones", () => {
-		for (const id of ["WR-15", "T-04-01", "RB-01-03", "D-02", "WR2-04", "Phase 7", "plan 08-11", "iteration 3", "08-RESEARCH", "07-07-SUMMARY"]) {
+		for (const id of [
+			"WR-15",
+			"T-04-01",
+			"RB-01-03",
+			"D-02",
+			"WR2-04",
+			"Phase 7",
+			"plan 08-11",
+			"iteration 3",
+			"08-RESEARCH",
+			"07-07-SUMMARY",
+			"D-D",
+			"ADR-0001",
+			"wr-01",
+			"cr2-03",
+			"#6998",
+			"08.2-13",
+		]) {
 			expect(findIdTokens(`// see ${id} here`), id).toContain(id);
 		}
-		for (const ok of ["UTF-8", "SHA-256", "50-56", "CVE-2021"]) {
+		for (const ok of ["UTF-8", "SHA-256", "50-56", "CVE-2021", "2026-08-13", "pi 1.1.0", "0.84.1-beta", "&#8212;", "a-b"]) {
 			expect(findIdTokens(`// uses ${ok} here`), ok).toEqual([]);
 		}
 	});

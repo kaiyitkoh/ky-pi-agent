@@ -4,7 +4,7 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { authoredFiles, codeTokens, isExempt } from "../helpers/comment-scan.ts";
+import { AUTHORED_ROOTS, authoredFiles, codeTokens, isExempt } from "../helpers/comment-scan.ts";
 import { repoRoot } from "../helpers/git.ts";
 
 const REF = process.env.COMMENT_BASE_REF ?? "";
@@ -54,7 +54,7 @@ describe.skipIf(REF === "")("comment-only diff vs COMMENT_BASE_REF", () => {
 	const deleted: string[] = [];
 	const added: string[] = [];
 	if (verify.status === 0) {
-		const atRef = git(["ls-tree", "-r", "--name-only", REF, "--", ".pi/extensions"])
+		const atRef = git(["ls-tree", "-r", "--name-only", REF, "--", ...AUTHORED_ROOTS])
 			.stdout.split("\n")
 			.map((l) => l.trim())
 			.filter((p) => p.endsWith(".ts") && !isExempt(p));
