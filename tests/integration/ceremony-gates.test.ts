@@ -132,12 +132,13 @@ describe("/grill -- the settle hook gates whatever SPEC.md the model wrote", () 
 	it("stands down once another workflow command claims the session, and at session_start", async () => {
 		const h = harness(grillExtension as (pi: unknown) => void);
 		await h.run("grill", "add the a module");
+		const armedNotes = h.notes.length;
 		expect(h.fire("before_agent_start")[0]).toBeDefined();
 		claimWorkflow("execute");
 		expect(h.fire("before_agent_start")[0], "an /execute turn must not carry the grill brief").toBeUndefined();
 		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 1);
 		h.fire("agent_end");
-		expect(h.notes, "a retired run gates nothing").toHaveLength(0);
+		expect(h.notes.slice(armedNotes), "a retired run gates nothing").toHaveLength(0);
 
 		await h.run("grill", "--resume");
 		h.fire("session_start");

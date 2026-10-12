@@ -8,6 +8,7 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow, isActiveWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
+import { ensureHarnessIgnored } from "../execute/progress.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { HARD_QUESTION_BUDGET, INTERVIEW_PERSPECTIVES, nextQuestionSlot } from "./scorecard.ts";
@@ -113,6 +114,8 @@ export default function (pi: ExtensionAPI): void {
 						return void ctx.ui.notify(`grill: .pi/work/${slug} already exists -- run "/grill --resume" instead`, "error");
 					}
 				}
+				const ignoredNow = ensureHarnessIgnored(ctx.cwd);
+				if (ignoredNow !== undefined) ctx.ui.notify(`grill: ${ignoredNow}`, "info");
 			} catch (err) {
 				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
 				return;

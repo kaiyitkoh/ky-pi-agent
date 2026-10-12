@@ -270,13 +270,13 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/grill/index.ts",
-		budget: 170,
+		budget: 180,
 		why: "plan 09-08 (FLOW-02/FLOW-03) -- the /grill command itself: two entry points (a description, or the " +
 			"literal --resume), the git pre-flight copied verbatim from workflows/index.ts, slug " +
 			"derivation/resolution via .pi/lib/work-artifacts.ts#workDir, and writeSpecIfGated -- the ONLY " +
 			"function in this subsystem that writes SPEC.md, running gateRequirementsAuthorship then " +
 			"validateSpec then gateAmbiguity before any write. Measured 110 raw lines 2026-08-15 with " +
-			"countRawLines, rounded up to the next ten. Re-measured 162 raw lines after the settle hook began gating each turn's SPEC.md, rounded up to the next ten",
+			"countRawLines, rounded up to the next ten. Re-measured 162 raw lines after the settle hook began gating each turn's SPEC.md, rounded up to the next ten. Re-measured 171 raw lines after /grill began git-ignoring the harness state directories, rounded up to the next ten",
 	},
 	{
 		file: ".pi/skills/grill/SKILL.md",
@@ -307,8 +307,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/review/index.ts",
-		budget: 150,
-		why: "plan 09-15 (FLOW-08) -- the /review command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, the six-part reviewer contract, gate depth via gateDepthFor, refute-or-promote before the stop decision, REVIEW.md as the single write, and the MR step through openMr. Measured 124 raw lines 2026-10-13 (named git maxBuffer constant) with countRawLines, rounded up to the next ten. Re-measured 131 raw lines after the deterministic gate began running at HEAD, rounded up to the next ten. Re-measured 133 raw lines after undeclared changes began requiring approval, rounded up to the next ten. Re-measured 125 raw lines after the MR body stopped travelling through a temp file, rounded up to the next ten. Re-measured 129 raw lines after the history and upstream preconditions were wired in, rounded up to the next ten. Re-measured 130 raw lines after the gate notice began naming only what runs, rounded up to the next ten. Re-measured 133 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 143 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten",
+		budget: 160,
+		why: "plan 09-15 (FLOW-08) -- the /review command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, the six-part reviewer contract, gate depth via gateDepthFor, refute-or-promote before the stop decision, REVIEW.md as the single write, and the MR step through openMr. Measured 124 raw lines 2026-10-13 (named git maxBuffer constant) with countRawLines, rounded up to the next ten. Re-measured 131 raw lines after the deterministic gate began running at HEAD, rounded up to the next ten. Re-measured 133 raw lines after undeclared changes began requiring approval, rounded up to the next ten. Re-measured 125 raw lines after the MR body stopped travelling through a temp file, rounded up to the next ten. Re-measured 129 raw lines after the history and upstream preconditions were wired in, rounded up to the next ten. Re-measured 130 raw lines after the gate notice began naming only what runs, rounded up to the next ten. Re-measured 133 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 143 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. Re-measured 151 raw lines after /review began git-ignoring the harness state directories, rounded up to the next ten",
 	},
 	{
 		file: ".pi/skills/review/SKILL.md",
@@ -605,7 +605,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 1160,
+		budget: 1170,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -638,7 +638,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"gateAmbiguity, kept out of index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 250-line grill " +
 			"ceiling headroom for the skill body -- see that registry's own entry for this file). Measured " +
 			"110 (index.ts) + 21 (scorecard-parse.ts) + 246 (scorecard.ts) + 689 (spec-schema.ts) = 1066 raw " +
-			"lines across 4 files 2026-08-15, rounded up to the next ten. Re-measured 1,142 raw lines after spec-gate.ts and the settle hook were added, rounded up to the next ten. Re-measured 1,156 raw lines after scorecard.ts began deriving the overall score from the dimensions, rounded up to the next ten. Re-measured 1,160 raw lines after spec-gate.ts began refusing ids with no entry, rounded up to the next ten. Re-measured 1166 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 1158 raw lines after the unused assumption-stamp helper was removed, rounded up to the next ten",
+			"lines across 4 files 2026-08-15, rounded up to the next ten. Re-measured 1,142 raw lines after spec-gate.ts and the settle hook were added, rounded up to the next ten. Re-measured 1,156 raw lines after scorecard.ts began deriving the overall score from the dimensions, rounded up to the next ten. Re-measured 1,160 raw lines after spec-gate.ts began refusing ids with no entry, rounded up to the next ten. Re-measured 1166 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 1158 raw lines after the unused assumption-stamp helper was removed, rounded up to the next ten. Re-measured 1161 raw lines after /grill began git-ignoring the harness state directories, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/plan-ceremony",
@@ -1561,7 +1561,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [".pi/skills/grill/SKILL.md"],
 		budget: 250,
 		why: "FEATURES.md Part 2 line 158's ceiling for the flagship workflow -- FROZEN, may not move to absorb " +
-			"growth (D-13). Measured 168 raw lines (index.ts) + 60 raw lines (SKILL.md) = 228 raw lines " +
+			"growth (D-13). Measured 171 raw lines (index.ts) + 60 raw lines (SKILL.md) = 231 raw lines " +
 			"2026-10-13 with countRawLines, inside 250 -- scorecard.ts, spec-schema.ts and " +
 			"scorecard-parse.ts are supporting modules bound only by the .pi/extensions/grill DIRECTORY_BUDGETS " +
 			"ratchet above, per this registry's own module-docstring rule (D-13) that a merged closure budget " +
@@ -1593,8 +1593,8 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		commandFile: ".pi/extensions/review/index.ts",
 		bodies: [".pi/skills/review/SKILL.md"],
 		budget: 250,
-		why: "FEATURES.md Part 2 line 206's ceiling -- FROZEN, may not move to absorb growth (D-13). Measured 149 raw lines " +
-			"(index.ts) + 50 raw lines (SKILL.md) = 199 raw lines 2026-10-13 with countRawLines, inside 250. mr.ts and " +
+		why: "FEATURES.md Part 2 line 206's ceiling -- FROZEN, may not move to absorb growth (D-13). Measured 151 raw lines " +
+			"(index.ts) + 50 raw lines (SKILL.md) = 201 raw lines 2026-10-13 with countRawLines, inside 250. mr.ts and " +
 			"scope-drift.ts are bound by the .pi/extensions/review DIRECTORY_BUDGETS ratchet",
 	},
 ];

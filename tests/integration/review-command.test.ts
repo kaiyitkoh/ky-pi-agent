@@ -204,6 +204,16 @@ describe("/review -- the real handler", () => {
 		expect(mocks.calls).toHaveLength(0);
 	});
 
+	it("harness state the checkpoint store and the logs write into the work repo does not count as dirty", async () => {
+		const h = setup();
+		for (const f of [".pi/state/checkpoints.json", ".pi/logs/wire-x.jsonl"]) {
+			mkdirSync(join(h.repo, f, ".."), { recursive: true });
+			writeFileSync(join(h.repo, f), "[]");
+		}
+		await h.run(SLUG);
+		expect(mocks.calls).toHaveLength(1);
+	});
+
 	it("refuses to open an MR for an unpushed HEAD", async () => {
 		const h = setup();
 		git(h.repo, ["update-ref", "-d", "refs/remotes/origin/work"]);

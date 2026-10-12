@@ -1,7 +1,7 @@
 /**
  * The /execute PROGRESS.md entry format and parser, the fail-closed drift abort, and the per-run state that binds
  * one verification run to a commit and a clean tree. Impure: appendProgress, changedFiles, uncommittedPaths,
- * ensureWorkIgnored and the run state.
+ * ensureHarnessIgnored and the run state.
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -246,11 +246,11 @@ export function noteToolEnd(toolCallId: string, isError: boolean, result: unknow
 const MAX_DIRTY_LISTED = 10;
 
 /**
- * Uncommitted or untracked paths anywhere in the repo except the harness's own `.pi/work/` and `.pi/logs/`, comma-joined; "" when the working tree is
- * exactly HEAD. A file left out of the commit would otherwise let a check pass that the commit cannot.
+ * Uncommitted or untracked, non-ignored paths anywhere in the repo, comma-joined; "" when the working tree is exactly HEAD.
+ * A file left out of the commit would otherwise let a check pass that the commit cannot.
  */
 export function uncommittedPaths(cwd: string): string {
-	const r = spawnSync("git", ["status", "--porcelain", "--untracked-files=all", "--", ":/", ":(exclude).pi/work", ":(exclude).pi/logs"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	const r = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
 	if (r.status !== 0) return `(git status failed in ${cwd})`;
 	const paths = (r.stdout ?? "").split("\n").filter((l) => l.trim() !== "").map((l) => l.slice(3));
 	return paths.length <= MAX_DIRTY_LISTED ? paths.join(", ") : `${paths.slice(0, MAX_DIRTY_LISTED).join(", ")} and ${paths.length - MAX_DIRTY_LISTED} more`;
@@ -265,23 +265,28 @@ export function boundOutput(text: string): string {
 	return `[${redacted.length - MAX_OUTPUT_CHARS} earlier characters elided]\n${redacted.slice(-MAX_OUTPUT_CHARS)}`;
 }
 
+const HARNESS_DIRS = [".pi/work/", ".pi/logs/", ".pi/state/"] as const;
+
 /**
- * Keep `.pi/work/` out of the work repo's commits: when nothing ignores it yet, append it to the repo-local exclude
- * file, which is never committed itself. Returns a notice when it did so.
+ * Hide the harness's own state from the work repo's `git status` and `git add -A`: append each harness directory that
+ * nothing ignores yet to the repo-local exclude file, which is never committed itself. Returns a notice when it did so.
  */
-export function ensureWorkIgnored(cwd: string): string | undefined {
+export function ensureHarnessIgnored(cwd: string): string | undefined {
 	const git = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	const probe = git(["check-ignore", "-q", "--", ".pi/work/PROGRESS.md"]);
-	if (probe.status === 0) return undefined;
-	const prefix = git(["rev-parse", "--show-prefix"]);
-	const exclude = git(["rev-parse", "--git-path", "info/exclude"]);
-	if (probe.status !== 1 || prefix.status !== 0 || exclude.status !== 0) {
-		throw new Error("execute: could not tell whether .pi/work/ is git-ignored here -- refusing rather than risk committing it");
+	const missing: string[] = [];
+	for (const dir of HARNESS_DIRS) {
+		const probe = git(["check-ignore", "-q", "--", `${dir}probe`]);
+		if (probe.status === 1) missing.push(dir);
+		else if (probe.status !== 0) throw new Error(`could not tell whether ${dir} is git-ignored here -- refusing rather than risk committing it`);
 	}
+	if (missing.length === 0) return undefined;
+	const exclude = git(["rev-parse", "--git-path", "info/exclude"]);
+	if (exclude.status !== 0) throw new Error("could not locate the repo's info/exclude file -- refusing rather than risk committing harness state");
 	const file = resolve(cwd, (exclude.stdout ?? "").trim());
 	mkdirSync(dirname(file), { recursive: true });
-	appendFileSync(file, `\n/${(prefix.stdout ?? "").trim()}.pi/work/\n`, "utf-8");
-	return `execute: added .pi/work/ to ${file} so the work artifacts are never committed`;
+	// `**/` because the checkpoint store sits at the repo root while the logs and work artifacts sit at the cwd.
+	appendFileSync(file, `\n${missing.map((d) => `**/${d}`).join("\n")}\n`, "utf-8");
+	return `added ${missing.join(", ")} to ${file} so harness state is never committed`;
 }
 
 /** HEAD at `cwd`, or "" when git cannot say; "" never equals a recorded commit, so an unknown HEAD fails the check. */

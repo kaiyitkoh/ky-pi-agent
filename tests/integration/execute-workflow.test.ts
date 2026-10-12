@@ -14,7 +14,8 @@ import { dirname, join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { logPath } from "../../.pi/lib/jsonl.ts";
+import { logDir, logPath } from "../../.pi/lib/jsonl.ts";
+import { recordCheckpoint } from "../../.pi/extensions/checkpoint/store.ts";
 import executeExtension from "../../.pi/extensions/execute/index.ts";
 import { HANDOFF_AGENT } from "../../.pi/extensions/execute/handoff.ts";
 import { driftAbort, executeRunContext, progressBlocks, recordedEntries, renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
@@ -240,6 +241,22 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.fire("agent_end", {});
 		expect(h.notes.at(-1)?.text).toContain("src/late.ts");
 		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
+	});
+
+	it("checkpoint and log state written into a work repo with no .gitignore neither dirties the tree nor reaches `git add -A`", async () => {
+		const h = harness();
+		expect(existsSync(join(h.repo, ".gitignore")), "the work repo must not ignore harness state itself").toBe(false);
+		await h.command(SLUG);
+		const sha = commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		expect(recordCheckpoint(h.repo, { sha, label: "turn", cwd: h.repo }), "the real checkpoint store must write its file").toBeDefined();
+		mkdirSync(logDir(h.repo), { recursive: true });
+		writeFileSync(join(logDir(h.repo), "wire-x.jsonl"), "{}\n");
+		verify(h);
+		await h.fire("agent_end", {});
+		expect(readFileSync(progressFile(h), "utf-8")).toContain(`## T001 @ ${sha}`);
+		git(h.repo, ["add", "-A"]);
+		const staged = spawnSync("git", ["diff", "--cached", "--name-only"], { cwd: h.repo, encoding: "utf-8" }).stdout;
+		expect(staged, "a model's `git add -A` must not stage harness state").toBe("");
 	});
 
 	it("an entry the model appends to PROGRESS.md does not mark its task done: the signed ledger decides", async () => {

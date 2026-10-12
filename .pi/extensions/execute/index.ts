@@ -18,7 +18,7 @@ import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, readLedger } from "./ledger.ts";
 import {
-	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureWorkIgnored, normalisePathForDrift,
+	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureHarnessIgnored, normalisePathForDrift,
 	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, renderProgressAppend, uncommittedPaths, verificationRecord,
 } from "./progress.ts";
 
@@ -114,8 +114,8 @@ export default function (pi: ExtensionAPI): void {
 				}
 
 				// Base SHA and tree are read in the same try, so a throw refuses and never arms a run.
-				const ignoredNow = ensureWorkIgnored(ctx.cwd);
-				if (ignoredNow !== undefined) ctx.ui.notify(ignoredNow, "info");
+				const ignoredNow = ensureHarnessIgnored(ctx.cwd);
+				if (ignoredNow !== undefined) ctx.ui.notify(`execute: ${ignoredNow}`, "info");
 				const headSha = currentSha(ctx.cwd);
 				if (from === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, reason: "first /execute" });
 				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
@@ -123,7 +123,7 @@ export default function (pi: ExtensionAPI): void {
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
 				claimWorkflow("execute");
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });
-				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nAny failed tool call rejects this attempt, so do not run a check you expect to fail. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
+				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nAny failed tool call rejects this attempt, so do not run a check you expect to fail. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
 			}

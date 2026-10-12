@@ -9,7 +9,7 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
 import { acceptedEntries, allowanceOf, latestRepin, pinnedAllowance, readLedger } from "../execute/ledger.ts";
-import { uncommittedPaths } from "../execute/progress.ts";
+import { ensureHarnessIgnored, uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
@@ -78,6 +78,8 @@ export default function (pi: ExtensionAPI): void {
 				const progress = accepted.map((e, i) => (i === lastStale ? `${e.entry}${repinNote}` : e.entry)).join("\n");
 				const mismatch = historyMismatch(ctx.cwd, plan.plan.tasks.map((t) => t.id), progress, repin);
 				if (mismatch !== undefined) return fail(`review: ${mismatch}`);
+				const ignoredNow = ensureHarnessIgnored(ctx.cwd);
+				if (ignoredNow !== undefined) ctx.ui.notify(`review: ${ignoredNow}`, "info");
 				const dirty = uncommittedPaths(ctx.cwd);
 				if (dirty !== "") return fail(`review: the working tree is not HEAD (uncommitted or untracked: ${dirty}) -- commit or remove them first`);
 

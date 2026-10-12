@@ -404,9 +404,11 @@ the command namespace and needed no rename.
 
 **Why `.pi/work/` is git-ignored.** The artifacts describe features of a
 private work codebase, and this repository is public. They are per-feature
-scratch, not harness source. In the work repo, where `/execute` runs, nothing
-ignores them by default, so `/execute` appends `.pi/work/` to that repo's
-`.git/info/exclude` (never committed) before its first run. PROGRESS.md keeps
+scratch, not harness source. In the work repo nothing ignores them, or the
+harness's `.pi/logs/` and `.pi/state/`, by default. So `/grill`, `/execute`
+and `/review` append whichever of the three is not yet ignored to that repo's
+`.git/info/exclude` (never committed). Harness state then never shows in
+`git status` and never reaches a `git add -A`. PROGRESS.md keeps
 only the verification run's output, redacted and cut to its last 8,000
 characters.
 
@@ -449,8 +451,8 @@ rebase may have replaced. An intended SPEC/PLAN allowance change is accepted
 the same way.
 `/review` diffs from `git merge-base HEAD staging`, and any drifted path needs
 explicit approval before the MR opens. It reads the
-committed diff only, and `/review` refuses to start while anything outside
-`.pi/work/` and `.pi/logs/` is uncommitted or untracked. A rename
+committed diff only, and `/review` refuses to start while any non-ignored
+path is uncommitted or untracked. A rename
 reports both paths (`--no-renames`), so a move out of an undeclared path
 drifts.
 
@@ -462,8 +464,7 @@ carries no arguments), and `driftAbort` allows every path git reports as
 changed. PROGRESS.md records that run's own output and exit code, bound to a
 harness-read commit SHA; no other tool output is kept. The verification run
 and the settle gate both run on the working tree, so both require
-`git status` to be clean apart from the harness's own `.pi/work/` and
-`.pi/logs/`: a file the model forgot to `git add` would otherwise let a check
+`git status` to be clean (harness state is ignored, as above): a file the model forgot to `git add` would otherwise let a check
 pass that the commit cannot. Each rejection is logged. Once a task passes
 `REVISION_CAP` rejections, or two deterministic-gate rejections in a row fail
 to lower the gate's finding count, `/execute` refuses it until the user runs
