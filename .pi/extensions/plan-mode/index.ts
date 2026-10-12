@@ -24,7 +24,7 @@
 // `pi.setActiveTools`, which is not a registration and costs no schema tokens.
 // `tests/unit/contributing-boundary.test.ts`'s `TOOL_REGISTRATION_ALLOWLIST` is
 // therefore left unchanged — no entry added, because none is owed. Its only
-// per-turn system-prompt cost is its two registered commands (`/plan`,
+// per-turn system-prompt cost is its two registered commands (`/plan-mode`,
 // `/plan-todos`) — `src/core/system-prompt.ts` carries no reference to
 // registered commands, so a command costs zero
 // [CITED: tests/unit/contributing-boundary.test.ts's own BOOT-10 citation].
@@ -113,7 +113,7 @@
  * When enabled, built-in write tools are disabled.
  *
  * Features:
- * - /plan command or Ctrl+Alt+P to toggle
+ * - /plan-mode command or Ctrl+Alt+P to toggle
  * - Bash restricted to allowlisted read-only commands
  * - Extracts numbered plan steps from "Plan:" sections
  * - [DONE:n] markers to complete steps during execution
@@ -146,7 +146,7 @@ const PLAN_MODE_TOOLS = ["read", "bash", "grep", "find", "ls", "questionnaire"];
 // and that function snapshots `pi.getActiveTools()` whenever the value is
 // undefined -- so every path into `restoreNormalModeTools()` is preceded by a
 // snapshot, and the `??` fallback is currently DEAD. Every call site was
-// checked (the /plan toggle, and the "Execute the plan" branch of agent_end).
+// checked (the /plan-mode toggle, and the "Execute the plan" branch of agent_end).
 //
 // Fixed anyway, and the correction recorded rather than the reachability
 // overstated: the function's own contract is "the tool set to activate when
@@ -292,7 +292,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		description: "Show current plan progress",
 		handler: async (_args, ctx) => {
 			if (todoItems.length === 0) {
-				ctx.ui.notify("No todos. Create a plan first with /plan", "info");
+				ctx.ui.notify("No todos. Create a plan first with /plan-mode", "info");
 				return;
 			}
 			const list = todoItems.map((item, i) => `${i + 1}. ${item.completed ? "✓" : "○"} ${item.text}`).join("\n");
@@ -324,7 +324,7 @@ export default function planModeExtension(pi: ExtensionAPI): void {
 		if (verdict.kind === "deny") {
 			return {
 				block: true,
-				reason: `Plan mode: command blocked -- ${verdict.reason}. Use /plan to disable plan mode first.\nCommand: ${command}`,
+				reason: `Plan mode: command blocked -- ${verdict.reason}. Use /plan-mode to disable plan mode first.\nCommand: ${command}`,
 			};
 		}
 	});

@@ -83,7 +83,10 @@ Six, itemised in full in `index.ts`'s own header. Summarised:
    (Standing Rule 8): the general name goes to the authored workflow, and
    this vendored example takes the more specific name.
    `pi.registerFlag("plan", ...)` is a structurally separate namespace and is
-   unchanged.
+   unchanged. The user-facing strings that named the toggle (the blocked-
+   command reason "Use /plan to disable plan mode first" and the empty-todo
+   hint "Create a plan first with /plan") and the comments that described it
+   now say `/plan-mode`, because `/plan` launches the ceremonial workflow.
 
 Deviations 4 and 5 mean this copy is **no longer diffable against upstream**
 in those two regions. That is deliberate: upstream's predicate is wrong for a
