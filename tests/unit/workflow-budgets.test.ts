@@ -650,7 +650,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/execute",
-		budget: 170,
+		budget: 370,
 		why: "plan 09-11 (FLOW-09) -- the first file of the /execute subsystem, handoff.ts: the honest-degradation " +
 			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/bg_wait pair, never " +
 			"reading the settings file), the pure buildHandoffPacket/renderHandoffPacket, and the real " +
@@ -660,7 +660,9 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"present-but-undeclared check for that reason -- declared here anyway, ahead of that check requiring " +
 			"it, per plan 09-05's identical precedent for .pi/extensions/grill and plan 09-09's for " +
 			".pi/extensions/plan-ceremony. Measured 169 raw lines across 1 file 2026-10-13 (handoff.ts), rounded " +
-			"up to the next ten",
+			"up to the next ten. RAISED 170 -> 370 by plan 09-13 (FLOW-07): progress.ts, the PROGRESS.md append " +
+			"format, fail-closed driftAbort and per-run output slot. Measured 169 (handoff.ts) + 198 (progress.ts) = " +
+			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
