@@ -1,122 +1,47 @@
 /**
- * ky-pi-agent — diagnostics row types and the literals every test asserts on.
- *
- * PURPOSE. One place for every constant that appears in both the writer and an
- * assertion. The house rule (`.pi/extensions/harness/index.ts:50-56`) is that a
- * duplicated literal is how an assertion silently stops matching the thing it
- * checks, so nothing below may be re-typed in a test: import it.
- *
- * LIFETIME. Permanent. `docs/DIAGNOSTICS.md` (plan 02-11) documents the row
- * contract this file declares, and Phases 5, 8 and 10 read the rows.
- *
- * BOUNDARY RULE (BOOT-10). This file declares types and constants. It registers
- * nothing at all, and in particular it does not spell the tool-registration
- * call even in prose — `tests/unit/contributing-boundary.test.ts` matches that
- * name as a plain substring across every tracked source under
- * `.pi/extensions/`, comments included.
- *
- * IMPORT CONCENTRATION. `@earendil-works/pi-ai`'s root entrypoint has an
- * announced future removal, so only this module, `turns.ts` and `call-model.ts`
- * import from it. Everything else imports the re-declared types from here.
- * `turns.ts` is on that list because `calculateCost` is a VALUE and cannot come
- * through a type-only re-export; it takes the types for that call from the same
- * statement rather than opening a second import site.
+ * Diagnostics row types and the literals every test asserts on; import them, never re-type them.
+ * Declares types and constants only. pi-ai's root entrypoint is slated for removal, so only this
+ * module, `turns.ts` and `call-model.ts` import it (`calculateCost` is a value, not a type).
  */
 import type { StopReason } from "@earendil-works/pi-ai";
 
-/**
- * pi-ai types the rest of the subsystem needs, re-exported from the one place
- * allowed to name that package.
- *
- * `prose.ts` takes a finalized assistant message and reads `stopReason` and the
- * `content` block union off it. Re-declaring that shape locally would trade a
- * compile error for a silent miss the day Pi renames a block type, and
- * importing pi-ai directly from a second module would break the concentration
- * rule stated above. So it comes through here, type-only and fully erased.
- *
- * `Api` and `Model` are on the list because `index.ts` must construct a
- * DEGRADED model shape when `ctx.model` is undefined at `turn_end` — a row whose
- * cost was computed from zero rates rather than a real catalogue entry. Without
- * the annotation the literal's `input: ["text"]` infers `string[]` and is not
- * assignable to `("text" | "image")[]`, so the fallback would need a cast; with
- * it, a future field added to pi-ai's `Model` is a compile error at the fallback
- * rather than a silently under-populated object. They are re-exported here, not
- * imported there, because `index.ts` is NOT one of the three sanctioned pi-ai
- * import sites.
- */
+/** pi-ai types re-exported so `prose.ts` and `index.ts` need no pi-ai import of their own. */
 export type { Api, AssistantMessage, Model, StopReason } from "@earendil-works/pi-ai";
 
 // ---------------------------------------------------------------------------
 // Log file naming
 // ---------------------------------------------------------------------------
 
-/**
- * Directory segment under Pi's config dir that holds every diagnostic log.
- *
- * Exported so `jsonl.ts` and the DIAG-07 gitignore test agree on one string.
- * The full directory is `<cwd>/<CONFIG_DIR_NAME>/<LOG_DIR_SEGMENT>` — never a
- * hardcoded `.pi`, because a rebranded Pi distribution uses a different name.
- */
+/** Directory segment under Pi's config dir (`CONFIG_DIR_NAME`, never a hardcoded `.pi`). */
 export const LOG_DIR_SEGMENT = "logs";
 
-/**
- * Base name of the wire stream: the redacted request/response dump (DIAG-01).
- *
- * Files are `wire-YYYY-MM-DD.jsonl` live and `wire-YYYY-MM-DD.<n>.jsonl`
- * rotated, increasing `n` being older [RESEARCH §10.5].
- */
+/** Wire stream base name: `wire-YYYY-MM-DD.jsonl` live, `wire-YYYY-MM-DD.<n>.jsonl` rotated (larger n is older). */
 export const WIRE_LOG_BASE = "wire";
 
-/** Base name of the turn stream: one row per turn AND per nested call (DIAG-04). */
+/** Base name of the turn stream: one row per turn AND per nested call. */
 export const TURNS_LOG_BASE = "turns";
 
 // ---------------------------------------------------------------------------
-// Rotation and retention (DIAG-08). Every number carries its arithmetic.
+// Rotation and retention
 // ---------------------------------------------------------------------------
 
-/**
- * Rotate `wire-*` at 32 MB.
- *
- * A single captured payload measured ~50 KB in this repo (RESEARCH §7.4), so
- * 32 MB is roughly 600 turns — about a heavy day — and still opens in an editor.
- */
+/** Rotate `wire-*` at 32 MB: ~50 KB per payload is roughly 600 turns. */
 export const WIRE_ROTATE_BYTES = 32_000_000;
 
-/**
- * Rotate `turns-*` at 8 MB.
- *
- * A turn row is ~600 B, so 8 MB is roughly 14,000 turns.
- */
+/** Rotate `turns-*` at 8 MB: ~600 B per row is roughly 14,000 turns. */
 export const TURNS_ROTATE_BYTES = 8_000_000;
 
-/**
- * Rotated files kept per stream, per day.
- *
- * 10 × 32 MB bounds a bad day at ~320 MB of wire and ~80 MB of turns. Beyond
- * this the oldest file is unlinked, oldest-first, by {@link rotate} in
- * `jsonl.ts`.
- */
+/** Rotated files kept per stream per day; the oldest is unlinked first by `rotate` in `jsonl.ts`. */
 export const MAX_ROTATED_FILES = 10;
 
-/**
- * Days of history kept, pruned at `session_start`.
- *
- * 14 is long enough to answer "was DeepSeek worse last week?" and short enough
- * that a working tree in a public repo never accumulates months of prompt
- * bodies.
- */
+/** Days of history kept, pruned at `session_start`. */
 export const RETENTION_DAYS = 14;
 
 // ---------------------------------------------------------------------------
-// Prose-tool-call detector (DIAG-05) — the literals plan 02-07 and its tests share
+// Prose-tool-call detector
 // ---------------------------------------------------------------------------
 
-/**
- * Retries permitted after a prose tool call is detected.
- *
- * One. A detector that retries repeatedly doubles cost on every false positive
- * and corrupts the measured prose rate that Phase 10 discriminates on.
- */
+/** Retries after a prose tool call: one, since repeats double cost per false positive and skew the measured prose rate. */
 export const MAX_PROSE_RETRIES = 1;
 
 /** `event` value on a turn row where the detector fired. */
@@ -126,31 +51,14 @@ export const PROSE_EVENT = "prose_tool_call";
 export const PROSE_EXHAUSTED_EVENT = "prose_tool_call_retry_exhausted";
 
 /**
- * The follow-up user message the detector injects on a prose tool call.
- *
- * One sentence: the failure, then the remedy. It lives here rather than inline
- * in `index.ts` because `tests/integration/prose-retry.test.ts` asserts the
- * retry reached the model by finding this text in the outgoing context, and the
- * house rule (`.pi/extensions/harness/index.ts:50-56`) is that a literal spelled
- * in both the writer and the assertion is how the assertion silently stops
- * matching the thing it checks.
- *
- * It names no tool and quotes nothing the model wrote. Interpolating the matched
- * tool name would splice untrusted model output back into a prompt for a second
- * pass, and the harness has no way to tell a genuine failed call from a name the
- * model printed in a code block.
+ * Follow-up user message injected on a prose tool call. Lives here because the integration test finds
+ * this text in the outgoing context. It names no tool: interpolating model output would feed it back into a prompt.
  */
 export const PROSE_RETRY_PROMPT =
 	"Your previous message described a tool call in prose instead of emitting one. " +
 	"Re-issue it as a real tool call.";
 
-/**
- * `event` value on the row a failed diagnostics handler writes.
- *
- * Pi swallows handler exceptions (`runner.ts:861-870`, observed live during
- * research), so without this row a broken instrument is indistinguishable from
- * a quiet one — the exact failure class this phase exists to eliminate.
- */
+/** `event` value on the row a failed diagnostics handler writes; Pi swallows handler exceptions (`runner.ts:861-870`). */
 export const DIAGNOSTICS_ERROR_EVENT = "diagnostics.error";
 
 // ---------------------------------------------------------------------------
@@ -160,22 +68,10 @@ export const DIAGNOSTICS_ERROR_EVENT = "diagnostics.error";
 /** What a turn row's numbers describe: a top-level turn, or a nested `callModel`. */
 export type RowKind = "turn" | "nested";
 
-/**
- * Coarse verdict for a turn, derived from `stopReason` (RESEARCH §3.3).
- *
- * Kept alongside the raw `stopReason` rather than replacing it: the mapping is
- * this project's interpretation and the provider's own word must stay readable.
- */
+/** Coarse verdict derived from `stopReason`; the raw `stopReason` stays on the row beside it. */
 export type Outcome = "ok" | "tool_use" | "length" | "error" | "aborted" | "deferred" | "pending";
 
-/**
- * The complete `stopReason` → `outcome` mapping.
- *
- * Typed as `Record<StopReason, Outcome>` so a new member of Pi's union is a
- * compile error here rather than an `undefined` in a log file.
- * [VERIFIED: pi-ai 0.84.1 dist/types.d.ts:275 — the union has exactly these
- *  seven members.]
- */
+/** The `stopReason` to `outcome` mapping; `Record<StopReason, ...>` makes a new Pi member a compile error (pi-ai `dist/types.d.ts:275`). */
 export const OUTCOME_BY_STOP_REASON: Record<StopReason, Outcome> = {
 	stop: "ok",
 	toolUse: "tool_use",
@@ -196,11 +92,8 @@ export interface TurnCost {
 }
 
 /**
- * One row of `turns-*.jsonl`. Field provenance is RESEARCH §5.5.
- *
- * Written from `message_end` + `turn_end`, never from
- * `after_provider_response`: a 4xx/5xx throws past the response hook, so a row
- * built there would be missing exactly the turns worth recording (Pitfall 3).
+ * One row of `turns-*.jsonl`. Written from `message_end` + `turn_end`, never from
+ * `after_provider_response`: a 4xx/5xx throws past that hook, so the worst turns would be missing.
  */
 export interface TurnRow {
 	/** `Date.now()` at row composition. */
@@ -221,46 +114,22 @@ export interface TurnRow {
 	cacheRead: number;
 	cacheWrite: number;
 	/**
-	 * Subset of `cacheWrite` written with 1h retention.
-	 *
-	 * OPTIONAL UNDER THE OMITTED-KEY RULE, and recorded because without it
-	 * `cost.cacheWrite` CANNOT BE REPRODUCED FROM THE ROW. `calculateCost` prices
-	 * the 1h portion at 2x the INPUT rate, not the cacheWrite rate:
-	 *
-	 *     const longWrite = usage.cacheWrite1h ?? 0;
-	 *     const shortWrite = usage.cacheWrite - longWrite;
-	 *     usage.cost.cacheWrite =
-	 *       (rates.cacheWrite * shortWrite + rates.input * 2 * longWrite) / 1000000;
-	 *     [VERIFIED: pi-ai 0.84.1 dist/models.js:538-543]
-	 *
-	 * Only Anthropic reports the split [VERIFIED: pi-ai 0.84.1
-	 * dist/types.d.ts:258-259], so on every other provider the key is genuinely
-	 * absent. Without this column a Bedrock Claude row with 1h retention has a
-	 * `cost.cacheWrite` that does not equal `cacheWrite x rates.cacheWrite` and
-	 * nothing on the row explaining the gap — which is the fabricated-measurement
-	 * class the `reasoning` rule above exists to prevent, arriving through the
-	 * column Phase 8 reconciles spend against.
+	 * Subset of `cacheWrite` written with 1h retention; key omitted when the provider does not report it.
+	 * Needed because `calculateCost` prices the 1h part at 2x the INPUT rate, so without it
+	 * `cost.cacheWrite` cannot be reproduced from the row (pi-ai `dist/models.js:538-543`).
+	 * Only Anthropic reports the split (`dist/types.d.ts:258-259`).
 	 */
 	cacheWrite1h?: number;
 	totalTokens: number;
 	/**
-	 * Reasoning tokens, a subset of `output`.
-	 *
-	 * OPTIONAL, AND THE KEY IS OMITTED WHEN THE PROVIDER REPORTS NOTHING —
-	 * never `0` and never `null`. Absence of the key means the provider reports
-	 * no breakdown; it does NOT mean zero thinking tokens were billed. Bedrock's
-	 * `handleMetadata` never assigns it
-	 * [VERIFIED: pi-ai src/api/bedrock-converse-stream.ts:589-602], while
-	 * `openai-completions.ts:1404` does. A `0` here would report Bedrock
-	 * thinking as free, which is a fabricated measurement (Pitfall 4).
+	 * Reasoning tokens, a subset of `output`. Key omitted when the provider reports no breakdown,
+	 * never `0` or `null`: absence is not zero billed thinking. Bedrock never assigns it
+	 * (`bedrock-converse-stream.ts:589-602`), `openai-completions.ts:1404` does.
 	 */
 	reasoning?: number;
 	/**
-	 * `cacheRead / (input + cacheRead)`.
-	 *
-	 * Omitted unless the denominator is strictly POSITIVE — not merely non-zero.
-	 * A `NaN` or negative denominator is not a measurement, and a `NaN` assigned
-	 * here would serialise to `null`, which the omitted-key rule forbids.
+	 * `cacheRead / (input + cacheRead)`. Omitted unless the denominator is strictly positive;
+	 * a `NaN` would serialise to `null`, which the omitted-key rule forbids.
 	 */
 	cacheReadRatio?: number;
 	cost: TurnCost;
@@ -275,56 +144,24 @@ export interface TurnRow {
 	toolCalls: number;
 	toolResults?: number;
 	/**
-	 * HTTP status as a per-call `onResponse` reported it.
-	 *
-	 * **ONLY EVER PRESENT ON A `kind:"nested"` ROW.** `index.ts`'s `turn_end` never
-	 * passes an `httpStatus` to `composeTurnRow` at all, so a main-loop row never
-	 * carries one — successful or not. That is deliberate: no field of a main-loop
-	 * row may be derived from `after_provider_response`, which sits after the retry
-	 * wrapper [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:239] and so
-	 * never fires on a 4xx/5xx (Pitfall 3).
-	 *
-	 * On the nested path `callModel` ALWAYS supplies an `onResponse`, so the field
-	 * is present whenever an HTTP response was seen — including on an errored row,
-	 * where `outcome: "error"` and `httpStatus: 200` legitimately sit side by side
-	 * (a 200 whose stream then ended with an error event). It is absent on a nested
-	 * call where no response was reached at all.
-	 *
-	 * Wanting a main-loop `httpStatus` is a CODE change — threading
-	 * `after_provider_response.status` onto the accumulator — and it must come with
-	 * the Pitfall 3 caveat. It is not a documentation change.
+	 * HTTP status as a per-call `onResponse` reported it; ONLY present on a `kind:"nested"` row.
+	 * Main-loop rows never get one because `after_provider_response` sits after the retry wrapper
+	 * and never fires on a 4xx/5xx (`openai-completions.ts:239`). On a nested row it can sit beside
+	 * `outcome: "error"` (a 200 whose stream then errored); absent if no response was reached.
 	 */
 	httpStatus?: number;
 	/** The REQUESTED thinking level, recorded because Bedrock makes it undecomposable. */
 	thinkingLevel?: string;
 	/**
-	 * The quality layer's OWN share of this turn's wall clock, in milliseconds.
-	 *
-	 * OPTIONAL, AND THE KEY IS OMITTED WHEN THE QUALITY LAYER DID NOT RUN ON
-	 * THIS TURN — never `0`, never `null`. This is NOT the turn total:
-	 * {@link TurnRow.latencyMs} is the turn total, and the two are not
-	 * comparable without that distinction stated. `qualityMs` sums the
-	 * deterministic gate stage's wall clock plus any nested review calls the
-	 * quality layer issued during this turn, drained from
-	 * `quality-cost.ts#takeQualityCost` exactly once, at `turn_end`.
+	 * The quality layer's own share of this turn's wall clock in ms, not the turn total
+	 * ({@link TurnRow.latencyMs}). Omitted when the quality layer did not run. Drained from
+	 * `quality-cost.ts#takeQualityCost` once, at `turn_end`.
 	 */
 	qualityMs?: number;
 	/**
-	 * The quality layer's own summed input+output tokens for this turn.
-	 *
-	 * Same omission rule as {@link TurnRow.qualityMs}: absent when the quality
-	 * layer never ran on this turn, present (possibly `0`) when it did.
-	 *
-	 * A nested quality-layer call — the deterministic gate stage, the
-	 * reviewer, the refute pass — ALSO emits its own `kind:"nested"` row with
-	 * its own `cost`, via the ordinary `callModel()` chokepoint path. This
-	 * field is an attribution convenience layered on top of those rows, not a
-	 * replacement for them, so a token counted here is ALSO counted on that
-	 * nested row. Double-counting across row kinds is expected and documented
-	 * here, not a bug: summing `qualityTokens` across `kind:"turn"` rows and
-	 * separately summing `totalTokens` across `kind:"nested"` rows measures
-	 * the same spend from two different groupings, and adding the two
-	 * together would double it.
+	 * The quality layer's summed input+output tokens for this turn; omitted when it did not run.
+	 * Its nested calls also emit their own `kind:"nested"` rows, so summing this across turn rows and
+	 * `totalTokens` across nested rows measures the same spend; never add the two.
 	 */
 	qualityTokens?: number;
 	/** Set for out-of-band rows: {@link PROSE_EVENT}, {@link DIAGNOSTICS_ERROR_EVENT}, … */
@@ -351,27 +188,10 @@ interface WireRecordBase {
 }
 
 /**
- * One row of `wire-*.jsonl`: a payload record, a headers record, or a response
- * record carrying a status and — where the transport exposes them — the
- * response headers too.
- *
- * Modelled as a union rather than three optional fields so a record carrying
- * both a request `payload` and a response `status` does not typecheck.
- * Everything here has already been through `redact.ts` — the writer is not the
- * place to remember that.
- *
- * THE RESPONSE ARM CARRIES BOTH `status` AND `headers`, which the original
- * three-way split forbade. `AfterProviderResponseEvent` is
- * `{ status: number; headers: Record<string, string> }`
- * [VERIFIED: pi 0.84.1 src/core/extensions/types.ts:691-696] — one event, two
- * fields — and splitting it into two records would put four entries in a
- * three-hook dump and break the `main.headers` → `main.request` →
- * `main.response` ordering assertion. Response headers are worth keeping: rate
- * limits, request ids and cache indicators live there. `headers` stays optional
- * because Bedrock supplies only `x-amzn-requestid`
- * [VERIFIED: pi-ai src/api/bedrock-converse-stream.ts:255-261] and Pi's docs
- * warn that a provider abstracting HTTP may expose none at all
- * [CITED: docs/extensions.md:708].
+ * One row of `wire-*.jsonl`, already redacted. A union so a record with both a request `payload`
+ * and a response `status` does not typecheck. The response arm carries `status` and `headers`
+ * together because `AfterProviderResponseEvent` is one event with both (Pi `types.ts:691-696`);
+ * `headers` is optional since Bedrock supplies only `x-amzn-requestid` (`bedrock-converse-stream.ts:255-261`).
  */
 export type WireRecord =
 	| (WireRecordBase & { payload: unknown; headers?: never; status?: never })
