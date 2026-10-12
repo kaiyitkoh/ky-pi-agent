@@ -252,7 +252,7 @@ export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
 		(entry): entry is CustomEntry<KyModeData> => entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE,
 	);
 	const latest = modeEntries.at(-1);
-	// `null` passes a bare `=== undefined` check, so reject it and every non-object payload explicitly.
+	// `null` passes a bare `=== undefined` check, so reject it and every non-object payload explicitly (contract: never throws).
 	if (latest === undefined || latest.data === null || typeof latest.data !== "object") {
 		return;
 	}
@@ -301,7 +301,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 		},
 	});
 
-	// Best-effort like `safety/index.ts:832-838`: restore never throws, a bad payload must not stop session start.
+	// Best-effort like `safety/index.ts:832-838`: a bad payload must not stop session start.
 	pi.on("session_start", (_event, ctx) => {
 		try {
 			restoreModeFromBranch(ctx.sessionManager.getBranch());
