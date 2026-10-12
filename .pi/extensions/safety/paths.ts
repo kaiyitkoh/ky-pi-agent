@@ -6,9 +6,9 @@
  * call (contributing-boundary.test.ts matches it as a substring).
  *
  * Invariants:
- * - Normalise on `Word.text`, never `.value`: an unquoted `C:\Users\x\.aws\credentials` has its
- *   backslashes eaten as POSIX escapes in `.value`; stripping one pair of quotes from `.text`
- *   yields the same path for all three quoting forms.
+ * - Normalises whatever arrives in `.text` and never reads `.value`. The bash caller currently passes
+ *   `Word.value`, which eats an unquoted `C:\Users\x\.aws\credentials`'s backslashes as POSIX escapes,
+ *   so that form is NOT blocked through bash (docs/SAFETY.md known bypasses).
  * - unbash expands neither `~` nor `$HOME`, so `home` is a parameter and expanded here.
  * - A leading UNC `\` pair is kept as a marker and server+share is pinned as an immutable root
  *   like a drive letter, so `\server\share\..\..\x` cannot climb off the share.
@@ -17,7 +17,7 @@
  */
 
 
-/** One path argument; `text` is the raw source slice (or the literal tool parameter). `value` is carried for parity but never read by {@link canonicalisePathArg}. */
+/** One path argument; `text` should be the raw source slice or tool parameter (bash args currently pass `Word.value`). `value` is never read by {@link canonicalisePathArg}. */
 export interface PathWordArg {
 	readonly text: string;
 	readonly value: string;
