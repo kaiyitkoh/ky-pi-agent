@@ -1600,3 +1600,74 @@ Phase 9 built `/grill`, `/plan`, `/execute` and `/review` and proved each offlin
 **Expected output.** A spawned subagent that works from the packet alone, and a recorded live delta beside the -447 estimate.
 
 **Offline proxy:** `tests/unit/handoff-packet.test.ts` covers the pure packet builder, the `UNAVAILABLE` availability probe and the delta arithmetic. No subagent has ever spawned, and the arithmetic asserts no sign.
+
+## Phase 10 — Context Budget & Progressive Disclosure
+
+Phase 10 measured the per-turn floor, added `--ky-profile` tool profiles, and built the context-pollution experiment harness, all proved offline. Three checks need the work laptop and are governed here. `docs/DIAGNOSTICS.md` ("Per-turn floor", "Context-pollution experiment") holds the numbers and protocol; they are cited, not repeated.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-10-01 | CTX-05 — the live minimal-vs-full context experiment on the work laptop | OUTSTANDING |
+| RB-10-02 | CTX-04 — a live prompt-cache hit and prompt-stability check on DeepSeek | OUTSTANDING |
+| RB-10-03 | CTX-06 — the per-turn cost of each pinned-but-uninstalled package, measured with `/budget` | OUTSTANDING |
+
+### RB-10-01 — CTX-05: the live minimal-vs-full experiment
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs a provider inference key. This machine holds live static IAM admin credentials and no provider key is configured for Pi, so no inference runs from it.
+
+**Precondition.** A DeepSeek key on the work laptop, exported under a variable name you choose (`<KEY_ENV_NAME>`; the name is an input, the value never enters this repo). `node --version` must be 22.19 or newer; if the `.ts` import is rejected, rerun with `--experimental-strip-types`.
+
+**Safety envelope.** The launcher runs Pi with a scrubbed environment in a temporary repository, review-only. Never run it from a directory holding real work, and never with cloud credentials in the shell.
+
+**Procedure, on the work laptop.**
+
+1. Confirm the offline harness still passes: `npx vitest run tests/unit/ctx-experiment.test.ts --maxWorkers=2`
+2. Run the experiment: `KY_EXP_MODEL=<provider/model> KY_EXP_KEY_VAR=<KEY_ENV_NAME> sh scripts/ctx-experiment.sh`
+3. If the decision is INCONCLUSIVE, rerun with `KY_EXP_REPEATS=20` added to the same command.
+4. Optionally run arm A on a second route to fill the provider-misconfiguration row.
+5. Record the result: `echo "RB-10-01 decision: <DEGRADES|NO_DETECTABLE_EFFECT|INCONCLUSIVE>, d=<d> [<lo>,<hi>], label=<discrimination>, $(date -u +%FT%TZ)" >> RB-10-01-RESULT.md`
+
+**Expected output.** A `summary.json` and the recorded line. Any of the three decisions is a valid result; none is a failure.
+
+**Offline proxy:** `tests/unit/ctx-experiment.test.ts` and `tests/unit/ctx-experiment-launcher.test.ts` prove the scoring, arm flags, JSON parsing and the launcher against a fake `pi`. No live trial has run.
+
+### RB-10-02 — CTX-04: live cache hit and prompt stability
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** A cache hit is reported by the provider on a real request, and no inference runs from this machine.
+
+**Procedure, on the work laptop.**
+
+1. Start a fresh session with the default profile and send two real turns on DeepSeek.
+2. Read the turns log `cacheRead` ratio for turn 2, and confirm the `/budget` floor is identical on both turns.
+3. Toggle `/plan`, send a third turn, and read the ratio again. A re-price here is expected: the tools block sits inside the cached prefix (assumption A1, unverified until this runs).
+4. Record the result: `echo "RB-10-02 turn-2 cacheRead ratio: <ratio>, after /plan toggle: <ratio>, $(date -u +%FT%TZ)" >> RB-10-02-RESULT.md`
+
+**Expected output.** A high turn-2 ratio with an unchanged floor, and a visibly lower ratio after the toggle.
+
+**Offline proxy:** `tests/integration/prompt-stability.test.ts` and `tests/integration/tool-profiles.test.ts` prove the system prompt and tool list are byte-stable across turns for a fixed profile. They do not prove the provider caches it.
+
+### RB-10-03 — CTX-06: per-package per-turn cost
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Four pinned packages are not installed, and nothing installs here.
+
+**Precondition.** `RB-07-02` (install the pinned specs with a human present for the package-legitimacy gate) must complete FIRST.
+
+**Procedure, on the work laptop, after `RB-07-02`.**
+
+1. For each profile run `pi --ky-profile recon`, then `review`, `implement`, `full`, and read `/budget` at the first prompt.
+2. Subtract the local floor to get each package's delta per profile.
+3. Check the `pi-subagents` `toolActivation` mode on DeepSeek (eager or loader), and whether its `advertised_subagents` section is byte-stable across turns.
+4. Check that a subagent child session keeps its frontmatter tool list under the default profile.
+5. Record the result: `echo "RB-10-03 <package> delta per profile: <recon>/<review>/<implement>/<full>, $(date -u +%FT%TZ)" >> RB-10-03-RESULT.md`
+
+**Static findings before install.** `pi-session-finder` registers 0 tools (0 tok). `@narumitw/pi-lsp` is a source-text estimate only, about 500-650 tok, and not a `/budget` number. `pi-subagents` and `pi-web-access` are not statically measurable.
+
+**Expected output.** One recorded line per package, each with four deltas.
+
+**Offline proxy:** `tests/integration/context-floor.test.ts` proves the floor arithmetic for every local extension and Pi built-in. It cannot see a package that is not installed.

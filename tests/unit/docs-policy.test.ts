@@ -169,6 +169,7 @@ const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02", "RB-07-03"] as const;
 const PHASE_EIGHT_IDS = ["RB-08-01", "RB-08-02", "RB-08-03"] as const;
 const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
 const PHASE_NINE_IDS = ["RB-09-01", "RB-09-02", "RB-09-03"] as const;
+const PHASE_TEN_IDS = ["RB-10-01", "RB-10-02", "RB-10-03"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
@@ -181,6 +182,7 @@ const ALL_IDS = [
 	...PHASE_EIGHT_IDS,
 	...PHASE_EIGHT_TWO_IDS,
 	...PHASE_NINE_IDS,
+	...PHASE_TEN_IDS,
 ] as const;
 
 /**
@@ -531,6 +533,18 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-09-03": [
 		"npx vitest run tests/unit/handoff-packet.test.ts --maxWorkers=2",
 		'echo "RB-09-03 parent-token delta: <live>, packet <tokens>, $(date -u +%FT%TZ)" >> RB-09-03-RESULT.md',
+	],
+
+	"RB-10-01": [
+		"npx vitest run tests/unit/ctx-experiment.test.ts --maxWorkers=2",
+		"KY_EXP_MODEL=<provider/model> KY_EXP_KEY_VAR=<KEY_ENV_NAME> sh scripts/ctx-experiment.sh",
+		'echo "RB-10-01 decision: <DEGRADES|NO_DETECTABLE_EFFECT|INCONCLUSIVE>, d=<d> [<lo>,<hi>], label=<discrimination>, $(date -u +%FT%TZ)" >> RB-10-01-RESULT.md',
+	],
+	"RB-10-02": [
+		'echo "RB-10-02 turn-2 cacheRead ratio: <ratio>, after /plan toggle: <ratio>, $(date -u +%FT%TZ)" >> RB-10-02-RESULT.md',
+	],
+	"RB-10-03": [
+		'echo "RB-10-03 <package> delta per profile: <recon>/<review>/<implement>/<full>, $(date -u +%FT%TZ)" >> RB-10-03-RESULT.md',
 	],
 };
 
