@@ -1536,16 +1536,8 @@ const FEATURES_CEILINGS: Readonly<Record<string, number>> = {
  * charge `/quick` with quality+safety+diagnostics (~13k lines) and be
  * meaningless.
  *
- * Only ONE row exists today -- `/quick`, the only ceremonial workflow that
- * exists. The four ceremonial rows (grill/plan/execute/review) are added by
- * the plans that CREATE their command files (09-08, 09-10, 09-13, 09-15),
- * never as placeholder rows for files that do not exist yet.
- *
- * HAND-OFF TO PLAN 09-16: an "every FEATURES_CEILINGS name has a
- * WORKFLOW_TEXT_BUDGETS row" completeness assertion is deliberately NOT
- * added here -- four of the five command files do not exist yet, so that
- * assertion would fail on every commit between this plan and 09-16. Plan
- * 09-16 is the phase's closing completeness gate; it adds that assertion.
+ * Unlike WORKFLOW_BUDGETS/DIRECTORY_BUDGETS there is no `budget === ceil(sum/10)*10` rule: the ceiling is a spec
+ * number, so it stays put while the measured sum is free to move beneath it.
  */
 const WORKFLOW_TEXT_BUDGETS: readonly {
 	name: string;
@@ -1559,10 +1551,9 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		commandFile: ".pi/extensions/workflows/index.ts",
 		bodies: [],
 		budget: 100,
-		why: "the only ceremonial workflow that exists today; no skill/prompt body. Re-measured 99 raw lines " +
-			"2026-08-15 with countRawLines -- WORKFLOW_BUDGETS' own why string for this same file was stale " +
-			"(stated 96), corrected in the same plan as this entry. 99 rounds up to 100, so the declared " +
-			"ceiling was already correct even though the narrative was not (09-RESEARCH.md Pitfall 2)",
+		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 84 raw lines " +
+			"2026-10-13 with countRawLines, inside 100 -- the independent greppable assertion on " +
+			"workflows/index.ts still holds",
 	},
 	{
 		name: "grill",
@@ -1570,8 +1561,8 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [".pi/skills/grill/SKILL.md"],
 		budget: 250,
 		why: "FEATURES.md Part 2 line 158's ceiling for the flagship workflow -- FROZEN, may not move to absorb " +
-			"growth (D-13). Measured 135 raw lines (index.ts) + 58 raw lines (SKILL.md) = 193 raw lines " +
-			"2026-08-15 with countRawLines, well inside 250 -- scorecard.ts, spec-schema.ts and " +
+			"growth (D-13). Measured 110 raw lines (index.ts) + 58 raw lines (SKILL.md) = 168 raw lines " +
+			"2026-10-13 with countRawLines, well inside 250 -- scorecard.ts, spec-schema.ts and " +
 			"scorecard-parse.ts are supporting modules bound only by the .pi/extensions/grill DIRECTORY_BUDGETS " +
 			"ratchet above, per this registry's own module-docstring rule (D-13) that a merged closure budget " +
 			"would be meaningless",
@@ -1582,8 +1573,8 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [".pi/skills/plan-ceremony/SKILL.md"],
 		budget: 200,
 		why: "FEATURES.md Part 2 line 183's ceiling, the TIGHTEST of the four ceremonial ceilings -- FROZEN, " +
-			"may not move to absorb growth (D-13). Measured 140 raw lines (index.ts) + 44 raw lines " +
-			"(SKILL.md) = 184 raw lines 2026-08-15 with countRawLines, inside 200 with 16 lines of headroom -- " +
+			"may not move to absorb growth (D-13). Measured 113 raw lines (index.ts) + 44 raw lines " +
+			"(SKILL.md) = 157 raw lines 2026-10-13 with countRawLines, inside 200 with 43 lines of headroom -- " +
 			"plan-schema.ts and requirement-ids.ts are supporting modules bound only by the " +
 			".pi/extensions/plan-ceremony DIRECTORY_BUDGETS ratchet above, per this registry's own " +
 			"module-docstring rule (D-13) that a merged closure budget would be meaningless",
@@ -1594,7 +1585,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [],
 		budget: 250,
 		why: "FEATURES.md Part 2 ceiling for /execute -- FROZEN, may not move to absorb growth (D-13). No skill body; " +
-			"measured 142 raw lines (index.ts) 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
+			"measured 142 raw lines 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
 			"the .pi/extensions/execute DIRECTORY_BUDGETS ratchet",
 	},
 	{
@@ -1619,6 +1610,35 @@ describe("Item 1(d) (D-13) -- WORKFLOW_TEXT_BUDGETS: the per-workflow readable-t
 	it("FEATURES_CEILINGS has exactly the five names FEATURES.md Part 2 specifies, at their stated values", () => {
 		expect(Object.keys(FEATURES_CEILINGS).sort()).toEqual(["execute", "grill", "plan", "quick", "review"]);
 		expect(FEATURES_CEILINGS).toEqual({ grill: 250, plan: 200, execute: 250, review: 250, quick: 100 });
+	});
+
+	it("every FEATURES_CEILINGS name has exactly one WORKFLOW_TEXT_BUDGETS row", () => {
+		for (const name of Object.keys(FEATURES_CEILINGS)) {
+			const rows = WORKFLOW_TEXT_BUDGETS.filter((e) => e.name === name);
+			expect(
+				rows.length,
+				`FEATURES_CEILINGS declares '${name}' but WORKFLOW_TEXT_BUDGETS has ${rows.length} rows for it -- add its row (exactly one)`,
+			).toBe(1);
+		}
+	});
+
+	it("every WORKFLOW_TEXT_BUDGETS row names a FEATURES_CEILINGS workflow", () => {
+		for (const entry of WORKFLOW_TEXT_BUDGETS) {
+			expect(
+				Object.hasOwn(FEATURES_CEILINGS, entry.name),
+				`WORKFLOW_TEXT_BUDGETS row '${entry.name}' is not in FEATURES_CEILINGS -- delete the row, or add the ceiling from FEATURES.md Part 2`,
+			).toBe(true);
+		}
+	});
+
+	it.each(WORKFLOW_TEXT_BUDGETS)("$name's why states the measured sum and a date", (entry) => {
+		const total = [entry.commandFile, ...entry.bodies].reduce((sum, f) => sum + countRawLines(f), 0);
+		expect(entry.why, `${entry.name}'s why must state the measured ${total} raw lines`).toContain(`${total} raw lines`);
+		expect(entry.why, `${entry.name}'s why must carry a YYYY-MM-DD measurement date`).toMatch(/\d{4}-\d{2}-\d{2}/);
+	});
+
+	it("quick keeps its independent 100-line ceiling", () => {
+		expect(countRawLines(".pi/extensions/workflows/index.ts")).toBeLessThanOrEqual(100);
 	});
 
 	it.each(WORKFLOW_TEXT_BUDGETS)("$name's command file + declared bodies stay within its budget", (entry) => {
