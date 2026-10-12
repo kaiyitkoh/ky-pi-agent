@@ -26,6 +26,7 @@
  *   dashscope/deepseek-v4-flash             input:["text"]           contextWindow:393216
  *   amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
  *                                            input:["text","image"]  reasoning:true  contextWindow:200000
+ *   [Pi 1.1.0: R1 ids removed from catalogue; built locally in beforeAll]
  *   amazon-bedrock/deepseek.r1-v1:0         input:["text"]  reasoning:true  contextWindow:128000
  *   amazon-bedrock/us.deepseek.r1-v1:0      same shape, region-qualified id
  *   amazon-bedrock/deepseek.v3-v1:0         input:["text"]  reasoning:true  contextWindow:163840
@@ -72,9 +73,15 @@ beforeAll(async () => {
 	await withModelsConfig({ models: TEMPLATE }, (handle) => {
 		dashscopeFlash = handle.requireModel("dashscope", "deepseek-v4-flash");
 		bedrockClaude = handle.requireModel("amazon-bedrock", "anthropic.claude-sonnet-4-5-20250929-v1:0");
-		bedrockR1 = handle.requireModel("amazon-bedrock", "deepseek.r1-v1:0");
-		bedrockR1Us = handle.requireModel("amazon-bedrock", "us.deepseek.r1-v1:0");
 		bedrockNonClaudeReasoning = handle.requireModel("amazon-bedrock", "deepseek.v3-v1:0");
+		// Pi 1.1.0 dropped deepseek.r1-v1:0 / us.deepseek.r1-v1:0 from the Bedrock
+		// catalogue (verified: only deepseek.v3-v1:0 and deepseek.v3.2 remain). The
+		// deny-list in guard.ts is id-based and still protects anyone who supplies
+		// those ids (custom models.json entry, older Pi), so the fixtures are built
+		// locally: same shape as the former catalogue entries (text-only, reasoning).
+		const r1Shape = { ...bedrockNonClaudeReasoning, input: ["text"], reasoning: true, contextWindow: 128000 };
+		bedrockR1 = { ...r1Shape, id: "deepseek.r1-v1:0", name: "DeepSeek-R1" } as Model<Api>;
+		bedrockR1Us = { ...r1Shape, id: "us.deepseek.r1-v1:0", name: "DeepSeek-R1 (US)" } as Model<Api>;
 	});
 });
 

@@ -162,7 +162,7 @@ read and act on — never a substituted model, never a downgrade.
    its own; the behaviour is pinned by `tests/unit/capability-guard.test.ts`,
    not by Pi's internals.
 4. **Bedrock DeepSeek R1 for a role that needs a tool loop.** Both ids Pi's
-   catalogue serves it under (`deepseek.r1-v1:0` and `us.deepseek.r1-v1:0`)
+   0.84.x catalogue served it under (absent from the Pi 1.1.0 catalogue; the deny-list still guards custom entries) (`deepseek.r1-v1:0` and `us.deepseek.r1-v1:0`)
    support no tool calling at all, and `Model<Api>` carries no field
    anywhere that expresses tool-calling support — so this is an explicit id
    deny-list, not a catalogue predicate, and there is no catalogue field to
