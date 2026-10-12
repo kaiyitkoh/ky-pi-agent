@@ -449,7 +449,9 @@ pass that the commit cannot. Each rejection is logged; once a task passes
 shared workflows
 settle handler stands aside while an `/execute` run is armed, so the result
 does not depend on extension load order, which Pi takes from an unsorted
-directory listing.
+directory listing. An `/execute` run whose `agent_end` never arrived is
+cleared at `session_start`, and `/quick` clears one before it arms, because
+an `/execute` slot with no shared run armed can only be a leak.
 
 **Why the record is a signed ledger, not PROGRESS.md.** The executor can
 write any file, so state kept in PROGRESS.md could be edited to erase the

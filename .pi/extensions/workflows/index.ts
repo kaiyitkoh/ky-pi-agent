@@ -9,7 +9,7 @@ import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
-import { executeRunContext } from "../execute/progress.ts";
+import { disarmExecuteRun, executeRunContext } from "../execute/progress.ts";
 
 export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("quick", {
@@ -35,6 +35,8 @@ export default function (pi: ExtensionAPI): void {
 				);
 				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
+				disarmExecuteRun(); // with no shared run armed, an /execute slot is a leak that would otherwise settle this run
+
 				// Trust reaches the gate stage so an untrusted cwd's node_modules/.bin is never spawned.
 				const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
 				if (gate.blocking) {

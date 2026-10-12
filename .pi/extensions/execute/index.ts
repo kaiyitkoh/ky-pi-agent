@@ -120,6 +120,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
+	// A run whose agent_end never arrived must not settle some later turn.
+	pi.on("session_start", () => disarmExecuteRun());
+
 	pi.on("tool_execution_start", (event) => {
 		if (executeRunContext() !== undefined) noteToolStart(event.toolCallId, event.toolName, event.args);
 	});

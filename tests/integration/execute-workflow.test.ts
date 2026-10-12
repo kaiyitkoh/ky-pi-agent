@@ -17,7 +17,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { logPath } from "../../.pi/lib/jsonl.ts";
 import executeExtension from "../../.pi/extensions/execute/index.ts";
 import { HANDOFF_AGENT } from "../../.pi/extensions/execute/handoff.ts";
-import { driftAbort, progressBlocks, recordedEntries, renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
+import { driftAbort, executeRunContext, progressBlocks, recordedEntries, renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import workflowsExtension from "../../.pi/extensions/workflows/index.ts";
 import { EVIDENCE_LOG_BASE, endRun, isRunArmed } from "../../.pi/extensions/workflows/evidence.ts";
@@ -464,6 +464,15 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain("degraded (ordinary prompt loop)");
 		expect(text).not.toMatch(/\bdelegated\b/);
+	});
+
+	it("a run whose agent_end never arrived is cleared at session_start, so it cannot settle a later turn", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		expect(executeRunContext()).toBeDefined();
+		await h.fire("session_start", {});
+		expect(executeRunContext(), "a leaked slot would make the workflows settle handler stand aside forever").toBeUndefined();
+		expect(isRunArmed()).toBe(false);
 	});
 
 	it("load order does not matter: with workflows loaded first, /execute still settles and records its own run", async () => {
