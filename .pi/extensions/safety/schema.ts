@@ -75,4 +75,6 @@ export interface AuditRow {
 	reason: string;
 	/** `process.pid`, or an injected value for deterministic tests. */
 	pid: number;
+	/** Set only on nested calls (e.g. codemode `executeTool`): the parent tool call id. Additive. */
+	parentToolCallId?: string;
 }

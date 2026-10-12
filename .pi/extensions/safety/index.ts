@@ -577,12 +577,71 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 }
 
 // ---------------------------------------------------------------------------
+// 08.1-03 -- Pi 1.x tool-path deny table (UPG-03)
+// ---------------------------------------------------------------------------
+
+/**
+ * Exact tool names the hook denies outright. Derived at source:
+ *  - "powershell": Pi 1.1.0 types.d.ts PowerShellToolCallEvent (922-925); unbash cannot parse it.
+ *  - "codemode": pi-coding-agent dist/extensions/codemode/tool.js:31 (CODEMODE_TOOL_NAME).
+ *  - "tool_search": dist/extensions/tool-search/tool.js:11 (TOOL_SEARCH_TOOL_NAME).
+ *  - MCP resource tools: dist/extensions/mcp/resources.js:2-3,192,208,224.
+ *  - Prefix "mcp__": dist/extensions/mcp/tools.js:46 (`mcp__<server>__<tool>`).
+ *  - pi-background-tasks@2.6.9 tools OUTSIDE the "process" feature, and the one
+ *    process-adjacent tool that takes a prompt/argv: bg_run_pi_attested
+ *    (src/extension.ts:1036, params 159-181: prompt, extraPiArgs, reportPath),
+ *    bg_delegate (src/core/delegate/types.ts:32), delegate_read_artifact
+ *    (src/delegate-child-extension.ts:601), fusion_* (src/core/fusion/*.ts).
+ *    bg_status/bg_logs/bg_kill take only taskId/maxBytes/tail (extension.ts:184-209)
+ *    and bg_result is id-only: no mapping needed.
+ * Codemode nested calls reach this hook too (agent-session.js:326-343, :388-416).
+ * EV-42 still holds generically for OTHER extension tools; see docs/SAFETY.md.
+ */
+const DENIED_TOOL_NAMES: ReadonlySet<string> = new Set([
+	"powershell",
+	"codemode",
+	"tool_search",
+	"list_mcp_resources",
+	"list_mcp_resource_templates",
+	"read_mcp_resource",
+	"bg_run_pi_attested",
+	"bg_delegate",
+	"delegate_read_artifact",
+	"fusion_reason",
+	"fusion_investigate",
+	"fusion_research",
+	"fusion_validate",
+	"fusion_brainstorm",
+	"fusion_web_fetch",
+]);
+const DENIED_TOOL_PREFIXES: readonly string[] = ["mcp__"];
+const DENY_COMMAND_MAX = 2000;
+
+function isDeniedToolName(name: string): boolean {
+	return DENIED_TOOL_NAMES.has(name) || DENIED_TOOL_PREFIXES.some((p) => name.startsWith(p));
+}
+
+function safeStringify(value: unknown): string {
+	try {
+		return JSON.stringify(value) ?? "";
+	} catch {
+		return "";
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Task 1 — the tool_call hook: UX and early rejection
 // ---------------------------------------------------------------------------
 
 /**
+ * 08.1-03: BEFORE the built-in filter, a deny table (DENIED_TOOL_NAMES /
+ * DENIED_TOOL_PREFIXES, with 1.1.0 file:line citations) blocks powershell, MCP,
+ * codemode and tool_search, and `bg_run` is classified as `bash` (confirm ->
+ * block, no wrapper to consume grants). Nested codemode calls reach this hook
+ * with `parentToolCallId` (agent-session.js:326-343), recorded in audit rows.
+ *
  * Fires for `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` only -- every
- * other tool name returns `undefined` immediately, unaudited, matching
+ * other (non-denied) tool name returns `undefined` immediately, unaudited (EV-42), matching
  * `policy.ts#evaluate`'s own "this guard governs exactly these tool names"
  * contract (SAFE-15's published limits table names the gap for every OTHER
  * tool explicitly, rather than this file silently claiming coverage it does
@@ -638,6 +697,76 @@ function registerApprovalTool(pi: ExtensionAPI): void {
  */
 function registerToolCallHook(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event, ctx): Promise<ToolCallEventResult | undefined> => {
+		const parentToolCallId = event.parentToolCallId;
+
+		// 08.1-03 (a): DENY table -- fail closed, even on malformed input.
+		if (isDeniedToolName(event.toolName)) {
+			const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
+			const raw = typeof rec.command === "string" ? rec.command : safeStringify(event.input);
+			const reason =
+				`"${event.toolName}" is not covered by the ky-pi-agent guard (unparseable or unreviewed tool path) -- ` +
+				"it is blocked. Use bash, read, write or edit instead.";
+			writeAuditRow(ctx.cwd, {
+				event: HOOK_AUDIT_EVENT,
+				tool: event.toolName,
+				command: raw.slice(0, DENY_COMMAND_MAX),
+				cwd: ctx.cwd,
+				verdict: "block",
+				reason,
+				parentToolCallId,
+			});
+			return { block: true, reason };
+		}
+
+		// 08.1-03 (b): bg_run -> classified EXACTLY as bash with the same command.
+		const isBgRun = event.toolName === "bg_run";
+		if (isBgRun) {
+			const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
+			if (typeof rec.command !== "string" || rec.command.trim() === "") {
+				const reason = "bg_run called without a non-empty string command -- blocked (fail closed)";
+				writeAuditRow(ctx.cwd, {
+					event: HOOK_AUDIT_EVENT,
+					tool: "bg_run",
+					command: safeStringify(event.input).slice(0, DENY_COMMAND_MAX),
+					cwd: ctx.cwd,
+					verdict: "block",
+					reason,
+					parentToolCallId,
+				});
+				return { block: true, reason };
+			}
+			const bgVerdict = classifyAtWrapper("bash", { command: rec.command }, ctx);
+			if (bgVerdict.kind === "allow") {
+				writeAuditRow(ctx.cwd, {
+					event: HOOK_AUDIT_EVENT,
+					tool: "bg_run",
+					command: rec.command,
+					cwd: ctx.cwd,
+					verdict: "allow",
+					reason: "hook: allowed (bg_run classified as bash)",
+					parentToolCallId,
+				});
+				return undefined;
+			}
+			// A confirm verdict BLOCKS for bg_run: the approve-and-reissue protocol
+			// consumes grants in the bash wrapper's execute(), and bg_run has no
+			// wrapper, so deferring would let it run unconsumed. Never defer here.
+			const reason =
+				bgVerdict.kind === "confirm"
+					? `${bgVerdict.reason} -- bg_run cannot use the approval protocol; run it through bash instead`
+					: bgVerdict.reason;
+			writeAuditRow(ctx.cwd, {
+				event: HOOK_AUDIT_EVENT,
+				tool: "bg_run",
+				command: rec.command,
+				cwd: ctx.cwd,
+				verdict: "block",
+				reason,
+				parentToolCallId,
+			});
+			return { block: true, reason };
+		}
+
 		if (
 			event.toolName !== "bash" &&
 			event.toolName !== "read" &&
@@ -662,6 +791,7 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 				cwd: ctx.cwd,
 				verdict: "allow",
 				reason: "hook: allowed",
+				parentToolCallId,
 			});
 			return undefined;
 		}
@@ -699,6 +829,7 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 					cwd: ctx.cwd,
 					verdict: "allow",
 					reason: `hook: an approval grant is present for this exact command -- deferring to the wrapper's one-shot consume -- ${verdict.reason}`,
+					parentToolCallId,
 				});
 				return undefined;
 			}
@@ -711,6 +842,7 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 				cwd: ctx.cwd,
 				verdict: "block",
 				reason: verdict.reason,
+				parentToolCallId,
 			});
 			return {
 				block: true,
@@ -729,6 +861,7 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			cwd: ctx.cwd,
 			verdict: "block",
 			reason: verdict.reason,
+			parentToolCallId,
 		});
 		return { block: true, reason: verdict.reason };
 	});

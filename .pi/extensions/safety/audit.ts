@@ -61,6 +61,8 @@ export interface AuditRowInput {
 	ts?: number;
 	/** Injected pid, for deterministic tests. Defaults to `process.pid`. */
 	pid?: number;
+	/** Parent tool call id for nested calls (Pi 1.x `parentToolCallId`). Omitted from the row when undefined. */
+	parentToolCallId?: string;
 }
 
 /** Options accepted by {@link writeAuditRow}. */
@@ -94,6 +96,9 @@ export function writeAuditRow(
 		reason: input.reason,
 		pid: input.pid ?? process.pid,
 	};
+	if (input.parentToolCallId !== undefined) {
+		row.parentToolCallId = input.parentToolCallId;
+	}
 
 	try {
 		return appendJsonl(cwd, AUDIT_LOG_BASE, row, {

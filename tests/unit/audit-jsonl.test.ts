@@ -111,6 +111,18 @@ describe("SAFE-14 — writeAuditRow records both verdicts in one dated file", ()
 		});
 	});
 
+	it("parentToolCallId round-trips when supplied and is absent from the row otherwise (08.1-03)", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 14, 9, 0, 0);
+			const written = writeAuditRow(cwd, { ...blockRow(cwd), parentToolCallId: "call_1" }, { now });
+			writeAuditRow(cwd, allowRow(cwd), { now });
+			const rows = readJsonl(written as string) as AuditRow[];
+			expect(rows).toHaveLength(2);
+			expect(rows[0].parentToolCallId).toBe("call_1");
+			expect(Object.keys(rows[1])).not.toContain("parentToolCallId");
+		});
+	});
+
 	it("never writes tool output or file contents, even when the caller supplies them", async () => {
 		await withTempLogCwd(async (cwd) => {
 			const now = new Date(2026, 7, 14, 9, 0, 0);
