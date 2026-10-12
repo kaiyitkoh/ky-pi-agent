@@ -1625,7 +1625,7 @@ Phase 10 measured the per-turn floor, added `--ky-profile` tool profiles, and bu
 
 1. Confirm the offline harness still passes: `npx vitest run tests/unit/ctx-experiment.test.ts --maxWorkers=2`
 2. Run the experiment: `KY_EXP_MODEL=<provider/model> KY_EXP_KEY_VAR=<KEY_ENV_NAME> sh scripts/ctx-experiment.sh`
-3. If the decision is INCONCLUSIVE, rerun with `KY_EXP_REPEATS=20` added to the same command.
+3. If the decision is INCONCLUSIVE, record that as the result. Do not rerun with more repeats and pool the runs; the design is one look at a fixed R (`docs/DIAGNOSTICS.md`, "Design").
 4. Optionally run arm A on a second route to fill the provider-misconfiguration row.
 5. Record the result: `echo "RB-10-01 decision: <DEGRADES|NO_DETECTABLE_EFFECT|INCONCLUSIVE>, d=<d> [<lo>,<hi>], label=<discrimination>, $(date -u +%FT%TZ)" >> RB-10-01-RESULT.md`
 

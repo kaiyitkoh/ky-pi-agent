@@ -37,8 +37,8 @@ export const LOW_CATCH_RATE = 0.5;
  */
 export const MAX_EXCLUDED_SHARE = 0.05;
 
-export const FIRST_STAGE_REPEATS = 10;
-export const SECOND_STAGE_REPEATS = 20;
+/** One look at a fixed R: no second stage and no pooling, because a second look at the same z inflates both error rates. */
+export const REPEATS = 10;
 
 export type ArmId = "A" | "B" | "F" | "C";
 

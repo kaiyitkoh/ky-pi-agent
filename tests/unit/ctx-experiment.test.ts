@@ -22,11 +22,10 @@ import {
 	scoreTrial,
 	summarise,
 	DEGRADE_POINTS,
-	FIRST_STAGE_REPEATS,
 	LOW_CATCH_RATE,
 	MAX_EXCLUDED_SHARE,
 	PROSE_RATE_THRESHOLD,
-	SECOND_STAGE_REPEATS,
+	REPEATS,
 	Z_90,
 	buildRunPlan,
 	decide,
@@ -47,8 +46,7 @@ describe("pre-registered constants", () => {
 		expect(DEGRADE_POINTS).toBe(0.15);
 		expect(Z_90).toBe(1.6449);
 		expect(PROSE_RATE_THRESHOLD).toBe(0.1);
-		expect(FIRST_STAGE_REPEATS).toBe(10);
-		expect(SECOND_STAGE_REPEATS).toBe(20);
+		expect(REPEATS).toBe(10);
 		expect(MAX_EXCLUDED_SHARE).toBe(0.05);
 		expect(ARM_IDS).toEqual(["A", "B", "F", "C"]);
 	});

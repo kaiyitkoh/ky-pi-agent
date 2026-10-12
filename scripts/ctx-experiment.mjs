@@ -50,7 +50,7 @@ async function main(argv) {
 
 	if (cmd === "plan") {
 		const seed = Number(flag(rest, "--seed", "20261013"));
-		const repeats = Number(flag(rest, "--repeats", String(core.FIRST_STAGE_REPEATS)));
+		const repeats = Number(flag(rest, "--repeats", String(core.REPEATS)));
 		const filter = flag(rest, "--defects", "");
 		const ids = SEEDED_DEFECTS.map((d) => d.id).filter((id) => filter === "" || filter.split(",").includes(id));
 		if (!Number.isInteger(seed) || !Number.isInteger(repeats) || repeats < 1 || ids.length === 0) {
