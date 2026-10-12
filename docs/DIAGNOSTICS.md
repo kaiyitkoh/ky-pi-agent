@@ -393,6 +393,56 @@ could not have been built the other way.
 
 ---
 
+## Per-turn floor
+
+The floor is what every request carries before the user types: the system prompt
+plus every active tool schema. `/budget` prints it as one line
+(`per-turn floor (system prompt + tool schemas)`), rounded once from the char sum.
+
+**Method.** `tests/integration/context-floor.test.ts` builds a composed faux session
+(`tests/helpers/harness-session.ts`): every tracked extension entry point, the real
+`AGENTS.md` and the repo skills, offline, no provider call. It captures the first
+outgoing request and runs `computeBudget` over the prompt and tool list. Unit:
+`/budget`'s formula, `Math.ceil(chars/4)`, tools counted as
+`name + description + JSON(parameters)`. Text is path-normalised (`<cwd>`, `<agent>`,
+`<repo>`) so the figures are identical on every machine. Measured 2026-10-13 on
+win32, Node 24.16.0, Pi 1.1.0. The four pinned packages in `.pi/settings.json` are
+not installed in this harness, so their cost is not in these numbers (it is measured
+separately). The Phase 2 figure of 1,850 tokens is the bare-Pi-plus-context-file
+configuration, not this composed one.
+
+**BEFORE (no cuts applied).**
+
+| Configuration | system chars | tool chars | floor chars | floor tokens | tools |
+|---|---|---|---|---|---|
+| bare Pi | 2758 | 2544 | 5302 | 1326 | 4 |
+| bare Pi + AGENTS.md | 4567 | 2544 | 7111 | 1778 | 4 |
+| full composed | 5162 | 5576 | 10738 | 2685 | 8 |
+
+The wire estimate for the composed tool list (`toToolDeclaration` JSON) is 6164 chars
+against 5576 by the `/budget` formula. The two are never compared with each other.
+The 2,685 figure is about 37% below the 4,255 estimated in research. Research
+measured a different configuration (likely including installed packages); this
+harness loads none, and Qoder's tool is deactivated when unconfigured.
+
+**Per-extension deltas** (floor of bare + AGENTS.md + one entry point, minus bare +
+AGENTS.md; zero rows are real measurements):
+
+| Entry point | chars | tokens | tools added | verdict |
+|---|---|---|---|---|
+| quality/index.ts | 511 | 128 | consult_advisor | budgeted |
+| questionnaire.ts | 1185 | 297 | questionnaire | profile-gate |
+| safety/index.ts | 248 | 62 | approve_ky_command | keep |
+| todo.ts | 310 | 78 | todo | profile-gate |
+| skills index | 1373 | 344 | none | budgeted |
+| checkpoint, diagnostics, execute, grill, harness, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | 0 | none | keep |
+
+Sum check: bare + AGENTS.md plus all deltas equals the composed floor with a residual
+of 0 chars (tolerance 32). Ceiling: `FLOOR_CEILINGS.composedBefore` holds the line at
+2,765 tokens until the cut lands.
+
+---
+
 ## The prose-tool-call event, and the lever deliberately not pulled
 
 `prose_tool_call` means a finalized assistant message *described* a tool call in
