@@ -17,7 +17,8 @@ import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import {
 	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, driftBase,
-	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase, recordedEntries, stallDetected, verificationRecord,
+	ensureWorkIgnored, executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase, recordedEntries,
+	stallDetected, verificationRecord,
 } from "./progress.ts";
 
 /** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
@@ -93,6 +94,8 @@ export default function (pi: ExtensionAPI): void {
 				}
 
 				// Base SHA and tree are read in the same try, so a throw refuses and never arms a run.
+				const ignoredNow = ensureWorkIgnored(ctx.cwd);
+				if (ignoredNow !== undefined) ctx.ui.notify(ignoredNow, "info");
 				const headSha = currentSha(ctx.cwd);
 				const pinned = driftBase(done);
 				if (pinned === undefined) pinDriftBase(ctx.cwd, slug, headSha);

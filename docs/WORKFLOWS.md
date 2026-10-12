@@ -374,7 +374,11 @@ the command namespace and needed no rename.
 
 **Why `.pi/work/` is git-ignored.** The artifacts describe features of a
 private work codebase, and this repository is public. They are per-feature
-scratch, not harness source.
+scratch, not harness source. In the work repo, where `/execute` runs, nothing
+ignores them by default, so `/execute` appends `.pi/work/` to that repo's
+`.git/info/exclude` (never committed) before its first run. PROGRESS.md keeps
+only the verification run's output, redacted and cut to its last 8,000
+characters.
 
 **Why the MR targets staging.** `main` auto-deploys. `/review` names the
 target as a constant and passes it explicitly on every call; it never relies

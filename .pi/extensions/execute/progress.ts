@@ -1,12 +1,13 @@
 /**
  * The /execute PROGRESS.md append format, the fail-closed drift abort, and the per-run state that binds real tool
  * output to a commit. The accept/reject verdict stays with ../workflows/evidence.ts gateCompletion; this file only
- * renders what that gate has already accepted. Impure: appendProgress, changedFiles and the run-state accessors.
+ * renders what that gate has already accepted. Impure: appendProgress, changedFiles, ensureWorkIgnored and the run state.
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
-import { join } from "node:path";
+import { dirname, join, resolve } from "node:path";
 
+import { redactString } from "../diagnostics/redact.ts";
 import { EXPECTED_FILE_PATTERN } from "../grill/spec-schema.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
 
@@ -242,7 +243,35 @@ export function noteToolEnd(toolCallId: string, isError: boolean, result: unknow
 	if (command !== normaliseCommand(state.verificationCommand)) return;
 	const reported = (result as { structuredContent?: { exit_code?: unknown } } | null)?.structuredContent?.exit_code;
 	const exitCode = typeof reported === "number" ? reported : isError ? 1 : 0;
-	state.verification = { output: renderToolResultText(result), exitCode, isError, sha };
+	state.verification = { output: boundOutput(renderToolResultText(result)), exitCode, isError, sha };
+}
+
+const MAX_OUTPUT_CHARS = 8_000;
+
+/** Redacted, and cut to its tail (where test summaries sit), because PROGRESS.md lands on disk and in the MR body. */
+export function boundOutput(text: string): string {
+	const redacted = redactString(text);
+	if (redacted.length <= MAX_OUTPUT_CHARS) return redacted;
+	return `[${redacted.length - MAX_OUTPUT_CHARS} earlier characters elided]\n${redacted.slice(-MAX_OUTPUT_CHARS)}`;
+}
+
+/**
+ * Keep `.pi/work/` out of the work repo's commits: when nothing ignores it yet, append it to the repo-local exclude
+ * file, which is never committed itself. Returns a notice when it did so.
+ */
+export function ensureWorkIgnored(cwd: string): string | undefined {
+	const git = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	const probe = git(["check-ignore", "-q", "--", ".pi/work/PROGRESS.md"]);
+	if (probe.status === 0) return undefined;
+	const prefix = git(["rev-parse", "--show-prefix"]);
+	const exclude = git(["rev-parse", "--git-path", "info/exclude"]);
+	if (probe.status !== 1 || prefix.status !== 0 || exclude.status !== 0) {
+		throw new Error("execute: could not tell whether .pi/work/ is git-ignored here -- refusing rather than risk committing it");
+	}
+	const file = resolve(cwd, (exclude.stdout ?? "").trim());
+	mkdirSync(dirname(file), { recursive: true });
+	appendFileSync(file, `\n/${(prefix.stdout ?? "").trim()}.pi/work/\n`, "utf-8");
+	return `execute: added .pi/work/ to ${file} so the work artifacts are never committed`;
 }
 
 /** HEAD at `cwd`, or "" when git cannot say; "" never equals a recorded commit, so an unknown HEAD fails the check. */

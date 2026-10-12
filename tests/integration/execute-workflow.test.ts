@@ -237,6 +237,31 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(bytes(progressFile(h))).toBe(before);
 	});
 
+	it("PROGRESS keeps the verification output redacted and bounded, and .pi/work/ is excluded from the work repo", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		const ignored = spawnSync("git", ["check-ignore", "-q", "--", `.pi/work/${SLUG}/PROGRESS.md`], { cwd: h.repo });
+		expect(ignored.status, "a model's `git add .` must never pick up the work artifacts").toBe(0);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h, `HEAD-OF-OUTPUT key=AKIA${"A".repeat(16)}\n${"x".repeat(20_000)}\nTAIL-OF-OUTPUT`);
+		h.fire("agent_end", {});
+		const text = readFileSync(progressFile(h), "utf-8");
+		expect(text).toContain("TAIL-OF-OUTPUT");
+		expect(text).toContain("earlier characters elided");
+		expect(text).not.toContain("HEAD-OF-OUTPUT");
+		expect(text).not.toContain(`AKIA${"A".repeat(16)}`);
+		expect(text.length).toBeLessThan(10_000);
+	});
+
+	it("redacts a credential inside short verification output", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h, `ok key=AKIA${"B".repeat(16)}`);
+		h.fire("agent_end", {});
+		expect(readFileSync(progressFile(h), "utf-8")).not.toContain(`AKIA${"B".repeat(16)}`);
+	});
+
 	it("fabrication: a commit with narrated output and no structured tool result is rejected, file unchanged", async () => {
 		const h = harness();
 		await h.command(SLUG);
