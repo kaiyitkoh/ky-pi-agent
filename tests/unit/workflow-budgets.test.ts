@@ -188,7 +188,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{
 		file: ".pi/extensions/harness/index.ts",
 		budget: 70,
-		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 63 raw lines 2026-10-13, rounded up to the next ten",
+		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 63 raw lines 2026-10-13, rounded up to the next ten. Re-measured 61 on 2026-10-13 after the 08.2 review fix WR-06 (forced-prompt branch also sets the section)",
 	},
 	{
 		file: ".pi/extensions/diagnostics/budget.ts",
@@ -348,7 +348,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"WR-03; measured 80 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 80 -> 90 " +
 			"by the 08.2 review fix WR-05: comment-rules.ts gained hasCommentRulesHeading (heading-line match " +
 			"outside fenced code). Re-measured 88 raw lines on 2026-10-13 (index.ts 63, comment-rules.ts 25), " +
-			"rounded up to the next ten",
+			"rounded up to the next ten. Re-measured 86 on 2026-10-13 after WR-06 (index.ts 61)",
 	},
 	{
 		dir: ".pi/extensions/diagnostics",

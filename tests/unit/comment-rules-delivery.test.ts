@@ -103,6 +103,69 @@ describe("harness delivers the comment rules", () => {
 		expect(prompt).toContain("<code_comments>");
 	});
 
+	// The forcing handler registers before the harness, so the harness sees the forced prompt.
+	const forcedSource = (forced: string): string =>
+		[
+			`import harness from ${JSON.stringify(HARNESS.replace(/\\/g, "/"))};`,
+			"export default function (pi) {",
+			`  pi.on("before_agent_start", () => ({ systemPrompt: ${JSON.stringify(forced)} }));`,
+			"  harness(pi);",
+			"}",
+			"",
+		].join("\n");
+
+	it("appends the rules exactly once to a forced prompt and still records the section", async () => {
+		const outgoing: string[] = [];
+		let sections: string[] = [];
+		await withFauxSession(
+			{
+				extensionSource: forcedSource("FORCED-PROMPT-X"),
+				responses: [
+					(context) => {
+						outgoing.push(transcriptView(context).systemPrompt);
+						return fauxAssistantMessage("one");
+					},
+					(context) => {
+						outgoing.push(transcriptView(context).systemPrompt);
+						return fauxAssistantMessage("two");
+					},
+				],
+			},
+			async (h) => {
+				await h.session.prompt("first");
+				await h.session.prompt("second");
+				sections = h.session.messages.flatMap((m) =>
+					m.role === "system" && "sections" in m && m.sections ? Object.keys(m.sections) : [],
+				);
+			},
+		);
+		expect(outgoing).toHaveLength(2);
+		for (const prompt of outgoing) {
+			expect(prompt.startsWith("FORCED-PROMPT-X")).toBe(true);
+			expect(occurrences(prompt, COMMENT_RULES_HEADING)).toBe(1);
+		}
+		expect(sections).toContain(COMMENT_RULES_SECTION);
+	});
+
+	it("leaves an empty forced prompt empty", async () => {
+		let prompt = "unset";
+		await withFauxSession(
+			{
+				extensionSource: forcedSource(""),
+				responses: [
+					(context) => {
+						prompt = transcriptView(context).systemPrompt;
+						return fauxAssistantMessage("ok");
+					},
+				],
+			},
+			async (h) => {
+				await h.session.prompt("hi");
+			},
+		);
+		expect(occurrences(prompt, COMMENT_RULES_HEADING)).toBe(0);
+	});
+
 	it("is absent without the harness (non-vacuity)", async () => {
 		const { prompt } = await capturePrompt({
 			extensionSource: "export default function () {}\n",

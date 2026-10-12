@@ -23,15 +23,13 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("before_agent_start", (event) => {
 		const o = event.systemPromptOptions;
 		if (o.contextFiles.some((f) => hasCommentRulesHeading(f.content))) return undefined;
-		if (typeof o.forceSystemPrompt === "string") {
-			if (!hasCommentRulesHeading(o.forceSystemPrompt)) {
-				o.forceSystemPrompt += `
-
-${COMMENT_RULES_TEXT}`;
-			}
-			return undefined;
-		}
+		// Pi persists sections even while a forced prompt is projected (agent-session.js#_preparePromptAndToolLoadout), so set both.
 		o.sections[COMMENT_RULES_SECTION] = COMMENT_RULES_TEXT;
+		const forced = o.forceSystemPrompt;
+		// An empty forced prompt is a deliberate choice; leave it empty.
+		if (typeof forced === "string" && forced.trim() !== "" && !hasCommentRulesHeading(forced)) {
+			o.forceSystemPrompt = `${forced}\n\n${COMMENT_RULES_TEXT}`;
+		}
 		return undefined;
 	});
 
