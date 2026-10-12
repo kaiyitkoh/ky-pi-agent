@@ -103,6 +103,10 @@ async function main(argv) {
 
 	if (cmd === "args") {
 		const [arm, padFile] = rest;
+		// Pi treats a missing file as literal prompt text, so a mangled path would silently turn arm C into arm A.
+		if (padFile !== undefined && !existsSync(padFile)) {
+			throw new Error(`args: pad file not found: ${padFile}`);
+		}
 		process.stdout.write(`${core.armArgs(arm, { padFile }).join("\n")}\n`);
 		return 0;
 	}

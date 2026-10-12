@@ -70,11 +70,11 @@ while IFS="$tab" read -r trial_id arm defect repeat <&3; do
 	node "$cli" prepare "$defect" "$(native "$trial_root")"
 	node "$cli" settings "$(native "$trial_root/agent")" "$arm"
 
-	pad_arg=
 	if [ "$arm" = "C" ]; then
-		pad_arg=$(native "$pad_file")
+		arm_args=$(node "$cli" args "$arm" "$(native "$pad_file")")
+	else
+		arm_args=$(node "$cli" args "$arm")
 	fi
-	arm_args=$(node "$cli" args "$arm" $pad_arg)
 
 	root_native=$(native "$trial_root")
 	old_ifs=$IFS

@@ -5,7 +5,7 @@
  * credentials while the minimal arm has bash and no safety layer.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -87,7 +87,8 @@ function runLauncher(env: Record<string, string>, prependPath?: string) {
 
 describe("ctx-experiment launcher with a fake pi", () => {
 	const evidence = tempDir("ctx-evidence-");
-	const out = tempDir("ctx-out-");
+	// A space in the output path proves the pad path is passed as one argument.
+	const out = tempDir("ctx out-");
 	const fakeDir = tempDir("ctx-fakepi-");
 	const fakePi = join(fakeDir, "pi");
 	writeFileSync(join(evidence, "canned.jsonl"), streamOf(reviewText([catching(defect.id)])), "utf-8");
@@ -165,6 +166,9 @@ describe("ctx-experiment launcher with a fake pi", () => {
 		expect(full).toHaveLength(1);
 		expect(minimal).toHaveLength(1);
 		expect(padded).toHaveLength(1);
+		const padArg = padded[0]![padded[0]!.indexOf("--append-system-prompt") + 1]!;
+		expect(padArg.endsWith("/pad.txt"), padArg).toBe(true);
+		expect(existsSync(padArg)).toBe(true);
 
 		const summary = JSON.parse(readFileSync(join(out, "summary.json"), "utf-8"));
 		expect(summary.trials).toBe(4);
@@ -217,6 +221,13 @@ describe("ctx-experiment summarise", () => {
 		expect(summary.arms.C).toMatchObject({ trials: 0, excluded: 1, misses: 0 });
 		expect(summary.decision.decision).toBe("INCONCLUSIVE");
 		expect(result.stdout).toContain("excluded: 2");
+	});
+
+	it("args refuses a pad file that does not exist", () => {
+		const missing = join(tempDir("ctx-nopad-"), "pad.txt");
+		const result = spawnSync(process.execPath, [CLI, "args", "C", missing], { encoding: "utf-8", windowsHide: true });
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain("pad file not found");
 	});
 
 	it("exits 2 with usage for an unknown subcommand", () => {
