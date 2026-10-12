@@ -42,7 +42,7 @@
  *                       their own conditional [RUNBOOK]/machine-state checks.
  *
  * A FIFTH SECTION, outside the four directions above but load-bearing for the
- * same EXT-08 requirement: `pi-subagents@0.49.0` reads NO configuration from
+ * same EXT-08 requirement: `pi-subagents@0.76.1` reads NO configuration from
  * `.pi/settings.json` at all (Task 1 of 07-09, `pi-subagents`
  * `src/extension/config.ts:90-92` -- a DEDICATED file,
  * `<agentDir>/extensions/subagent/config.json`), so the worktree-setup-hook
@@ -80,7 +80,7 @@ interface ExpectedPackage {
  */
 const EXPECTED_PACKAGES: readonly ExpectedPackage[] = [
 	{
-		spec: "npm:pi-subagents@0.49.0",
+		spec: "npm:pi-subagents@0.76.1",
 		why: "subagent isolation, worktree spawning, background execution, contact_supervisor escalation",
 	},
 	{
@@ -88,11 +88,11 @@ const EXPECTED_PACKAGES: readonly ExpectedPackage[] = [
 		why: "bg_run/bg_status/bg_logs/bg_kill background bash",
 	},
 	{
-		spec: "npm:@narumitw/pi-lsp@0.49.4",
+		spec: "npm:@narumitw/pi-lsp@0.49.9",
 		why: "lsp_diagnostics/lsp_fix, a 2-tool LSP diagnostics bridge",
 	},
 	{
-		spec: "npm:pi-web-access@0.22.0",
+		spec: "npm:pi-web-access@0.38.0",
 		why: "keyless web/documentation lookup (Exa, DuckDuckGo, Jina Reader, local unpdf)",
 	},
 	{
@@ -153,7 +153,7 @@ describe("EXT-08 Direction 2 -- pin shape: proven live, then applied to the real
 	const fixtures: readonly { spec: string; expected: boolean; label: string }[] = [
 		{ spec: "npm:pi-web-access", expected: false, label: "bare npm spec, no version" },
 		{ spec: "https://github.com/o/r", expected: false, label: "unrefed https URL" },
-		{ spec: "npm:pi-web-access@0.22.0", expected: true, label: "exact npm pin" },
+		{ spec: "npm:pi-web-access@0.38.0", expected: true, label: "exact npm pin" },
 	];
 
 	for (const fixture of fixtures) {
@@ -301,7 +301,7 @@ describe("EXT-08 Direction 4 -- installed-but-undeclared, where checkable", () =
 });
 
 describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' own config file", () => {
-	// pi-subagents@0.49.0 reads NO configuration from .pi/settings.json at
+	// pi-subagents@0.76.1 reads NO configuration from .pi/settings.json at
 	// all -- Task 1 of this plan read getConfigPath() end to end
 	// (pi-subagents src/extension/config.ts:90-92) and found the real key
 	// path is a DEDICATED global file, <agentDir>/extensions/subagent/config.json.
@@ -334,7 +334,7 @@ describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' o
 		expect(existsSync(join(repoRoot(), relativeHookPath))).toBe(true);
 	});
 
-	it("agentScope is deliberately absent from .pi/settings.json -- pi-subagents@0.49.0 has no such config key", () => {
+	it("agentScope is deliberately absent from .pi/settings.json -- pi-subagents@0.76.1 has no such config key", () => {
 		// agentScope is a PER-INVOCATION parameter on the subagent tool's own
 		// schema (pi-subagents src/extension/schemas.ts:333), resolved to
 		// "both" whenever a caller omits it (src/agents/agent-scope.ts:3-6) --
@@ -343,7 +343,7 @@ describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' o
 		expect(
 			Object.prototype.hasOwnProperty.call(readSettings(), "agentScope"),
 			"agentScope must not appear as a top-level .pi/settings.json key -- nothing in " +
-				"pi-subagents@0.49.0 reads it from there",
+				"pi-subagents@0.76.1 reads it from there",
 		).toBe(false);
 	});
 });

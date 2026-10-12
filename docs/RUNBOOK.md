@@ -992,8 +992,8 @@ entry and cannot be substituted.
 
 ## Phase 7 — Composed Extensions, Pinned & Reviewed
 
-Phase 7 composed five pinned npm packages (`pi-subagents@0.49.0`,
-`pi-background-tasks@2.4.2`, `@narumitw/pi-lsp@0.49.4`, `pi-web-access@0.22.0`,
+Phase 7 composed five pinned npm packages (`pi-subagents@0.76.1`,
+`pi-background-tasks@2.4.2`, `@narumitw/pi-lsp@0.49.9`, `pi-web-access@0.38.0`,
 `pi-session-finder@0.5.6`) with five vendored Pi-bundled extensions
 (`.pi/extensions/{todo,questionnaire,plan-mode,loop-police,checkpoint}`), wired
 the worktree-isolation setup hook the subagent runner needs, and closed
@@ -1055,7 +1055,7 @@ in `.pi/settings.json`.
 2. **One subagent spawn.** Confirm the five installed packages are still
    current per `RB-07-02`'s own reconciliation step — then confirm the
    working tree is clean: `git status --porcelain`. Worktree-isolated
-   subagents call `resolveRepoState()` (`pi-subagents@0.49.0
+   subagents call `resolveRepoState()` (`pi-subagents@0.76.1
    src/runs/shared/worktree.ts:137-142`), which runs the equivalent check
    scoped to exclude `.pi/subagents` and throws `"worktree isolation
    requires a clean git working tree. Commit or stash changes first."` on
@@ -1113,7 +1113,7 @@ prove:**
   (`07-09-SUMMARY.md`) and nothing in this repository's test suite spawns
   `pi-subagents`' real spawn path; only leg 2 above does.
 - `tests/unit/subagent-capabilities.test.ts` — proves ten `file:line`
-  citations against the pinned `pi-subagents@0.49.0` tarball are genuine and
+  citations against the pinned `pi-subagents@0.76.1` tarball are genuine and
   bound to the exact pinned version (`docs/EXTENSIONS.md`'s Subagent
   capability evidence table). It proves the citations are real source, not
   that the mechanisms they cite behave correctly once actually invoked in a
@@ -1168,10 +1168,10 @@ the package-legitimacy gate:**
    legitimacy evidence table — that review is current as of 2026-08-14/15 and
    should be re-run if this procedure runs materially later, since the
    ecosystem ships 13-16 releases/month.
-2. `pi install -l npm:pi-subagents@0.49.0`
+2. `pi install -l npm:pi-subagents@0.76.1`
 3. `pi install -l npm:pi-background-tasks@2.4.2`
-4. `pi install -l npm:@narumitw/pi-lsp@0.49.4`
-5. `pi install -l npm:pi-web-access@0.22.0`
+4. `pi install -l npm:@narumitw/pi-lsp@0.49.9`
+5. `pi install -l npm:pi-web-access@0.38.0`
 6. `pi install -l npm:pi-session-finder@0.5.6`
 7. `pi list`
 8. Reconcile step 7's output against `.pi/settings.json`'s `packages[]`:
@@ -1298,7 +1298,7 @@ same two reasons Phase 7 already recorded: **Correction 1** — this machine's
 live AWS SSO / static admin credentials are not a permission to run a
 `[RUNBOOK]` item, and it holds no *provider* inference credentials regardless
 — and **Correction 2** — the five packages Phase 7 pinned, including
-`pi-subagents@0.49.0` and `@narumitw/pi-lsp@0.49.4`, have never been
+`pi-subagents@0.76.1` and `@narumitw/pi-lsp@0.49.9`, have never been
 installed (`RB-07-02`, OUTSTANDING). Three entries follow, each citing the
 prior-phase entry that blocks it rather than restating that entry's own
 procedure.
@@ -1376,7 +1376,7 @@ this entry, and cannot be substituted.
 **Why this cannot be done here.** `quality/gates.ts#probeLspAvailability`
 reads the live, registered tool-name list — never `.pi/settings.json` — and
 on this machine that list never contains `lsp_diagnostics`/`lsp_fix`,
-because `@narumitw/pi-lsp@0.49.4` is pinned and **not installed**
+because `@narumitw/pi-lsp@0.49.9` is pinned and **not installed**
 (Correction 2, `RB-07-02`, OUTSTANDING). The LSP leg's `UNAVAILABLE` state,
 now genuinely wired into a real `/quick` run (plan 08-11), is not a finding
 about the leg's own logic — it is the honest, structurally-distinct-from-PASS
@@ -1385,7 +1385,7 @@ real type error, once the package and a real language server are both
 present, cannot be exercised without them.
 
 **Precondition.** Run this only after `RB-07-02` has completed — installing
-the five pinned specs, including `@narumitw/pi-lsp@0.49.4`, and reconciling
+the five pinned specs, including `@narumitw/pi-lsp@0.49.9`, and reconciling
 `pi list` against `.pi/settings.json`.
 
 **Procedure, on the work laptop, after `RB-07-02`:**

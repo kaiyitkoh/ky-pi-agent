@@ -486,10 +486,10 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		'git log --all --oneline -S"$KYPI_REDACTED_ACCOUNT_ID"',
 	],
 	"RB-07-02": [
-		"pi install -l npm:pi-subagents@0.49.0",
+		"pi install -l npm:pi-subagents@0.76.1",
 		"pi install -l npm:pi-background-tasks@2.4.2",
-		"pi install -l npm:@narumitw/pi-lsp@0.49.4",
-		"pi install -l npm:pi-web-access@0.22.0",
+		"pi install -l npm:@narumitw/pi-lsp@0.49.9",
+		"pi install -l npm:pi-web-access@0.38.0",
 		"pi install -l npm:pi-session-finder@0.5.6",
 		"pi list",
 		"npx vitest run tests/unit/extension-pins.test.ts",
