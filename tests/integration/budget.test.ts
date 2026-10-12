@@ -63,7 +63,8 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Context } from "@earendil-works/pi-ai";
+import type { TranscriptContext } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText } from "@earendil-works/pi-ai";
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -114,7 +115,7 @@ interface TurnRowShape {
 interface Capture {
 	/** `ctx.getSystemPrompt()`, exactly as the real extension's hook saw it. */
 	prompt: string;
-	/** `context.systemPrompt` as the provider adapter saw it, for cross-check. */
+	/** `getCurrentSystemPrompt(context.messages)` (pi-ai 1.1.0 transcript replay) as the provider adapter saw it, for cross-check. */
 	providerPrompt: string | undefined;
 	/** The tool list the provider was really sent. Real names, real schemas. */
 	tools: readonly { name: string; description: string; parameters: unknown }[];
@@ -154,7 +155,7 @@ let live: Capture;
 
 describe("DIAG-06 — /budget against a real system prompt and a real cache", () => {
 	beforeAll(async () => {
-		const outgoing: Context[] = [];
+		const outgoing: TranscriptContext[] = [];
 
 		live = await withFauxSession(
 			{
@@ -206,8 +207,8 @@ describe("DIAG-06 — /budget against a real system prompt and a real cache", ()
 
 				return {
 					prompt: readFileSync(dump, "utf-8"),
-					providerPrompt: outgoing[0]?.systemPrompt,
-					tools: (outgoing[0]?.tools ?? []).map((tool) => ({
+					providerPrompt: outgoing[0] ? getCurrentSystemPrompt(outgoing[0].messages) : undefined,
+					tools: (outgoing[0] ? getCurrentTools(outgoing[0].messages) : []).map((tool) => ({
 						name: tool.name,
 						description: tool.description,
 						parameters: tool.parameters as unknown,
@@ -233,7 +234,7 @@ describe("DIAG-06 — /budget against a real system prompt and a real cache", ()
 		// diverge, the report would be decomposing a prompt nobody was charged for.
 		expect(
 			live.providerPrompt,
-			"`ctx.getSystemPrompt()` and the `context.systemPrompt` the provider adapter received " +
+			"`ctx.getSystemPrompt()` and the `getCurrentSystemPrompt(context.messages)` the provider adapter received " +
 				"must be the same string. `/budget` reports the former and the user pays for the " +
 				"latter, so a divergence would make the whole report a description of something else",
 		).toBe(live.prompt);

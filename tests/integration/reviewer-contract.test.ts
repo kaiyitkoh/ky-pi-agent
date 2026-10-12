@@ -31,8 +31,13 @@ import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { Context, FauxProviderHandle, SimpleStreamOptions } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import type { FauxProviderHandle, SimpleStreamOptions, TranscriptContext } from "@earendil-works/pi-ai";
+import {
+	fauxAssistantMessage,
+	fauxProvider,
+	fauxToolCall,
+	getCurrentSystemPrompt,
+} from "@earendil-works/pi-ai";
 
 import { beforeAll, describe, expect, it } from "vitest";
 
@@ -44,7 +49,7 @@ import {
 	type ReviewerContractInput,
 } from "../../.pi/extensions/quality/reviewer.ts";
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
-import { SECRET_FIXTURE_TOKEN, wrapFauxWithPayload } from "../helpers/faux.ts";
+import { SECRET_FIXTURE_TOKEN, transcriptView, wrapFauxWithPayload } from "../helpers/faux.ts";
 import { commitFile, makeTempRepo } from "../helpers/git.ts";
 import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
 
@@ -181,7 +186,7 @@ async function waitForConfiguredAuth(
 }
 
 interface CapturedRequest {
-	context: Context;
+	context: TranscriptContext;
 	options: SimpleStreamOptions | undefined;
 }
 
@@ -195,7 +200,8 @@ function capturedText(capture: CapturedRequest | undefined): string {
 	if (capture === undefined) {
 		return "";
 	}
-	return capture.context.messages
+	return transcriptView(capture.context)
+		.messages
 		.map((message) => (typeof message.content === "string" ? message.content : JSON.stringify(message.content)))
 		.join("\n");
 }
@@ -382,12 +388,13 @@ describe("GATE-02 -- the reviewer's fixed context contract reaches the wire", ()
 
 	it("the tools array on the wire contains exactly one tool named submit_review", () => {
 		const capture = run.captures[0];
-		expect(capture?.context.tools?.length, "the tools array reaching the request is not length 1").toBe(1);
-		expect(capture?.context.tools?.[0]?.name).toBe("submit_review");
+		const tools = capture ? transcriptView(capture.context).tools : [];
+		expect(tools.length, "the tools array reaching the request is not length 1").toBe(1);
+		expect(tools[0]?.name).toBe("submit_review");
 	});
 
 	it("the system prompt on the wire carries every named soft-failure phrase, asserted individually", () => {
-		const systemPrompt = run.captures[0]?.context.systemPrompt ?? "";
+		const systemPrompt = getCurrentSystemPrompt(run.captures[0]?.context.messages ?? []);
 		expect(systemPrompt.length, "no system prompt reached the captured request at all").toBeGreaterThan(0);
 
 		expect(systemPrompt, 'missing "Stopping at surface issues"').toContain("Stopping at surface issues");

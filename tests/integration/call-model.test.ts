@@ -61,7 +61,7 @@
  */
 import { existsSync, readFileSync } from "node:fs";
 
-import type { Context, Model } from "@earendil-works/pi-ai";
+import type { Model, TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -176,7 +176,7 @@ interface Run {
 	/** Per-provider-call view of the outgoing options, captured by the factory. */
 	seenEfforts: unknown[];
 	/** The `Context` the provider received on the advisor call. */
-	advisorContext: Context | undefined;
+	advisorContext: TranscriptContext | undefined;
 	model: Model<string> | undefined;
 	/** Did the deliberately-rejected call rethrow, as `callModel` promises? */
 	rethrew: boolean;
@@ -194,7 +194,7 @@ const REJECTION_WITH_SECRET = `registry blew up holding ${SECRET_FIXTURE_TOKEN}`
 
 async function runFixture(): Promise<Run> {
 	const seenEfforts: unknown[] = [];
-	let advisorContext: Context | undefined;
+	let advisorContext: TranscriptContext | undefined;
 	let model: Model<string> | undefined;
 	let callerPayloadHookRan = false;
 

@@ -12,7 +12,7 @@
  *   queueMicrotask(async () => {
  *       await streamOptions?.onResponse?.({ status: 200, headers: {} }, requestModel);
  *
- * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510 — and :577 and :641 for the
+ * [VERIFIED: pi-ai 1.1.0 dist/providers/faux.js:359 — and :404 and :443 for the
  *  deferred paths. `grep -n "onPayload" faux.ts` returns nothing.]
  *
  * Pi wires `before_provider_request` to the agent's `onPayload` callback

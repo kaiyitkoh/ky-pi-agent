@@ -40,7 +40,7 @@
 import { readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
-import type { Context, Model } from "@earendil-works/pi-ai";
+import type { Model, TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -50,6 +50,7 @@ import { WIRE_LOG_BASE, type WireKind } from "../../.pi/extensions/diagnostics/s
 import {
 	buildOpenAiFixturePayload,
 	SECRET_FIXTURE_TOKEN,
+	transcriptView,
 	withSecretHeader,
 } from "../helpers/faux.ts";
 import { isIgnored, repoRoot } from "../helpers/git.ts";
@@ -80,7 +81,7 @@ interface Capture {
 	/** Every log file that exists under the session cwd, relative to it. */
 	relativePaths: string[];
 	/** The `Context` the provider was handed, captured by the response factory. */
-	context: Context | undefined;
+	context: TranscriptContext | undefined;
 	model: Model<string> | undefined;
 }
 
@@ -93,7 +94,7 @@ interface Capture {
  * different properties of the SAME dump.
  */
 async function captureOnePrompt(): Promise<Capture> {
-	let seenContext: Context | undefined;
+	let seenContext: TranscriptContext | undefined;
 	let seenModel: Model<string> | undefined;
 
 	return await withFauxSession(
@@ -232,8 +233,14 @@ describe("DIAG-01 / DIAG-07 — the wire dump of one live turn", () => {
 		// `buildOpenAiFixturePayload` prepends a `system` message when the context
 		// carries a system prompt (openai-completions.ts:681-760 does the same), so
 		// the arithmetic is the assertion rather than a bare equality.
-		const expectedMessages =
-			(capture.context?.messages.length ?? 0) + (capture.context?.systemPrompt ? 1 : 0);
+		//
+		// pi-ai 1.1.0: the system prompt is now a `role: "system"` message INSIDE
+		// `context.messages`, so counting `messages.length` and adding 1 for the
+		// prompt would double count it. Count the non-system messages (what the
+		// builder iterates) plus one when the replayed prompt is non-empty (the
+		// single system message the builder emits).
+		const view = capture.context ? transcriptView(capture.context) : undefined;
+		const expectedMessages = (view?.messages.length ?? 0) + (view?.systemPrompt ? 1 : 0);
 		expect(
 			request?.payload?.messages?.length,
 			"the recorded payload carries a different number of messages than the context the " +

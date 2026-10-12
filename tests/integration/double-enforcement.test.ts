@@ -64,7 +64,7 @@
  */
 import { existsSync } from "node:fs";
 
-import type { AssistantMessage, Context, FauxResponseStep } from "@earendil-works/pi-ai";
+import type { AssistantMessage, FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 
 import { describe, expect, it } from "vitest";
@@ -130,15 +130,15 @@ function assertAuditNonEmpty(rows: AuditRowShape[]): void {
 }
 
 /** A response step that records the outgoing context (including the prior tool result) before answering. */
-function capturing(into: Context[], reply: AssistantMessage): FauxResponseStep {
-	return ((context: Context): AssistantMessage => {
+function capturing(into: TranscriptContext[], reply: AssistantMessage): FauxResponseStep {
+	return ((context: TranscriptContext): AssistantMessage => {
 		into.push(context);
 		return reply;
 	}) as FauxResponseStep;
 }
 
 /** The most recent `toolResult` message in a captured context, or `undefined` if none exists. */
-function lastToolResult(context: Context): { isError: boolean; text: string } | undefined {
+function lastToolResult(context: TranscriptContext): { isError: boolean; text: string } | undefined {
 	const msg = [...context.messages].reverse().find((m) => m.role === "toolResult");
 	if (msg === undefined || msg.role !== "toolResult") {
 		return undefined;
@@ -174,7 +174,7 @@ function mutatorExtensionSource(mutateFrom: string, mutateTo: string): string {
 }
 
 /** One scripted turn: a bash tool call, then a plain closing reply captured via {@link capturing}. */
-function scriptedTurn(command: string, outgoing: Context[]): FauxResponseStep[] {
+function scriptedTurn(command: string, outgoing: TranscriptContext[]): FauxResponseStep[] {
 	return [
 		fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" }),
 		capturing(outgoing, fauxAssistantMessage([fauxText("noted")], { stopReason: "stop" })),
@@ -187,7 +187,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 		// idempotency guard any more -- this file loads it in-process, in more
 		// than one it() below, and each load fully re-registers with no reset
 		// call needed.
-		const outgoing: Context[] = [];
+		const outgoing: TranscriptContext[] = [];
 
 		await withFauxSession(
 			{
@@ -204,7 +204,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 				expect(outgoing.length, "the closing reply must have been reached for its context to be captured").toBe(
 					1,
 				);
-				const result = lastToolResult(outgoing[0] as Context);
+				const result = lastToolResult(outgoing[0] as TranscriptContext);
 				expect(result?.isError, "a hook block must surface to the model as an error tool result").toBe(true);
 				expect(
 					result?.text,
@@ -224,7 +224,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 	});
 
 	it("case 2: a later handler mutates a hook-allowed command into a blocked one -- the wrapper still stops it", async () => {
-		const outgoing: Context[] = [];
+		const outgoing: TranscriptContext[] = [];
 
 		await withFauxSession(
 			{
@@ -256,7 +256,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 				expect(outgoing.length, "the closing reply must have been reached for its context to be captured").toBe(
 					1,
 				);
-				const result = lastToolResult(outgoing[0] as Context);
+				const result = lastToolResult(outgoing[0] as TranscriptContext);
 				expect(
 					result?.isError,
 					"the wrapper must have thrown for the mutated (blocked) command -- isError:true is what " +
@@ -287,7 +287,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 	});
 
 	it("case 3 (negative control): the same mechanism mutating to another BENIGN command executes normally", async () => {
-		const outgoing: Context[] = [];
+		const outgoing: TranscriptContext[] = [];
 
 		await withFauxSession(
 			{
@@ -308,7 +308,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 				expect(outgoing.length, "the closing reply must have been reached for its context to be captured").toBe(
 					1,
 				);
-				const result = lastToolResult(outgoing[0] as Context);
+				const result = lastToolResult(outgoing[0] as TranscriptContext);
 				expect(
 					result?.isError,
 					"a benign mutated command must execute normally -- the real bash tool ran and returned " +
