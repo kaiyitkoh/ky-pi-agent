@@ -400,7 +400,7 @@ plus every active tool schema. `/budget` prints it as one line
 (`per-turn floor (system prompt + tool schemas)`), rounded once from the char sum.
 
 **Method.** `tests/integration/context-floor.test.ts` builds a composed faux session
-(`tests/helpers/harness-session.ts`): every tracked extension entry point, the real
+(`tests/helpers/harness-session.ts`): every extension Pi's loader discovers (`*.ts` and `*/index.ts`, including re-exported defaults), the real
 `AGENTS.md` and the repo skills, offline, no provider call. It captures the first
 outgoing request and runs `computeBudget` over the prompt and tool list. Unit:
 `/budget`'s formula, `Math.ceil(chars/4)`, tools counted as
@@ -417,29 +417,30 @@ configuration, not this composed one.
 |---|---|---|---|---|---|
 | bare Pi | 2758 | 2544 | 5302 | 1326 | 4 |
 | bare Pi + AGENTS.md | 4567 | 2544 | 7111 | 1778 | 4 |
-| full composed | 5162 | 5576 | 10738 | 2685 | 8 |
+| full composed | 8479 | 8450 | 16929 | 4233 | 12 |
 
-The wire estimate for the composed tool list (`toToolDeclaration` JSON) is 6164 chars
-against 5576 by the `/budget` formula. The two are never compared with each other.
-The 2,685 figure is about 37% below the 4,255 estimated in research. Research
-measured a different configuration (likely including installed packages); this
-harness loads none, and Qoder's tool is deactivated when unconfigured.
+The wire estimate for the composed tool list (`toToolDeclaration` JSON) is 9206 chars
+against 8450 by the `/budget` formula. The two are never compared with each other.
+The 4,233 figure is within 1% of the 4,255 estimated in research (the measured
+value is the one that counts). Qoder's tool is deactivated when unconfigured, and no
+installed package is loaded.
 
 **Per-extension deltas** (floor of bare + AGENTS.md + one entry point, minus bare +
 AGENTS.md; zero rows are real measurements):
 
 | Entry point | chars | tokens | tools added | verdict |
 |---|---|---|---|---|
+| background-tasks/index.ts | 6191 | 1548 | bg_run, bg_status, bg_logs, bg_kill (plus a system-prompt section) | profile-gate |
 | quality/index.ts | 511 | 128 | consult_advisor | budgeted |
 | questionnaire.ts | 1185 | 297 | questionnaire | profile-gate |
 | safety/index.ts | 248 | 62 | approve_ky_command | keep |
 | todo.ts | 310 | 78 | todo | profile-gate |
 | skills index | 1373 | 344 | none | budgeted |
-| checkpoint, diagnostics, execute, grill, harness, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | 0 | none | keep |
+| checkpoint, diagnostics, execute, grill, harness, loop-police, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | 0 | none | keep |
 
 Sum check: bare + AGENTS.md plus all deltas equals the composed floor with a residual
 of 0 chars (tolerance 32). Ceiling: `FLOOR_CEILINGS.composedBefore` holds the line at
-2,765 tokens until the cut lands.
+4,360 tokens until the cut lands.
 
 ---
 

@@ -14,11 +14,11 @@ import {
 
 /**
  * Ceilings in `/budget`-formula tokens (Math.ceil(chars / 4)), measured on normalised text.
- * composedBefore: measured 2685 tokens (10738 chars) on 2026-10-13 with all 17 tracked entry points,
+ * composedBefore: measured 4233 tokens (16929 chars) on 2026-10-13 with all 18 tracked entry points,
  * skills and AGENTS.md and no uninstalled packages; ceiling is that plus under 3% headroom.
  */
 const FLOOR_CEILINGS = {
-	composedBefore: 2765,
+	composedBefore: 4360,
 };
 
 const CLOSURE_TOLERANCE_CHARS = 32;
@@ -33,7 +33,10 @@ describe("composed default", () => {
 		composed = await measureFloor();
 		const entries = listEntryPoints();
 		expect(entries.length, "entry-point discovery must not be vacuous").toBeGreaterThanOrEqual(15);
-		for (const name of ["read", "bash", "approve_ky_command"]) {
+		for (const wanted of [".pi/extensions/background-tasks/index.ts", ".pi/extensions/loop-police/index.ts"]) {
+			expect(entries, `re-exported default entry ${wanted} must be measured`).toContain(wanted);
+		}
+		for (const name of ["read", "bash", "approve_ky_command", "bg_run"]) {
 			expect(composed.toolNames, `composed harness must register ${name}`).toContain(name);
 		}
 		console.info(

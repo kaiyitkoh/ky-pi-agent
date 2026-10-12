@@ -32,12 +32,8 @@ const QODER_ENV = [
 	"QODER_BASE_URL",
 ] as const;
 
-// Pi's extension discovery: `<dir>/*.ts` and `<dir>/<name>/index.ts` (not nested helper files).
+// Mirrors Pi's loader discovery (no export inspection): `<dir>/*.ts` and `<dir>/<name>/index.ts`.
 const DISCOVERED = /^\.pi\/extensions\/(?:[^/]+\.ts|[^/]+\/index\.ts)$/;
-
-// Same predicate as the extension-layout test: a top-level default export marks an entry point.
-const DEFAULT_EXPORT =
-	/^[ \t]*export[ \t]+default[ \t]*(async[ \t]+function|function|class|\(|[A-Za-z_$])/m;
 
 export interface HarnessSessionOptions {
 	/** Repo-relative entry points to load. Default: every tracked one. */
@@ -80,7 +76,6 @@ export interface FloorMeasurement {
 export function listEntryPoints(): string[] {
 	const found = trackedFiles(".pi/extensions")
 		.filter((file) => DISCOVERED.test(file))
-		.filter((file) => DEFAULT_EXPORT.test(readFileSync(join(repoRoot(), file), "utf-8")))
 		.sort();
 	if (found.length === 0) {
 		throw new Error("listEntryPoints: no tracked extension entry points found under .pi/extensions");
