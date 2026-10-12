@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-12T16:23:30.696Z"
-last_activity: 2026-10-12 -- Phase 08.1 planning complete
+last_updated: "2026-10-12T16:28:11.260Z"
+last_activity: 2026-10-12
 progress:
   total_phases: 14
   completed_phases: 8
   total_plans: 110
-  completed_plans: 98
+  completed_plans: 99
   percent: 57
 ---
 
@@ -21,19 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 09 — ceremonial-workflows
+**Current focus:** Phase 08.1 — pi-1-x-upgrade-install-health
 
 ## Current Position
 
-Phase: 09 (ceremonial-workflows) — EXECUTING
-Plan: 13 of 17
+Phase: 08.1 (pi-1-x-upgrade-install-health) — EXECUTING
+Plan: 2 of 7
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
-Last activity: 2026-10-12 -- Phase 08.1 planning complete
+Last activity: 2026-10-12
 
-Progress: [██████████] 95%
+Progress: [█████████░] 90%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -515,7 +515,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-08-15T16:50:48.854Z
+Last session: 2026-10-12T16:28:11.248Z
 Stopped at: Completed 09-12-PLAN.md
 Resume file: None
 
