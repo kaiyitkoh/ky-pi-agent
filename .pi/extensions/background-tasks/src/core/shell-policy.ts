@@ -165,8 +165,11 @@ export function applyShellPolicyGuidance(
 }
 
 export function createShellPolicyGuidanceHandler(policy: ResolvedShellPolicy) {
-  return (event: BeforeAgentStartEvent): BeforeAgentStartEventResult | undefined =>
-    applyShellPolicyGuidance(event, policy);
+  return (event: BeforeAgentStartEvent): BeforeAgentStartEventResult | undefined => {
+    const selected = event.systemPromptOptions?.selectedTools;
+    if (Array.isArray(selected) && !selected.includes('bg_run')) return undefined;
+    return applyShellPolicyGuidance(event, policy);
+  };
 }
 
 export function registerShellPolicyGuidance(

@@ -132,6 +132,11 @@ Commands registered: `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/jobs`,
    imports `guardBgRun` from `../../safety/index.ts` and throws on a non-allow verdict for the
    FINAL params, so an `event.input` mutation after the tool_call hook is still caught. It also
    denies `isAgent` other than false (WR-02).
+9. **Shell-policy guidance gated on `bg_run` (10-03 local patch)**: `createShellPolicyGuidanceHandler()`
+   in `src/core/shell-policy.ts` returns early when `event.systemPromptOptions.selectedTools` is an
+   array without `bg_run`. The section costs about 128 tok every turn, and no `bg_*` tool is offered
+   in any profile except `full`. A missing field keeps today's behaviour (fail open). Regression:
+   `tests/unit/shell-policy-gate.test.ts`.
 
 ## What was not vendored
 
@@ -162,7 +167,7 @@ Hash is the sha256 of the upstream original inside the tarball.
 | `src/core/pi-launch.ts` | `69e751caa70cb67109b9fb2990b7e06de5e5fd971ea47f608662ebb3ef6be85d` | specifiers only (deviation 4) |
 | `src/core/registry.ts` | `3d33da6f795bc8946a291287987736d7a823b563326116de97ca229a300abb51` | modified - see deviation 1, 4 |
 | `src/core/reload-shell-owner.ts` | `315b0fa89e408ec5dc4df21fae7f4308eeb32987761a8361272a69a141543a36` | specifiers only (deviation 4) |
-| `src/core/shell-policy.ts` | `91c3532a3b6afc4d682ab0e341f892f228c477c9e648010dd8e40d5aa0cc9c27` | specifiers only (deviation 4) |
+| `src/core/shell-policy.ts` | `91c3532a3b6afc4d682ab0e341f892f228c477c9e648010dd8e40d5aa0cc9c27` | modified - see deviation 4, 9 |
 | `src/core/task-durable.ts` | `1e604c936a778019e89a7c02cb5efaa09dfc860a43d0d00d3d219f1c19f0cc28` | modified - one error-message word (deviation 1) |
 | `src/core/windows-taskkill.ts` | `d8e21e077720f408a5b181b200924363ad75fd7b3acbafeabb6a2662a9d1fad1` | specifiers only (deviation 4) |
 | `src/extension.ts` | `480bb50c7a087237aad4bdde302dda00635429b6be5ca0886422c487709603eb` | modified - see deviations 1, 3, 4, 5 |

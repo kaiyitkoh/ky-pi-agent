@@ -336,10 +336,10 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[] = [
 	{
 		dir: ".pi/extensions/background-tasks",
-		budget: 10340,
+		budget: 10350,
 		why: "08.1-05 (UPG-04) -- vendored pi-background-tasks@2.6.9 trimmed to the process feature (D-02); " +
 			"upstream's source, not authored logic (PROVENANCE.md lists every file and deviation). Measured 10345 raw " +
-			"lines across 14 files 2026-10-13, rounded up to the next ten. Re-measured 10340 after the 08.1 review fixes (CR-01 shell-default patch in common.ts shrank it by 9 lines, execute() guard added 4; PROVENANCE deviations 7-8), rounded up to the next ten",
+			"lines across 14 files 2026-10-13, rounded up to the next ten. Re-measured 10340 after the 08.1 review fixes (CR-01 shell-default patch in common.ts shrank it by 9 lines, execute() guard added 4; PROVENANCE deviations 7-8), rounded up to the next ten. Re-measured 10343 after the bg_run gate in shell-policy.ts (3 added lines of code, PROVENANCE deviation 9), rounded up to the next ten",
 	},
 	{
 		dir: WORKFLOWS_DIR,
