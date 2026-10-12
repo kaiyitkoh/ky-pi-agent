@@ -1,83 +1,8 @@
 /**
- * QUAL-01 — six deterministic anti-pattern rule classes, syntax-only.
- *
- * PURPOSE. Six named detectors — magic numbers where a constant belongs,
- * special-casing on a literal input value, copy-paste duplication, swallowed
- * exceptions, a shipped task-marker comment standing in for a real fix, and
- * N+1 query shapes — each walking a real TypeScript syntax tree, never
- * matching regex over source text. This is the deterministic stage's only
- * genuinely new detection capability (08-CONTEXT.md); everything else in
- * GATE-01's four legs already existed before this phase.
- *
- * NOTE ON THIS FILE'S OWN VOCABULARY. This module deliberately never spells
- * the four literal task-marker tokens {@link SHIPPED_TODO_TOKENS} matches
- * inside a comment, anywhere in its own prose — doing so would make
- * `ruleShippedTodo` flag this file's own documentation of itself when this
- * module is swept as ordinary `.pi/extensions/` source (Group D's own false-
- * positive sweep caught this on the first run; see `08-02-SUMMARY.md`).
- *
- * ---------------------------------------------------------------------------
- * WHY THE TYPESCRIPT COMPILER API, AND WHY SYNTAX-ONLY
- * ---------------------------------------------------------------------------
- * `typescript@5.9.3` is already a pinned devDependency and already in the
- * tool path via `tsc --noEmit` — using it for QUAL-01 costs zero new
- * supply-chain surface, on a machine `08-CONTEXT.md` establishes is holding
- * live static IAM admin credentials in plaintext. `tests/unit/pinning.test.ts`
- * asserts `devDependencies` is EXACTLY six audited pins; a new lint or
- * `ast-grep` package fails that assertion outright and demands a full Package
- * Legitimacy Audit this phase has no reason to trigger.
- *
- * Every rule below parses with `ts.createSourceFile` and walks with
- * `ts.forEachChild` — never `String.match`, never a hand-rolled tokenizer.
- * Phase 4 already paid for the alternative the expensive way: an exact-string
- * `tool_call` guard was defeated by `git.exe push`, a trivial rename no
- * string match can see through. A real syntax tree does not have that
- * failure mode.
- *
- * These rules deliberately never build a `ts.Program` and never touch the
- * type checker (`ts.createProgram`, `getTypeChecker`, anything requiring a
- * resolved module graph). A `ts.SourceFile` from `ts.createSourceFile` is
- * cheap — parsing one file costs nothing like type-checking a whole program
- * — which is QUAL-02's wall-clock claim made structurally true rather than
- * merely asserted.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS DOES NOT PROVE
- * ---------------------------------------------------------------------------
- * Syntax-only means no type information reaches any rule here: no rule can
- * know what a value IS, only how it is WRITTEN. `ruleMagicNumber` cannot tell
- * a `number` from a `bigint` from an opaque branded type; `ruleNPlusOne`
- * cannot tell a real database call from a same-named local function; a parse
- * failure on a syntactically invalid source degrades to whatever partial
- * tree `ts.createSourceFile` recovers — it never throws (T-08-04) — so a rule
- * run against broken input returns whatever findings survive the recovery,
- * never an exception. Two of the six rules below (`literal-special-case`,
- * `n-plus-one`) are honestly undecidable without type information or a real
- * call graph, which is why they ship at WARNING tier and can never fail a
- * build on their own — see each rule's own docstring for its specific
- * false-positive scope, and `08-RESEARCH.md` Pitfall 2 for why a naive
- * reading of these six patterns would drown this repository's own house
- * style in false positives (a documented `catch { return undefined; }`, a
- * named byte constant, a legitimate one-`pi.exec`-per-worktree loop).
- *
- * ---------------------------------------------------------------------------
- * PURITY
- * ---------------------------------------------------------------------------
- * This module is PURE: it takes `{ path, text }[]` and returns findings. It
- * never touches `ctx`, never reads a file itself, never spawns anything. The
- * caller — a future `/quick`-adjacent gate module, not built in this plan —
- * owns reading files off disk and handing this module their contents.
- *
- * BOUNDARY RULE (BOOT-10). This module registers nothing. It does not spell
- * the tool-registration call, in code or in prose —
- * `tests/unit/contributing-boundary.test.ts` matches that name as a plain
- * substring across every tracked source under `.pi/extensions/`.
+ * Six syntax-only, pure AST rules (never regex, never a Program); a parse failure never throws. Registers nothing.
+ * Do not spell the task-marker tokens or the tool-registration call in comments: ruleShippedTodo and contributing-boundary.test.ts scan them.
  */
 import * as ts from "typescript";
-
-// ---------------------------------------------------------------------------
-// Public shapes
-// ---------------------------------------------------------------------------
 
 /** One file handed to the rules, already read off disk by the (impure) caller. */
 export interface QualitySource {
@@ -85,13 +10,7 @@ export interface QualitySource {
 	readonly text: string;
 }
 
-/**
- * The six rule ids, in the order `08-02-PLAN.md` names them.
- *
- * A `const` tuple with a derived union type, so a new rule id is a compile
- * error everywhere it is not also added — the same discipline
- * `OUTCOME_BY_STOP_REASON` in `diagnostics/schema.ts` uses for `StopReason`.
- */
+/** The six rule ids; a const tuple so a new id is a compile error where unhandled. */
 export const RULE_IDS = [
 	"magic-number",
 	"literal-special-case",
@@ -112,64 +31,25 @@ export interface QualityFinding {
 	readonly message: string;
 }
 
-/**
- * Paths whose repo-relative prefix is exempt from every rule.
- *
- * `tests/fixtures/` holds plan 08-10's seeded-defect corpus, which is BY
- * CONSTRUCTION made of the exact shapes these six rules detect — a shipped
- * task-marker comment, a swallowed exception, a copy-pasted block. Scanning
- * that directory
- * would make the corpus un-shippable the moment this module exists
- * (`08-RESEARCH.md` Known Threat Patterns, last row). Exemption is by path
- * prefix, never by content, so the corpus stays legible as real offending
- * TypeScript rather than needing every fixture individually suppressed.
- */
+/** Prefix exempt from every rule: the seeded-defect corpus is made of the shapes the rules detect. */
 export const SCAN_EXEMPT_PREFIXES = ["tests/fixtures/"] as const;
 
 /**
- * The suppression comment prefix.
- *
- * `// quality-allow:<rule-id> — <reason>`, on the offending line or the line
- * immediately above it, suppresses exactly that rule id at that line — and
- * ONLY when a non-empty reason follows the em dash. A bare
- * `// quality-allow:shipped-todo` with nothing after it does not suppress:
- * an unreasoned suppression is indistinguishable from a suppression nobody
- * meant to write, and this module must not treat "typed the marker" as
- * "justified the marker".
+ * `// quality-allow:<rule-id> — <reason>` on the finding's line or the line above suppresses that rule.
+ * A bare `// quality-allow:shipped-todo` with no reason after the em dash does not suppress.
  */
 export const SUPPRESSION_MARKER = "quality-allow:";
 
-// ---------------------------------------------------------------------------
-// Shared AST helpers
-// ---------------------------------------------------------------------------
-
-/** 1-indexed line number for a source position, matching every other JSONL/finding convention in this repo. */
 function lineOf(sourceFile: ts.SourceFile, pos: number): number {
 	return sourceFile.getLineAndCharacterOfPosition(pos).line + 1;
 }
 
 function parse(source: QualitySource): ts.SourceFile {
-	// setParentNodes: true — every rule below climbs `.parent` to decide
-	// declaration position, enclosing function or nearby comments; without it
-	// `.parent` is undefined everywhere and every ancestor walk below is dead.
+	// setParentNodes: every rule climbs .parent.
 	return ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, true);
 }
 
-// ---------------------------------------------------------------------------
-// Rule: magic-number (tier: error)
-// ---------------------------------------------------------------------------
-
-/**
- * Values excluded from `magic-number` regardless of position.
- *
- * `0`/`1`/`2` are the smallest counting numbers (empty/singular/pair — the
- * shapes every loop and conditional in ordinary code already carries),
- * `100`/`1000` are the two round numbers this repository's own style uses
- * for percentages and byte-order-of-magnitude comments without naming a
- * constant. This is the documented, deliberate allowlist QUAL-01's own task
- * text calls for — not an attempt to reach zero findings by widening it
- * further (`08-RESEARCH.md` Pitfall 2's explicit warning).
- */
+/** Smallest counting numbers plus 100/1000 for percentages and byte magnitudes; deliberately not widened. */
 const MAGIC_NUMBER_ALLOWLIST = new Set([0, 1, 2, 100, 1000]);
 
 const COMPARISON_OPERATORS = new Set<ts.SyntaxKind>([
@@ -195,16 +75,7 @@ function collectNumericLiterals(sourceFile: ts.SourceFile): ts.NumericLiteral[] 
 	return found;
 }
 
-/**
- * True when `node` sits in a `const`-declaration position: the initialiser
- * of a `const` variable, or nested inside an object/array literal (or
- * parenthesised expression) that is itself, transitively, that initialiser.
- *
- * This is the `WIRE_ROTATE_BYTES = 32_000_000` shape — `diagnostics/schema.ts`
- * names its own byte constants exactly this way — and this rule must not
- * flag a named constant's own initialiser (this plan's own `read_first`
- * instruction).
- */
+/** True for a const initialiser, including nested object/array/paren wrappers (the named-constant shape). */
 function isConstDeclarationPosition(node: ts.NumericLiteral): boolean {
 	let current: ts.Node = node;
 	let parent: ts.Node | undefined = node.parent;
@@ -236,7 +107,6 @@ function isEnumMemberValue(node: ts.NumericLiteral): boolean {
 	return parent !== undefined && ts.isEnumMember(parent) && parent.initializer === node;
 }
 
-/** `arr[0]` / `arr[1]` — the two index literals ordinary array access uses constantly. */
 function isSmallArrayIndex(node: ts.NumericLiteral): boolean {
 	if (node.text !== "0" && node.text !== "1") {
 		return false;
@@ -263,7 +133,6 @@ function isAllowlistedValue(node: ts.NumericLiteral): boolean {
 	return MAGIC_NUMBER_ALLOWLIST.has(Number(node.text));
 }
 
-/** `someCall() > 37` — a literal compared directly against a call's result, never bound to a name. */
 function isComparedAgainstCallResult(node: ts.NumericLiteral): boolean {
 	const parent = node.parent;
 	if (parent === undefined || !ts.isBinaryExpression(parent)) {
@@ -277,16 +146,8 @@ function isComparedAgainstCallResult(node: ts.NumericLiteral): boolean {
 }
 
 /**
- * `magic-number` (tier: error).
- *
- * Fires on a `ts.NumericLiteral` in a non-declaration position when either:
- *   (a) the same literal text appears 2+ times in the file, or
- *   (b) the literal is a direct comparison operand against a call's result.
- *
- * Excluded, regardless of (a)/(b): a `const` declaration's own initialiser
- * (including nested inside an object/array literal that IS that
- * initialiser), an enum member's value, the array-index literals `0`/`1`,
- * `-1`, and the deliberate `{0, 1, 2, 100, 1000}` allowlist.
+ * Flags a non-declaration literal that repeats 2+ times in the file or is compared directly to a call result.
+ * Excluded: const initialisers, enum values, 0/1 indexes, -1, and MAGIC_NUMBER_ALLOWLIST.
  */
 export function ruleMagicNumber(source: QualitySource): QualityFinding[] {
 	const sourceFile = parse(source);
@@ -338,10 +199,6 @@ export function ruleMagicNumber(source: QualitySource): QualityFinding[] {
 	return findings;
 }
 
-// ---------------------------------------------------------------------------
-// Rule: literal-special-case (tier: warning — only partially decidable)
-// ---------------------------------------------------------------------------
-
 const EQUALITY_OPERATORS = new Set<ts.SyntaxKind>([
 	ts.SyntaxKind.EqualsEqualsToken,
 	ts.SyntaxKind.EqualsEqualsEqualsToken,
@@ -368,19 +225,7 @@ function functionParamNames(fn: ts.FunctionLikeDeclaration): Set<string> {
 	return names;
 }
 
-/**
- * `literal-special-case` (tier: warning — only partially decidable).
- *
- * An `if`/`switch` whose test compares a PARAMETER identifier against a
- * string or numeric literal, inside the function that parameter belongs to.
- *
- * THIS CANNOT DISTINGUISH A LEGITIMATE DISPATCH TABLE FROM AN AD HOC SPECIAL
- * CASE, and that is exactly why it ships at WARNING tier and can never fail a
- * build on its own. A `switch (event.type) { case "click": ...; case "scroll": ... }` is
- * ordinary, correct dispatch; syntactically it is identical in shape to a
- * parameter special-cased for one caller's convenience. Only a human, or a
- * model reviewer with the surrounding intent, can tell the two apart.
- */
+/** Warning tier: a parameter-vs-literal if/switch looks identical to a legitimate dispatch table; a human must judge. */
 export function ruleLiteralSpecialCase(source: QualitySource): QualityFinding[] {
 	const sourceFile = parse(source);
 	const findings: QualityFinding[] = [];
@@ -424,9 +269,7 @@ export function ruleLiteralSpecialCase(source: QualitySource): QualityFinding[] 
 
 		function visitBody(node: ts.Node): void {
 			if (node !== fn && isFunctionLikeNode(node)) {
-				// A nested function is visited independently when the top-level
-				// walk reaches it — its own parameters, not this function's, are
-				// what matter inside it.
+					// Nested functions are visited on their own with their own parameters.
 				return;
 			}
 			if (ts.isIfStatement(node) && ts.isBinaryExpression(node.expression)) {
@@ -465,25 +308,10 @@ export function ruleLiteralSpecialCase(source: QualitySource): QualityFinding[] 
 	return findings;
 }
 
-// ---------------------------------------------------------------------------
-// Rule: copy-paste (tier: error)
-// ---------------------------------------------------------------------------
-
-/**
- * The duplication threshold, named per this rule's own docstring requirement
- * to dogfood `ruleMagicNumber` — a bare `12` in the walk below would be
- * exactly the anti-pattern this file's sibling rule exists to catch.
- */
+/** Named so this file passes its own magic-number rule. */
 export const COPY_PASTE_MIN_STATEMENTS = 12;
 
-/**
- * A normalised token-kind sequence for `block`'s statements: every
- * `Identifier`/`PrivateIdentifier` collapses to `"ID"` and every numeric or
- * string literal collapses to `"LIT"`, so a renamed, re-valued copy of the
- * same structure still produces an identical signature. Everything else is
- * the raw `SyntaxKind` number, so the STRUCTURE — statement shapes, operator
- * choices, nesting — must still match exactly.
- */
+/** Identifiers collapse to "ID" and literals to "LIT"; statement structure must still match exactly. */
 function normalizeBlockSignature(block: ts.Block): string {
 	const tokens: string[] = [];
 	function visit(node: ts.Node): void {
@@ -504,15 +332,7 @@ function normalizeBlockSignature(block: ts.Block): string {
 	return tokens.join(",");
 }
 
-/**
- * `copy-paste` (tier: error).
- *
- * Two `ts.Block` nodes in the same source whose normalised signature
- * (see {@link normalizeBlockSignature}) is identical, and which carry at
- * least {@link COPY_PASTE_MIN_STATEMENTS} statements each. Renamed copies
- * still match because identifiers and literal values are dropped before
- * comparison — only the STRUCTURE is compared.
- */
+/** Two blocks with identical normalised signatures and at least COPY_PASTE_MIN_STATEMENTS statements each. */
 export function ruleCopyPaste(source: QualitySource): QualityFinding[] {
 	const sourceFile = parse(source);
 	const blocks: ts.Block[] = [];
@@ -552,16 +372,7 @@ export function ruleCopyPaste(source: QualitySource): QualityFinding[] {
 	return findings;
 }
 
-// ---------------------------------------------------------------------------
-// Rule: swallowed-exception (tier: error)
-// ---------------------------------------------------------------------------
-
-/**
- * The NEVER-THROWS contract marker this repository's own house style already
- * uses — `safety/audit.ts`'s `writeAuditRow` and `workflows/evidence.ts`'s
- * `writeEvidenceRow` both document `catch { return undefined; }` this way on
- * purpose, and this rule must not flag either.
- */
+/** Marker that excuses a swallowed catch (as in safety/audit.ts writeAuditRow). */
 export const NEVER_THROWS_MARKERS = ["NEVER THROWS", "never throws"] as const;
 
 function commentTextNear(node: ts.Node, fullText: string): string {
@@ -569,13 +380,7 @@ function commentTextNear(node: ts.Node, fullText: string): string {
 	return ranges.map((range) => fullText.slice(range.pos, range.end)).join("\n");
 }
 
-/**
- * True when `catchClause`, an ancestor up to and including its nearest
- * enclosing function, carries a leading comment naming a
- * {@link NEVER_THROWS_MARKERS} marker. Stops climbing once the enclosing
- * function-like node's own comment has been checked — a marker on some
- * unrelated outer scope does not count.
- */
+/** Checks leading comments up to and including the nearest enclosing function; outer scopes do not count. */
 function hasNeverThrowsMarker(catchClause: ts.CatchClause, sourceFile: ts.SourceFile): boolean {
 	const fullText = sourceFile.getFullText();
 	let current: ts.Node | undefined = catchClause;
@@ -592,7 +397,6 @@ function hasNeverThrowsMarker(catchClause: ts.CatchClause, sourceFile: ts.Source
 	return false;
 }
 
-/** Empty, or a bare `return;`/`return undefined;` — a catch that discards the exception with no trace. */
 function isSwallowingBlock(block: ts.Block): boolean {
 	if (block.statements.length === 0) {
 		return true;
@@ -611,16 +415,7 @@ function isSwallowingBlock(block: ts.Block): boolean {
 	return false;
 }
 
-/**
- * `swallowed-exception` (tier: error).
- *
- * A `ts.CatchClause` whose block is empty, or whose sole statement is a bare
- * `return`/`return undefined`, UNLESS a {@link NEVER_THROWS_MARKERS} marker
- * appears in a leading comment on the catch clause or its enclosing function.
- * This is the false-positive that matters most in this codebase: `evidence.ts`
- * and `safety/audit.ts` both ship this exact shape on purpose, and both
- * document it this way.
- */
+/** Empty or bare-return catch, flagged unless a NEVER_THROWS_MARKERS marker leads the catch or its enclosing function. */
 export function ruleSwallowedException(source: QualitySource): QualityFinding[] {
 	const sourceFile = parse(source);
 	const findings: QualityFinding[] = [];
@@ -640,24 +435,11 @@ export function ruleSwallowedException(source: QualitySource): QualityFinding[] 
 	return findings;
 }
 
-// ---------------------------------------------------------------------------
-// Rule: shipped-todo (tier: error)
-// ---------------------------------------------------------------------------
-
 const SHIPPED_TODO_TOKENS = ["TODO", "FIXME", "XXX", "HACK"] as const;
 
-/** A regex LITERAL, never `new RegExp(...)` — applied only to an already-extracted comment substring, never the whole source. */
 const SHIPPED_TODO_PATTERN = /\b(TODO|FIXME|XXX|HACK)\b/;
 
-/**
- * `shipped-todo` (tier: error).
- *
- * A token from {@link SHIPPED_TODO_TOKENS} found inside a COMMENT trivia
- * range, obtained via `ts.getLeadingCommentRanges`/`getTrailingCommentRanges`
- * — never a substring scan of the whole file text, which would also flag the
- * word sitting inside a string literal (a legitimate negative fixture this
- * rule must not trip on) or inside this very module's own docstrings.
- */
+/** Scans comment trivia only, so the word inside a string literal or fixture is not flagged. */
 export function ruleShippedTodo(source: QualitySource): QualityFinding[] {
 	const sourceFile = parse(source);
 	const fullText = sourceFile.getFullText();
@@ -690,23 +472,12 @@ export function ruleShippedTodo(source: QualitySource): QualityFinding[] {
 		ts.forEachChild(node, visit);
 	}
 	ts.forEachChild(sourceFile, visit);
-	// A trailing comment at end-of-file attaches only to the EndOfFileToken's
-	// own leading trivia, which the statement-level walk above never visits.
+	// A trailing comment at EOF sits in the EndOfFileToken's leading trivia, which the walk skips.
 	checkRanges(ts.getLeadingCommentRanges(fullText, sourceFile.endOfFileToken.getFullStart()));
 
 	return findings;
 }
 
-// ---------------------------------------------------------------------------
-// Rule: n-plus-one (tier: warning — only partially decidable)
-// ---------------------------------------------------------------------------
-
-/**
- * Callee names treated as a likely per-item data call. Caller-tunable in
- * spirit (a future gate module could accept an override), but exported as a
- * plain constant here because every rule function in this module takes only
- * `(source: QualitySource)` — see the module's own task text.
- */
 export const N_PLUS_ONE_CALLEES = ["query", "exec", "fetch", "findMany", "get"] as const;
 
 function calleeName(expr: ts.LeftHandSideExpression): string | undefined {
@@ -719,7 +490,6 @@ function calleeName(expr: ts.LeftHandSideExpression): string | undefined {
 	return undefined;
 }
 
-/** The loop-body node for a `for`/`for-of`/`for-in`/`while`/`do` statement, or a `.map(`/`.forEach(` callback body. `undefined` for anything else. */
 function loopBodyOf(node: ts.Node): ts.Node | undefined {
 	if (
 		ts.isForStatement(node) ||
@@ -742,19 +512,7 @@ function loopBodyOf(node: ts.Node): ts.Node | undefined {
 	return undefined;
 }
 
-/**
- * `n-plus-one` (tier: warning — only partially decidable).
- *
- * An `await` expression, or a call whose callee name matches
- * {@link N_PLUS_ONE_CALLEES}, appearing syntactically inside a
- * `for`/`for-of`/`for-in`/`while`/`do`/`.map(`/`.forEach(` body.
- *
- * THE KNOWN FALSE POSITIVE THIS PROJECT ITSELF HAS: this repository's own
- * worktree tests legitimately run one `pi.exec` per worktree inside a loop,
- * because no bulk git API exists to replace it. This rule cannot distinguish
- * that from a genuine N+1 query, which is exactly why it ships at WARNING
- * tier and can never fail a build on its own.
- */
+/** Warning tier: cannot tell a legitimate per-item call (one pi.exec per worktree) from a real N+1. */
 export function ruleNPlusOne(source: QualitySource): QualityFinding[] {
 	const sourceFile = parse(source);
 	const findings: QualityFinding[] = [];
@@ -811,10 +569,6 @@ export function ruleNPlusOne(source: QualitySource): QualityFinding[] {
 	return findings;
 }
 
-// ---------------------------------------------------------------------------
-// Aggregator
-// ---------------------------------------------------------------------------
-
 const RULE_FNS: Record<RuleId, (source: QualitySource) => QualityFinding[]> = {
 	"magic-number": ruleMagicNumber,
 	"literal-special-case": ruleLiteralSpecialCase,
@@ -828,18 +582,9 @@ function isExemptPath(path: string): boolean {
 	return SCAN_EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix));
 }
 
-/**
- * True when `source`'s text carries a valid {@link SUPPRESSION_MARKER} for
- * `ruleId` on `line` (1-indexed) or the line immediately above it, WITH a
- * non-empty reason after the em dash. A bare marker with no reason returns
- * `false` — see {@link SUPPRESSION_MARKER}'s own docstring for why an
- * unreasoned suppression does not suppress.
- */
+/** Valid only with a non-empty reason after the em dash, on the finding's line or the line above. */
 function isSuppressed(source: QualitySource, ruleId: RuleId, line: number): boolean {
 	const lines = source.text.split("\n");
-	// `line` is 1-indexed; `lines[line - 1]` is that same line, `lines[line - 2]`
-	// is the line above it. Both are checked so a suppression comment may sit
-	// beside the offending code or directly over it.
 	for (const idx of [line - 1, line - 2]) {
 		const text = lines[idx];
 		if (text === undefined) {
@@ -866,11 +611,7 @@ function isSuppressed(source: QualitySource, ruleId: RuleId, line: number): bool
 	return false;
 }
 
-/**
- * Dispatch all six rules over every non-exempt source, dropping any finding
- * a valid {@link SUPPRESSION_MARKER} suppresses, sorted by `path` then
- * `line` so output is deterministic run to run.
- */
+/** Runs all six rules over non-exempt sources, drops suppressed findings, sorts by path then line. */
 export function runAntiPatternRules(sources: readonly QualitySource[]): QualityFinding[] {
 	const findings: QualityFinding[] = [];
 	for (const source of sources) {
