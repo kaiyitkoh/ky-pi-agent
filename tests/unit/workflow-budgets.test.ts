@@ -270,13 +270,13 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/grill/index.ts",
-		budget: 110,
+		budget: 170,
 		why: "plan 09-08 (FLOW-02/FLOW-03) -- the /grill command itself: two entry points (a description, or the " +
 			"literal --resume), the git pre-flight copied verbatim from workflows/index.ts, slug " +
 			"derivation/resolution via .pi/lib/work-artifacts.ts#workDir, and writeSpecIfGated -- the ONLY " +
 			"function in this subsystem that writes SPEC.md, running gateRequirementsAuthorship then " +
 			"validateSpec then gateAmbiguity before any write. Measured 110 raw lines 2026-08-15 with " +
-			"countRawLines, rounded up to the next ten",
+			"countRawLines, rounded up to the next ten. Re-measured 162 raw lines after the settle hook began gating each turn's SPEC.md, rounded up to the next ten",
 	},
 	{
 		file: ".pi/skills/grill/SKILL.md",
@@ -289,13 +289,13 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/plan-ceremony/index.ts",
-		budget: 120,
+		budget: 150,
 		why: "plan 09-10 (FLOW-06) -- the /plan command itself: one entry point, no flags, the git pre-flight " +
 			"copied verbatim from workflows/index.ts, slug resolution via candidateSlugsWithSpec/resolveSlug " +
 			"(refusing rather than picking on ambiguity), the SPEC pre-flight (existence then validateSpec, " +
 			"re-run every invocation), and writePlanIfGated -- the ONLY function in this subsystem that writes " +
 			"PLAN.md, re-validating the on-disk SPEC.md and deriving its requirement ids before ever calling " +
-			"validatePlan. Measured 140 raw lines 2026-08-15 with countRawLines, already an exact multiple of ten",
+			"validatePlan. Measured 140 raw lines 2026-08-15 with countRawLines, already an exact multiple of ten. Re-measured 142 raw lines after the settle hook began gating each turn's PLAN.md, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/execute/index.ts",
@@ -605,7 +605,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 1070,
+		budget: 1150,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -638,11 +638,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"gateAmbiguity, kept out of index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 250-line grill " +
 			"ceiling headroom for the skill body -- see that registry's own entry for this file). Measured " +
 			"110 (index.ts) + 21 (scorecard-parse.ts) + 246 (scorecard.ts) + 689 (spec-schema.ts) = 1066 raw " +
-			"lines across 4 files 2026-08-15, rounded up to the next ten",
+			"lines across 4 files 2026-08-15, rounded up to the next ten. Re-measured 1,142 raw lines after spec-gate.ts and the settle hook were added, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/plan-ceremony",
-		budget: 430,
+		budget: 460,
 		why: "plan 09-09 (FLOW-06) -- the first file of the /plan subsystem, plan-schema.ts: the task-line " +
 			"parser (TASK_LINE_PATTERN, VERIFICATION_SEPARATOR, parseTaskLine), the whole-document scanner " +
 			"(parsePlanTasks, malformed lines returned never dropped), the files-touched union " +
@@ -667,7 +667,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 200-line plan ceiling headroom for the " +
 			"skill body -- the same reason grill/scorecard-parse.ts was kept out of grill/index.ts). Measured " +
 			"291 (plan-schema.ts) + 113 (index.ts) + 20 (requirement-ids.ts) = 424 raw lines across 3 files " +
-			"2026-08-15, rounded up to the next ten",
+			"2026-08-15, rounded up to the next ten. Re-measured 453 raw lines after the settle hook began gating PLAN.md, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/execute",
@@ -1561,8 +1561,8 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [".pi/skills/grill/SKILL.md"],
 		budget: 250,
 		why: "FEATURES.md Part 2 line 158's ceiling for the flagship workflow -- FROZEN, may not move to absorb " +
-			"growth (D-13). Measured 110 raw lines (index.ts) + 58 raw lines (SKILL.md) = 168 raw lines " +
-			"2026-10-13 with countRawLines, well inside 250 -- scorecard.ts, spec-schema.ts and " +
+			"growth (D-13). Measured 162 raw lines (index.ts) + 60 raw lines (SKILL.md) = 222 raw lines " +
+			"2026-10-13 with countRawLines, inside 250 -- scorecard.ts, spec-schema.ts and " +
 			"scorecard-parse.ts are supporting modules bound only by the .pi/extensions/grill DIRECTORY_BUDGETS " +
 			"ratchet above, per this registry's own module-docstring rule (D-13) that a merged closure budget " +
 			"would be meaningless",
@@ -1573,8 +1573,8 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [".pi/skills/plan-ceremony/SKILL.md"],
 		budget: 200,
 		why: "FEATURES.md Part 2 line 183's ceiling, the TIGHTEST of the four ceremonial ceilings -- FROZEN, " +
-			"may not move to absorb growth (D-13). Measured 113 raw lines (index.ts) + 44 raw lines " +
-			"(SKILL.md) = 157 raw lines 2026-10-13 with countRawLines, inside 200 with 43 lines of headroom -- " +
+			"may not move to absorb growth (D-13). Measured 142 raw lines (index.ts) + 44 raw lines " +
+			"(SKILL.md) = 186 raw lines 2026-10-13 with countRawLines, inside 200 with 14 lines of headroom -- " +
 			"plan-schema.ts and requirement-ids.ts are supporting modules bound only by the " +
 			".pi/extensions/plan-ceremony DIRECTORY_BUDGETS ratchet above, per this registry's own " +
 			"module-docstring rule (D-13) that a merged closure budget would be meaningless",

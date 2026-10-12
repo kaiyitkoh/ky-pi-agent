@@ -49,7 +49,13 @@ const SPEC: SpecArtifact = {
 	},
 	clarificationsBody: "- Q: none -> A: none",
 	assumptionsBody: "none",
-	scorecardBody: "Overall: 0.1",
+	scorecardBody: [
+		"| factual-grounding | 0.9 |",
+		"| requirement-precision | 0.9 |",
+		"| failure-coverage | 0.9 |",
+		"| scope-definiteness | 0.9 |",
+		"Overall: 0.1",
+	].join("\n"),
 };
 const PLAN = "- [ ] T001 [R1] Create the a module in src/a.ts | verify: npm test\n";
 const SLUG = "s1";
@@ -132,6 +138,7 @@ describe("/execute -- refusals hand nothing to the model and arm nothing", () =>
 		["no PLAN.md", () => harness({ plan: null })],
 		["a PLAN.md that fails validatePlan", () => harness({ plan: "- [ ] not a task line\n" })],
 		["a SPEC.md that fails validateSpec", () => harness({ spec: "# not a spec\n" })],
+		["a SPEC.md whose ambiguity scorecard fails its gate", () => harness({ spec: renderSpecMarkdown({ ...SPEC, scorecardBody: "Overall: 0.1" }) })],
 		["a protected-branch HEAD", () => harness({ branch: "main" })],
 	];
 	it.each(cases)("%s", async (_name, make) => {

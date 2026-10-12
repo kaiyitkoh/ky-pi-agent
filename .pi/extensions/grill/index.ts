@@ -1,16 +1,17 @@
 /**
  * /grill command: two entry points, no flags, gated. Procedure lives in the "grill" skill and docs/WORKFLOWS.md.
  * Registers one command, zero tools; interrogation goes through pi.sendUserMessage, never a nested model call.
+ * While armed, each turn is told its question slot, and each turn's SPEC.md is re-gated and re-rendered.
  */
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workDir } from "../../lib/work-artifacts.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { gateAmbiguity } from "./scorecard.ts";
-import { parseAmbiguityScorecard } from "./scorecard-parse.ts";
-import { gateRequirementsAuthorship, renderSpecMarkdown, validateSpec, type SpecGateVerdict } from "./spec-schema.ts";
+import { HARD_QUESTION_BUDGET, INTERVIEW_PERSPECTIVES, nextQuestionSlot } from "./scorecard.ts";
+import { validateGatedSpec } from "./spec-gate.ts";
+import { gateRequirementsAuthorship, renderSpecMarkdown, type SpecGateVerdict } from "./spec-schema.ts";
 
 /** The one artifact this subsystem ever writes -- named once, reused everywhere below. */
 const SPEC_FILE_NAME = "SPEC.md";
@@ -38,19 +39,15 @@ function latestWorkSlug(cwd: string): string | undefined {
 	return dirs[0]?.name;
 }
 
-/** The only function that writes SPEC.md. Runs the authorship, validateSpec and ambiguity gates in order; only `renderSpecMarkdown` output of the validated artifact reaches disk, never the raw `markdown`. */
+/** The only function that writes a gated SPEC.md: authorship first, then the full gate every reader applies; only the re-rendered artifact reaches disk. */
 export function writeSpecIfGated(cwd: string, slug: string, markdown: string): SpecGateVerdict {
 	const factsVerdict = gateRequirementsAuthorship(markdown);
 	if (!factsVerdict.ok) {
 		return factsVerdict;
 	}
-	const validated = validateSpec(markdown);
+	const validated = validateGatedSpec(markdown);
 	if (!validated.ok) {
 		return { ok: false, reason: validated.reason };
-	}
-	const ambiguityVerdict = gateAmbiguity(parseAmbiguityScorecard(validated.spec.scorecardBody));
-	if (!ambiguityVerdict.ok) {
-		return ambiguityVerdict;
 	}
 	const dir = workDir(cwd, slug);
 	mkdirSync(dir, { recursive: true });
@@ -58,7 +55,29 @@ export function writeSpecIfGated(cwd: string, slug: string, markdown: string): S
 	return { ok: true };
 }
 
+interface GrillRun {
+	readonly cwd: string;
+	readonly slug: string;
+	asked: number;
+	lastMtime: number;
+	lastReject?: string;
+}
+
+/** The per-turn instruction: which question slot this is, or that the budget is spent, plus the last gate refusal. */
+function turnBrief(run: GrillRun): string {
+	const slot = nextQuestionSlot(run.asked);
+	const lines = [
+		"exhausted" in slot
+			? `${slot.reason}. Write .pi/work/${run.slug}/${SPEC_FILE_NAME} now and ask nothing further.`
+			: `Question ${slot.index + 1} of ${HARD_QUESTION_BUDGET}: ask exactly one question as the ${INTERVIEW_PERSPECTIVES[slot.index]?.label} (${INTERVIEW_PERSPECTIVES[slot.index]?.surfaces}), or write .pi/work/${run.slug}/${SPEC_FILE_NAME} if every gate already clears.`,
+	];
+	if (run.lastReject !== undefined) lines.push(`The last ${SPEC_FILE_NAME} was refused by the gate: ${run.lastReject}`);
+	return lines.join("\n");
+}
+
 export default function (pi: ExtensionAPI): void {
+	let run: GrillRun | undefined;
+
 	pi.registerCommand("grill", {
 		description: "Interrogate a change into a gated SPEC.md before any plan or code exists",
 		handler: async (args, ctx) => {
@@ -98,6 +117,8 @@ export default function (pi: ExtensionAPI): void {
 
 			if (!ctx.isIdle()) return void ctx.ui.notify("grill: a turn is already in flight -- wait for it to finish", "error");
 
+			// A resume is the user's explicit choice to keep asking, so it starts a fresh budget.
+			run = { cwd: ctx.cwd, slug, asked: 0, lastMtime: 0 };
 			const description = task === "--resume" ? `resume the interrogation already in progress in .pi/work/${slug}` : task;
 			pi.sendUserMessage(
 				`Read the "grill" skill before doing anything else, then interrogate this request: ${description}\n\n` +
@@ -105,5 +126,36 @@ export default function (pi: ExtensionAPI): void {
 					`rotating perspective per the skill's own table. Work in .pi/work/${slug}/.`,
 			);
 		},
+	});
+
+	pi.on("before_agent_start", () => {
+		if (run === undefined) return undefined;
+		return { message: { customType: "grill-turn", content: turnBrief(run), display: false } };
+	});
+
+	pi.on("agent_end", (_event, ctx) => {
+		if (run === undefined) return;
+		const current = run;
+		current.asked += 1;
+		try {
+			const file = join(workDir(current.cwd, current.slug), SPEC_FILE_NAME);
+			if (existsSync(file) && statSync(file).mtimeMs !== current.lastMtime) {
+				const gated = writeSpecIfGated(current.cwd, current.slug, readFileSync(file, "utf-8"));
+				current.lastMtime = statSync(file).mtimeMs;
+				if (gated.ok) {
+					run = undefined;
+					return void ctx.ui.notify(`grill: .pi/work/${current.slug}/${SPEC_FILE_NAME} passed every gate and was re-rendered`, "info");
+				}
+				current.lastReject = gated.reason;
+				ctx.ui.notify(`grill: ${SPEC_FILE_NAME} refused -- ${gated.reason}`, "warning");
+			}
+			if (current.asked > HARD_QUESTION_BUDGET) {
+				run = undefined;
+				ctx.ui.notify(`grill: question budget spent with no gated ${SPEC_FILE_NAME} -- downstream commands will refuse it; run "/grill --resume" to continue`, "error");
+			}
+		} catch (err) {
+			run = undefined;
+			ctx.ui.notify(`grill: gate not applied -- ${err instanceof Error ? err.message : String(err)}`, "error");
+		}
 	});
 }

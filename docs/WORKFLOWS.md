@@ -339,10 +339,19 @@ deliberately not a table entry.
 
 ## 9. The ambiguity dimensions
 
-`AMBIGUITY_DIMENSIONS` in `.pi/extensions/grill/scorecard.ts`. `/grill`
-stops asking when every dimension clears its floor or the hard question budget
-runs out. A dimension still below its floor at that point is written into
-SPEC.md section 7 as an assumption, never silently dropped.
+`AMBIGUITY_DIMENSIONS` in `.pi/extensions/grill/scorecard.ts`. While
+`/grill` is armed, every turn is told its question slot (`nextQuestionSlot`)
+and every SPEC.md the model writes is run through `writeSpecIfGated` at the
+end of the turn: a passing SPEC is re-rendered and the interrogation ends; a
+refusal is handed to the next turn. When the hard question budget runs out
+without a passing SPEC, `/grill` stops with an error. A dimension still below
+its floor is not overridable: SPEC.md stays refused, and `/grill --resume`
+starts a fresh budget as the user's explicit choice to keep asking.
+
+`validateGatedSpec` in `.pi/extensions/grill/spec-gate.ts` is the one SPEC
+gate. `/grill` writes through it, and `/plan`, `/execute` and `/review`
+re-run it on every invocation, so a SPEC.md written directly with the write
+tool is refused downstream exactly as `/grill` would refuse it.
 
 | Dimension | Floor |
 |---|---|

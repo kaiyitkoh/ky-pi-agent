@@ -106,7 +106,13 @@ const VALID_SPEC: SpecArtifact = {
 	},
 	clarificationsBody: "- Q: none -> A: none",
 	assumptionsBody: "none",
-	scorecardBody: "Overall: 0.1",
+	scorecardBody: [
+		"| factual-grounding | 0.9 |",
+		"| requirement-precision | 0.9 |",
+		"| failure-coverage | 0.9 |",
+		"| scope-definiteness | 0.9 |",
+		"Overall: 0.1",
+	].join("\n"),
 };
 
 /** A notification `ctx.ui.notify` recorded. */

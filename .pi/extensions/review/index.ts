@@ -8,7 +8,7 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workDir } from "../../lib/work-artifacts.ts";
-import { validateSpec } from "../grill/spec-schema.ts";
+import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
 import { gateDepthFor } from "../quality/gates.ts";
@@ -56,7 +56,7 @@ export default function (pi: ExtensionAPI): void {
 				for (const f of ["SPEC.md", "PLAN.md", "PROGRESS.md"]) {
 					if (!existsSync(join(dir, f))) return fail(`review: .pi/work/${slug}/${f} does not exist`);
 				}
-				const spec = validateSpec(readFileSync(join(dir, "SPEC.md"), "utf-8"));
+				const spec = validateGatedSpec(readFileSync(join(dir, "SPEC.md"), "utf-8"));
 				if (!spec.ok) return fail(spec.reason);
 				const ids = extractSpecRequirementIds(spec.spec.requirementsBody);
 				const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), ids);

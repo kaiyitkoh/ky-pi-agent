@@ -1,12 +1,13 @@
 /**
  * /plan command: one entry point, no flags, SPEC-gated. Grammar and coverage rules live in the "plan-ceremony" skill and docs/WORKFLOWS.md.
  * Registers one command, zero tools; planning goes through pi.sendUserMessage, never a nested model call.
+ * While armed, each turn's PLAN.md is re-gated and re-rendered, and a refusal is handed to the next turn.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workDir } from "../../lib/work-artifacts.ts";
-import { validateSpec } from "../grill/spec-schema.ts";
+import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { renderPlanMarkdown, validatePlan } from "./plan-schema.ts";
@@ -59,7 +60,7 @@ export function writePlanIfGated(cwd: string, slug: string, markdown: string): P
 	if (!existsSync(specPath)) {
 		return { ok: false, reason: `.pi/work/${slug}/${SPEC_FILE_NAME} does not exist -- /plan cannot write without a gated SPEC` };
 	}
-	const specVerdict = validateSpec(readFileSync(specPath, "utf-8"));
+	const specVerdict = validateGatedSpec(readFileSync(specPath, "utf-8"));
 	if (!specVerdict.ok) {
 		return { ok: false, reason: specVerdict.reason };
 	}
@@ -73,6 +74,8 @@ export function writePlanIfGated(cwd: string, slug: string, markdown: string): P
 }
 
 export default function (pi: ExtensionAPI): void {
+	let run: { readonly cwd: string; readonly slug: string; lastMtime: number; lastReject?: string } | undefined;
+
 	pi.registerCommand("plan", {
 		description: "Turn a SPEC.md that has passed its own gate into a coverage-complete PLAN.md task list",
 		handler: async (args, ctx) => {
@@ -98,15 +101,41 @@ export default function (pi: ExtensionAPI): void {
 				return void ctx.ui.notify(`plan: .pi/work/${slug}/${SPEC_FILE_NAME} does not exist -- run /grill first`, "error");
 			}
 
-			const specVerdict = validateSpec(readFileSync(specPath, "utf-8"));
+			const specVerdict = validateGatedSpec(readFileSync(specPath, "utf-8"));
 			if (!specVerdict.ok) return void ctx.ui.notify(specVerdict.reason, "error");
 
 			if (!ctx.isIdle()) return void ctx.ui.notify("plan: a turn is already in flight -- wait for it to finish", "error");
 
+			run = { cwd: ctx.cwd, slug, lastMtime: 0 };
 			pi.sendUserMessage(
 				`Read the "plan-ceremony" skill before doing anything else, then write a PLAN.md task list for ` +
 					`.pi/work/${slug}/SPEC.md, covering every requirement id declared in its §3. Work in .pi/work/${slug}/.`,
 			);
 		},
+	});
+
+	pi.on("before_agent_start", () => {
+		if (run?.lastReject === undefined) return undefined;
+		return { message: { customType: "plan-gate", content: `The last ${PLAN_FILE_NAME} was refused by the gate: ${run.lastReject}`, display: false } };
+	});
+
+	pi.on("agent_end", (_event, ctx) => {
+		if (run === undefined) return;
+		const current = run;
+		try {
+			const file = join(workDir(current.cwd, current.slug), PLAN_FILE_NAME);
+			if (!existsSync(file) || statSync(file).mtimeMs === current.lastMtime) return;
+			const gated = writePlanIfGated(current.cwd, current.slug, readFileSync(file, "utf-8"));
+			current.lastMtime = statSync(file).mtimeMs;
+			if (gated.ok) {
+				run = undefined;
+				return void ctx.ui.notify(`plan: .pi/work/${current.slug}/${PLAN_FILE_NAME} passed every gate and was re-rendered`, "info");
+			}
+			current.lastReject = gated.reason;
+			ctx.ui.notify(`plan: ${PLAN_FILE_NAME} refused -- ${gated.reason}`, "warning");
+		} catch (err) {
+			run = undefined;
+			ctx.ui.notify(`plan: gate not applied -- ${err instanceof Error ? err.message : String(err)}`, "error");
+		}
 	});
 }

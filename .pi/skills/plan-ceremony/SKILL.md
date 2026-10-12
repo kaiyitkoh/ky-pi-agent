@@ -39,5 +39,5 @@ A path declared here becomes `/execute`'s write allowance -- it is a PERMISSION,
 ## What will refuse you (structural, not negotiable)
 
 - Not on `main`/`master`: the command's own git pre-flight (`classifyGitInvocation`).
-- No gated SPEC.md on disk, or one that fails its own gate: `validateSpec`, re-run every invocation, never trusted from a prior turn.
-- Zero task lines, any malformed line, a duplicate id, a pathless or commandless task, or coverage broken in either direction: `validatePlan`.
+- No gated SPEC.md on disk, or one that fails its own gate: `validateGatedSpec`, re-run every invocation, never trusted from a prior turn.
+- Zero task lines, any malformed line, a duplicate id, a pathless or commandless task, or coverage broken in either direction: `validatePlan`, run on PLAN.md at the end of every turn; a refusal comes back to you on the next turn.

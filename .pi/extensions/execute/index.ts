@@ -6,7 +6,7 @@ import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workDir } from "../../lib/work-artifacts.ts";
-import { validateSpec } from "../grill/spec-schema.ts";
+import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan, type ParsedTask } from "../plan-ceremony/plan-schema.ts";
 import { gateDepthFor } from "../quality/gates.ts";
@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI): void {
 				if (verdict.kind === "block") return fail(verdict.reason);
 
 				if (!existsSync(join(dir, "PLAN.md"))) return fail(`execute: .pi/work/${slug}/PLAN.md does not exist -- run /plan first`);
-				const spec = validateSpec(readFileSync(join(dir, "SPEC.md"), "utf-8"));
+				const spec = validateGatedSpec(readFileSync(join(dir, "SPEC.md"), "utf-8"));
 				if (!spec.ok) return fail(spec.reason);
 				const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), extractSpecRequirementIds(spec.spec.requirementsBody));
 				if (!plan.ok) return fail(plan.reason);

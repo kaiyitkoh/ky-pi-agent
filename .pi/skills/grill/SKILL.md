@@ -12,8 +12,9 @@ The spec-schema.ts and scorecard.ts modules under .pi/extensions/grill/ are AUTH
 1. Read and grep the codebase for every claim you are about to make. Record each finding as a §2 Verified Codebase Facts row (`claim | file:line or command output | how verified`) BEFORE proposing anything -- an unverified claim cannot become a requirement (FLOW-03).
 2. Ask exactly ONE question per turn. Never batch questions.
 3. Take the perspective the harness assigns for that question number (table below) -- rotate, never repeat one lens twice in a row.
-4. Stop after 5 questions (`HARD_QUESTION_BUDGET`), whatever the scorecard says. Every dimension still below its floor at that point gets stamped `⚠ ASSUMPTION` into §7 -- never silently dropped.
+4. Stop after 5 questions (`HARD_QUESTION_BUDGET`), whatever the scorecard says. The harness tells you each turn's slot; when it says the budget is spent, write SPEC.md and ask nothing more.
 5. Score the four dimensions below honestly and write the §8 scorecard as a table of `| <dimension-id> | <score> |` rows plus an `Overall: <score>` line.
+6. Write SPEC.md with the write tool. At the end of every turn the harness runs the full gate on it; a refusal comes back to you on the next turn.
 
 ## Ambiguity dimensions (floor 0.7, higher is better; overall gate <= 0.20, lower is better -- two separate scales, see scorecard.ts)
 
@@ -54,4 +55,5 @@ The spec-schema.ts and scorecard.ts modules under .pi/extensions/grill/ are AUTH
 - Not on `main`/`master`, or `/grill --resume` with nothing to resume: the command's own git pre-flight (`classifyGitInvocation`).
 - §3 authored before §2 is evidenced: `gateRequirementsAuthorship`.
 - §1/§4/§5 malformed or incomplete: `validateSpec`.
-- Ambiguity score over gate, or a dimension below its floor with no recorded override: `gateAmbiguity`.
+- Ambiguity score over gate, or any dimension below its floor (no override): `gateAmbiguity`.
+- §3 with no `R<n>` id, or an empty §6/§7: `validateGatedSpec`, which /plan, /execute and /review re-run too.
