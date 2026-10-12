@@ -23,7 +23,7 @@ import {
 } from "../../.pi/extensions/routing/profiles.ts";
 import { SHELL_POLICY_SECTION } from "../../.pi/extensions/background-tasks/src/core/shell-policy.ts";
 import { transcriptView } from "../helpers/faux.ts";
-import { createHarnessSession, listEntryPoints, withHarnessSession } from "../helpers/harness-session.ts";
+import { createHarnessSession, type HarnessHandle, listEntryPoints, withHarnessSession } from "../helpers/harness-session.ts";
 
 function steps(n: number, sink: TranscriptContext[]): FauxResponseStep[] {
 	return Array.from({ length: n }, () => (context: TranscriptContext) => {
@@ -172,6 +172,31 @@ describe("a transcript's loadout is never narrowed again", () => {
 			expect(second.systemPrompt).not.toContain(SHELL_POLICY_SECTION);
 			expect(second.systemPrompt).toBe(first.systemPrompt);
 			expect(systemCount(sink[1]!)).toBe(1);
+		});
+	});
+
+	it("a follow-up queued mid-run keeps a tool activated during that run", async () => {
+		const sink: TranscriptContext[] = [];
+		let h!: HarnessHandle;
+		let queued: Promise<void> | undefined;
+		const responses: FauxResponseStep[] = [
+			(c) => {
+				sink.push(c);
+				h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+				queued = h.session.prompt("follow", { streamingBehavior: "followUp" });
+				return fauxAssistantMessage("ok");
+			},
+			(c) => {
+				sink.push(c);
+				return fauxAssistantMessage("ok");
+			},
+		];
+		await withHarnessSession({ responses }, async (handle) => {
+			h = handle;
+			await h.session.prompt("one");
+			await queued;
+			expect(sink.length, "non-vacuity: the follow-up reached the provider").toBe(2);
+			expect(getCurrentTools(sink[1]!.messages).map((t) => t.name)).toContain("bg_run");
 		});
 	});
 
