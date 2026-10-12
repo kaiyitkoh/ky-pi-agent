@@ -140,12 +140,12 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 
 ### Context Budget
 
-- [x] **CTX-01**: Named tool profiles (recon / implement / review / full) are set once at `session_start` and only added to — tool *removal* invalidates the prompt cache **[FAUX]**
-- [x] **CTX-02**: `pi.setActiveTools()` is the mechanism; the `context` hook cannot strip tool definitions and is not used for this **[FAUX]**
-- [x] **CTX-03**: `AGENTS.md` has a hard token budget enforced in CI
-- [x] **CTX-04**: No volatile content — timestamps, running cost, git branch, changed files — appears in the system prompt; DeepSeek cache reads are ~50× cheaper than fresh input, so one volatile token re-prices the whole prefix every turn **[FAUX]**
-- [x] **CTX-05**: A controlled minimal-vs-full-harness experiment measures whether context pollution actually degrades output quality **[RUNBOOK]**
-- [x] **CTX-06**: Per-extension per-turn token cost is measured and recorded, so every installed extension can be justified
+- [x] **CTX-01**: Named tool profiles (recon / implement / review / full) are set once at `session_start` and only added to — tool *removal* invalidates the prompt cache **[FAUX]** — *proved by `tests/integration/tool-profiles.test.ts`*
+- [x] **CTX-02**: `pi.setActiveTools()` is the mechanism; the `context` hook cannot strip tool definitions and is not used for this **[FAUX]** — *proved by `tests/integration/context-hook-tools.test.ts` and the lint in `tests/unit/context-hook-lint.test.ts`; plain rewrites cannot strip tools, and a system-shaped `toolsRemoved` return is banned by that lint*
+- [x] **CTX-03**: `AGENTS.md` has a hard token budget enforced in CI — *proved by `tests/unit/agents-md-budget.test.ts`*
+- [x] **CTX-04**: No volatile content — timestamps, running cost, git branch, changed files — appears in the system prompt; DeepSeek cache reads are ~50× cheaper than fresh input, so one volatile token re-prices the whole prefix every turn **[FAUX]** — *proved by `tests/integration/prompt-stability.test.ts`; live cache hit is `RB-10-02`*
+- [~] **CTX-05**: A controlled minimal-vs-full-harness experiment measures whether context pollution actually degrades output quality **[RUNBOOK]** — *PARTIAL. Protocol pre-registered and harness proved offline (plans 10-05/10-06). Not proved: no live trial has run. Outstanding: `RB-10-01`*
+- [~] **CTX-06**: Per-extension per-turn token cost is measured and recorded, so every installed extension can be justified — *PARTIAL. Every local extension and Pi built-in measured and closed against the composed floor (plans 10-01/10-03). Not measured: the four pinned-but-uninstalled packages. Outstanding: `RB-10-03`*
 
 ### Terminal UI
 
@@ -336,8 +336,8 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | CTX-02 | Phase 10 | Complete |
 | CTX-03 | Phase 10 | Complete |
 | CTX-04 | Phase 10 | Complete |
-| CTX-05 | Phase 10 | Complete |
-| CTX-06 | Phase 10 | Complete |
+| CTX-05 | Phase 10 | Partial — offline proof only; not complete until `RB-10-01` runs |
+| CTX-06 | Phase 10 | Partial — local extensions measured; not complete until `RB-10-03` measures the four uninstalled packages |
 | UI-01 | Phase 11 | Pending |
 | UI-02 | Phase 11 | Pending |
 | UI-03 | Phase 11 | Pending |

@@ -739,10 +739,10 @@ already-outstanding `RB-07-01` end-to-end smoke ritual.
 
 ## Pi 1.x capabilities not adopted - inputs for Phases 10/11
 
-Notes only. Nothing here was built in Phase 08.1. Source: pi-coding-agent / pi-ai 1.1.0 types and CHANGELOG.
+Notes. Phase 10 decided the first two bullets (see "Context budget and tool profiles" below); the rest remain candidates. Source: pi-coding-agent / pi-ai 1.1.0 types and CHANGELOG.
 
-- Tool `exposure` (`direct` / `codemode` / `deferred` / `hidden`) and `namespace`; `prepareLoadout()`. Candidate replacement for hand-rolled `setActiveTools` progressive disclosure.
-- Built-in `tool_search` and `defaultTools` +/- adjustments.
+- Tool `exposure` (`direct` / `codemode` / `deferred` / `hidden`) and `namespace`; `prepareLoadout()`. Not adopted: deferred exposure needs vendored `defaultActive:false` patches to third-party packages.
+- Built-in `tool_search` and `defaultTools` +/- adjustments. Not adopted: option (a) below.
 - Codemode: nested tool calls were proven guarded by the safety layer in 08.1-03.
 - `pi.registerVirtualModel` (a router could present as one model).
 - `compaction.modelOverrides` (cheap model for compaction) and the `session_compact_failed` event.
@@ -750,7 +750,57 @@ Notes only. Nothing here was built in Phase 08.1. Source: pi-coding-agent / pi-a
 - `durationMs` on `tool_execution_end` (free latency telemetry for the wire inspector).
 - Tool-renderer registry.
 - `agent_settled` now carries `aborted`; upstream git-checkpoint moved from `agent_end` to it.
-- Third-party loaders (`subagents_enable`, `web_enable`) and the `promptSnippet` cost they add per turn; measure before adopting.
+- Third-party loaders (`subagents_enable`, `web_enable`) and the `promptSnippet` cost they add per turn: measured under `RB-10-03`.
+- Pi's cache warmer (`cacheWarming`, docs/settings.md:19) replays the stable prefix; Phase 11's cost display should account for it.
+
+## Context budget and tool profiles
+
+Every request carries a floor: the system prompt plus every active tool schema. Measured numbers live in `docs/DIAGNOSTICS.md` ("Per-turn floor") and are cited here, not re-derived. Profiles are documented in `docs/ROUTING.md` ("Tool profiles").
+
+### tool_search decision: option (a)
+
+Pi's `tool_search` and deferred exposure were not adopted. `setActiveTools()` stays the only mechanism. Reasons: `tool_search` itself costs about 173 tok per turn; deferred exposure needs vendored `defaultActive:false` patches to third-party packages; and each model-driven tool load re-prices the cached prefix on DeepSeek and Bedrock, because those transports re-send the current tool list. `.pi/settings.json`, `docs/SAFETY.md`, the safety deny list and `tests/integration/new-tool-paths.test.ts` are unchanged by this phase.
+
+### Criterion reinterpretations
+
+The original CTX criteria were written before Pi 1.x. Each was reinterpreted; the table says how and which test proves it.
+
+| # | Original wording | 1.x mechanism | Why equivalent or stronger | Proving test |
+|---|------------------|---------------|-----------------------------|--------------|
+| R1 | Profiles set once at `session_start` via `setActiveTools()` and only ever added to; tool removal invalidates the prompt cache | `setActiveTools` once at `session_start`, before the first request; profile code never runs again. Mid-session changes are user commands only (the plan-mode toggle) | Narrowing before the first request writes no `toolsRemoved`, so nothing is invalidated. On DeepSeek (`openai-completions`) and Bedrock the transport re-sends the current tool list, so any mid-session change, add or remove, re-prices the prefix. The enforced rule is: no profile-driven change after the first request | `tests/integration/tool-profiles.test.ts` T1 and T2 |
+| R2 | The `context` hook cannot strip tool definitions at all | Holds only for plain message rewrites. A `context` handler that returns a system-shaped message carrying `toolsRemoved` can change provider tools (Pi 1.1.0 `runner.js:101-106`, `restoreSystemMessages`, only filters inbound system messages). So the property is enforced by a lint, not by Pi | The lint bans `context_with_system`, `toolsAdded` and `toolsRemoved` in tracked source | `tests/integration/context-hook-tools.test.ts` and `tests/unit/context-hook-lint.test.ts` |
+| R3 | Named profiles via `setActiveTools()` | `setActiveTools` stays the primitive; no `exposure: "deferred"`, no `tool_search`, no vendored patches | `tool_search` costs about 173 tok/turn itself and each model-driven load re-prices the prefix; option (a) needs no safety change | `tests/unit/tool-profiles-table.test.ts`; `tests/integration/new-tool-paths.test.ts` stays green |
+| R4 | `/budget` shows the floor measurably below the ~1,850-token baseline | The 1,850 figure is bare Pi plus a context file. Measured BEFORE composed floor is 4,233 tok (bare Pi 1,326; bare + AGENTS.md 1,778). AFTER: recon 1,818, review 1,945, implement (default) 2,389, full 4,233. Only recon is below ~1,850 | "Measurably below" holds against the true baseline; the literal 1,850 is claimed for recon only, and the default is 43.6% below BEFORE | `tests/integration/context-floor.test.ts` (`FLOOR_CEILINGS`) |
+| R5 | Each installed extension's per-turn cost is a recorded number | Local extensions measured exactly; the four uninstalled packages are static findings or OUTSTANDING under `RB-10-03` | Attribution closes on the composed floor with a residual of 0 chars | `tests/integration/context-floor.test.ts` attribution closure; `RB-10-03` |
+| R6 | No volatile content in the system prompt | Plus: no mid-run section patches (a patch is a second system message) | Byte equality is necessary, not sufficient | `tests/integration/prompt-stability.test.ts` |
+
+### Per-extension per-turn cost
+
+Numbers are from `docs/DIAGNOSTICS.md`; the verdict is what this phase decided.
+
+| Entry point | tokens | verdict |
+|---|---|---|
+| background-tasks | 1548 | profile-gate (full only) |
+| questionnaire | 297 | profile-gate (full only; plan mode re-adds it) |
+| todo | 78 | profile-gate (implement and full) |
+| quality (`consult_advisor`) | 128 | budgeted |
+| safety (`approve_ky_command`) | 62 | keep, in every profile |
+| skills index | 344 | budgeted |
+| checkpoint, diagnostics, execute, grill, harness, loop-police, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | keep |
+
+Four pinned packages are not installed here. `pi-session-finder` is static: 0 tools, 0 tok. `@narumitw/pi-lsp` is a source-text estimate of about 500-650 tok, not a `/budget` number. `pi-subagents` and `pi-web-access` are not statically measurable. All four are OUTSTANDING under `RB-10-03`.
+
+### Plan mode is the one sanctioned mid-session tool change
+
+Toggling `/plan` changes the active tool list mid-session, which re-prices the cached prefix once. That cost is accepted because it is a deliberate user command, not something a profile or the model does. Whether the re-price happens as expected is checked live in `RB-10-02`.
+
+### `context` versus `context_with_system`
+
+A plain `context` rewrite cannot change the tools sent to the provider. A system-shaped message carrying `toolsRemoved` returned from a `context` handler can, so the lint in `tests/unit/context-hook-lint.test.ts` bans `context_with_system`, `toolsAdded` and `toolsRemoved` in tracked source. Tool changes go through `setActiveTools()` only.
+
+### Prose-retry `tool_choice` lever
+
+The `tool_choice` retry for prose tool calls stays off. The experiment in `docs/DIAGNOSTICS.md` (`RB-10-01`) supplies the baseline prose-tool-call rate that decision waits for.
 
 ## Harness: comment rules in every project
 

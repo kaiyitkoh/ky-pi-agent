@@ -135,6 +135,28 @@ downgrade path anywhere in this subsystem.
 
 ---
 
+### Tool profiles
+
+`pi --ky-profile recon|review|implement|full` narrows the active tool set once, at `session_start`, before the first request. The default is `implement`. An unknown value falls back to `implement`. `full` applies no narrowing. The native escape hatch `pi --tools read,bash` is untouched.
+
+| Tool(s) | recon | review | implement | full |
+|---------|-------|--------|-----------|------|
+| read, bash, approve_ky_command | yes | yes | yes | yes |
+| edit, write, todo | no | no | yes | yes |
+| consult_advisor, lsp_diagnostics, lsp_fix | no | yes | yes | yes |
+| subagent, bg_wait, subagent_supervisor, subagents_enable | no | yes | yes | yes |
+| web_enable | yes | yes | yes | yes |
+| web_search, fetch_content, get_search_content, source_check | yes | no | no | yes |
+| questionnaire, bg_run, bg_status, bg_logs, bg_kill, qoder_delegate | no | no | no | yes |
+
+Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,818 tok, review 1,945, implement 2,389, full 4,233.
+
+Two rules keep this safe. Pi's registered-but-inactive built-ins (`grep`, `find`, `ls`) are neutral and never removed, because if they are active something chose them. A loadout with neither `edit` nor `write` was already chosen read-only (plan mode, a read-only subagent), so the profile leaves it alone.
+
+A profile is chosen once per session. Changing it means starting a new session, because any mid-session tool change re-prices the cached prefix on DeepSeek and Bedrock.
+
+---
+
 ## 4. The four refusals
 
 Four routes are impossible, and the capability guard (`routing/guard.ts`)
