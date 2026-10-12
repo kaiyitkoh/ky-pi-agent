@@ -1,167 +1,40 @@
 /**
- * SAFE-04 / SAFE-05 — the git and glab decision layer.
+ * git and glab decision layer: two separate questions, deny only when both hold.
  *
- * A two-step evaluation, kept as two genuinely separate steps because
- * conflating them is exactly Pitfall 5 (`04-RESEARCH.md:506-511`):
+ * - Is `HEAD` currently a protected branch? Answered by {@link currentBranch}, the only impure
+ *   function here. Asking "does the command mention `main`" instead would block
+ *   `git worktree add -b feat main`, `git fetch origin main`, `git diff main`.
+ * - Is this subcommand a WRITE given its args? A pure table of per-subcommand predicates
+ *   (`{ subcommand, matches(args), why }`); `rebase` and `apply` appear in both tables with
+ *   complementary predicates. `push` is always a write: the refspec target cannot be trusted
+ *   from argv and resolving it would need a second git invocation.
  *
- *   (1) is `HEAD` CURRENTLY the protected branch? — a property of the
- *       checked-out repository, independent of anything in the command's
- *       argument list. Answered by {@link currentBranch}, the only impure
- *       function in this module.
- *   (2) is this subcommand a WRITE to the checked-out branch, given its
- *       arguments? — a property of the command alone, independent of
- *       `HEAD`. Answered by {@link classifyGitInvocation}'s table lookup,
- *       which is pure.
+ * With `HEAD` protected: a matching write entry blocks; else a matching read entry allows; else a
+ * subcommand in either table with no matching shape (`git stash pop`) or an unknown one blocks
+ * (fail closed). Fix a false positive by adding a fixture-backed row, never by widening a predicate.
  *
- * Deny only when BOTH hold. A rule that instead asks "does this command
- * mention `main` anywhere" conflates the two questions and blocks
- * `git worktree add -b feat main`, `git fetch origin main`, `git diff main`
- * and `git log origin/main` — breaking the single most useful escape hatch
- * the user has while trying to protect `main`.
+ * `glab mr merge` blocks on every branch: an MR merge is the deploy trigger on GitLab's server,
+ * regardless of local `HEAD`. `mr create` is a conditional allow only with an explicit,
+ * non-protected `--target-branch`/`-b` (GitLab defaults an omitted target to the protected default
+ * branch, so silence is the trigger). The blocked table is consulted first so `create` can never
+ * admit a `merge`.
  *
- * ---------------------------------------------------------------------------
- * WHY THIS IS A TABLE OF PREDICATES, NOT A BOOLEAN OR A FLAT NAME SET
- * ---------------------------------------------------------------------------
- * `04-RESEARCH.md` Open Question 3 names the cases that need a per-subcommand
- * PREDICATE over the argument list, not a static write/read label:
- *   - `rebase` — bare (`git rebase`, no non-flag argument) rewrites the
- *     checked-out branch against its upstream: a WRITE. `git rebase feature`
- *     names an explicit OTHER ref: the read-preview form, a READ.
- *   - `worktree add` — with or without `-b`/`-B`, this reads the named ref
- *     to populate a SECOND working directory. Neither form mutates the named
- *     ref itself, so both are allowed (the pinned answer for the
- *     without-`-b` case the plan calls out explicitly).
- *   - `apply` — writes the tree unless `--check`/`--stat`/`--numstat` makes
- *     it a dry run.
- *   - `commit --amend` — unambiguously a write, regardless of flags.
- *   - `push` — a write regardless of refspec, because the refspec TARGET
- *     cannot be trusted from the argument list alone (it can name a
- *     different remote-tracking ref than the one actually pushed, and
- *     resolving that correctly would need a second git invocation this
- *     module deliberately does not make — see the purity note below).
+ * `currentBranch` runs `git symbolic-ref --short HEAD` with `shell: false`. A non-zero exit returns
+ * {@link DETACHED_HEAD}, a named sentinel never equal to a protected name, not `undefined`, which a
+ * caller's `=== "main"` would read as falsy and fail open. Callers resolve the cwd first:
+ * `CanonicalInvocation.cwdOverride` (`git -C`) beats `ctx.cwd`, so `git -C /other/repo push`
+ * evaluates that repo's HEAD.
  *
- * `GIT_WRITE_SUBCOMMANDS` and `GIT_READ_SUBCOMMANDS` are therefore both
- * arrays of `{ subcommand, matches(args), why }`, and a subcommand may
- * legitimately appear in BOTH tables with complementary predicates (`rebase`,
- * `apply`) — the write table's predicate answers "is THIS invocation a
- * write", not "can this subcommand ever write".
- *
- * ---------------------------------------------------------------------------
- * RESOLUTION ORDER AND THE FAIL-CLOSED DEFAULT
- * ---------------------------------------------------------------------------
- * Given `HEAD` is protected:
- *   1. If the subcommand has a write-table entry AND its predicate matches
- *      this invocation's args → BLOCK.
- *   2. Else if the subcommand has a read-table entry AND its predicate
- *      matches → ALLOW.
- *   3. Else if the subcommand appears in EITHER table but neither predicate
- *      matched this exact argument shape (e.g. `git stash pop` — `stash` is
- *      read-table-known, but only the `list` form is named allowed) → BLOCK,
- *      fail closed on the unmatched shape rather than falling through open.
- *   4. Else the subcommand is wholly unknown → BLOCK, fail closed, with the
- *      reason naming the subcommand as unclassified.
- *
- * The documented remedy for a false positive at step 3 or 4 is to ADD a
- * fixture-backed table row, never to widen a predicate's default toward
- * "true" or to special-case around this resolution order. That is the same
- * posture `shell.ts`'s deny predicate states for its own unknown node types.
- *
- * ---------------------------------------------------------------------------
- * WHY `glab mr merge` IS SEPARATE, AND UNCONDITIONAL ON BRANCH — BUT
- * `mr create` IS NOT (PLAN 09-04, FLOW-08)
- * ---------------------------------------------------------------------------
- * In the user's work repo an MR merge IS the deploy trigger (CONTEXT.md
- * decision 13) — merging a `.tf` change through GitLab is an infra change,
- * not a local plan. `HEAD` is irrelevant to that: the danger is the MERGE
- * TARGET on GitLab's server, not the branch checked out on this laptop.
- * `mr merge` (with or without an IID, with or without `--auto-merge`) blocks
- * on EVERY branch regardless of `HEAD`, while `mr list`/`mr view`/`ci status`
- * stay allowed so the harness remains usable for ordinary orientation.
- *
- * Plan 09-04 added a SECOND, narrower fact `classifyGlabInvocation` now
- * needs: independence from `currentBranch` (`HEAD` on THIS laptop) STAYS
- * true and unchanged — that claim is not touched by this addition — but the
- * function is NOT independent of the invocation's own DESTINATION branch, a
- * genuinely different fact, carried by the new `protectedBranches`
- * parameter (deliberately NOT the existing `GitPolicyFacts`, which also
- * bundles `currentBranch` — bundling would misstate that the destination
- * check depends on `HEAD`, which it does not). `mr create` opens an MR whose
- * own argv names a destination; GitLab silently defaults an OMITTED
- * destination to the project's default branch, so SILENCE is itself the
- * deploy trigger. `mr create` is therefore a conditional allow: permitted
- * only when its own argv names an EXPLICIT, PRESENT, non-protected target
- * (`--target-branch`/`-b`, either the separated or `=` form), and blocked —
- * fail closed — on a missing target or a protected one, compared
- * case-insensitively, mirroring {@link isProtected}'s own comparison. The
- * blocked-subcommand table is still consulted FIRST, before the `mr create`
- * conditional-allow check runs, so a `create` predicate can never
- * accidentally admit a `merge` — the two verbs are mutually exclusive at
- * `args[0]`, and the resolution order makes that exclusivity structural,
- * not incidental (see {@link classifyGlabInvocation}).
- *
- * ---------------------------------------------------------------------------
- * WHY `currentBranch` IS THE ONLY IMPURE EXPORT
- * ---------------------------------------------------------------------------
- * Mirrors `.pi/extensions/safety/shell.ts`'s canonicalise()/wrapper-resolution
- * split and `.pi/extensions/diagnostics/budget.ts`'s PURITY docstring:
- * `classifyGitInvocation`/`classifyGlabInvocation` take a plain data object
- * and a facts object, never `ctx`, never touch the filesystem or a
- * subprocess — which is what lets `tests/unit/git-policy.test.ts` be a
- * millisecond fixture table. The ONE fact that genuinely needs a real
- * repository — "what branch is checked out right now" — is isolated in
- * `currentBranch`, proven against a real disposable checkout in
- * `tests/integration/git-head-main.test.ts`.
- *
- * `currentBranch(cwd)` runs `git symbolic-ref --short HEAD` with
- * `spawnSync(..., { shell: false })`, the exact spawn shape
- * `tests/helpers/git.ts:42-53` uses (copied as a PATTERN — extensions must
- * not import from `tests/`). Exit 0 → the branch name, trimmed. Non-zero
- * (detached HEAD, or no git repository at all) → {@link DETACHED_HEAD}, a
- * distinct named sentinel, NEVER `undefined` and never an empty string.
- * Returning `undefined` and letting a caller's `=== "main"` comparison read
- * it as falsy-therefore-"not main" is exactly how a guard silently fails
- * open on the machine's own quirks (a detached CI checkout, a submodule);
- * `DETACHED_HEAD` cannot equal any configured protected-branch name, so it
- * is unconditionally treated as NOT-protected, on purpose, and that
- * treatment is visible at the call site rather than hidden in a fallback.
- *
- * The caller is responsible for resolving WHICH cwd to interrogate before
- * calling `currentBranch` — `shell.ts`'s `CanonicalInvocation.cwdOverride`
- * (from git's own `-C`/`--git-dir`) takes precedence over the harness's
- * ambient `ctx.cwd` when present, which is what makes
- * `git -C /other/repo push` evaluate against `/other/repo`'s HEAD rather
- * than the harness's own working directory (T-04-18).
- *
- * ---------------------------------------------------------------------------
- * BOUNDARY RULE (BOOT-10). This module registers nothing. It does not spell
- * the tool-registration call, in code or in prose —
- * `tests/unit/contributing-boundary.test.ts` matches that name as a plain
- * substring across every tracked source under `.pi/extensions/`.
+ * Registers nothing and never spells the tool-registration call (contributing-boundary.test.ts
+ * matches it as a substring).
  */
 import { spawnSync } from "node:child_process";
 
-// ---------------------------------------------------------------------------
-// The HEAD oracle (impure — the only spawnSync call in this module)
-// ---------------------------------------------------------------------------
 
-/**
- * The distinct value `currentBranch` returns for a detached HEAD (or when
- * `git symbolic-ref` fails for any other reason — no repository, no HEAD at
- * all). Never equal to any real branch name, so it is unconditionally
- * NOT-protected wherever it is compared against `protectedBranches`. See the
- * module docstring's "WHY `currentBranch` IS THE ONLY IMPURE EXPORT" section
- * for why this is a named sentinel rather than `undefined`.
- */
+/** `currentBranch` result for a detached HEAD or any `git symbolic-ref` failure; never a real branch name, so never protected. */
 export const DETACHED_HEAD = "(detached HEAD)";
 
-/**
- * What branch is checked out in the repository at `cwd`, right now.
- *
- * `git symbolic-ref --short HEAD` is git's own documented primitive for this
- * question (`04-RESEARCH.md`'s Don't-Hand-Roll table, row 3) — never parsed
- * out of `git branch`/`git status` text. Exit 0 → the branch name, trimmed.
- * Non-zero → {@link DETACHED_HEAD}.
- */
+/** The branch checked out at `cwd`, via `git symbolic-ref --short HEAD` (never parsed from `git status` text). */
 export function currentBranch(cwd: string): string {
 	const result = spawnSync("git", ["symbolic-ref", "--short", "HEAD"], {
 		cwd,
@@ -179,17 +52,8 @@ export function currentBranch(cwd: string): string {
 }
 
 /**
- * The HEAD commit SHA of the repository at `cwd`, right now.
- *
- * WHY NO SENTINEL (unlike {@link currentBranch}'s {@link DETACHED_HEAD}): a
- * detached HEAD is unconditionally NOT-protected, so a safe default exists
- * for it. No safe default exists for "the current SHA is unknown" — GATE-07
- * (`workflows/evidence.ts`) compares a recorded SHA against this value, and
- * an unknown SHA can never legitimately match a piece of evidence. Returning
- * a sentinel here would let a broken repository (no `.git`, or a repository
- * with no commits yet) read compare-equal to itself under a naive `===`.
- * This function THROWS instead, on both a launch failure and a non-zero
- * exit; callers must wrap it and refuse (fail closed).
+ * The HEAD commit SHA at `cwd`. THROWS on failure with no sentinel: an unknown SHA must never
+ * compare equal to recorded evidence, so callers wrap it and refuse (fail closed).
  */
 export function currentSha(cwd: string): string {
 	const result = spawnSync("git", ["rev-parse", "HEAD"], {
@@ -210,20 +74,7 @@ export function currentSha(cwd: string): string {
 	return (result.stdout ?? "").trim();
 }
 
-/**
- * The tree object id `HEAD` currently points at, in the repository at `cwd`.
- *
- * Phase 8's GATE-01 tree-comparison branch (`workflows/evidence.ts`
- * `gateCompletion` branch (6)) needs this to tell "HEAD moved" apart from
- * "HEAD moved to a commit whose tree is byte-identical to the one at arm
- * time" -- an empty commit (`git commit --allow-empty`) is the textbook case:
- * its SHA differs from its parent's, but its tree does not. Copies {@link
- * currentSha}'s fail-closed contract exactly and for the identical reason: no
- * sentinel exists for an unknown tree, because an unknown tree can never
- * legitimately match a piece of evidence, and a sentinel would let a broken
- * repository read compare-equal to itself under a naive `===`. THROWS on
- * both a launch failure and a non-zero exit; callers must wrap it and refuse.
- */
+/** The tree id of `HEAD`, telling an empty commit (new SHA, same tree) from real movement. Same THROWS contract as {@link currentSha}. */
 export function currentTree(cwd: string): string {
 	const result = spawnSync("git", ["rev-parse", "HEAD^{tree}"], {
 		cwd,
@@ -243,52 +94,31 @@ export function currentTree(cwd: string): string {
 	return (result.stdout ?? "").trim();
 }
 
-// ---------------------------------------------------------------------------
-// The pure classifier half
-// ---------------------------------------------------------------------------
 
-/**
- * One parsed git or glab invocation, already split into its (sub)command word
- * and everything after it. This module never parses a raw command string
- * itself — that is `shell.ts`'s job (`CanonicalInvocation.args`), and the
- * test table builds this shape directly from its own fixtures.
- */
+/** One git/glab invocation split into subcommand and args; `shell.ts` does the string parsing. */
 export interface GitInvocation {
-	/** The git subcommand (`"push"`, `"worktree"`, ...) or the glab first-level verb (`"mr"`, `"ci"`, ...). */
 	readonly subcommand: string;
-	/** Every argument AFTER the subcommand, in order. */
 	readonly args: readonly string[];
 }
 
-/** Facts `classifyGitInvocation` needs and will never derive for itself — see the module docstring. */
 export interface GitPolicyFacts {
-	/** The checked-out branch, from {@link currentBranch} — or {@link DETACHED_HEAD}. */
 	readonly currentBranch: string;
-	/** Branch names treated as protected. Compared case-insensitively. */
 	readonly protectedBranches: readonly string[];
 }
 
-/** Discriminated verdict shape, mirroring `shell.ts`'s `ShellVerdict` and `paths.ts`'s `PathVerdict`. */
 export type GitVerdict = { readonly kind: "allow" } | { readonly kind: "block"; readonly reason: string };
 
-/** One subcommand's write-or-read predicate over its own argument list. */
 interface GitSubcommandRule {
 	readonly subcommand: string;
-	/** True when THIS invocation's args make it match this table's classification. */
 	readonly matches: (args: readonly string[]) => boolean;
 	readonly why: string;
 }
 
-/** True if any element of `args` does not start with `-` — i.e. there is a positional (non-flag) argument. */
 function hasPositionalArg(args: readonly string[]): boolean {
 	return args.some((a) => !a.startsWith("-"));
 }
 
-/**
- * Subcommands that WRITE to the checked-out branch, at least for some
- * argument shapes. See the module docstring for `rebase`/`apply`'s
- * conditional predicates.
- */
+/** Subcommands that WRITE to the checked-out branch for at least some argument shapes. */
 export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{
 		subcommand: "push",
@@ -313,12 +143,7 @@ export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	},
 ];
 
-/**
- * Subcommands that are safe regardless of `HEAD`, at least for some argument
- * shapes -- ALLOWED even when `HEAD` is protected. Every one of these must
- * appear as a named row in `tests/unit/git-policy.test.ts` (Pitfall 5: "a
- * named allow-case, not merely absent from the deny-list").
- */
+/** Subcommands safe even when `HEAD` is protected; each needs a named allow row in git-policy.test.ts. */
 export const GIT_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "fetch", matches: () => true, why: "reads from a remote, never mutates the checked-out branch" },
 	{ subcommand: "diff", matches: () => true, why: "read-only comparison" },
@@ -356,23 +181,10 @@ function isProtected(facts: GitPolicyFacts): boolean {
 }
 
 /**
- * CR-05: does this `push`'s own argv name a protected branch as its
- * DESTINATION, regardless of what `HEAD` currently is? The write table's own
- * `push` rule already says "the refspec target cannot be trusted from argv
- * alone" -- but that reasoning was previously only ever APPLIED on the
- * protected-`HEAD` branch of {@link classifyGitInvocation}, so
- * `git push --force origin main` from a feature branch reached `allow`: HEAD
- * was not protected, so the write table was never even consulted, even
- * though the command names `main` literally in argv.
- *
- * A positional (non-flag) token is read as `src:dst` when it contains a `:`,
- * else as a bare ref (source and destination are the same name); a leading
- * `refs/heads/` prefix is stripped before comparison. Case-insensitive,
- * matching {@link isProtected}'s own comparison. `git push origin
- * feature/x:main` and `git push --force origin main` both match; a plain
- * `git push origin feature/x` (destination `feature/x`, not a protected name)
- * does not -- the paired negative that proves this cannot degenerate into
- * "any push is blocked".
+ * Does a `push` argv name a protected branch as destination, whatever `HEAD` is? Without this
+ * `git push --force origin main` from a feature branch reached allow. A positional token is
+ * `src:dst` when it has `:`, else a bare ref; `refs/heads/` is stripped; comparison is
+ * case-insensitive. `origin feature/x` must not match.
  */
 function pushTargetsProtected(args: readonly string[], protectedBranches: readonly string[]): boolean {
 	return args.some((a) => {
@@ -385,14 +197,7 @@ function pushTargetsProtected(args: readonly string[], protectedBranches: readon
 	});
 }
 
-/**
- * The whole SAFE-04 decision: deny when either (a) this `push`'s own argv
- * names a protected branch as its destination refspec, REGARDLESS of the
- * checked-out branch (CR-05), or (b) `HEAD` is protected AND the subcommand
- * classifies as a write for these exact args. See the module docstring for
- * the four-step resolution order and the fail-closed default that governs
- * every OTHER subcommand.
- */
+/** Deny a push naming a protected destination regardless of `HEAD`, or any write while `HEAD` is protected; see the module header for the resolution order. */
 export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolicyFacts): GitVerdict {
 	const display = `git ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
 
@@ -442,11 +247,7 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 	};
 }
 
-// ---------------------------------------------------------------------------
-// glab -- separate and unconditional on branch (decision 13)
-// ---------------------------------------------------------------------------
 
-/** `glab` subcommand forms blocked on every branch -- the deploy trigger. */
 const GLAB_BLOCKED_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{
 		subcommand: "mr",
@@ -455,23 +256,12 @@ const GLAB_BLOCKED_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	},
 ];
 
-/** `glab` subcommand forms explicitly allowed -- orientation commands that must stay usable. */
 const GLAB_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "mr", matches: (args) => args[0] === "list" || args[0] === "view", why: "read-only MR inspection" },
 	{ subcommand: "ci", matches: (args) => args[0] === "status", why: "read-only pipeline status" },
 ];
 
-/**
- * PLAN 09-04: extracts an explicit `mr create` target branch from the args
- * that follow `"create"` (`invocation.args.slice(1)`) -- accepting BOTH the
- * separated form (`--target-branch staging`, `-b staging`) and the `=` form
- * (`--target-branch=staging`). Returns `undefined` when no such flag is
- * present, OR when it is present but its value is missing (the next token is
- * absent or itself looks like another flag) -- BOTH shapes must be treated
- * as an ABSENT target by the caller, because GitLab defaults an omitted
- * target to the project's default branch: silence and an empty value are the
- * SAME danger, not two different ones.
- */
+/** The explicit `mr create` target (`--target-branch X`, `-b X`, `--target-branch=X`); a missing or flag-like value is treated as absent, since an omitted target is the same danger. */
 function extractMrCreateTarget(argsAfterCreate: readonly string[]): string | undefined {
 	for (let i = 0; i < argsAfterCreate.length; i++) {
 		const a = argsAfterCreate[i];
@@ -487,20 +277,7 @@ function extractMrCreateTarget(argsAfterCreate: readonly string[]): string | und
 	return undefined;
 }
 
-/**
- * PLAN 09-04: the whole `mr create` conditional-allow predicate -- built as a
- * function CLOSING OVER `protectedBranches` rather than widening
- * {@link GitSubcommandRule}'s `matches(args)` shape to a second parameter,
- * so `GIT_WRITE_SUBCOMMANDS`/`GIT_READ_SUBCOMMANDS`/`GLAB_BLOCKED_SUBCOMMANDS`/
- * `GLAB_READ_SUBCOMMANDS`'s existing single-argument predicates stay exactly
- * as they are; only `mr create` needs the extra fact, so only `mr create`
- * gets a bespoke function rather than every table row's own type growing a
- * parameter it would otherwise ignore. True only for an explicit, present,
- * non-protected target -- an absent target (see {@link extractMrCreateTarget})
- * or one matching `protectedBranches` case-insensitively (mirroring
- * {@link isProtected}) both return `false`, which the caller falls through to
- * the fail-closed BLOCK for.
- */
+/** `mr create` conditional allow: true only for an explicit, non-protected target. Closes over `protectedBranches` so the shared single-argument rule type stays unchanged. */
 function mrCreateTargetsSafeBranch(args: readonly string[], protectedBranches: readonly string[]): boolean {
 	if (args[0] !== "create") {
 		return false;
@@ -512,31 +289,7 @@ function mrCreateTargetsSafeBranch(args: readonly string[], protectedBranches: r
 	return !protectedBranches.some((b) => b.toLowerCase() === target.toLowerCase());
 }
 
-/**
- * `glab mr merge` blocks unconditionally, regardless of `HEAD` -- the danger
- * is the merge target on GitLab's server, not the branch checked out on this
- * laptop. `mr list`/`mr view`/`ci status` stay allowed. `mr create` (PLAN
- * 09-04, FLOW-08) is a conditional allow: permitted only with an explicit,
- * present, non-protected `--target-branch`/`-b` destination, blocked
- * otherwise -- see the module docstring's "WHY `glab mr merge` IS
- * SEPARATE... BUT `mr create` IS NOT" section for the currentBranch-
- * independent / destination-dependent distinction this introduces. An
- * unknown subcommand fails closed, same posture as {@link classifyGitInvocation}.
- *
- * `protectedBranches` is a NARROW parameter -- not the existing
- * `GitPolicyFacts` (which also carries `currentBranch`) -- because the
- * currentBranch-independence claim above stays true and unchanged; only the
- * destination-branch fact is new here.
- *
- * Resolution order, and why it is BINDING: blocked-subcommand lookup runs
- * FIRST, then the read-subcommand lookup, then the `mr create`
- * conditional-allow check, then the fail-closed default. `mr merge` and
- * `mr create` are mutually exclusive at `args[0]` ("merge" vs "create"), so
- * this order is not what makes `merge` safe from `create`'s predicate --
- * mutual exclusivity does that structurally -- but it IS what guarantees a
- * future subcommand added to the blocked table is never shadowed by a
- * broader conditional-allow check added later without matching care.
- */
+/** `glab mr merge` blocks on every branch; `mr list`/`view`/`ci status` stay allowed; `mr create` is the conditional allow; unknown forms fail closed. Takes `protectedBranches` rather than `GitPolicyFacts` because the destination check does not depend on `HEAD`. */
 export function classifyGlabInvocation(invocation: GitInvocation, protectedBranches: readonly string[]): GitVerdict {
 	const display = `glab ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
 
@@ -573,48 +326,14 @@ export function classifyGlabInvocation(invocation: GitInvocation, protectedBranc
 	};
 }
 
-// ---------------------------------------------------------------------------
-// SAFE-01's classifier half -- reads a push failure, never causes one
-// ---------------------------------------------------------------------------
 
-/**
- * What kind of failure a `git push` produced, read off its stderr text.
- *
- * `"protected-branch-rejection"` means the SERVER rejected the push because the
- * target ref is protected -- the only control in this phase enforced where the
- * harness has no code execution at all (CONTEXT.md decision 1). `"other"` is
- * every other push failure -- non-fast-forward, network, auth, anything -- and
- * exists so this classifier can be driven in BOTH directions: a classifier that
- * answers `"protected-branch-rejection"` for everything would pass a
- * one-directional test just as well as a correct one.
- */
+/** `"protected-branch-rejection"` is the server refusing a protected ref (the one control enforced where the harness runs no code); `"other"` exists so the classifier is tested in both directions. */
 export type PushFailureClassification = "protected-branch-rejection" | "other";
 
-/**
- * GitLab's own wording for a protected-branch push rejection.
- *
- * `tests/integration/gitlab-push-protection.test.ts`'s fixture hook writes this
- * exact sentence to stderr, and its own comment says so: it is a REPRODUCTION
- * of GitLab's real message, not a captured one, because this machine has no
- * GitLab access. `RB-04-01` (`docs/RUNBOOK.md`) is what confirms the real
- * wording on the work laptop -- this pattern is deliberately loose (a
- * case-insensitive substring test) so a live message that differs from the
- * fixture only in capitalisation or surrounding text still classifies
- * correctly, while the phrase itself is specific enough not to match an
- * ordinary git failure by accident.
- */
+/** GitLab's rejection wording, reproduced from the fixture hook; a loose case-insensitive match tolerates differences in the live message (confirm on the work laptop per docs/RUNBOOK.md). */
 const PROTECTED_BRANCH_REJECTION_RE = /not allowed to push code to protected branches/i;
 
-/**
- * Classifies one `git push` failure's stderr text.
- *
- * Pure, and deliberately reads text rather than an exit code: `git push`'s
- * process exit code is non-zero for every rejection reason (protected branch,
- * non-fast-forward, network failure, auth failure, ...), so the exit code alone
- * cannot distinguish this phase's one server-side control from any other
- * failure. This is a proxy-side READER, never a caller of `git push` itself --
- * it takes text the caller already captured.
- */
+/** Classify a push failure from stderr text; exit codes are non-zero for every rejection so cannot distinguish this one. Pure reader, never runs git. */
 export function classifyPushFailure(stderr: string): PushFailureClassification {
 	return PROTECTED_BRANCH_REJECTION_RE.test(stderr) ? "protected-branch-rejection" : "other";
 }
