@@ -1,7 +1,7 @@
 /**
  * Routing entry point: `/cheap`, `/balanced`, `/max`, `/escalate` and `/mode`.
- * The only routing file that touches a live session; registers commands and a flag, narrows the starting tool set once
- * (never registers a tool, never a direct model call).
+ * The only routing file that touches a live session; registers commands and a flag and narrows the active tool set to
+ * the profile without ever removing a declared tool (never registers a tool, never a direct model call).
  */
 import type {
 	CustomEntry,
@@ -9,6 +9,7 @@ import type {
 	ExtensionCommandContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
+import { getCurrentTools } from "@earendil-works/pi-ai";
 
 import { appendJsonl } from "../../lib/jsonl.ts";
 import { agentOverridesFor, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
@@ -313,6 +314,20 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			if (event.reason === "reload" || branch.some((entry) => entry.type === "message")) return;
 			const next = applyProfile(pi.getActiveTools(), resolveProfile(pi.getFlag("ky-profile")));
 			if (next !== undefined) pi.setActiveTools(next);
+		} catch {
+			// Swallowed deliberately.
+		}
+	});
+	// Catches tools activated after the start-up narrowing (a later session_start handler, leaving plan mode).
+	// Only names the transcript has not declared are dropped, so the request records no removal.
+	pi.on("before_agent_start", (_event, ctx) => {
+		try {
+			const active = pi.getActiveTools();
+			const next = applyProfile(active, resolveProfile(pi.getFlag("ky-profile")));
+			if (next === undefined) return;
+			const declared = new Set(getCurrentTools(ctx.sessionManager.buildSessionProjection().messages).map((t) => t.name));
+			const kept = active.filter((name) => next.includes(name) || declared.has(name));
+			if (kept.length !== active.length) pi.setActiveTools(kept);
 		} catch {
 			// Swallowed deliberately.
 		}

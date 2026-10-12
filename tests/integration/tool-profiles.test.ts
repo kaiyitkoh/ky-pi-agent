@@ -141,6 +141,16 @@ describe("a transcript's loadout is never narrowed again", () => {
 		});
 	});
 
+	it("a tool activated after start-up narrowing, before any request, is dropped before the first request", async () => {
+		const sink: TranscriptContext[] = [];
+		await withHarnessSession({ responses: steps(1, sink) }, async (h) => {
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "qoder_delegate"]);
+			await h.session.prompt("one");
+			expect(getCurrentTools(sink[0]!.messages).map((t) => t.name)).not.toContain("qoder_delegate");
+			expect(removedNames(sink[0]!)).toEqual([]);
+		});
+	});
+
 	it("a new empty session is still narrowed", async () => {
 		await withHarnessSession({}, async (h) => {
 			await h.session.extensionRunner.emit({ type: "session_start", reason: "new" });
@@ -173,6 +183,20 @@ describe("plan mode survives the default profile", () => {
 
 	it("--plan keeps the read-only loadout", async () => {
 		check(await declared({ profile: "implement", flags: { plan: true } }));
+	});
+
+	it("--plan, then leaving plan mode, declares the profile's tools and removes none", async () => {
+		const sink: TranscriptContext[] = [];
+		await withHarnessSession({ profile: "implement", flags: { plan: true }, responses: steps(2, sink) }, async (h) => {
+			await h.session.prompt("one");
+			await h.session.prompt("/plan-mode");
+			expect(h.session.getActiveToolNames(), "non-vacuity: leaving plan mode restores it").toContain("qoder_delegate");
+			await h.session.prompt("two");
+			const names = getCurrentTools(sink[1]!.messages).map((t) => t.name);
+			expect(names).toContain("edit");
+			expect(names, "plan mode never declared it, so the profile drops it").not.toContain("qoder_delegate");
+			expect(removedNames(sink[1]!)).toEqual([]);
+		});
 	});
 
 	it("a restored plan-mode entry keeps the read-only loadout", async () => {
