@@ -6,6 +6,7 @@
 import type { LegStatus } from "../quality/gates.ts";
 import type { SpecArtifact, VerifiedFact } from "../grill/spec-schema.ts";
 import type { ParsedTask } from "../plan-ceremony/plan-schema.ts";
+import { parseRequirementEntries } from "../plan-ceremony/requirement-ids.ts";
 import { estimateTokensFromChars } from "../diagnostics/budget.ts";
 
 /**
@@ -45,32 +46,14 @@ export interface HandoffPacket {
 	readonly verificationCommand: string;
 }
 
-/** One §3 requirement entry, as `parseRequirementEntries` finds it. */
-interface SpecRequirementEntry {
-	readonly id: string;
-	readonly text: string;
-}
-
-/** One `R<digits>: <body>` entry in a §3 body. Body is a bounded lazy quantifier (never `.+`) for backtracking safety. */
-const REQUIREMENT_ENTRY_PATTERN = /\bR(\d{1,4}):\s*(\S[\s\S]{0,2000}?)(?=\s*\bR\d{1,4}:|$)/g;
-
-/** Every `R<id>: <text>` entry in a §3 body; ids written without the colon convention yield no entry. */
-function parseRequirementEntries(requirementsBody: string): readonly SpecRequirementEntry[] {
-	const entries: SpecRequirementEntry[] = [];
-	for (const match of requirementsBody.matchAll(REQUIREMENT_ENTRY_PATTERN)) {
-		const digits = match[1];
-		if (digits === undefined) {
-			continue;
-		}
-		entries.push({ id: `R${digits}`, text: (match[0] ?? "").trim() });
-	}
-	return entries;
-}
-
-/** A fact travels with the packet when its `claim` appears case-insensitively in the excerpt text; not "all of them", which would defeat the bounded packet. */
-function selectReferencedFacts(verifiedFacts: readonly VerifiedFact[], requirementExcerpts: readonly string[]): readonly VerifiedFact[] {
+/**
+ * A fact travels with the packet when its claim carries an `[R#]` tag for one of the task's ids, or appears
+ * case-insensitively in the excerpt text; not "all of them", which would defeat the bounded packet.
+ */
+function selectReferencedFacts(verifiedFacts: readonly VerifiedFact[], requirementExcerpts: readonly string[], ids: readonly string[]): readonly VerifiedFact[] {
 	const haystack = requirementExcerpts.join("\n\n").toLowerCase();
-	return verifiedFacts.filter((fact) => haystack.includes(fact.claim.toLowerCase()));
+	const tagged = (claim: string) => ids.some((id) => claim.includes(`[${id}]`));
+	return verifiedFacts.filter((fact) => tagged(fact.claim) || haystack.includes(fact.claim.toLowerCase()));
 }
 
 /**
@@ -87,7 +70,7 @@ export function buildHandoffPacket(input: { readonly spec: SpecArtifact; readonl
 		if (entry === undefined) {
 			throw new Error(
 				`buildHandoffPacket: task ${task.id} cites requirement ${id}, but the SPEC's Requirements section ` +
-					`(§3) carries no "${id}:" entry -- a packet built on a missing requirement is a silently ` +
+					`(§3) carries no entry opening with ${id} -- a packet built on a missing requirement is a silently ` +
 					"under-specified child",
 			);
 		}
@@ -104,7 +87,7 @@ export function buildHandoffPacket(input: { readonly spec: SpecArtifact; readonl
 	return {
 		taskId: task.id,
 		requirementExcerpts,
-		verifiedFacts: selectReferencedFacts(spec.verifiedFacts, requirementExcerpts),
+		verifiedFacts: selectReferencedFacts(spec.verifiedFacts, requirementExcerpts, task.requirementIds),
 		filePaths: [task.path],
 		verificationCommand: task.verificationCommand,
 	};

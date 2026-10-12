@@ -40,8 +40,8 @@ The spec-schema.ts and scorecard.ts modules under .pi/extensions/grill/ are AUTH
 | § | section | required content | consumer |
 | --- | --- | --- | --- |
 | 1 | Goal | one falsifiable sentence | every downstream reader (plan, execute, review) |
-| 2 | Verified Codebase Facts | `claim \| evidence \| how verified` table, every row evidenced | this skill's own evidence gate (FLOW-03) |
-| 3 | Requirements | R1..Rn: statement, current state, target state, acceptance criterion | /plan, /review |
+| 2 | Verified Codebase Facts | `claim \| evidence \| how verified` table, every row evidenced; prefix a claim with `[R#]` to hand it to that requirement's executor | this skill's own evidence gate (FLOW-03) |
+| 3 | Requirements | one entry per id, each opening its own line (`R1: ...`): statement, current state, target state, acceptance criterion | /plan, /review |
 | 4 | Error and Edge Behaviour | >= 3 entries, each `IF <condition> THEN THE SYSTEM SHALL <response>` | /plan, /review |
 | 5 | Scope Pin | In scope / Out of scope (non-empty, each with a reason) / Expected files | /review's drift detector |
 | 6 | Clarifications Log | `- Q: <question> -> A: <answer>` | a future human or agent re-reading this SPEC |

@@ -24,7 +24,7 @@ import {
 import { estimateTokensFromChars } from "../../.pi/extensions/diagnostics/budget.ts";
 import { renderSpecMarkdown, validateSpec, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import { parseTaskLine, renderPlanMarkdown, validatePlan, type ParsedTask } from "../../.pi/extensions/plan-ceremony/plan-schema.ts";
-import { extractSpecRequirementIds } from "../../.pi/extensions/plan-ceremony/requirement-ids.ts";
+import { extractSpecRequirementIds, parseRequirementEntries, requirementIdsWithoutEntry } from "../../.pi/extensions/plan-ceremony/requirement-ids.ts";
 
 // ---------------------------------------------------------------------------
 // probeSubagentAvailability -- the three-state table, mirroring gates.ts's
@@ -185,6 +185,27 @@ describe("FLOW-09 -- buildHandoffPacket: presence AND absence, never 'all of the
 		expect(() => buildHandoffPacket({ spec: FIVE_REQUIREMENT_SPEC, task: taskCitingUndeclaredId })).toThrow(
 			/R9/,
 		);
+	});
+
+	it("reads the same entries validatePlan's ids come from: bold, dotted and long final entries all resolve", () => {
+		const longTail = "x".repeat(3000);
+		const spec = { ...FIVE_REQUIREMENT_SPEC, requirementsBody: `- **R1** - rotate tokens.\nR2. expire them.\nR4: ${longTail}` };
+		const packet = buildHandoffPacket({ spec, task: TASK_CITING_R2_R4 });
+		expect(packet.requirementExcerpts[0]).toBe("R2. expire them.");
+		expect(packet.requirementExcerpts[1]).toContain(longTail);
+		expect(parseRequirementEntries(spec.requirementsBody).map((e) => e.id)).toEqual(["R1", "R2", "R4"]);
+	});
+
+	it("a §3 that mentions an id with no entry of its own is reported", () => {
+		expect(requirementIdsWithoutEntry("R1: rotate tokens, unlike R7.")).toEqual(["R7"]);
+	});
+
+	it("a §2 fact tagged [R#] for one of the task's ids travels with the packet", () => {
+		const spec = {
+			...FIVE_REQUIREMENT_SPEC,
+			verifiedFacts: [...FIVE_REQUIREMENT_SPEC.verifiedFacts, { claim: "[R4] tokens live in redis", evidence: "src/a.ts:1", howVerified: "read" }],
+		};
+		expect(buildHandoffPacket({ spec, task: TASK_CITING_R2_R4 }).verifiedFacts.map((f) => f.claim)).toContain("[R4] tokens live in redis");
 	});
 });
 
