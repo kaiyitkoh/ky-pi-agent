@@ -1506,3 +1506,26 @@ Dated install log, not an outstanding check (no RB id).
 - Pi 1.x defaults to a fullscreen TUI; `tuiMode: "regular"` restores scrollback if that is unwanted (user preference).
 - `RB-07-01` and `RB-07-02` remain OUTSTANDING, now against the re-pinned specs in `.pi/settings.json`.
 - Supply-chain posture after Pi dropped its shrinkwrap: see CONTRIBUTING.md.
+
+## Phase 08.2 - Comment Discipline
+
+Phase 08.2 delivers the code-comment rules to every project Pi runs in. The offline half is proven by a faux session; the live half needs a real provider credential and the installed package.
+
+| ID | Check | Status |
+| --- | --- | --- |
+| RB-08-04 | CMT-02 — the harness injects the comment rules into a real Pi session in another project | OUTSTANDING |
+
+### RB-08-04 — CMT-02: comment rules reach a real session in another project
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs a live provider credential and the package installed into Pi, neither of which this machine has for a throwaway project.
+
+**Offline proxy:** `tests/unit/comment-rules-delivery.test.ts` drives a faux session and asserts the rules appear once in the outgoing system prompt.
+
+Steps:
+
+1. `cd` into a project without its own `## Code comments` heading.
+2. Run the exact command `pi -p "Quote the first bullet under the Code comments heading in your system prompt, verbatim."`
+3. Expected output begins `Default to no comment`.
+4. Record the date and result.

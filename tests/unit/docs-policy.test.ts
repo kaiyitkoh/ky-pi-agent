@@ -163,6 +163,7 @@ const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02", "RB-07-03"] as const;
  * governed entries rather than dangling ones.
  */
 const PHASE_EIGHT_IDS = ["RB-08-01", "RB-08-02", "RB-08-03"] as const;
+const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
@@ -173,6 +174,7 @@ const ALL_IDS = [
 	...PHASE_FIVE_IDS,
 	...PHASE_SEVEN_IDS,
 	...PHASE_EIGHT_IDS,
+	...PHASE_EIGHT_TWO_IDS,
 ] as const;
 
 /**
@@ -509,6 +511,7 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		`cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 3`,
 	],
 	"RB-08-02": ["git checkout -- <file>"],
+	"RB-08-04": ['pi -p "Quote the first bullet under the Code comments heading in your system prompt, verbatim."'],
 	"RB-08-03": [
 		'echo "RB-08-03 live catch rate: <caught>/<total>, $(date -u +%FT%TZ)" >> RB-08-03-RESULT.md',
 	],

@@ -753,3 +753,12 @@ Notes only. Nothing here was built in Phase 08.1. Source: pi-coding-agent / pi-a
 - Tool-renderer registry.
 - `agent_settled` now carries `aborted`; upstream git-checkpoint moved from `agent_end` to it.
 - Third-party loaders (`subagents_enable`, `web_enable`) and the `promptSnippet` cost they add per turn; measure before adopting.
+
+## Harness: comment rules in every project
+
+- Mechanism: the harness `before_agent_start` hook sets `systemPromptOptions.sections.code_comments` (Pi 1.1.0 `dist/core/extensions/runner.js:1121-1170`, `dist/core/system-prompt.js:110-114`).
+- Why not a bootstrap-written `~/.pi/agent/AGENTS.md`: it needs a manual step, risks clobbering user content, and is absent for `pi install`-only users.
+- Skip rule: a loaded context file containing `## Code comments` wins, so a project's own rules override.
+- The text is a constant, so the cache prefix stays stable.
+- Source of truth: `.pi/extensions/harness/comment-rules.ts`, parity-tested against `AGENTS.md`.
+- Known limit: pi-subagents child sessions may not load user-scope package extensions (unverified).

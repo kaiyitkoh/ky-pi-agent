@@ -155,6 +155,14 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [ ] **UI-04**: A live widget shows running subagents and their status
 - [ ] **UI-05**: No UI element introduces a system-prompt cache invalidation, verified by watching `cacheRead` stay non-trivial
 
+### Comment Discipline
+
+- [ ] **CMT-01**: Root `AGENTS.md` carries the code-comment rules (15 lines or fewer) plus cross-agent conventions, and `CLAUDE.md` begins with `@AGENTS.md`
+- [ ] **CMT-02**: The harness delivers the same rules to every project Pi runs in, with no manual step and a stable cache prefix
+- [ ] **CMT-03**: A vitest check fails on plan, requirement, review or phase IDs inside comments of tracked authored `.pi/extensions/**/*.ts` (vendored files exempt)
+- [ ] **CMT-04**: The same check reports per-file and total comment ratio
+- [ ] **CMT-05**: A cleanup pass brings the authored comment ratio to 35% or less with no behaviour change, keeping safety invariants and Pi-source facts
+
 ---
 
 ## v2 Requirements
@@ -335,9 +343,15 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | UI-03 | Phase 11 | Pending |
 | UI-04 | Phase 11 | Pending |
 | UI-05 | Phase 11 | Pending |
+| CMT-01 | Phase 08.2 | Pending |
+| CMT-02 | Phase 08.2 | Pending |
+| CMT-03 | Phase 08.2 | Pending |
+| CMT-04 | Phase 08.2 | Pending |
+| CMT-05 | Phase 08.2 | Pending |
 
 **Coverage:**
 - v1 requirements: **107 total** — corrected from 105. The earlier count predated the QUAL-01…09 Engineering Quality group. Counted by category: BOOT 10 · DIAG 8 · PROV 10 · SAFE 17 · ROUTE 11 · EXT 10 · GATE 10 · QUAL 9 · FLOW 11 · CTX 6 · UI 5.
+- CMT-01..05 were inserted 2026-10-13 for Phase 08.2 (Comment Discipline); the 107 figure above predates them.
 - Mapped to phases: **107**
 - Unmapped: **0** ✓
 - Duplicates: **0** ✓ — every requirement maps to exactly one phase
