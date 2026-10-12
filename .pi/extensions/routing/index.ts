@@ -322,9 +322,9 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			// Swallowed deliberately.
 		}
 	});
-	// Before each idle prompt, drop out-of-profile tools the transcript has not declared, so no removal is recorded.
-	// `input` precedes before_agent_start, so no handler builds a prompt section for a tool dropped here.
+	// Drop out-of-profile tools not yet declared (no removal recorded); `input` precedes before_agent_start, so no prompt section sees them.
 	pi.on("input", (_event, ctx) => {
+		// NEVER THROWS: a failed narrowing must not block the prompt; the wider loadout is the safe fallback.
 		try {
 			const active = pi.getActiveTools();
 			const next = ctx.isIdle() ? applyProfile(active, profile()) : undefined;
