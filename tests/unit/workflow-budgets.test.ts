@@ -306,6 +306,16 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"lines 2026-10-13 with countRawLines, rounded up to the next ten",
 	},
 	{
+		file: ".pi/extensions/review/index.ts",
+		budget: 130,
+		why: "plan 09-15 (FLOW-08) -- the /review command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, the six-part reviewer contract, gate depth via gateDepthFor, refute-or-promote before the stop decision, REVIEW.md as the single write, and the MR step through openMr. Measured 123 raw lines 2026-10-13 with countRawLines, rounded up to the next ten",
+	},
+	{
+		file: ".pi/skills/review/SKILL.md",
+		budget: 50,
+		why: "plan 09-15 (FLOW-08) -- the six-input contract, the soft-failure table, REVIEW.md sections with consumers, severity and classification rules, and the MR rule, as tables. Measured 50 raw lines 2026-10-13 with countRawLines, already a multiple of ten",
+	},
+	{
 		file: ".pi/skills/plan-ceremony/SKILL.md",
 		budget: 50,
 		why: "plan 09-10 (FLOW-06) -- the task-line grammar, the both-directions coverage rule, the three " +
@@ -677,8 +687,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/review",
-		budget: 50,
-		why: "plan 09-14 (FLOW-05) -- scope-drift.ts: the pure compareScope and the git-diff-backed changedFilesSince that make the scope pin machine-checkable. Measured 47 raw lines across 1 file 2026-10-13, rounded up to the next ten",
+		budget: 290,
+		why: "plan 09-14 (FLOW-05) -- scope-drift.ts: the pure compareScope and the git-diff-backed changedFilesSince that make the scope pin machine-checkable. Measured 47 raw lines across 1 file 2026-10-13, rounded up to the next ten. RAISED 50 -> 290 by plan 09-15 (FLOW-08): index.ts (the /review command) and mr.ts (MR body from evidence, classify-then-exec openMr). Measured 47 + 123 + 117 = 287 raw lines across 3 files 2026-10-13, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
@@ -1586,6 +1596,15 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		why: "FEATURES.md Part 2 ceiling for /execute -- FROZEN, may not move to absorb growth (D-13). No skill body; " +
 			"measured 142 raw lines (index.ts) 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
 			"the .pi/extensions/execute DIRECTORY_BUDGETS ratchet",
+	},
+	{
+		name: "review",
+		commandFile: ".pi/extensions/review/index.ts",
+		bodies: [".pi/skills/review/SKILL.md"],
+		budget: 250,
+		why: "FEATURES.md Part 2 line 206's ceiling -- FROZEN, may not move to absorb growth (D-13). Measured 123 raw lines " +
+			"(index.ts) + 50 raw lines (SKILL.md) = 173 raw lines 2026-10-13 with countRawLines, inside 250. mr.ts and " +
+			"scope-drift.ts are bound by the .pi/extensions/review DIRECTORY_BUDGETS ratchet",
 	},
 ];
 
