@@ -78,18 +78,52 @@ extracts it.
 
 ## Installed packages
 
-Five packages, exact-pinned as `npm:<name>@<version>`. Every version below
-was resolved live in this session and is **UNCHANGED** against `07-CONTEXT.md`'s
-2026-08-15 re-verified table — no drift in the hours between context
-generation and this plan's execution.
+Five packages, exact-pinned as `npm:<name>@<version>`. Phase 08.1 plan 04
+re-pinned `pi-subagents` (0.49.0 to 0.76.1), `@narumitw/pi-lsp` (0.49.4 to
+0.49.9) and `pi-web-access` (0.22.0 to 0.38.0) for Pi 1.x; `pi-session-finder`
+stays at 0.5.6 and `pi-background-tasks` stays at 2.4.2 until plan 08.1-05
+replaces it with a vendored copy. For the three re-pinned rows the
+`pushed_at` column is replaced by the npm publish time (`npm view <pkg> time`),
+and each was chosen at least 3 days after publication (newer `pi-subagents`
+0.77.0 and `pi-web-access` 0.39.0 were skipped on age).
 
 | Package | Version | License field | LICENSE in tarball | Repository | `pushed_at` | Archived | Lifecycle scripts | Capability |
 |---|---|---|---|---|---|---|---|---|
-| `pi-subagents` | `0.49.0` | MIT | yes | `nicobailon/pi-subagents` | `2026-08-14T19:08:02Z` | false | none (postinstall/preinstall/install all empty) | Subagent isolation, background execution (`async`), mid-run steering, `contact_supervisor` escalation, per-agent model/prompt/tools/thinking |
+| `pi-subagents` | `0.76.1` | MIT | yes | `nicobailon/pi-subagents` | published `2026-10-06T01:33:43Z` | false | none (npm view scripts empty) | Subagent isolation, background execution (`async`), mid-run steering, `contact_supervisor` escalation, per-agent model/prompt/tools/thinking |
 | `pi-background-tasks` | `2.4.2` | ISC | yes | `ismailsaleekh/pi-background-tasks` | `2026-08-13T23:58:10Z` | false | none | `bg_run`/`bg_status`/`bg_logs`/`bg_kill` background bash (plus 7 delegate/fusion tools accepted as unavoidable overhead — see below) |
-| `@narumitw/pi-lsp` | `0.49.4` | MIT | yes | `narumiruna/pi-extensions` | `2026-08-14T16:17:22Z` | false | none | 2-tool LSP diagnostics bridge (`lsp_diagnostics`, `lsp_fix`) |
-| `pi-web-access` | `0.22.0` | MIT | yes | `nicobailon/pi-web-access` | `2026-08-12T19:44:51Z` | false | none | Web/documentation lookup (Exa, DuckDuckGo, Jina Reader — genuinely keyless) |
+| `@narumitw/pi-lsp` | `0.49.9` | MIT | yes | `narumiruna/pi-extensions` | published `2026-10-02T02:26:10Z` | false | none (`prepack` build only; not run at install) | 2-tool LSP diagnostics bridge (`lsp_diagnostics`, `lsp_fix`) |
+| `pi-web-access` | `0.38.0` | MIT | yes | `nicobailon/pi-web-access` | published `2026-10-09T18:25:13Z` | false | none (`prepublishOnly`/`postpublish` only; not run at install) | Web/documentation lookup (Exa, DuckDuckGo, Jina Reader — genuinely keyless) |
 | `pi-session-finder` | `0.5.6` | MIT | yes | `pungggi/pi-session-finder` | `2026-08-02T22:35:36Z` | false | none | Session search (`/find`, `/find-back` commands; zero model-facing tools) |
+
+**Review evidence for the 08.1 re-pin (offline, tarballs unpacked and never
+executed or installed).**
+
+| Package | Tarball sha256 | Files | Source shape | Peers admit Pi 1.1.0 | `@earendil-works/*` named imports vs 1.1.0 exports |
+|---|---|---|---|---|---|
+| `pi-subagents@0.76.1` | `369266f8204aa08e31a995817be007062cdc792113e26d24f9f04021753dc080` | 1291 | compiled JS only (311 `.js`, 0 `.ts`) — see Compiled-JS exception | yes (`pi-ai >=0.86.1`, others `*`) | 59 resolved |
+| `pi-web-access@0.38.0` | `05eb99b2f5a8f0088dfe3ce3da444004b7f11cb3867d632718ff9f9ccbb656bd` | 98 | `.ts` source plus a 1.06 MB `dist/` bundle that is the declared extension entry | yes (all `*`) | 27 resolved |
+| `@narumitw/pi-lsp@0.49.9` | `8932b668788db923f9cdf43ea4ec5763112945944910597a3f31318cd7879edc` | 17 | `.ts` (`dist/index.ts` is the built copy of `src/`) | yes (`*`) | 8 resolved; tsc against 1.1.0 types: 0 errors |
+| `pi-session-finder@0.5.6` (unchanged) | `7a414009d091b2b6e065ef69f1f4a1eb18ade4d161d2ac1483ca58c0d4876722` | 10 | `.ts` | yes (`>=0.74.0`, `>=0.83.0`) | 13 resolved; tsc: 0 errors |
+
+For `pi-web-access` the tsc pass reported 29 errors: 27 are unresolved
+third-party modules (the package's own dependencies are not installed in the
+scratch directory), one is `openai-search.ts:391` (`ResolvedRequestAuth` has no
+`error` property, under `strict:false`) and one is a `gemini-search.ts:158`
+`unknown`-to-`object` argument. Neither of the last two was investigated
+further. Runtime dependencies: `pi-subagents` exact (`jiti 2.7.0`, `yaml 2.8.3`,
+`acorn 8.18.0`, `undici 8.10.2`, `@js-temporal/polyfill 0.5.1`);
+`pi-web-access` mixed (see Known pin residuals); `pi-lsp` and
+`pi-session-finder` none. A first checker pass reported 4 unresolved names
+(`Agent`, `ThinkingLevel`, `ModelThinkingLevel`); all are `export *`
+re-exports the script did not follow and were confirmed present by hand in
+`pi-agent-core/dist/agent.d.ts` and `pi-ai/dist/types.d.ts`.
+
+**Load status (Phase 08.1).** The 08.1 re-pin was verified offline only:
+published-file review plus an `@earendil-works/*` import-resolution check
+against the installed Pi 1.1.0 exports. That check is a **proxy**, not a load.
+No composed package has been installed or run under Pi 1.1.0. Real-load
+confirmation remains under `RB-07-01` and `RB-07-02` in
+[`docs/RUNBOOK.md`](RUNBOOK.md), which stay **OUTSTANDING**.
 
 Model-facing tool counts and names for each of these are **not restated
 here**. `tests/unit/tool-count-baseline.test.ts` is the authoritative
@@ -169,7 +203,7 @@ Recorded so Phase 8 does not silently re-open a settled decision.
 
 `isPinnedPackageSpec` (`tests/unit/pinning.test.ts`) governs only the
 top-level `packages[]` spec string this repo writes into
-`.pi/settings.json` — `npm:pi-subagents@0.49.0`, for example. It has no
+`.pi/settings.json` — `npm:pi-subagents@0.76.1`, for example. It has no
 visibility into what that package's own `dependencies`/`peerDependencies`
 resolve to at `pi install` time; those are ordinary npm semver, outside any
 lockfile this repo controls. Re-derived from Task 2's live `npm view <pkg>
@@ -178,22 +212,26 @@ different candidate set):
 
 | Package | Dependency | Range | Residual |
 |---|---|---|---|
+| `pi-web-access` | `@modelcontextprotocol/sdk` | `1.32.1` | exact (new in 0.38.0) |
+| `pi-web-access` | `defuddle` | `0.19.3` | exact (new in 0.38.0) |
 | `pi-web-access` | `@mozilla/readability` | `^0.6.0` | caret |
 | `pi-web-access` | `linkedom` | `^0.16.0` | caret |
 | `pi-web-access` | `p-limit` | `^6.1.0` | caret |
 | `pi-web-access` | `promise.try` | `^2.0.1` | caret |
 | `pi-web-access` | `turndown` | `^7.2.0` | caret |
-| `pi-web-access` | `typebox` | `^1.1.38` | caret — a **third** uncontrolled `typebox` instance (Pi bundles `1.3.7`; `pi-subagents` pins its own `1.1.38` exact) |
 | `pi-web-access` | `unpdf` | `^1.6.2` | caret |
-| `pi-web-access` | `undici` | `^8.9.0` | caret |
-| `pi-subagents` | `typebox` | `1.1.38` | exact (no caret), but a **second module instance** alongside Pi's bundled `1.3.7` — Pi loads packages with separate module roots |
+| `pi-web-access` | `undici` | `^8.11.2` | caret |
+| `pi-subagents` | `typebox` | — | no longer a dependency at 0.76.1 (peer `*` only), so the earlier second-instance residual is removed |
+| `pi-subagents` | `undici`, `acorn`, `@js-temporal/polyfill` | `8.10.2`, `8.18.0`, `0.5.1` | exact (new since 0.49.0) |
 | `pi-subagents` | `jiti` | `2.7.0` | exact, second module instance |
 | `pi-subagents` | `yaml` | `2.8.3` | exact, second module instance |
 | `pi-background-tasks` | `turndown` | `7.2.4` | exact |
+| Pi 1.1.0 itself | `@earendil-works/{chord,pi-ai,pi-agent-core,pi-codemode,pi-mcp,pi-tui}` | `^1.1.0` | caret first-party family (the host's own dependencies, not a composed package); mitigated by the lockfile, which pins the resolved set |
 | `@narumitw/pi-lsp` | — | — | peers only, no runtime dependency |
 | `pi-session-finder` | — | — | peers only, no runtime dependency |
 
-The runtime consequence of the second/third `typebox` instance is marked
+The runtime consequence of module-instance duplication (`jiti`, `yaml` and
+`undici` now appear in several packages at different versions) is marked
 **UNVERIFIED** per decision 5 — an observation to carry forward, not a claim
 this plan makes either way. `pi-web-access` is the only one of the five
 installed packages carrying genuine transitive caret ranges; `pi-subagents`'
@@ -204,7 +242,7 @@ single dependency is likewise exact.
 
 ## Worktree isolation — accepted residual
 
-`pi-subagents@0.49.0`'s `linkNodeModulesIfPresent`
+`pi-subagents` 0.49.0's (Phase 7 review; historical) `linkNodeModulesIfPresent`
 (`src/runs/shared/worktree.ts:243-254`) symlinks — does not copy —
 `node_modules` into a worktree using the unqualified two-argument
 `fs.symlinkSync(target, link)` form, which requires
@@ -214,6 +252,15 @@ verified directly on this machine). An "isolated" subagent worktree therefore
 either fails to build `node_modules` at all, or — if a workaround is
 misapplied — gains read/write access to the parent repo's real dependency
 tree rather than a genuinely isolated one.
+
+**Re-read at 0.76.1 (08.1-04).** The premise above has changed upstream:
+`linkNodeModulesIfPresent` (`src/runs/shared/worktree.js:600`) now calls
+`fs.symlinkSync(nodeModulesPath, nodeModulesLinkPath, process.platform ===
+"win32" ? "junction" : "dir")` (`worktree.js:628`), the same junction form the
+setup hook uses, so the `EPERM` failure mode is no longer expected. The shared
+read/write exposure of the parent's real dependency tree remains. `worktreeSetupHook`
+is still a real config key (`src/runs/foreground/subagent-executor.js:1488`,
+`src/runs/background/subagent-runner.js:3768`). Not exercised on this machine.
 
 **Decision taken: accepted for this phase.** The setup hook this phase ships
 (`worktreeSetupHook`, a real exposed config key at
@@ -283,7 +330,7 @@ narrowed three ways, all of them covered by
 **What is still true and not solved here:** a secret-bearing file leaves its
 repository's directory tree, in every repository on this machine, whenever a
 worktree subagent spawns. The alternative — opting in per repository — needs
-a project-scope config surface `pi-subagents@0.49.0` does not expose. Named
+a project-scope config surface `pi-subagents` 0.49.0 (Phase 7 review; not re-derived at 0.76.1) did not expose. Named
 as a **Phase 8 follow-up** alongside `T-07-07`, not silently carried.
 
 ### Third accepted residual: checkpoint capture writes untracked file content into `.git/objects` (WR-19)
@@ -593,10 +640,10 @@ record (2026-08-14T19:09–19:14Z) for drift.
 
 | Package | Pinned version | Resolved on registry? | License field | LICENSE file in tarball | Source shape | Repository | `pushed_at` (this session) | Archived | Do-not-install list? | Verdict |
 |---|---|---|---|---|---|---|---|---|---|---|
-| `pi-subagents` | `0.49.0` | Yes — `npm view pi-subagents version` (no arg) resolves to `0.49.0`, matching the pin exactly | MIT | Yes (`package/LICENSE`) | `.ts` source (192 `.ts` files under `src/`); zero `dist/*.js` | `nicobailon/pi-subagents`, 3,140★ | `2026-08-14T21:44:39Z` | false | No | **Would-install** (identity confirmed; blocked only by the gate outcome above, not by any legitimacy finding) |
+| `pi-subagents` | `0.49.0` (historical Phase 7 review; superseded by 0.76.1, see Installed packages) | Yes — `npm view pi-subagents version` (no arg) resolved to `0.49.0`, matching the pin exactly | MIT | Yes (`package/LICENSE`) | `.ts` source (192 `.ts` files under `src/`); zero `dist/*.js` | `nicobailon/pi-subagents`, 3,140★ | `2026-08-14T21:44:39Z` | false | No | **Would-install** (identity confirmed; blocked only by the gate outcome above, not by any legitimacy finding) |
 | `pi-background-tasks` | `2.4.2` | Yes — latest resolves to `2.4.2` | ISC | Yes | `.ts` source (49 `.ts` files); zero `dist/*.js` | `ismailsaleekh/pi-background-tasks`, 9★ | `2026-08-13T23:58:10Z` | false | No | **Would-install** |
-| `@narumitw/pi-lsp` | `0.49.4` | Yes — latest resolves to `0.49.4` | MIT | Yes | `.ts` source (10 `.ts` files); zero `dist/*.js` | `narumiruna/pi-extensions`, 328★ | `2026-08-14T16:17:22Z` | false | No | **Would-install** |
-| `pi-web-access` | `0.22.0` | Yes — latest resolves to `0.22.0` | MIT | Yes | `.ts` source (56 `.ts` files); zero `dist/*.js` | `nicobailon/pi-web-access`, 1,095★ | `2026-08-14T21:42:50Z` | false | No | **Would-install** |
+| `@narumitw/pi-lsp` | `0.49.4` (historical; superseded by 0.49.9) | Yes — latest resolved to `0.49.4` | MIT | Yes | `.ts` source (10 `.ts` files); zero `dist/*.js` | `narumiruna/pi-extensions`, 328★ | `2026-08-14T16:17:22Z` | false | No | **Would-install** |
+| `pi-web-access` | `0.22.0` (historical; superseded by 0.38.0) | Yes — latest resolved to `0.22.0` | MIT | Yes | `.ts` source (56 `.ts` files); zero `dist/*.js` | `nicobailon/pi-web-access`, 1,095★ | `2026-08-14T21:42:50Z` | false | No | **Would-install** |
 | `pi-session-finder` | `0.5.6` | Yes — latest resolves to `0.5.6` | MIT | Yes | `.ts` source (5 `.ts` files); zero `dist/*.js` | `pungggi/pi-session-finder`, 3★ | `2026-08-02T22:35:36Z` | false | No | **Would-install** |
 
 **Drift check against `07-01-SUMMARY.md`:** all five versions are

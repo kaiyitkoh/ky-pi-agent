@@ -1056,7 +1056,7 @@ in `.pi/settings.json`.
    current per `RB-07-02`'s own reconciliation step — then confirm the
    working tree is clean: `git status --porcelain`. Worktree-isolated
    subagents call `resolveRepoState()` (`pi-subagents@0.76.1
-   src/runs/shared/worktree.ts:137-142`), which runs the equivalent check
+   src/runs/shared/worktree.js:196-205`), which runs the equivalent check
    scoped to exclude `.pi/subagents` and throws `"worktree isolation
    requires a clean git working tree. Commit or stash changes first."` on
    any non-empty result — an operational precondition, not a suggestion.

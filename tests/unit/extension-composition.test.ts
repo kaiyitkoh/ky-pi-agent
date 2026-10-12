@@ -113,13 +113,13 @@ const CAPABILITY_SOURCES: readonly CapabilitySource[] = [
 		capability: "LSP diagnostics",
 		kind: "npm",
 		evidence: "@narumitw/pi-lsp",
-		why: "EXT-05 -- no bundled Pi example covers LSP diagnostics; packages[] pins @narumitw/pi-lsp@0.49.4 (lsp_diagnostics, lsp_fix)",
+		why: "EXT-05 -- no bundled Pi example covers LSP diagnostics; packages[] pins @narumitw/pi-lsp@0.49.9 (lsp_diagnostics, lsp_fix)",
 	},
 	{
 		capability: "web lookup",
 		kind: "npm",
 		evidence: "pi-web-access",
-		why: "EXT-05 -- Pi's own docs state it intentionally ships no web tool at all; packages[] pins pi-web-access@0.22.0 (genuinely keyless: Exa, DuckDuckGo, Jina Reader, local unpdf)",
+		why: "EXT-05 -- Pi's own docs state it intentionally ships no web tool at all; packages[] pins pi-web-access@0.38.0 (genuinely keyless: Exa, DuckDuckGo, Jina Reader, local unpdf)",
 	},
 	{
 		capability: "session search",

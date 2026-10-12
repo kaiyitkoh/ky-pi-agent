@@ -51,47 +51,43 @@
  *     `tests/unit/subagent-capabilities.test.ts` (07-12) already states for
  *     its own third-party evidence table.
  *
- * CHILD-PROCESS-ONLY EXCLUSIONS, NAMED RATHER THAN SILENTLY DROPPED.
- * `pi-subagents@0.49.0` registers two further tool NAMES that never appear in
- * this baseline because neither is ever active in the PARENT (main) session:
+ * CHILD-PROCESS-ONLY EXCLUSIONS, NAMED RATHER THAN SILENTLY DROPPED
+ * (re-derived in 08.1-04 from `pi-subagents@0.76.1`'s compiled JS).
+ * The package registers further tool NAMES that never appear in this
+ * baseline because they are not registered into the PARENT (main) session:
  *
  *   - `contact_supervisor` is registered only by
- *     `registerNativeSupervisorClient()`, gated by
- *     `if (!readChildMetadata()) return;`
- *     [VERIFIED: src/intercom/native-supervisor-channel.ts:299,303] -- this
- *     function runs inside a spawned CHILD subagent's own process, never the
- *     parent. The PARENT session instead registers `subagent_supervisor`
- *     (constant `NATIVE_SUPERVISOR_TOOL_NAME`
- *     [VERIFIED: native-supervisor-channel.ts:21,650]) and `intercom`
- *     [VERIFIED: native-supervisor-channel.ts:651], both via
- *     `registerParentTools()`, called unconditionally from
- *     `supervisorChannel.start()` inside `pi.on("session_start", ...)`
- *     [VERIFIED: src/extension/index.ts:827-835]. This is a correction to
- *     `07-12-SUMMARY.md`'s own finding 9, which named the parent-session pair
- *     as "contact_supervisor and intercom" -- re-reading the pinned source
- *     directly in this session shows the parent tool is `subagent_supervisor`
- *     (`buildParentIntercomTool(pending, state, NATIVE_SUPERVISOR_TOOL_NAME)`
- *     at native-supervisor-channel.ts:650), not `contact_supervisor`, which
- *     the child-only guard above proves cannot appear in the parent session
- *     at all. This file's own `pi-subagents` row uses the corrected name; the
- *     plan's own `<baseline_starting_point>` table already had it right.
- *   - `structured_output` is registered only when BOTH
- *     `process.env[STRUCTURED_OUTPUT_CAPTURE_ENV]` and
- *     `process.env[STRUCTURED_OUTPUT_SCHEMA_ENV]` are set
- *     [VERIFIED: src/runs/shared/subagent-prompt-runtime.ts:609-622] --
- *     env vars this package sets only when spawning a child subagent process
- *     for a step that declared an `outputSchema`. It is conditional AND
- *     child-process-scoped; it never appears in the parent session's active
- *     tool list either.
+ *     `registerNativeSupervisorClient()`, which returns early unless child
+ *     metadata is present (`src/intercom/native-supervisor-channel.js:179-183`);
+ *     it runs inside a spawned CHILD subagent's own process. The PARENT
+ *     registers `subagent_supervisor` (`NATIVE_SUPERVISOR_TOOL_NAME`,
+ *     native-supervisor-channel.js:13) via `registerParentTools()` (:648-656),
+ *     started from the `session_start` handler (src/extension/index.js:1056,
+ *     :1084). `intercom` was registered by 0.49.0 but no longer is by this
+ *     package (it appears only as a tool-name reference at :597).
+ *   - `structured_output`, the watchdog diff tool and similar child-runtime
+ *     tools are registered from `src/runs/shared/subagent-prompt-runtime.js:439,488`
+ *     inside spawned children only.
  *
- * `pi-web-access@0.22.0`'s four tools are each gated by their own
- * `isToolEnabled()` check [VERIFIED: index.ts:244-248, call sites at
- * :1635,:2207,:2301,:2619] -- CONDITIONAL in general, but this repository's
+ * DYNAMIC TOOL ACTIVATION IS NEW SINCE 0.49.0. `pi-subagents@0.76.1`
+ * registers a loader tool `subagents_enable`
+ * (`src/extension/tool-activation.js:78,114`, mode `auto` by default) and
+ * `pi-web-access@0.38.0` registers `web_enable` (`tool-activation.ts:11,73`,
+ * called from `index.ts:2259` unless `toolActivation` is `eager`). Both
+ * loaders carry a `promptSnippet`, so they are counted here as tools with
+ * prompt metadata; the baseline counts REGISTERED tools, not the subset a
+ * given session has ACTIVE.
+ *
+ * `pi-web-access@0.38.0`'s four tools are each gated by their own
+ * `isToolEnabled()` check [VERIFIED: index.ts:738-741, registration sites at
+ * :1405,:1950,:1972,:2160] -- CONDITIONAL in general, but this repository's
  * `.pi/settings.json` carries no `pi-web-access`-specific configuration at
  * all, and `isToolEnabled()`'s own default (no override present) resolves to
  * `true` for all four keys. Recorded as "conditional, default-enabled with
  * this repo's actual config" rather than flatly "always active" or flatly
- * "conditional" -- neither alone is the honest answer.
+ * "conditional" -- neither alone is the honest answer. The extension entry
+ * point is the compiled `dist/` bundle built from this `.ts` (see
+ * docs/EXTENSIONS.md, Compiled-JS exception).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -129,14 +125,16 @@ const TOOL_COUNT_BASELINE: readonly ToolCountRow[] = [
 	{
 		source: "pi-subagents",
 		kind: "npm",
-		toolNames: ["subagent", "subagent_wait", "subagent_supervisor", "intercom"],
-		promptMetadata: false,
-		why: "EXT-01..EXT-04 -- all four registered unconditionally (src/extension/index.ts:578 `subagent`, :621 registerTool, " +
-			":623 registerWaitTool -> `subagent_wait` at src/runs/background/wait-tool.ts:9, :827-835 " +
-			"session_start -> supervisorChannel.start() -> registerParentTools() -> `subagent_supervisor` " +
-			"(NATIVE_SUPERVISOR_TOOL_NAME, native-supervisor-channel.ts:21,650) and `intercom` (:651)); " +
-			"`contact_supervisor` and `structured_output` are real tool names in this package but never appear " +
-			"in the parent session -- see this file's own docstring for both guards, cited with file:line",
+		toolNames: ["subagent", "bg_wait", "subagents_enable", "subagent_supervisor"],
+		promptMetadata: true,
+		why: "EXT-01..EXT-04 -- re-derived at 0.76.1 compiled JS (08.1-04): `subagent` registered at " +
+			"src/extension/index.js:667,699; registerWaitTool -> `bg_wait` (src/extension/index.js:712, " +
+			"src/runs/background/wait-tool.js:28,34; 0.49.0 named it `subagent_wait`); loader `subagents_enable` " +
+			"(src/extension/tool-activation.js:78,114, carries promptSnippet at :82); session_start -> " +
+			"supervisorChannel.start() (index.js:1056,1084) -> registerParentTools() -> `subagent_supervisor` " +
+			"(NATIVE_SUPERVISOR_TOOL_NAME, native-supervisor-channel.js:13,655). `intercom` is no longer " +
+			"registered. `contact_supervisor` and the child-runtime tools never appear in the parent session " +
+			"-- see this file's own docstring, cited with file:line",
 	},
 	{
 		source: "pi-background-tasks",
@@ -173,22 +171,21 @@ const TOOL_COUNT_BASELINE: readonly ToolCountRow[] = [
 		kind: "npm",
 		toolNames: ["lsp_diagnostics", "lsp_fix"],
 		promptMetadata: true,
-		why: "EXT-05 LSP diagnostics -- both registered unconditionally in lsp() (src/pi-lsp.ts:145-147, " +
-			"the manifest's ./src/index.ts entry re-exporting this default). Names confirmed at " +
-			"src/pi-lsp.ts:50,112. Both carry promptSnippet and promptGuidelines (src/pi-lsp.ts:53-54,115-116).",
+		why: "EXT-05 LSP diagnostics -- re-read at 0.49.9 (08.1-04): both registered unconditionally in lsp() " +
+			"(src/pi-lsp.ts:149,158; the manifest's ./dist/index.ts entry is the built copy of src/). Names confirmed " +
+			"at src/pi-lsp.ts:45,105. Both carry promptSnippet and promptGuidelines (src/pi-lsp.ts:48-49,108-109).",
 	},
 	{
 		source: "pi-web-access",
 		kind: "npm",
-		toolNames: ["web_search", "source_check", "fetch_content", "get_search_content"],
+		toolNames: ["web_search", "source_check", "fetch_content", "get_search_content", "web_enable"],
 		promptMetadata: true,
-		why: "EXT-05 web lookup -- CONDITIONAL in general (each gated by its own isToolEnabled() check, " +
-			"index.ts:244-248, call sites at :1635,:2207,:2301,:2619), but this repository's " +
-			".pi/settings.json carries no pi-web-access-specific config at all, and isToolEnabled()'s own " +
-			"default (no override) resolves true for all four keys -- so if this package were ever " +
-			"installed with this repo's current settings, all four would register. Default names " +
-			"web_search/source_check/fetch_content/get_search_content (index.ts:225-228). All four carry " +
-			"promptSnippet; none was found carrying promptGuidelines.",
+		why: "EXT-05 web lookup -- re-read at 0.38.0 (08.1-04). The four tools are CONDITIONAL in general (each " +
+			"gated by its own isToolEnabled() check, index.ts:738-741, registered at :1405,:1950,:1972,:2160) but " +
+			".pi/settings.json carries no pi-web-access-specific config, and the default resolves true for all four. " +
+			"The loader `web_enable` (tool-activation.ts:11,73) is registered by index.ts:2259 whenever " +
+			"toolActivation is not \"eager\" (default \"auto\", index.ts:724). All five carry promptSnippet " +
+			"(index.ts:1411,1954,1976,2164; tool-activation.ts:77); none was found carrying promptGuidelines.",
 	},
 	{
 		source: "pi-session-finder",
