@@ -162,7 +162,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"\"above 100 it has FAILED\" line. CORRECTED by plan 09-02 (09-RESEARCH.md Pitfall 2): that " +
 			"96 figure was already three lines stale by the time it was written -- re-measured with " +
 			"countRawLines and confirmed 99 raw lines 2026-08-15, still rounding up to the same 100. Re-measured 84 raw lines 2026-10-13 after " +
-			"the comment cleanup, rounded up to the next ten",
+			"the comment cleanup, rounded up to the next ten. Re-measured 86 raw lines after its settle handler began deferring to an armed /execute run, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
@@ -351,7 +351,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"of ten. RAISED 430 -> 480 by plan 08-12 (GATE-01's tree-comparison branch) -- see both per-file " +
 			"entries above for what grew. Re-measured 476 raw lines 2026-08-15 (index.ts 95 + evidence.ts 381), " +
 			"rounded up to the next ten. Code-review fix pass WR-06 (see the per-file entry above): re-measured " +
-			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381). Re-measured 326 raw lines 2026-10-13 (index.ts 84 + evidence.ts 242), rounded up to the next ten",
+			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381). Re-measured 326 raw lines 2026-10-13 (index.ts 84 + evidence.ts 242), rounded up to the next ten. Re-measured 328 raw lines after index.ts began deferring to an armed /execute run, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/routing",
@@ -1551,7 +1551,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		commandFile: ".pi/extensions/workflows/index.ts",
 		bodies: [],
 		budget: 100,
-		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 84 raw lines " +
+		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 86 raw lines " +
 			"2026-10-13 with countRawLines, inside 100 -- the independent greppable assertion on " +
 			"workflows/index.ts still holds",
 	},

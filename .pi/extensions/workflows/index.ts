@@ -9,6 +9,7 @@ import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
+import { executeRunContext } from "../execute/progress.ts";
 
 export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("quick", {
@@ -66,6 +67,7 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
+		if (executeRunContext() !== undefined) return; // /execute owns the settle of its own run, whatever the load order
 		let sha = ""; // currentSha fails closed by design (safety/git.ts#currentSha)
 		let tree = ""; // same fail-closed contract: an empty tree or sha never matches, so the gate rejects
 		try { sha = currentSha(armedCwd() ?? ctx.cwd); tree = currentTree(armedCwd() ?? ctx.cwd); } catch { /* gate rejects on unknown SHA/tree below */ }

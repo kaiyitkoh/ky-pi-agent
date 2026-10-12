@@ -317,14 +317,14 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(text).not.toMatch(/\bdelegated\b/);
 	});
 
-	it("workflows loaded first consumes the run: execute finds no verdict and writes nothing", async () => {
+	it("load order does not matter: with workflows loaded first, /execute still settles and records its own run", async () => {
 		const h = harness({ order: "workflows-first" });
 		await h.command(SLUG);
-		const before = bytes(progressFile(h));
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
-		h.fire("tool_execution_end", toolEnd("ok"));
+		verify(h);
 		h.fire("agent_end", {});
-		expect(bytes(progressFile(h))).toBe(before);
+		expect(readFileSync(progressFile(h), "utf-8")).toContain(`## T001 @ ${headSha(h.repo)}`);
+		expect(isRunArmed()).toBe(false);
 		endRun("", ""); // leave no armed run behind
 	});
 });

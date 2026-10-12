@@ -404,9 +404,10 @@ command equals the task's verification command ran cleanly at the commit
 being recorded (seen on `tool_execution_start`, since `tool_execution_end`
 carries no arguments), and `driftAbort` allows every path git reports as
 changed. PROGRESS.md records that run's own output and exit code, bound to a
-harness-read commit SHA; no other tool output is kept. If the shared workflows
-handler consumes the run first, `/execute` finds no verdict and writes
-nothing.
+harness-read commit SHA; no other tool output is kept. The shared workflows
+settle handler stands aside while an `/execute` run is armed, so the result
+does not depend on extension load order, which Pi takes from an unsorted
+directory listing.
 
 **Why the handoff probe reports `UNAVAILABLE`.** `pi-subagents` is pinned
 and not installed. The probe checks for the minimum tools a handoff needs and
