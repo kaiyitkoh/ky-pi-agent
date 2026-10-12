@@ -30,6 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [ ] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main`
 - [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
+- [ ] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost
 
 ## Phase Details
 
@@ -585,6 +586,22 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 9. Ceremonial Workflows | 12/17 | In Progress|  |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
 | 11. Terminal UI | 0/TBD | Not started | - |
+
+### Phase 12: OpenSpec Opt-in Skill
+
+**Goal:** OpenSpec's official skills are available on demand (`/skill:openspec-*`) without costing per-turn tokens or weakening Phase 9's code-enforced gates.
+**Requirements**: TBD (user decision 2026-10-12: option (b) opt-in, official skill not the `openspec-pi` wrapper)
+
+**Success Criteria:**
+1. `@fission-ai/openspec` CLI pinned to an exact reviewed version (1.14.1 at research time; re-check), telemetry disabled (`OPENSPEC_TELEMETRY=0`).
+2. Official skills installed at user level (`~/.pi/agent/skills/` via `openspec init --tools pi` or equivalent), expanded profile, with `disable-model-invocation: true` so they add zero per-turn prompt cost; not committed into the repo's `.pi/` (would trip workflow-budget tests).
+3. Safety guard classifies `openspec` CLI calls correctly (archive must not trip protected-path rules); `openspec/` stays out of this public repo.
+4. Bootstrap/runbook documents install + upgrade; third-party wrapper `openspec-pi` evaluated and rejected or vendored with justification.
+**Depends on:** Phase 11
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 12 to break down)
 
 ---
 *Roadmap created: 2026-08-13 · Granularity: fine · Coverage: 107/107 v1 requirements mapped*
