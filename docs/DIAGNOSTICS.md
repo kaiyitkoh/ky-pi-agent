@@ -561,6 +561,74 @@ grep -F '"corr":"<paste the corr value here>"' .pi/logs/wire-$(date +%F).jsonl
 
 ---
 
+## Context-pollution experiment
+
+**Question.** Does the full harness make a cheap model catch fewer real defects than bare Pi does, and if so is the cause harness
+behaviour, sheer prompt mass, prose tool calls, or a misconfigured provider route?
+
+**Corpus.** The six seeded defects in `tests/fixtures/seeded-defects/index.ts`, each built into a disposable git repo. Every trial
+sends the same review-only prompt (`buildTrialPrompt`) and the model answers with one JSON review. Scoring reuses the existing
+calibration grader, so a trial is "caught" only when a finding names the right file and the right failure.
+
+**Arms.**
+
+| Arm | Name | Isolates |
+|-----|------|----------|
+| A | minimal | Bare Pi: no extensions, skills, context files or prompt templates. The baseline. |
+| B | harness-implement | The harness as installed, default `implement` profile. |
+| F | harness-full | The harness with the `full` tool profile. The primary comparison is F against A. |
+| C | padded-minimal | A plus inert repo prose of the measured floor difference (`PAD_TOKENS`), separating token mass from harness behaviour. |
+
+**Design.** Paired and interleaved: each (defect, repeat) block runs all four arms contiguously in a seeded order and blocks are
+shuffled, so provider drift lands on every arm alike. First stage R=10 repeats (6 defects x 10 x 4 arms = 240 trials); a second
+stage of R=20 only if the first is inconclusive. The seed is `KY_EXP_SEED` (default 20261013).
+
+**Metrics.** Catch rate per arm, malformed-output count, prose-tool-call rate, unmatched findings, input and cache-read tokens.
+
+**Pre-registered decision rule.** Pinned by `scripts/ctx-experiment-core.ts` and its tests, so changing it after seeing data
+shows up as a test edit. With d = catch(F) - catch(A) and a 90% Newcombe interval (z = 1.6449):
+
+- `DEGRADES` when d <= -0.15 (`DEGRADE_POINTS`) and the interval's upper bound is below zero.
+- `NO_DETECTABLE_EFFECT` when the interval's lower bound is above -0.15.
+- `INCONCLUSIVE` otherwise.
+
+**Discrimination.**
+
+| Outcome | Reading |
+|---------|---------|
+| Prose-tool-call rate >= 0.10 and at least half the misses fall in prose trials (any arm) | `prose-tool-calls` |
+| F `DEGRADES` vs A, and C does not degrade vs A | `harness-behaviour` (the harness does it, not the token mass) |
+| F `DEGRADES` vs A, and C also `DEGRADES` vs A | `context-pollution` (token mass alone hurts) |
+| No effect, but A itself catches under 50% | `neither`; if a second-route run of A is healthy, `provider-misconfiguration` |
+| Anything else | `inconclusive` |
+
+**Power, honestly.** 60 trials per arm detects only large effects. `INCONCLUSIVE` is a valid and expected answer for a modest
+effect; it is not a failure of the run and must not be rerun with a different rule.
+
+**How to run.** On the work laptop, from the repo root (check `node --version` is >= 22.19; on an older 22.x build run with
+`NODE_OPTIONS=--experimental-strip-types`):
+
+```sh
+KY_EXP_MODEL=deepseek/deepseek-v4-flash KY_EXP_KEY_VAR=DEEPSEEK_API_KEY sh scripts/ctx-experiment.sh
+```
+
+`KY_EXP_MODEL` is the same provider/model id for every arm. `KY_EXP_KEY_VAR` is the NAME of the variable holding the provider
+key; only that one variable is passed to pi. Optional: `KY_EXP_SEED`, `KY_EXP_REPEATS`, `KY_EXP_DEFECTS` (comma list),
+`KY_EXP_PI` (default `pi`), `KY_EXP_OUT` (default `logs/ctx-experiment/<UTC timestamp>`). Output is `trials.tsv`, one `.jsonl` and
+`.stderr.log` per trial, `failures.tsv`, `summary.json`, and a human summary on stdout. `logs/` and `*.jsonl` are gitignored.
+Cost: 240 model calls with a few thousand input tokens each; budget it as a few dollars at cheap-model prices.
+
+**Safety envelope.** The minimal arm has bash and no safety layer, and the laptop holds live AWS credentials. Each trial therefore
+runs in a disposable temp repo under `env -i` with an allowlist (PATH, Windows `SYSTEMROOT`, the one key variable); HOME,
+USERPROFILE, TMP and `PI_CODING_AGENT_DIR` point into a per-trial temp root; the prompt is review-only; there is no `eval`. No
+`AWS_*` variable can cross, and `tests/unit/ctx-experiment-launcher.test.ts` proves it against a fake pi. Arms B and F load this
+checkout as a local package, so nothing is fetched from a registry.
+
+**Status.** The live run is `RB-10-01` in `docs/RUNBOOK.md`: **OUTSTANDING**. Everything above was verified offline against a
+fake pi; no number here is a measured model result.
+
+---
+
 ## What has not been verified
 
 `docs/RUNBOOK.md` carries the three Phase 2 checks that need a real model, a real
