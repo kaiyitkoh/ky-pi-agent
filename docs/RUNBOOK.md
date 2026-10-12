@@ -1619,7 +1619,7 @@ Phase 10 measured the per-turn floor, added `--ky-profile` tool profiles, and bu
 
 **Precondition.** A DeepSeek key on the work laptop, exported under a variable name you choose (`<KEY_ENV_NAME>`; the name is an input, the value never enters this repo). `node --version` must be 22.19 or newer; if the `.ts` import is rejected, rerun with `--experimental-strip-types`.
 
-**Safety envelope.** The launcher runs Pi with a scrubbed environment in a temporary repository, review-only. Never run it from a directory holding real work, and never with cloud credentials in the shell.
+**Safety envelope.** The launcher runs Pi with a scrubbed environment in a temporary repository, review-only. That isolates environment variables, not the filesystem: the minimal arm's `bash` runs as your OS user with no safety layer and can read `~/.aws`, the real `~/.pi/agent/auth.json` and the Windows Credential Manager by absolute path. Run it only from an OS account, container or VM that holds no cloud credentials and no real Pi auth file, never from a directory holding real work, and never with cloud credentials in the shell.
 
 **Procedure, on the work laptop.**
 

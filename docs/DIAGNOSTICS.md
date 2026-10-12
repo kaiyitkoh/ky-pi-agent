@@ -633,6 +633,12 @@ does not appear in process listings or process-creation audit logs. No `AWS_*` v
 `tests/unit/ctx-experiment-launcher.test.ts` proves both against a fake pi and argv-recording `node`/`env` shims. Arms B and F load this
 checkout as a local package, so nothing is fetched from a registry.
 
+**What the envelope does not do.** It isolates environment variables only, not the filesystem. The model in arms A and C
+runs `bash` as the operator's own OS user with no safety layer, so absolute paths such as `~/.aws/credentials`,
+`~/.aws/sso/cache/`, the real `~/.pi/agent/auth.json` and the Windows Credential Manager stay reachable. The review-only
+prompt makes that unlikely, but nothing enforces it. Run the experiment only from an OS account, container or VM that holds no
+cloud credentials and no real Pi auth file.
+
 **Status.** The live run is `RB-10-01` in `docs/RUNBOOK.md`: **OUTSTANDING**. Everything above was verified offline against a
 fake pi; no number here is a measured model result.
 

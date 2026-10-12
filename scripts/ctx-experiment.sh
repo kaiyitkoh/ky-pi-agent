@@ -8,6 +8,7 @@
 # Windows system root, and the single provider key variable named by KY_EXP_KEY_VAR,
 # which is handed over in the child's environment, never on a command line.
 # HOME, USERPROFILE, TMP/TEMP and the Pi agent dir all point into the per-trial root.
+# This isolates the environment, not the filesystem: run only from an account without cloud credentials.
 #
 # Required env: KY_EXP_MODEL (provider/model id), KY_EXP_KEY_VAR (NAME of the variable
 # holding the provider key). Optional: KY_EXP_SEED, KY_EXP_REPEATS, KY_EXP_DEFECTS,
