@@ -1161,6 +1161,12 @@ would even have been reached. It is a gate that requires a human physically
 present, on a machine whose real credential exposure is now known rather than
 assumed absent.
 
+**Re-armed by the Phase 08.1 re-pin.** Plan 08.1-04 re-pinned `pi-subagents`,
+`@narumitw/pi-lsp` and `pi-web-access` (offline review only: published-file
+review plus an `@earendil-works/*` import-resolution proxy against Pi 1.1.0;
+nothing was installed or loaded). `RB-07-01` ("run after any version bump")
+and this entry therefore now name the new specs and both remain OUTSTANDING.
+
 **Procedure, on the work laptop, with a human physically present to satisfy
 the package-legitimacy gate:**
 
