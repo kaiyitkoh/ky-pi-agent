@@ -543,16 +543,16 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/providers",
-		budget: 1430,
+		budget: 600,
 		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs' transitive walk newly discovers this " +
 			"directory -- routing/index.ts imports ./modes.ts (same-directory, already inside the routing/ " +
 			"ratchet), and modes.ts itself imports callWithFallback from ../providers/fallback.ts and CHAIN " +
 			"from ../providers/schema.ts, a hop CR-04's depth-1-only version never followed. Grandfathered in " +
 			"at its CURRENT measured total, the same precedent WR-05 set for routing/harness/diagnostics and " +
 			"CR-04 set for quality/safety (not a number this phase reviewed for tightness) -- this entry did " +
-			"not exist before WR2-04, so there is no prior committed number to raise from. Measured 1,430 raw " +
-			"lines across 4 files 2026-08-15 (fallback.ts 304, index.ts 329, schema.ts 623, sso.ts 174), " +
-			"already an exact multiple of ten",
+			"not exist before WR2-04, so there is no prior committed number to raise from. Measured 599 raw " +
+			"lines across 4 files 2026-10-13 (fallback.ts 112, index.ts 138, schema.ts 273, sso.ts 76), " +
+			"rounded up to the next ten",
 	},
 	{
 		dir: ".pi/lib",

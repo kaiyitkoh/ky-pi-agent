@@ -21,7 +21,7 @@ export interface SsoPattern {
 export const SSO_PATTERNS: readonly SsoPattern[] = [
 	{
 		label: "expired-token",
-		// No trailing ``: `ExpiredTokenException` continues with a word character.
+		// No trailing `\b`: `ExpiredTokenException` continues with a word character.
 		pattern: /\bExpiredToken/i,
 		why:
 			"STS's expiry exception in both spellings. `ExpiredToken` is not a substring of any " +

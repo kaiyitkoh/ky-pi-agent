@@ -1,134 +1,23 @@
 /**
- * ky-pi-agent — Qoder Cloud Agents HTTP client: config resolution, the
- * three-step request sequence and a defensive SSE parser. (ROUTE-11)
- *
- * ---------------------------------------------------------------------------
- * PURPOSE
- * ---------------------------------------------------------------------------
- * This module is the impure-but-testable half of the Qoder delegate tool:
- * everything needed to turn a plain-language task into a folded text result
- * from Qoder's own hosted agent loop, without touching Pi's extension API at
- * all. `index.ts` (this directory's sibling) is the only file that wires this
- * into a registered tool; nothing here registers anything.
- *
- *   - {@link resolveQoderConfig} — pure. Reads no environment itself; the
- *     caller hands in an environment object. Refuses, never guesses, and
- *     never throws.
- *   - {@link parseSseFrames} — pure, incremental. Feed it whatever chunk
- *     arrived; it returns the frames that completed and the leftover partial
- *     block to prepend to the next chunk. See its own docstring for the
- *     exact incremental-feeding recipe.
- *   - {@link foldDelegatedResult} — pure. Accumulates the delegated agent's
- *     own message text out of a frame list, ignoring its thinking traffic and
- *     completing on the session's own idle signal.
- *   - {@link delegateTask} — impure. The three-step HTTP sequence, streamed
- *     and folded, with a redacted transcript written to a gitignored log.
- *
- * ---------------------------------------------------------------------------
- * THE FOREIGN AGENT STATEMENT
- * ---------------------------------------------------------------------------
- * A task handed to {@link delegateTask} runs inside Qoder's OWN hosted agent
- * loop, with Qoder's own Read/Write/Edit/Glob/Grep/Bash tools, against a
- * container this repository does not control. None of this harness's own
- * controls apply to that work: not Pi's own tools, not this project's
- * AGENTS.md or system prompt, not the Phase 4 safety guard (branch
- * protection, `terraform`/`kubectl` confirmation, `.env`/`*.tfstate` read
- * blocks, the audit log), and not the Phase 2 wire inspector — no request or
- * response Qoder's own model makes is ever captured by this repository's
- * diagnostics. On a laptop where merging to `main` auto-deploys to AWS, this
- * means the harness's guard protects nothing Qoder does on its behalf. See
- * `index.ts`'s tool description for the user/model-facing statement of the
- * same fact, and `docs/ROUTING.md` for the full paragraph.
- *
- * ---------------------------------------------------------------------------
- * OFFICIAL SURFACE ONLY
- * ---------------------------------------------------------------------------
- * This client speaks only the official Cloud Agents HTTP API documented at
- * `docs.qoder.com`: a personal access token in an `Authorization: Bearer`
- * header, against `https://api.qoder.com/api/v1/cloud`. Two unofficial
- * packages exist on npm (`pi-provider-qoder`, `pi-qoder-provider`) that
- * instead reverse-engineer Qoder's own undocumented internal endpoints and
- * forge the signatures that endpoint expects — a breach of Qoder's Terms of
- * Service with an irreversible termination clause (05-RESEARCH.md Part C /
- * STACK.md §5 carry the exact ToS section numbers). Neither is imported,
- * vendored, forked or referenced by anything below; this file has zero
- * runtime dependencies beyond Node's own `fetch`.
- *
- * ---------------------------------------------------------------------------
- * UNVERIFIED — the SSE event-type enum, and why the live check stays
- * OUTSTANDING (RB-05-01)
- * ---------------------------------------------------------------------------
- * The Qoder docs page fetched for this phase showed exactly three event
- * `type` values (`agent.thinking`, `agent.message`, `session.status_idle`)
- * and never claimed that list was exhaustive. There is no PAT and no network
- * egress on this machine, so whether a real session emits additional event
- * types (a tool-use event from Qoder's own internal agent, an error event, a
- * different status transition) is UNVERIFIED. {@link parseSseFrames} and
- * {@link foldDelegatedResult} are written to fail safely on an unrecognised
- * `event:`/`data.type` value — skip it, never throw, never hang — precisely
- * because the enum is known-incomplete. Whether a real PAT against a real
- * `agent_id`/`environment_id` actually produces this envelope end-to-end is
- * the live check named `RB-05-01` in `docs/RUNBOOK.md`, and it is
- * OUTSTANDING by construction until run by hand on the work laptop. Nothing
- * in this file, and nothing green in this repository's test suite, may be
- * read as discharging it.
- *
- * ---------------------------------------------------------------------------
- * QODER IS A DELEGATE TOOL, NEVER A ROUTABLE MODEL
- * ---------------------------------------------------------------------------
- * Qoder appears in no `models.json` entry, no role→model map, no fallback
- * chain and no capability guard anywhere in this repository. The only way the
- * model can reach it is the one registered tool `index.ts` builds on top of
- * the exports below (05-CONTEXT.md decision 11).
- *
- * ---------------------------------------------------------------------------
- * BOUNDARY RULES
- * ---------------------------------------------------------------------------
- * This file never spells the tool-registration call, not even in a comment
- * — `tests/unit/contributing-boundary.test.ts` matches it as a plain
- * substring across every tracked source under `.pi/extensions/`, and only
- * `index.ts` is allowlisted. It also never calls the direct-model-completion
- * route or hands back a raw provider object — `tests/unit/chokepoint-lint.
- * test.ts` scans this directory too, with no exemption.
- *
- * ---------------------------------------------------------------------------
- * TRANSCRIPT AND REDACTION
- * ---------------------------------------------------------------------------
- * The one credential this file ever handles — the personal access token — is
- * placed in exactly one place, the `Authorization` header of each outgoing
- * request, and is NEVER placed into a transcript record at all (not
- * redacted-after-the-fact; simply never written). Every transcript record
- * this file does write passes through `diagnostics/redact.ts`'s `redactDeep`
- * before {@link writeQoderTranscript} appends it, reusing DIAG-07's one
- * redaction rule rather than inventing a second, and lands only under the
- * gitignored `.pi/logs/` tree via `.pi/lib/jsonl.ts#appendJsonl` (own base
- * name `"qoder"`, never shared with diagnostics' or safety's own streams). A
- * transcript write failure never breaks the delegated task itself — mirrors
- * `safety/audit.ts#writeAuditRow`'s own "never throws" contract.
- *
- * ---------------------------------------------------------------------------
- * LAYOUT
- * ---------------------------------------------------------------------------
- *   client.ts (this file) — config resolution, SSE parsing, the HTTP client.
- *   index.ts              — the registered tool, its description and schema.
+ * Qoder Cloud Agents HTTP client: config resolution, SSE parser, three-step request sequence. Registers nothing; index.ts does.
+ * resolveQoderConfig and parseSseFrames are pure and never throws on bad input.
+ * Delegated work runs in Qoder's hosted loop, outside this harness's guard and wire inspector (docs/ROUTING.md).
+ * Official API only (docs.qoder.com, Bearer PAT at https://api.qoder.com/api/v1/cloud); the unofficial npm providers forge signatures against Qoder's ToS.
+ * The SSE event enum is known-incomplete, so unknown events are skipped; the live check is in docs/RUNBOOK.md.
  */
 import { appendJsonl } from "../../lib/jsonl.ts";
 import { redactDeep } from "../diagnostics/redact.ts";
 
-// -----------------------------------------------------------------------------
-// Environment variable names and defaults
-// -----------------------------------------------------------------------------
-
 /** The personal access token. Generated once at qoder.com/account/integrations, shown only once. */
 export const QODER_TOKEN_ENV = "QODER_PERSONAL_ACCESS_TOKEN";
 
-/** A pre-configured agent id — one-time console/API setup, never created per task. See the module docstring. */
+/** A pre-configured agent id; created once, never per task. */
 export const QODER_AGENT_ID_ENV = "QODER_AGENT_ID";
 
-/** A pre-configured environment id — same one-time-setup posture as {@link QODER_AGENT_ID_ENV}. */
+/** A pre-configured environment id; same one-time setup as the agent id. */
 export const QODER_ENVIRONMENT_ID_ENV = "QODER_ENVIRONMENT_ID";
 
-/** Optional override, for the loopback fixture a later plan builds — see the base-URL refusal below. */
+/** Optional override; only https or a 127.0.0.1 loopback URL is accepted. */
 export const QODER_BASE_URL_ENV = "QODER_BASE_URL";
 
 /** The real Cloud Agents base URL, used whenever {@link QODER_BASE_URL_ENV} is unset. */
@@ -140,20 +29,8 @@ const TOKEN_PREFIX = "pt-";
 /** Own base name for the transcript stream, distinct from diagnostics' and safety's own bases. */
 const QODER_LOG_BASE = "qoder";
 
-/**
- * Upper bound on a delegated task's length, checked after trimming.
- *
- * ASVS V5 input validation on the one model-supplied field this tool accepts,
- * mirroring `safety/index.ts`'s `approve_ky_command` params validation. A
- * bound this generous (roughly the length of a long paragraph of
- * instructions) exists to catch a runaway or adversarial payload, not to
- * constrain a genuine task description.
- */
+/** Upper bound on a delegated task's length after trimming; catches a runaway payload (ASVS V5). */
 export const MAX_TASK_CHARS = 20_000;
-
-// -----------------------------------------------------------------------------
-// Config resolution — pure
-// -----------------------------------------------------------------------------
 
 /** The resolved, validated configuration {@link delegateTask} needs. */
 export interface QoderConfig {
@@ -169,15 +46,8 @@ export type QoderConfigResult =
 	| { readonly ok: false; readonly message: string };
 
 /**
- * Resolve and validate the Qoder configuration from an injected environment
- * object. Pure: never reads the environment itself (the caller supplies it),
- * never throws, and never guesses a default for a credential or an id — only
- * for the base URL, whose documented default is public information.
- *
- * Refusal order: missing variables first (naming every missing one and the
- * one-time setup step for each kind), then the token's shape, then the base
- * URL's scheme. A caller that fixes the first refusal and calls again will
- * reach the next one in turn rather than seeing every failure class at once.
+ * Resolve and validate config from an injected environment; never throws and never guesses a credential or id.
+ * Refusals come one class at a time: missing variables, then token shape, then base-URL scheme.
  */
 export function resolveQoderConfig(env: NodeJS.ProcessEnv): QoderConfigResult {
 	const token = env[QODER_TOKEN_ENV];
@@ -230,12 +100,8 @@ export function resolveQoderConfig(env: NodeJS.ProcessEnv): QoderConfigResult {
 		};
 	}
 
-	// The base-URL seam a later plan's loopback fixture uses. Enforced HERE,
-	// not merely at a call site, mirroring `tests/helpers/loopback.ts`'s own
-	// `assertLoopbackUrl` discipline: a copy-paste that reintroduces a real,
-	// non-TLS host must fail loudly rather than quietly carry a bearer
-	// credential to it. The literal `127.0.0.1` below is this file's own
-	// independent check -- it does not share a constant with any test helper.
+	// Enforced here, not at a call site, so a real non-TLS host can never receive the bearer credential;
+	// the literal is independent of tests/helpers/loopback.ts.
 	const isLoopback = parsed.hostname === "127.0.0.1";
 	if (parsed.protocol !== "https:" && !isLoopback) {
 		return {
@@ -250,17 +116,7 @@ export function resolveQoderConfig(env: NodeJS.ProcessEnv): QoderConfigResult {
 	return { ok: true, config: { token: token as string, agentId: agentId as string, environmentId: environmentId as string, baseUrl } };
 }
 
-// -----------------------------------------------------------------------------
-// SSE parsing — pure, incremental
-// -----------------------------------------------------------------------------
-
-/**
- * One parsed SSE frame. `id`/`event` are the field lines the envelope
- * carries; `data` is the `data:` line(s) already JSON-parsed, or `undefined`
- * when the line was absent or did not parse -- never a throw. See the module
- * docstring's UNVERIFIED section: `event` may be any string, not only the
- * three documented so far.
- */
+/** One parsed SSE frame; `data` is JSON-parsed or `undefined`, and `event` may be any string. */
 export interface SseFrame {
 	readonly id?: string;
 	readonly event?: string;
@@ -279,10 +135,7 @@ export interface ParseSseResult {
 function splitField(line: string): { readonly field: string; readonly value: string } | undefined {
 	const idx = line.indexOf(":");
 	if (idx === -1) {
-		// A field line with no colon carries no value the envelope defines.
-		// Ignored rather than treated as an error -- see the module docstring's
-		// UNVERIFIED section: this parser is deliberately tolerant of shapes it
-		// was not shown.
+			// No colon: no defined value, ignored.
 		return undefined;
 	}
 	const field = line.slice(0, idx);
@@ -318,9 +171,7 @@ function parseOneFrame(block: string): SseFrame {
 				dataLines.push(split.value);
 				break;
 			default:
-				// Any other field name (SSE also defines `retry:`, and Qoder could
-				// add its own) is ignored rather than fatal -- the same tolerant
-				// posture the module docstring states for `event`/`data.type`.
+					// Other fields (`retry:`, future Qoder fields) are ignored.
 				break;
 		}
 	}
@@ -330,8 +181,7 @@ function parseOneFrame(block: string): SseFrame {
 	try {
 		data = rawData.length > 0 ? JSON.parse(rawData) : undefined;
 	} catch {
-		// A malformed `data:` line is data to the caller, not a crash. See the
-		// module docstring: this parser never throws on untrusted network input.
+			// Malformed data is data to the caller; this parser never throws on untrusted input.
 		data = undefined;
 	}
 
@@ -339,35 +189,13 @@ function parseOneFrame(block: string): SseFrame {
 }
 
 /**
- * Parse as many complete frames as `chunk` contains, returning the leftover
- * partial block as `rest`.
- *
- * INCREMENTAL FEEDING RECIPE. This function is stateless per call; the
- * caller carries state by threading `rest` back in:
- *
- * ```ts
- * let buffer = "";
- * const frames: SseFrame[] = [];
- * for (const piece of incomingChunks) {
- *   const parsed = parseSseFrames(buffer + piece);
- *   frames.push(...parsed.frames);
- *   buffer = parsed.rest;
- * }
- * ```
- *
- * This is exactly what {@link delegateTask} does against a real `fetch`
- * stream, and what `tests/unit/qoder-client.test.ts` does against two
- * arbitrary chunk splits of the same fixture to prove the split point cannot
- * change the resulting frame sequence.
- *
- * Frames are separated by a blank line (`\n\n`; `\r\n\r\n` is normalised to
- * the same shape first, since Qoder's transport may use either).
+ * Parse the complete frames in `chunk`, returning the unterminated tail as `rest`. Stateless: feed `rest + nextChunk`.
+ * Frames end at a blank line; CRLF is normalised first.
  */
 export function parseSseFrames(chunk: string): ParseSseResult {
 	const normalized = chunk.replace(/\r\n/g, "\n");
 	const blocks = normalized.split("\n\n");
-	// The last element is either "" (chunk ended exactly on a blank line) or a
-	// not-yet-terminated block -- either way it is not a complete frame yet.
+	// The last element is "" or an unterminated block.
 	const rest = blocks.pop() ?? "";
 
 	const frames: SseFrame[] = [];
@@ -379,10 +207,6 @@ export function parseSseFrames(chunk: string): ParseSseResult {
 	}
 	return { frames, rest };
 }
-
-// -----------------------------------------------------------------------------
-// Folding — pure accumulation over a frame list
-// -----------------------------------------------------------------------------
 
 /** What kind of `event_start` announced a given `event_id`, if recognised. */
 type EventKind = "message" | "thinking" | "other";
@@ -411,19 +235,8 @@ function readString(value: unknown): string | undefined {
 }
 
 /**
- * Fold a frame list into the delegated agent's accumulated text.
- *
- * Accumulates `event_delta` frames whose parent `event_start` announced
- * `agent.message`, concatenating `delta.content.text` for
- * `delta.type === "content_delta"`, until a `session.status_idle` frame
- * arrives. `agent.thinking` deltas accumulate separately into
- * {@link FoldedResult.thinkingText} rather than the result text.
- *
- * UNRECOGNISED `event_start` TYPES, MALFORMED PAYLOAD SHAPES AND UNKNOWN
- * TOP-LEVEL `data.type` VALUES ARE ALL IGNORED, NEVER FATAL -- the module
- * docstring's UNVERIFIED section states why: the documented event enum is
- * known-incomplete, and a parser that assumed completeness would throw or
- * hang the first time a real PAT exercised it.
+ * Fold frames into the delegated agent's text: `agent.message` deltas accumulate until `session.status_idle`,
+ * `agent.thinking` deltas separately. Unknown event types and malformed shapes are ignored because the documented enum is incomplete.
  */
 export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
 	let text = "";
@@ -467,7 +280,7 @@ export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
 			} else if (kind === "thinking") {
 				thinkingText += deltaText;
 			}
-			// kind "other" or unrecognised eventId: ignored, per the docstring.
+				// kind "other" or unknown eventId: ignored.
 			continue;
 		}
 
@@ -481,8 +294,7 @@ export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
 			continue;
 		}
 
-		// Any other top-level `data.type` (or a frame with no recognisable type
-		// at all) is silently ignored -- see the UNVERIFIED section above.
+		// Any other top-level type is ignored.
 	}
 
 	return { text, thinkingText, done, stopReason };
@@ -493,16 +305,8 @@ export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
 // -----------------------------------------------------------------------------
 
 /**
- * Redact `record` and append it to the `qoder` transcript stream. Never
- * throws -- a logging failure must not break the delegated task itself,
- * mirroring `safety/audit.ts#writeAuditRow`'s own contract. The
- * `Authorization` header value is never passed to this function at all; see
- * the call sites in {@link delegateTask}.
- *
- * WR-03: exported so `index.ts` can write the `qoder.delegate.confirm`
- * audit record through this SAME redacted writer/stream rather than
- * inventing a second one -- `index.ts` never touches `QODER_LOG_BASE` or
- * `redactDeep` directly.
+ * Redact `record` and append it to the `qoder` transcript stream; never throws, so logging cannot break the task.
+ * Exported so index.ts writes its confirm record through the same redacted writer. The bearer token is never passed here.
  */
 export function writeQoderTranscript(cwd: string, record: Record<string, unknown>): void {
 	try {
@@ -512,22 +316,7 @@ export function writeQoderTranscript(cwd: string, record: Record<string, unknown
 	}
 }
 
-// -----------------------------------------------------------------------------
-// The impure HTTP sequence
-// -----------------------------------------------------------------------------
-
-/**
- * WR-07: the SSE read loop's inactivity deadline. `while (!folded.done) {
- * await reader.read() }` used to terminate only on `session.status_idle`, on
- * stream close, or on `signal` abort -- a Qoder session that keeps the
- * connection open with no bytes at all (a stalled agent, a dropped
- * keepalive) pinned the tool call forever, with the only escape being the
- * user pressing Esc. Five minutes is deliberately generous: long enough that
- * a real delegation's thinking/message deltas (which reset the deadline on
- * every chunk, never on a fixed wall-clock budget) are never cut short, short
- * enough that a genuinely stalled connection is reported rather than hung on
- * indefinitely.
- */
+/** Inactivity deadline for the SSE read loop, reset on every chunk, so a long delegation survives and a stalled connection is reported. */
 export const STREAM_INACTIVITY_TIMEOUT_MS = 5 * 60_000;
 
 /** What {@link delegateTask} needs. */
@@ -544,47 +333,11 @@ export interface DelegateTaskOptions {
 	readonly title?: string;
 	/** Called with the accumulated thinking text each time it grows, for tool-call progress. */
 	readonly onThinking?: (thinkingText: string) => void;
-	/**
-	 * Test-only injection seam for {@link STREAM_INACTIVITY_TIMEOUT_MS}.
-	 * Production code NEVER passes this -- it defaults to the real five-minute
-	 * constant. Exists so a loopback test can prove the stall-detection
-	 * behaviour without actually waiting five minutes.
-	 */
+	/** Test-only seam for STREAM_INACTIVITY_TIMEOUT_MS. */
 	readonly inactivityTimeoutMs?: number;
-	/**
-	 * Test-only injection seam for the deadline clock (`Date.now` by default).
-	 * Production code NEVER passes this. WR2-03 (`08-REVIEW.md` iteration 2):
-	 * lets a loopback test replace `Date.now()` with a test-controlled counter,
-	 * so the deadline arithmetic below can be driven to an exact, reproducible
-	 * value instead of betting on real wall-clock time surviving CI scheduler
-	 * jitter. See {@link onProgress}'s own docstring for how a test
-	 * synchronises the two.
-	 */
+	/** Test-only clock seam (default `Date.now`). */
 	readonly now?: () => number;
-	/**
-	 * Called exactly once per chunk that resets the inactivity deadline (never
-	 * for the final chunk, which completes the fold instead) -- immediately
-	 * AFTER `lastProgressAt` is reset, i.e. exactly when the client's own
-	 * bookkeeping considers a fresh budget to have started. Test-only; a
-	 * production caller has no use for it and none passes it.
-	 *
-	 * WR2-03 (`08-REVIEW.md` iteration 2): this is the synchronisation point
-	 * `qoder-delegate.test.ts`'s WR-04 case needs to drive {@link now}
-	 * correctly. The prior version of that test advanced a REAL wall clock
-	 * (150ms sleeps) between server-side `chunkWritten` events, which are
-	 * decoupled from when the CLIENT itself has actually consumed and reset
-	 * for a given chunk -- on a loaded runner a single real gap could
-	 * genuinely balloon past the injected budget, a false-failure risk in the
-	 * test, not a bug in the code under test. Because `onProgress` fires from
-	 * INSIDE this function's own read loop, a test can bump its injected
-	 * `now()` and release the NEXT chunk from within this callback, which
-	 * guarantees the client's own next remaining-check sees EXACTLY one
-	 * bump's worth of elapsed time -- never more, never less, never subject
-	 * to server-write-vs-client-read scheduling order -- while the whole
-	 * exchange still happens over a real socket with zero real wall-clock
-	 * waiting. Following 08-05's own "root cause eliminated at its source, no
-	 * wall-clock delay option" discipline.
-	 */
+	/** Test-only: called once per chunk that resets the deadline, so a test can step its injected clock in lockstep with the read loop. */
 	readonly onProgress?: () => void;
 }
 
@@ -593,32 +346,18 @@ function requestHeaders(token: string): Record<string, string> {
 	return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
-/**
- * Cancel a stream reader, swallowing any error the cancellation itself
- * raises. WR-07: called right before the inactivity-timeout error is thrown,
- * so a pending `reader.read()` is unblocked and the `finally` block's
- * `reader.releaseLock()` does not itself throw on a still-in-progress read.
- * Never allowed to mask the real (timeout) error that follows it.
- */
+/** Cancel a stream reader, swallowing cancellation errors so they never mask the timeout error that follows. */
 async function cancelReaderQuietly(reader: ReadableStreamDefaultReader<Uint8Array>, reason: string): Promise<void> {
 	try {
 		await reader.cancel(reason);
 	} catch {
-		// Best-effort -- see this function's own doc comment.
+			// Best-effort.
 	}
 }
 
 /**
- * Run the three-step Cloud Agents sequence and fold the streamed result back
- * into plain text: create a session, send the task as a `user.message` event,
- * then stream and fold events until `session.status_idle`.
- *
- * Validates `task` (non-empty after trimming, bounded by {@link MAX_TASK_CHARS})
- * before sending anything -- ASVS V5, the same posture `safety/index.ts`'s
- * `approve_ky_command` takes with its own params.
- *
- * Every request carries `Authorization: Bearer <token>`; the token is never
- * placed anywhere else, including any transcript record this function writes.
+ * Run the three-step sequence: create a session, send the task as `user.message`, stream and fold until `session.status_idle`.
+ * The task is validated (non-empty, bounded) first; the token goes only in the Authorization header, never in a transcript.
  */
 export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedResult> {
 	const trimmed = opts.task.trim();
@@ -660,24 +399,9 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	if (sessionId === undefined || sessionId.length === 0) {
 		throw new Error("Qoder delegate: session create returned no usable session id.");
 	}
-	// WR-08: `sessionId` comes from an UNTRUSTED network response and is
-	// spliced into two request paths below. An id containing `../`, `?`, `#`
-	// or a space would re-target or mangle the request -- the same
-	// input-validation posture this file already applies to the model-
-	// supplied `task` (MAX_TASK_CHARS / the empty-task refusal above), now
-	// applied to the server-supplied id it did not previously cover. Reject
-	// with the offending value in the message (never silently truncate or
-	// coerce it) rather than relying on `encodeURIComponent` alone -- an id
-	// this file cannot validate is an id this file should refuse to use, not
-	// merely escape and hope the peer's own routing tolerates.
+	// The id is untrusted network input spliced into request paths; refuse a malformed one instead of escaping it.
 	if (!/^[A-Za-z0-9._-]{1,128}$/.test(sessionId)) {
-		// WR-06: a terminal transcript record before this throw, the same gap
-		// WR-06 originally closed for the stream-open step. Without it the
-		// transcript ends at "qoder.session.create.response: 200" with nothing
-		// following, and the operator following RB-05-01 step 4 has no record of
-		// WHY the sequence stopped. The offending id is untrusted network input
-		// and is never echoed here -- the thrown Error (surfaced to the model)
-		// already carries it for the caller that needs it.
+		// Terminal transcript record so the log shows why the sequence stopped; the offending id is not echoed here.
 		writeQoderTranscript(cwd, { event: "qoder.delegate.failed", cause: "malformed-session-id" });
 		throw new Error(
 			`Qoder delegate: session create returned a session id that does not look like one ` +
@@ -703,14 +427,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		throw new Error(`Qoder delegate: sending the task failed with HTTP ${eventResponse.status}.`);
 	}
 
-	// WR-06: request/response transcript records for the stream-open step,
-	// mirroring the two steps above. RB-05-01 step 4 tells the operator to read
-	// the transcript for a 401/403 "on any of the three requests" -- before
-	// this fix, the stream open (step 3) wrote NEITHER a request NOR a
-	// response record, so a 401/403 here left the transcript showing two clean
-	// 200s and then nothing, and the operator running the one live check this
-	// phase deliberately leaves OUTSTANDING would be looking at a log that
-	// cannot show the failure the runbook told them to look for.
+	// Transcript records for the stream-open step so a 401/403 is visible in the log, as for the two steps above.
 	writeQoderTranscript(cwd, {
 		event: "qoder.stream.open.request",
 		url: `${config.baseUrl}/sessions/${encodedSessionId}/events/stream`,
@@ -733,12 +450,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	let folded: FoldedResult = { text: "", thinkingText: "", done: false };
 	let lastReportedThinking = "";
 
-	// WR-07: the inactivity deadline. `lastProgressAt` resets on every chunk
-	// (see the loop body below), never on a fixed wall-clock budget from the
-	// stream's own start -- see STREAM_INACTIVITY_TIMEOUT_MS's own doc comment
-	// for why a genuinely long delegation must not be cut short by this.
-	// WR2-03: `now` is `opts.now` in tests only, `Date.now` in production --
-	// see `DelegateTaskOptions.now`'s own docstring.
+	// Inactivity deadline: reset on every chunk, never a fixed budget from stream start. `now` is injectable in tests.
 	const inactivityTimeoutMs = opts.inactivityTimeoutMs ?? STREAM_INACTIVITY_TIMEOUT_MS;
 	const now = opts.now ?? Date.now;
 	let lastProgressAt = now();
@@ -748,10 +460,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 			const remaining = inactivityTimeoutMs - (now() - lastProgressAt);
 			if (remaining <= 0) {
 				await cancelReaderQuietly(reader, "inactivity timeout");
-				// WR-06: a terminal transcript record before this throw -- see the
-				// malformed-session-id branch above for why this gap matters.
-				// Without it the transcript ends at "qoder.stream.open.response: 200"
-				// with nothing following a stall.
+				// Terminal transcript record, as for the malformed-session-id branch.
 				writeQoderTranscript(cwd, {
 					event: "qoder.delegate.failed",
 					cause: "inactivity-timeout",
@@ -764,9 +473,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 				);
 			}
 
-			// Race the read against the REMAINING budget, not the full deadline --
-			// so a read that starts partway through the window cannot silently
-			// extend the deadline past what "no bytes for N ms" actually means.
+			// Race against the remaining budget so a late-starting read cannot extend the deadline.
 			const TIMED_OUT = Symbol("qoder-stream-read-timed-out");
 			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
 			const raced = await Promise.race([
@@ -780,13 +487,9 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 			}
 
 			if (raced === TIMED_OUT) {
-				// Cancel the reader BEFORE throwing: a pending reader.read() call
-				// makes releaseLock() in the finally block below throw its own
-				// ("cannot release a reader lock when a read() call is in
-				// progress"), which would mask this actionable error behind a
-				// confusing second one. cancel() unblocks that pending read.
+				// Cancel before throwing: a pending read() makes releaseLock() throw and mask this error.
 				await cancelReaderQuietly(reader, "inactivity timeout");
-				// WR-06: same terminal record as the pre-loop timeout check above.
+				// Same terminal record as the pre-loop check.
 				writeQoderTranscript(cwd, {
 					event: "qoder.delegate.failed",
 					cause: "inactivity-timeout",
@@ -803,10 +506,9 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 			if (streamDone) {
 				break;
 			}
-			// Progress: reset the deadline. A genuinely long delegation that keeps
-			// producing bytes (even slowly) is never cut off by this timeout.
+			// Progress: reset the deadline.
 			lastProgressAt = now();
-			// WR2-03: test-only synchronisation point -- see `onProgress`'s own docstring.
+			// Test-only synchronisation point.
 			opts.onProgress?.();
 
 			buffer += decoder.decode(value, { stream: true });
@@ -823,13 +525,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		reader.releaseLock();
 	}
 
-	// CR-03: flush what the transport left unterminated. A server that closes
-	// the body without a final blank line after the last frame -- a common SSE
-	// server behaviour this file's own module docstring already says the
-	// envelope is UNVERIFIED about -- must not cost the last frame (often
-	// session.status_idle itself, or the final content_delta). `decoder.decode()`
-	// with no argument flushes any pending multi-byte sequence the streaming
-	// decode above left buffered.
+	// Flush what the transport left unterminated: a server may close without a final blank line and drop the last frame.
 	buffer += decoder.decode();
 	if (buffer.trim().length > 0) {
 		const flushed = parseSseFrames(`${buffer}\n\n`);
@@ -848,11 +544,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		textChars: folded.text.length,
 	});
 
-	// CR-03: `done` must be CHECKED, not merely recorded. A connection dropped
-	// mid-stream, a server-side 5xx after headers, or an early close (without a
-	// session.status_idle frame ever arriving) must never be handed back to the
-	// model as a complete, trustworthy answer -- the transcript would show
-	// done:false, but nothing upstream of this function ever reads that field.
+	// Check `done`: a dropped or early-closed stream must not be returned as a complete answer.
 	if (!folded.done) {
 		throw new Error(
 			"Qoder delegate: the event stream ended without a session.status_idle frame after " +

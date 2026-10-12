@@ -214,7 +214,6 @@ export interface QuotaAlternativeFixture {
 	readonly alternative: string;
 	/** A failure whose only quota wording is this alternative. */
 	readonly text: string;
-	readonly text: string;
 }
 
 /**

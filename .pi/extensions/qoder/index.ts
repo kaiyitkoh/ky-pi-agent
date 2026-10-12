@@ -1,95 +1,24 @@
 /**
- * ky-pi-agent — the Qoder delegate tool entry point. (ROUTE-11)
- *
- * PURPOSE. Registers exactly one tool, `qoder_delegate`, on top of the pure
- * config resolver and HTTP client `client.ts` (this directory's sibling)
- * already exports. This file's own job is narrow: build the schema, write
- * the description that tells the model and the user what invoking this tool
- * actually means, read `QODER_PERSONAL_ACCESS_TOKEN`/`QODER_AGENT_ID`/
- * `QODER_ENVIRONMENT_ID` at the ONE call site this repository ever reads
- * them, and turn a refusal or a failure into a message the model can act on.
- *
- * ---------------------------------------------------------------------------
- * THIS EXTENSION REGISTERS A TOOL ON PURPOSE
- * ---------------------------------------------------------------------------
- * CONTRIBUTING.md's boundary rule says a new capability defaults to a
- * command or a skill, and registering a tool must justify its per-request
- * schema cost. This one does, and the justification lives beside the
- * `TOOL_REGISTRATION_ALLOWLIST` entry in
- * `tests/unit/contributing-boundary.test.ts`, added in the same commit as
- * this file, in the (a)/(b)/(c) shape that file's own worked example uses.
- * The short version: the model must be able to delegate MID-TURN, a skill
- * has no mechanism to make an authenticated HTTP round trip and fold a
- * streamed result, and the measured schema cost is 1315 bytes / 329 tokens
- * -- see the allowlist comment for exactly how that was computed.
- *
- * ---------------------------------------------------------------------------
- * THE DESCRIPTION IS A FIRST-CLASS STATEMENT, NOT A COMMENT
- * ---------------------------------------------------------------------------
- * `qoder_delegate`'s own `description` names all four controls it bypasses --
- * Pi's own tools, this project's AGENTS.md and system prompt, the Phase 4
- * safety hooks, and the Phase 2 wire inspector -- and states the auto-deploy
- * consequence plainly, because the model reads the description and the user
- * may never read `docs/`. See `client.ts`'s own module docstring for the
- * fuller foreign-agent statement, and `docs/ROUTING.md` (a later plan) for
- * the full user-facing paragraph this description points to.
- *
- * ---------------------------------------------------------------------------
- * THE REFUSAL PATH IS THE PATH THAT ACTUALLY RUNS HERE
- * ---------------------------------------------------------------------------
- * This machine holds no `QODER_PERSONAL_ACCESS_TOKEN` and has no network
- * egress (05-CONTEXT.md). `execute()` therefore spends most of its life on
- * the `resolveQoderConfig` refusal branch, which is why that branch throws
- * an ACTIONABLE error -- naming the missing variable and the exact one-time
- * setup step -- rather than an opaque failure. Pi's own agent loop turns a
- * thrown `Error` into `isError:true` for the model
- * [VERIFIED: `.pi/extensions/safety/index.ts`'s own citation of
- * `pi-agent-core/dist/agent-loop.js:444-449`, `createErrorToolResult`],
- * exactly the same mechanism `safety/index.ts#registerApprovalTool` already
- * uses in this codebase for its own refusal paths.
- *
- * ---------------------------------------------------------------------------
- * BOUNDARY RULE (BOOT-10)
- * ---------------------------------------------------------------------------
- * `pi.registerTool` is called exactly once below. This file is the ONLY
- * entry in `TOOL_REGISTRATION_ALLOWLIST` besides `safety/index.ts` --
- * `tests/unit/contributing-boundary.test.ts` fails the build otherwise.
- *
- * ---------------------------------------------------------------------------
- * LAYOUT
- * ---------------------------------------------------------------------------
- *   client.ts (sibling) — config resolution, SSE parsing, the HTTP client.
- *   index.ts (this file) — the registered tool, its schema and description.
+ * Registers the single `qoder_delegate` tool over client.ts; the justification for a registered tool sits beside its
+ * allowlist entry in tests/unit/contributing-boundary.test.ts. Config is read only here, and a refusal throws an
+ * actionable Error, which Pi turns into isError for the model (pi-agent-core dist/agent-loop.js:444-449).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { delegateTask, MAX_TASK_CHARS, resolveQoderConfig, writeQoderTranscript } from "./client.ts";
 
-/** How much of `task` is ever shown inside the confirmation dialog. See WR-04. */
+/** Bound on the task excerpt shown in the confirmation dialog. */
 const CONFIRM_EXCERPT_CHARS = 500;
 
-/**
- * `task` is the only required parameter. Every added field is per-request
- * tokens on every turn this tool stays active -- see the allowlist's (b)
- * answer for the measured cost of this single-field schema.
- */
+/** `task` is the only parameter: every added field costs request tokens each turn (see the allowlist entry). */
 const qoderDelegateSchema = Type.Object({
 	task: Type.String({
 		description: "The task to delegate to Qoder's own hosted agent loop, in plain language.",
 	}),
 });
 
-/**
- * The first-class, user- and model-facing bypass statement. Names all four
- * bypassed controls and the auto-deploy consequence, and points to the full
- * statement in `docs/ROUTING.md`. Kept under the ~400-token budget stated in
- * the plan: measured at 1315 bytes / 329 tokens as the whole serialised
- * `{type:"function",function:{name,description,parameters}}` tool object
- * (`openai-completions.ts:1337-1372`'s own shape), computed with
- * `Math.ceil(bytes / 4)` per `diagnostics/budget.ts:223-224` -- see the
- * `TOOL_REGISTRATION_ALLOWLIST` comment for the exact command run.
- */
+/** User- and model-facing bypass statement; measured 1315 bytes / 329 tokens (see the allowlist entry). Full text: docs/ROUTING.md. */
 const QODER_DELEGATE_DESCRIPTION =
 	"Delegates a task to Qoder's own hosted agent loop -- a FOREIGN AGENT, not a Pi tool call. " +
 	"It runs inside Qoder's own container with Qoder's own Read/Write/Edit/Glob/Grep/Bash tools, " +
@@ -104,7 +33,7 @@ const QODER_DELEGATE_DESCRIPTION =
 	"unfamiliar contributor -- reviewed, never merged on the strength of 'an agent said so'. Full " +
 	"statement: docs/ROUTING.md.";
 
-/** The two choices `qoder_delegate`'s own confirmation offers -- mirrors `safety/index.ts#registerApprovalTool`'s `APPROVE_CHOICE`/`DENY_CHOICE` naming exactly. */
+/** The confirmation choices; names mirror safety/index.ts APPROVE_CHOICE/DENY_CHOICE. */
 const DELEGATE_CHOICE = "Delegate to Qoder";
 const CANCEL_CHOICE = "Cancel";
 
@@ -115,41 +44,20 @@ export default function (pi: ExtensionAPI): void {
 		description: QODER_DELEGATE_DESCRIPTION,
 		parameters: qoderDelegateSchema,
 		async execute(_toolCallId, params, signal, onUpdate, ctx) {
-			// The ONE place this repository reads these three variables. See
-			// client.ts's module docstring: resolveQoderConfig itself never
-			// touches the environment.
+			// The one place these variables are read.
 			const configResult = resolveQoderConfig(process.env);
 			if (!configResult.ok) {
-				// WR-02 (iteration 3): this is the documented defence-in-depth path
-				// (docs/ROUTING.md's "two gates, not one") -- a record here is the
-				// only way to observe the session_start deactivation hook having
-				// failed (it is best-effort; see this file's own comment on that
-				// hook below). Before this fix this branch left no trace anywhere.
+				// Defence in depth (docs/ROUTING.md "two gates, not one"): the only trace if the session_start deactivation failed.
 				writeQoderTranscript(ctx.cwd, { event: "qoder.delegate.refused", cause: "unconfigured" });
-				// Actionable, never opaque -- see this file's own docstring
-				// section on the refusal path.
+				// Actionable, never opaque.
 				throw new Error(configResult.message);
 			}
 
-			// WR-04: ASVS V5 input validation, moved to the TOOL BOUNDARY -- BEFORE
-			// the confirmation prompt below. `client.ts#delegateTask` already
-			// enforces this same bound, but it used to run AFTER the human
-			// decision, so an unbounded, model-controlled `task` was interpolated
-			// into `ctx.ui.select`'s title first. Two consequences that made the
-			// human decision -- the more security-relevant of the two checks --
-			// LESS safe than the network call behind it: (1) a megabyte-long or
-			// newline-stuffed task floods the dialog, pushing the bypass warning
-			// below out of view, so the user approves a prompt whose warning they
-			// never saw; (2) the length bound was documented as protecting
-			// "before sending anything", which stopped being true of the human
-			// decision the moment WR-11 added it. Refusing here, before `ctx.ui.
-			// select` is ever called, closes both.
+			// Validate at the tool boundary, before the confirmation prompt: an unbounded task would flood the
+			// dialog and push the bypass warning out of view.
 			const task = params.task.trim();
 			if (task.length === 0 || task.length > MAX_TASK_CHARS) {
-				// WR-02 (iteration 3): this is the branch an adversarial or looping
-				// model hits repeatedly, and before this fix it left ZERO trace --
-				// no transcript record, nothing in `.pi/logs/qoder-*.jsonl` for the
-				// operator RB-05-01 step 4 sends there. Never the task text itself.
+				// Adversarial or looping models land here; leave a trace, never the task text.
 				writeQoderTranscript(ctx.cwd, {
 					event: "qoder.delegate.refused",
 					cause: "task-length",
@@ -160,21 +68,8 @@ export default function (pi: ExtensionAPI): void {
 						`(got ${task.length}).`,
 				);
 			}
-			// WR-01 (iteration 3): the excerpt below used to be bounded by
-			// CHARACTERS only, so a task made of e.g. "\n".repeat(500) still
-			// produced a ~500-line confirmation dialog title --
-			// `ExtensionSelectorComponent` renders the title as a single,
-			// untruncated, un-line-capped `Text` child and adds the option list
-			// AFTER it [VERIFIED: pi-coding-agent 0.84.1
-			// `dist/modes/interactive/components/extension-selector.js:29,35-36`],
-			// and `selectedIndex` defaults to `0` (`:12`) -- the pre-highlighted
-			// option this file passes as `[DELEGATE_CHOICE, CANCEL_CHOICE]` is the
-			// APPROVE choice. So a model-controlled `task` could change the
-			// dialog's HEIGHT and push the choices, or the bypass warning above
-			// them, out of view. Fix: replace every C0/C1 control character
-			// (newlines included) with a space, collapse runs, THEN bound the
-			// length -- a model-controlled string can change the excerpt's
-			// CONTENT but never the dialog's SHAPE.
+			// Flatten control characters, then bound length: the selector renders the title uncapped above the options and
+			// pre-highlights the first one (extension-selector.js:12,29,35-36), so task content must not change the dialog's shape.
 			const flattened = Array.from(task)
 				.map((ch) => {
 					const cp = ch.codePointAt(0) ?? 0;
@@ -188,21 +83,8 @@ export default function (pi: ExtensionAPI): void {
 					? `${flattened.slice(0, CONFIRM_EXCERPT_CHARS)}… (${task.length} chars total)`
 					: flattened;
 
-			// WR-11: a human in the loop, mirroring `safety/index.ts#
-			// registerApprovalTool`'s exact deny-by-default shape. This tool's
-			// OWN description already states it bypasses Pi's own tools, this
-			// project's AGENTS.md and system prompt, the Phase 4 safety guard
-			// and the Phase 2 wire inspector -- on a laptop where merging to
-			// main auto-deploys to AWS, a model invoking it unilaterally,
-			// mid-turn, on the strength of a description alone is exactly the
-			// failure mode this harness exists to prevent. `undefined` (no UI
-			// bound -- headless/`-p`) and `hasUI === false` both refuse via the
-			// SAME branch below, never via a separately-written headless
-			// allow-path. WR-04/WR-01: the bypass warning comes FIRST and the
-			// (now length- AND line-bounded) task excerpt LAST. The excerpt is
-			// flattened to one line before it ever reaches this string, so task
-			// content cannot change the dialog's height at all -- it cannot push
-			// the warning above it, or the choices below it, out of view.
+			// Human in the loop, deny-by-default as in safety/index.ts; headless (no UI) refuses via the same branch.
+			// Warning first, bounded one-line excerpt last, so task content cannot hide the warning or the choices.
 			const choice = ctx.hasUI
 				? await ctx.ui.select(
 						"Delegate this task to Qoder's own hosted agent loop? This bypasses Pi's own tools, " +
@@ -214,14 +96,7 @@ export default function (pi: ExtensionAPI): void {
 				: undefined;
 			const approved = choice === DELEGATE_CHOICE;
 
-			// WR-03: the single most consequential decision this file makes -- a
-			// human authorising a foreign agent to act on a machine where `main`
-			// auto-deploys -- previously wrote NO record on any branch. Written
-			// through the SAME redacted writer/stream `delegateTask` already uses
-			// (client.ts's own `writeQoderTranscript`), on BOTH branches, before
-			// either returning or throwing, mirroring `safety/index.ts#
-			// registerApprovalTool`'s own "every branch writes exactly one audit
-			// row" contract. Never the task text itself -- only its length.
+			// Written on both branches through the redacted writer, before returning or throwing; length only, never the task text.
 			writeQoderTranscript(ctx.cwd, {
 				event: "qoder.delegate.confirm",
 				hasUI: ctx.hasUI,
@@ -257,56 +132,17 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// CR-01: the configuration gate must run from a point where the extension
-	// RUNTIME IS BOUND, never from the factory. `pi.getActiveTools()` and
-	// `pi.setActiveTools()` are NOT callable during extension load -- Pi
-	// installs throwing stubs for both until `Runner.bindCore()` runs
-	// [VERIFIED: pi-coding-agent 0.84.1 `dist/core/extensions/loader.js:134-153`,
-	// "Extension runtime not initialized. Action methods cannot be called
-	// during extension loading."], and the factory is awaited strictly BEFORE
-	// that bind (`loadExtensionFromFactory` awaits the factory at
-	// `loader.js:425`; `this._bindExtensionCore(...)` does not run until
-	// `agent-session.js:2041`, after `getExtensions()` at `:2031`). A call from
-	// the factory throws, and Pi then discards the WHOLE extension -- including
-	// the `registerTool` call above that had already succeeded -- exactly the
-	// hazard `safety/index.ts` already documents at its own `:768-769`
-	// ("the runtime's own `getAllTools()`/`getActiveTools()` throw 'not
-	// initialized' during extension loading"). `session_start` is the
-	// sanctioned point [CLAUDE.md's own "register everything, activate on
-	// demand via `pi.setActiveTools`" pattern; `diagnostics/index.ts:502-506`
-	// and `diagnostics/budget.ts:648` both call `getActiveTools()` from inside
-	// a handler, never a factory]: the runtime is bound by then, and
-	// `registerTool()` above already ran during load, so the tool exists to be
-	// filtered. `registerTool` makes a NEWLY-registered tool active in the
-	// session by default [VERIFIED (WR-04, iteration 3 -- the prior citation
-	// here pointed at an unreachable branch): `AgentSession`'s constructor
-	// always calls `_buildRuntime({ activeToolNames: …, includeAllExtensionTools:
-	// true })` (`dist/core/agent-session.js:158-161`), and `_refreshToolRegistry`'s
-	// `else if (options?.includeAllExtensionTools)` arm -- the one that ACTUALLY
-	// activates every extension tool, `agent-session.js:2003-2006` -- runs
-	// because of it. The sibling `else if (!options?.activeToolNames)` arm at
-	// `:2008-2014` is dead code from session construction: `_buildRuntime`
-	// always forwards a DEFINED `activeToolNames` (`options.activeToolNames ??
-	// ["read","bash","edit","write"]`, `:2043-2046`), so that arm's own
-	// precondition never holds here], so this tool costs its measured ~329 tokens on EVERY provider
-	// request by default, including on this machine and in CI where
-	// `resolveQoderConfig` can only ever refuse. Deactivating it when
-	// unconfigured is applied here as an opt-OUT (deactivate when NOT
-	// configured) rather than the more common opt-IN shape, because Pi's own
-	// default is "active unless removed". Best-effort, mirroring
-	// `safety/index.ts`'s and `routing/index.ts`'s own `session_start` hooks
-	// (`safety/index.ts:832-838`, `routing/index.ts:673-679`): a failure here
-	// must never stop the session itself from starting -- on an unexpected
-	// error the tool stays active and `execute()`'s own `resolveQoderConfig`
-	// check still refuses actionably at call time, which is strictly better
-	// than a crashed session.
+	// Gate from session_start, never the factory: get/setActiveTools throw until the runtime binds (loader.js:134-153;
+	// the factory is awaited at loader.js:425, bind is at agent-session.js:2041) and a throw discards the whole extension.
+	// A new tool is active by default (agent-session.js:158-161, 2003-2006) and costs ~329 tokens per request, so
+	// deactivate it when unconfigured. Best-effort: on error it stays active and execute() still refuses.
 	pi.on("session_start", () => {
 		try {
 			if (!resolveQoderConfig(process.env).ok) {
 				pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "qoder_delegate"));
 			}
 		} catch {
-			// Swallowed deliberately -- see the comment above.
+				// Swallowed deliberately; execute() still refuses.
 		}
 	});
 }
