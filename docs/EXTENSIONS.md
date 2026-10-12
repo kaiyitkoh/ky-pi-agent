@@ -78,11 +78,11 @@ extracts it.
 
 ## Installed packages
 
-Five packages, exact-pinned as `npm:<name>@<version>`. Phase 08.1 plan 04
+Four packages, exact-pinned as `npm:<name>@<version>`. Phase 08.1 plan 04
 re-pinned `pi-subagents` (0.49.0 to 0.76.1), `@narumitw/pi-lsp` (0.49.4 to
 0.49.9) and `pi-web-access` (0.22.0 to 0.38.0) for Pi 1.x; `pi-session-finder`
-stays at 0.5.6 and `pi-background-tasks` stays at 2.4.2 until plan 08.1-05
-replaces it with a vendored copy. For the three re-pinned rows the
+stays at 0.5.6. `pi-background-tasks` left `packages[]` in plan 08.1-05 and is
+vendored process-only (see "Vendored, not depended on"). For the three re-pinned rows the
 `pushed_at` column is replaced by the npm publish time (`npm view <pkg> time`),
 and each was chosen at least 3 days after publication (newer `pi-subagents`
 0.77.0 and `pi-web-access` 0.39.0 were skipped on age).
@@ -90,7 +90,6 @@ and each was chosen at least 3 days after publication (newer `pi-subagents`
 | Package | Version | License field | LICENSE in tarball | Repository | `pushed_at` | Archived | Lifecycle scripts | Capability |
 |---|---|---|---|---|---|---|---|---|
 | `pi-subagents` | `0.76.1` | MIT | yes | `nicobailon/pi-subagents` | published `2026-10-06T01:33:43Z` | false | none (npm view scripts empty) | Subagent isolation, background execution (`async`), mid-run steering, `contact_supervisor` escalation, per-agent model/prompt/tools/thinking |
-| `pi-background-tasks` | `2.4.2` | ISC | yes | `ismailsaleekh/pi-background-tasks` | `2026-08-13T23:58:10Z` | false | none | `bg_run`/`bg_status`/`bg_logs`/`bg_kill` background bash (plus 7 delegate/fusion tools accepted as unavoidable overhead — see below) |
 | `@narumitw/pi-lsp` | `0.49.9` | MIT | yes | `narumiruna/pi-extensions` | published `2026-10-02T02:26:10Z` | false | none (`prepack` build only; not run at install) | 2-tool LSP diagnostics bridge (`lsp_diagnostics`, `lsp_fix`) |
 | `pi-web-access` | `0.38.0` | MIT | yes | `nicobailon/pi-web-access` | published `2026-10-09T18:25:13Z` | false | none (`prepublishOnly`/`postpublish` only; not run at install) | Web/documentation lookup (Exa, DuckDuckGo, Jina Reader — genuinely keyless) |
 | `pi-session-finder` | `0.5.6` | MIT | yes | `pungggi/pi-session-finder` | `2026-08-02T22:35:36Z` | false | none | Session search (`/find`, `/find-back` commands; zero model-facing tools) |
@@ -132,11 +131,6 @@ registry Phase 10 measures against, per the Phase 6 D-8 precedent (see
 a doc that can grow a number the code does not have becomes a second source
 of truth).
 
-`pi-background-tasks`' peer range
-`@earendil-works/pi-coding-agent: ^0.81.1 || ^0.82.1 || ^0.83.0 || ^0.84.0`
-is satisfied by this repo's pinned `0.84.1`, and is a real constraint on any
-future Pi bump — the union of four caret ranges still excludes `0.85.x`.
-
 ---
 
 ## Vendored, not depended on
@@ -151,6 +145,7 @@ the need in full.
 | Vendored item | Reason | Upstream provenance |
 |---|---|---|
 | `pi-loop-police` | EXT-10 — GitHub API reports `license: null` (re-confirmed live this session, `gh api repos/sebaxzero/pi-loop-police`), and the packed tarball (`npm pack pi-loop-police@1.14.1` + `tar -tf`) ships **no LICENSE/LICENCE file at all** despite `"license":"MIT"` in `package.json` | npm `pi-loop-police@1.14.1`, 11 files, 110,059 bytes unpacked, `time.modified=2026-08-11T22:04:31Z` |
+| `background-tasks/` (`index.ts` + `src/`), `pi-background-tasks@2.6.9`, process-only | D-02 (08.1-05) — 2.6.9 caps its Pi peers at `^0.84.0` so it cannot install against Pi 1.x; vendored without the delegate, fusion, attested-run and anthropic-attribution features (~22k lines) and without the npm-registry update check, dropping the `turndown` dependency. Registers `bg_run`/`bg_status`/`bg_logs`/`bg_kill` only; `PI_BG_FEATURES` tokens are ignored. Placed flat at `.pi/extensions/background-tasks/` (not `vendor/`, per the placement rule below) | `ismailsaleekh/pi-background-tasks`, ISC, LICENSE copied; tarball sha256 and deviation list in `.pi/extensions/background-tasks/PROVENANCE.md` |
 | `plan-mode/` (`index.ts` + `utils.ts` + `read-only.ts`), registers `/plan-mode` (renamed from `/plan` by plan 09-03, DEVIATION 6 — the ceremonial `/plan` workflow now owns that name) | EXT-06 — the npm alternative `@narumitw/pi-plan-mode@0.49.3` depends on `@narumitw/pi-tui-kit@^0.49.1`, a caret range `isPinnedPackageSpec` cannot see and this repo cannot exactly pin | Pi 0.84.1 `examples/extensions/plan-mode/index.ts` (390 lines) + `utils.ts` (168 lines) = 558 lines |
 | `todo.ts` | EXT-06 — the npm alternative `@juicesharp/rpiv-todo@2.5.2` depends on `@juicesharp/rpiv-config@^2.5.2` and `typebox@^1.1.24`, both caret ranges | Pi 0.84.1 `examples/extensions/todo.ts` (297 lines) |
 | `questionnaire.ts` | EXT-06 — the npm alternative `@juicesharp/rpiv-ask-user-question@2.5.2` carries the identical `rpiv-config`/`typebox` caret defect | Pi 0.84.1 `examples/extensions/questionnaire.ts` (448 lines) |
@@ -225,7 +220,6 @@ different candidate set):
 | `pi-subagents` | `undici`, `acorn`, `@js-temporal/polyfill` | `8.10.2`, `8.18.0`, `0.5.1` | exact (new since 0.49.0) |
 | `pi-subagents` | `jiti` | `2.7.0` | exact, second module instance |
 | `pi-subagents` | `yaml` | `2.8.3` | exact, second module instance |
-| `pi-background-tasks` | `turndown` | `7.2.4` | exact |
 | Pi 1.1.0 itself | `@earendil-works/{chord,pi-ai,pi-agent-core,pi-codemode,pi-mcp,pi-tui}` | `^1.1.0` | caret first-party family (the host's own dependencies, not a composed package); mitigated by the lockfile, which pins the resolved set |
 | `@narumitw/pi-lsp` | — | — | peers only, no runtime dependency |
 | `pi-session-finder` | — | — | peers only, no runtime dependency |
@@ -235,8 +229,7 @@ The runtime consequence of module-instance duplication (`jiti`, `yaml` and
 **UNVERIFIED** per decision 5 — an observation to carry forward, not a claim
 this plan makes either way. `pi-web-access` is the only one of the five
 installed packages carrying genuine transitive caret ranges; `pi-subagents`'
-own dependencies are exact pins in their own right; `pi-background-tasks`'
-single dependency is likewise exact.
+own dependencies are exact pins in their own right.
 
 ---
 

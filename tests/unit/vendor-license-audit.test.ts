@@ -88,6 +88,15 @@ const MUST_BE_VENDORED: readonly VendoredRow[] = [
 		mustNotBeInstalled: ["pi-loop-police"],
 		why: "no LICENSE file in tarball; GitHub API reports license=NONE (EXT-10)",
 	},
+	{
+		vendorPath: ".pi/extensions/background-tasks",
+		sourcePath: ".pi/extensions/background-tasks",
+		provenancePath: ".pi/extensions/background-tasks/PROVENANCE.md",
+		npmPackageName: "pi-background-tasks",
+		mustNotBeInstalled: ["pi-background-tasks"],
+		why: "D-02 (08.1-05) -- pi-background-tasks@2.6.9 caps its Pi peers at ^0.84.0 so it cannot install on Pi 1.x; " +
+			"vendored process-only (bg_run/bg_status/bg_logs/bg_kill), no fusion/delegate/attested/update-check",
+	},
 	// WR-15: the four rows below were promised by a comment ("Later plans in
 	// this wave append rows here") and never appended. All four plans landed in
 	// this phase, so four vendored items in the tool-execution path sat outside

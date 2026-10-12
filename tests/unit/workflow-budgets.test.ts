@@ -130,6 +130,14 @@ const COMMAND_MARKER = "registerCommand(";
  */
 const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[] = [
 	{
+		file: ".pi/extensions/background-tasks/src/extension.ts",
+		budget: 990,
+		why: "08.1-05 (UPG-04)'s vendored pi-background-tasks@2.6.9, process-only: registers /bg, /tasks, /bg-tasks, " +
+			"/bg-clear, /jobs, /logs and /kill. Upstream's own size after trimming the delegate/fusion/attested " +
+			"registrations and the update check (see .pi/extensions/background-tasks/PROVENANCE.md); not hand-written " +
+			"workflow logic. Measured 988 raw lines 2026-10-13, rounded up to the next ten",
+	},
+	{
 		file: ".pi/extensions/workflows/index.ts",
 		budget: 100,
 		why: "FLOW-01 -- the ROADMAP's /quick raw-line ceiling. RAISED 80 -> 100 by plan 08-11 (GATE-01): /quick now " +
@@ -308,6 +316,13 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
  * per-file budget alone is insufficient.
  */
 const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[] = [
+	{
+		dir: ".pi/extensions/background-tasks",
+		budget: 10350,
+		why: "08.1-05 (UPG-04) -- vendored pi-background-tasks@2.6.9 trimmed to the process feature (D-02); " +
+			"upstream's source, not authored logic (PROVENANCE.md lists every file and deviation). Measured 10345 raw " +
+			"lines across 14 files 2026-10-13, rounded up to the next ten",
+	},
 	{
 		dir: WORKFLOWS_DIR,
 		budget: 480,

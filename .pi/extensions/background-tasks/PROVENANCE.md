@@ -126,7 +126,7 @@ Commands registered: `/bg`, `/tasks`, `/bg-tasks`, `/bg-clear`, `/jobs`,
 
 - `src/fusion-extension.ts`, `src/core/fusion/**`, `src/delegate-extension.ts`,
   `src/core/delegate/**` (read-only delegated agents and Fusion workflows;
-  duplicate `pi-subagents`).
+  duplicate the separately installed subagents extension).
 - `src/core/attested-pi-run.ts`, `src/core/attested-pi-contract.ts` (attested
   Pi runs).
 - `src/core/anthropic-attribution.ts`, `src/core/anthropic-attribution-path.ts`

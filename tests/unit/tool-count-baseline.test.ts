@@ -137,34 +137,14 @@ const TOOL_COUNT_BASELINE: readonly ToolCountRow[] = [
 			"-- see this file's own docstring, cited with file:line",
 	},
 	{
-		source: "pi-background-tasks",
-		kind: "npm",
-		toolNames: [
-			"bg_run",
-			"bg_run_pi_attested",
-			"bg_status",
-			"bg_logs",
-			"bg_kill",
-			"bg_delegate",
-			"bg_result",
-			"fusion_reason",
-			"fusion_investigate",
-			"fusion_research",
-			"fusion_validate",
-		],
+		source: ".pi/extensions/background-tasks/index.ts",
+		kind: "vendored",
+		toolNames: ["bg_run", "bg_status", "bg_logs", "bg_kill"],
 		promptMetadata: true,
-		why: "EXT-05 background bash -- all eleven registered unconditionally inside " +
-			"backgroundTasksExtension() (src/extension.ts:206, the manifest's " +
-			"./extensions/background-tasks.ts entry): 5 bg_* at src/extension.ts:682,767,832,863,908; " +
-			"registerFusionExtension(pi,...) called at src/extension.ts:232 registers the 4 fusion_* tools " +
-			"(fusion-extension.ts:1179,1197,1216,1236); registerDelegateExtension(pi,...) called at " +
-			"src/extension.ts:241 registers bg_delegate/bg_result (delegate-extension.ts:340,516). " +
-			"Decision D-07-B: bg_delegate, bg_result, fusion_reason, fusion_investigate, fusion_research and " +
-			"fusion_validate -- six tools -- duplicate pi-subagents' own delegation/multi-model-reasoning " +
-			"surface and cannot be filtered by any file-path glob, because both calls sit inside the same " +
-			"unconditional extension-init function as the four wanted bg_* tools. Accepted as unavoidable " +
-			"overhead if this package were ever installed; the single strongest Phase 10 cut target named by " +
-			"this phase. All 11 tools carry both promptSnippet and promptGuidelines.",
+		why: "EXT-05 background bash -- vendored pi-background-tasks@2.6.9, process-only (D-02, 08.1-05). Four tools " +
+			"registered in src/extension.ts (bg_run, bg_status, bg_logs, bg_kill; table in PROVENANCE.md). The delegate/fusion/" +
+			"attested tools that made the npm package cost eleven tools are not vendored. Confirmed by grep: " +
+			"registerTool( appears exactly four times in the vendored tree. All four carry promptSnippet and promptGuidelines.",
 	},
 	{
 		source: "@narumitw/pi-lsp",
@@ -307,7 +287,7 @@ function extractRegisteredToolNames(text: string): string[] {
 	let match: RegExpExecArray | null = callSite.exec(text);
 	while (match !== null) {
 		const window = text.slice(match.index, match.index + 400);
-		const nameMatch = /name:\s*"([^"]+)"/.exec(window);
+		const nameMatch = /name:\s*["']([^"']+)["']/.exec(window);
 		if (!nameMatch) {
 			throw new Error(
 				`registerTool( call at index ${match.index} has no name: "..." within a 400-char window -- ` +
@@ -454,29 +434,15 @@ describe("tool-count-baseline Direction 3 -- completeness, both ways, both sides
 	});
 });
 
-describe("tool-count-baseline Direction 4 -- the Phase 10 handoff, made explicit and greppable", () => {
-	const bgTasksRow = TOOL_COUNT_BASELINE.find((row) => row.source === "pi-background-tasks");
+describe("tool-count-baseline Direction 4 -- vendored background tasks stay process-only", () => {
+	const bgTasksRow = TOOL_COUNT_BASELINE.find((row) => row.source === ".pi/extensions/background-tasks/index.ts");
 
-	it("a pi-background-tasks row exists (vacuity guard for this direction)", () => {
-		expect(bgTasksRow, "no pi-background-tasks row in TOOL_COUNT_BASELINE").toBeDefined();
+	it("a vendored background-tasks row exists (vacuity guard for this direction)", () => {
+		expect(bgTasksRow, "no .pi/extensions/background-tasks row in TOOL_COUNT_BASELINE").toBeDefined();
 	});
 
-	it("lists all eleven tools", () => {
-		expect(bgTasksRow?.toolNames.length).toBe(11);
-	});
-
-	it("its why names the six delegate/fusion tools as redundant with pi-subagents and unfilterable, citing src/extension.ts:232 and :241", () => {
-		const why = bgTasksRow?.why ?? "";
-		expect(why.includes("bg_delegate")).toBe(true);
-		expect(why.includes("bg_result")).toBe(true);
-		expect(why.includes("fusion_reason")).toBe(true);
-		expect(why.includes("fusion_investigate")).toBe(true);
-		expect(why.includes("fusion_research")).toBe(true);
-		expect(why.includes("fusion_validate")).toBe(true);
-		expect(why.includes("pi-subagents")).toBe(true);
-		expect(why.includes("src/extension.ts:232")).toBe(true);
-		expect(why.includes("src/extension.ts:241")).toBe(true);
-		expect(why.toLowerCase().includes("cannot be filtered")).toBe(true);
+	it("lists exactly the four process tools and none of the dropped delegate/fusion/attested tools", () => {
+		expect([...(bgTasksRow?.toolNames ?? [])].sort()).toEqual(["bg_kill", "bg_logs", "bg_run", "bg_status"]);
 	});
 });
 

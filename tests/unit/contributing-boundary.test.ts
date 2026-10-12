@@ -260,6 +260,11 @@ const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [
 	".pi/extensions/todo.ts",
 	".pi/extensions/questionnaire.ts",
 	".pi/extensions/quality/index.ts",
+	// 08.1-05 (UPG-04): vendored pi-background-tasks@2.6.9, process-only. (a) the model must start, poll, read and
+	// stop long-running commands mid-turn, which no command or skill can do; (b) four tools, schema cost measured
+	// by tests/unit/tool-count-baseline.test.ts (all four carry promptSnippet/promptGuidelines); (c) a skill
+	// cannot hold a live process handle. The 7 delegate/fusion tools of the npm package are NOT vendored.
+	".pi/extensions/background-tasks/src/extension.ts",
 ];
 
 /** Tracked text sources under `.pi/extensions/`, read from the index's view. */

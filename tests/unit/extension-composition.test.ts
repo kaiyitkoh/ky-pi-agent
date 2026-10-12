@@ -105,9 +105,10 @@ const CAPABILITY_SOURCES: readonly CapabilitySource[] = [
 	},
 	{
 		capability: "background bash",
-		kind: "npm",
-		evidence: "pi-background-tasks",
-		why: "EXT-05 -- no bundled Pi example covers background bash; packages[] pins pi-background-tasks@2.4.2 (bg_run/bg_status/bg_logs/bg_kill plus 7 unavoidable delegate/fusion tools, decision D-07-B)",
+		kind: "vendored",
+		evidence: ".pi/extensions/background-tasks/index.ts",
+		npmAlternative: "pi-background-tasks",
+		why: "EXT-05 -- no bundled Pi example covers background bash; pi-background-tasks@2.6.9 is vendored process-only (D-02, 08.1-05): bg_run/bg_status/bg_logs/bg_kill, no delegate/fusion/attested tools",
 	},
 	{
 		capability: "LSP diagnostics",

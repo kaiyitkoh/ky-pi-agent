@@ -992,10 +992,11 @@ entry and cannot be substituted.
 
 ## Phase 7 — Composed Extensions, Pinned & Reviewed
 
-Phase 7 composed five pinned npm packages (`pi-subagents@0.76.1`,
-`pi-background-tasks@2.4.2`, `@narumitw/pi-lsp@0.49.9`, `pi-web-access@0.38.0`,
-`pi-session-finder@0.5.6`) with five vendored Pi-bundled extensions
-(`.pi/extensions/{todo,questionnaire,plan-mode,loop-police,checkpoint}`), wired
+Phase 7 composed four pinned npm packages (`pi-subagents@0.76.1`,
+`@narumitw/pi-lsp@0.49.9`, `pi-web-access@0.38.0`, `pi-session-finder@0.5.6`)
+with six vendored extensions
+(`.pi/extensions/{todo,questionnaire,plan-mode,loop-police,checkpoint,background-tasks}`;
+`background-tasks` is `pi-background-tasks@2.6.9` vendored process-only in 08.1-05), wired
 the worktree-isolation setup hook the subagent runner needs, and closed
 EXT-01 through EXT-08 and EXT-10 against real pinned source rather than a
 fixture: `docs/EXTENSIONS.md`'s Subagent capability evidence table
@@ -1163,28 +1164,27 @@ assumed absent.
 **Procedure, on the work laptop, with a human physically present to satisfy
 the package-legitimacy gate:**
 
-1. Re-confirm each of the five pinned specs' identity against the registry
+1. Re-confirm each of the four pinned specs' identity against the registry
    and repository pages named in `docs/EXTENSIONS.md`'s per-package
    legitimacy evidence table — that review is current as of 2026-08-14/15 and
    should be re-run if this procedure runs materially later, since the
    ecosystem ships 13-16 releases/month.
 2. `pi install -l npm:pi-subagents@0.76.1`
-3. `pi install -l npm:pi-background-tasks@2.4.2`
-4. `pi install -l npm:@narumitw/pi-lsp@0.49.9`
-5. `pi install -l npm:pi-web-access@0.38.0`
-6. `pi install -l npm:pi-session-finder@0.5.6`
-7. `pi list`
-8. Reconcile step 7's output against `.pi/settings.json`'s `packages[]`:
+3. `pi install -l npm:@narumitw/pi-lsp@0.49.9`
+4. `pi install -l npm:pi-web-access@0.38.0`
+5. `pi install -l npm:pi-session-finder@0.5.6`
+6. `pi list`
+7. Reconcile step 6's output against `.pi/settings.json`'s `packages[]`:
    every spec must appear at its pinned version, and `pi list` must contain
    nothing that `packages[]` does not declare. Record the verdict as `MATCH`
    or an itemised `MISMATCH` — never "looks right".
-9. Re-run `sh bin/bootstrap.sh --assert-hardening` and confirm it still exits
+8. Re-run `sh bin/bootstrap.sh --assert-hardening` and confirm it still exits
    0 — an install that silently rewrote an `.npmrc` is exactly the kind of
    regression this repository has caught before.
-10. `npx vitest run tests/unit/extension-pins.test.ts`
+9. `npx vitest run tests/unit/extension-pins.test.ts`
 
-**Expected output.** Step 7 lists all five specs at their pinned versions and
-nothing else project-scoped. Step 9 exits 0. Step 10 exits 0, and its own
+**Expected output.** Step 6 lists all four specs at their pinned versions and
+nothing else project-scoped. Step 8 exits 0. Step 9 exits 0, and its own
 Direction 4 ("installed-but-undeclared") now resolves through its real branch
 for the first time, because `.pi/npm/` exists — record whether it passed
 through the real branch or the "confirmed absent" branch this time, since

@@ -84,10 +84,6 @@ const EXPECTED_PACKAGES: readonly ExpectedPackage[] = [
 		why: "subagent isolation, worktree spawning, background execution, contact_supervisor escalation",
 	},
 	{
-		spec: "npm:pi-background-tasks@2.4.2",
-		why: "bg_run/bg_status/bg_logs/bg_kill background bash",
-	},
-	{
 		spec: "npm:@narumitw/pi-lsp@0.49.9",
 		why: "lsp_diagnostics/lsp_fix, a 2-tool LSP diagnostics bridge",
 	},
