@@ -204,14 +204,16 @@ function destinationIsProtected(dst: string, protectedBranches: readonly string[
 function pushRefusal(args: readonly string[], configOverrides: readonly string[], protectedBranches: readonly string[]): string | undefined {
 	if (configOverrides.some((c) => PUSH_CONFIG_KEY.test(c))) return "overrides push or remote config with -c";
 	if (args.some((a) => PUSH_EVERY_BRANCH_FLAGS.has(a))) return "pushes every branch, protected ones included";
-	const deleting = args.includes("--delete") || args.includes("-d");
 	const positionals: string[] = [];
 	let remoteGiven = false;
+	let deleting = false;
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
 		if (PUSH_VALUE_FLAGS.has(a)) {
 			remoteGiven ||= a === "--repo";
 			i++;
+		} else if (a === "--delete" || a === "-d") {
+			deleting = true;
 		} else if (a.startsWith("--repo=")) {
 			remoteGiven = true;
 		} else if (/^-[^-]/.test(a) && a.length > 2 && a.includes("o")) {
