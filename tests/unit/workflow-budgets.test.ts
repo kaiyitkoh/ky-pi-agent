@@ -500,7 +500,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 3810,
+		budget: 3130,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
@@ -537,9 +537,9 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 				"RAISED 3750 -> 3810 by plan 09-12 (QUAL-08): gates.ts grew QUALITY_MECHANISMS, WorkflowId, " +
 				"GateDepth, GATE_DEPTH_BY_WORKFLOW and gateDepthFor -- the pure gate-depth selector, added beside " +
 				"shouldRunDesignReview in the same family (426 -> 486); no other file in this directory changed. " +
-				"Re-measured 3,808 raw lines across the same 8 files 2026-08-16 (advisor.ts 198, calibration.ts " +
-				"249, gates.ts 486, index.ts 431, review-schema.ts 580, reviewer.ts 425, rules.ts 890, verdict.ts " +
-				"549), rounded up to the next ten",
+				"Re-measured 3,123 raw lines across the same 8 files 2026-08-16 (advisor.ts 198, calibration.ts " +
+				"249, gates.ts 486, index.ts 431, review-schema.ts 392, reviewer.ts 425, rules.ts 631, verdict.ts " +
+				"311), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/providers",
