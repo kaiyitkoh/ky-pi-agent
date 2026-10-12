@@ -407,6 +407,7 @@ Plans:
 **Plans:** 7/7 plans complete
 
 **Success Criteria:**
+
 1. Pi family (`pi-coding-agent`, `pi-ai`, `pi-tui`, `pi-agent-core`) pinned to exactly 1.1.0 in devDependencies; `typebox`/`vitest` match Pi's own pins; global `pi` reinstalled at 1.1.0 and `~/.pi/agent/settings.json` `piPinned` updated (RUNBOOK entry if it needs the user).
 2. `tests/helpers/faux.ts` and every test using the provider context migrated to `TranscriptContext` + `getCurrentSystemPrompt()`/`getCurrentTools()`; diagnostics (`wire`, `budget`, `call-model`), `harness`, `routing` re-verified against 1.1.0 types; stale `[VERIFIED: ... 0.84.1 ...]` citations updated or removed.
 3. Safety guard covers the `powershell` tool and codemode nested calls, or those built-ins are disabled by default with a test proving it; allowlist/subagent-block tests account for the new built-in tools.
@@ -414,6 +415,7 @@ Plans:
 5. `vitest.config.ts` caps workers (`maxWorkers: 2`); `tsc --noEmit` and the full suite pass once at phase verification.
 
 Plans:
+
 - [x] 08.1-01-PLAN.md — vitest maxWorkers 2, Pi 1.1.0 family + typebox/vitest pins, operative version strings, global pi reinstall via bootstrap
 - [x] 08.1-02-PLAN.md — faux helpers + provider-context tests migrated to TranscriptContext; diagnostics/harness/routing re-verified
 - [x] 08.1-03-PLAN.md — safety hook: deny powershell/MCP/codemode/tool_search, bg_run mapped to bash, nested-call proof, built-ins disabled
@@ -430,12 +432,14 @@ Plans:
 **Plans:** 13 plans
 
 **Success Criteria:**
+
 1. Root `AGENTS.md` exists with the code-comment rules (≤15 lines) and other cross-agent conventions; `CLAUDE.md` begins with `@AGENTS.md` so Claude Code and Pi read the same rules with no duplication.
 2. The harness delivers the comment rules to every project Pi runs in (mechanism chosen from Pi 1.1.0 source), not only this repo.
 3. A vitest check fails on plan/requirement/review IDs inside comments in authored `.pi/extensions/**` files (vendored files exempt), and reports per-file comment ratio.
 4. One-off cleanup pass across authored extensions removes history, IDs and narration while keeping real WHY (safety invariants, Pi source facts); overall comment ratio drops from 55% to ≤35%; no behavioural change (typecheck + targeted tests green).
 
 Plans:
+
 - [ ] 08.2-01-PLAN.md — comment-rules constant + harness before_agent_start section, AGENTS.md, CLAUDE.md @AGENTS.md, CMT reqs, RB-08-04
 - [ ] 08.2-02-PLAN.md — AST comment scanner, ID gate with PENDING_CLEANUP ratchet, ratio report, comment-only transpile verifier
 - [ ] 08.2-03-PLAN.md — cleanup: diagnostics index/budget/call-model/wire
@@ -449,6 +453,12 @@ Plans:
 - [ ] 08.2-11-PLAN.md — cleanup: providers + qoder
 - [ ] 08.2-12-PLAN.md — cleanup: grill + plan-ceremony (ratchet empties)
 - [ ] 08.2-13-PLAN.md — empty-ratchet lock, 35% aggregate check, tsc + single full-suite run, sign-off
+
+**Cross-cutting constraints:**
+
+- Emitted JavaScript of every file touched (comments removed) is byte-identical to the plan's base commit, and NEVER THROWS / quality-allow: counts did not drop
+- Workflow and directory budgets for the touched files equal the new measured counts
+- Their combined comment ratio is 33% or less
 
 ### Phase 9: Ceremonial Workflows
 
@@ -617,14 +627,17 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 **Requirements**: TBD (user decision 2026-10-12: option (b) opt-in, official skill not the `openspec-pi` wrapper)
 
 **Success Criteria:**
+
 1. `@fission-ai/openspec` CLI pinned to an exact reviewed version (1.14.1 at research time; re-check), telemetry disabled (`OPENSPEC_TELEMETRY=0`).
 2. Official skills installed at user level (`~/.pi/agent/skills/` via `openspec init --tools pi` or equivalent), expanded profile, with `disable-model-invocation: true` so they add zero per-turn prompt cost; not committed into the repo's `.pi/` (would trip workflow-budget tests).
 3. Safety guard classifies `openspec` CLI calls correctly (archive must not trip protected-path rules); `openspec/` stays out of this public repo.
 4. Bootstrap/runbook documents install + upgrade; third-party wrapper `openspec-pi` evaluated and rejected or vendored with justification.
+
 **Depends on:** Phase 9 (runs before Phase 11, which awaits a user decision on terminal vs GUI front-end)
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (run /gsd-plan-phase 12 to break down)
 
 ---
