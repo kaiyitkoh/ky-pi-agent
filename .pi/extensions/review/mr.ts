@@ -4,7 +4,6 @@
  */
 import { spawnSync } from "node:child_process";
 
-import { commandFor } from "../../lib/win-quote.ts";
 import { redactString } from "../diagnostics/redact.ts";
 import type { SpecArtifact } from "../grill/spec-schema.ts";
 import type { PlanArtifact } from "../plan-ceremony/plan-schema.ts";
@@ -14,7 +13,9 @@ import { PROTECTED_BRANCHES } from "../safety/index.ts";
 
 export const MR_TARGET_BRANCH = "staging";
 export const MR_TARGET_BRANCH_FLAG = "--target-branch";
-export const MR_BODY_FILE_FLAG = "--description-file";
+export const MR_BODY_FLAG = "--description";
+/** Windows caps a whole command line at 32,767 characters (CreateProcess); leave room for the rest of the argv. */
+export const MAX_MR_BODY_CHARS = 30_000;
 
 export const AI_AUTHORSHIP_DISCLOSURE =
 	"Disclosure: this change and this description were written with AI assistance and checked by an automated reviewer pass.";
@@ -66,12 +67,18 @@ export function buildMrBody(input: MrBodyInput): string {
 	return redactString(lines.join("\n"));
 }
 
-/** Explicit target always; the body travels as a file so no body text reaches a command line. */
-export function mrCreateArgv(input: { targetBranch: string; title: string; bodyFile: string }): readonly string[] {
-	return ["mr", "create", MR_TARGET_BRANCH_FLAG, input.targetBranch, "--title", input.title, MR_BODY_FILE_FLAG, input.bodyFile];
+export interface MrInput {
+	readonly targetBranch: string;
+	readonly title: string;
+	readonly body: string;
 }
 
-/** Titles reach a Windows shell string; keep only characters with no cmd.exe meaning. */
+/** Target first, so no earlier value-taking flag can swallow it; the body is one argv element and never meets a shell. */
+export function mrCreateArgv(input: MrInput): readonly string[] {
+	return ["mr", "create", MR_TARGET_BRANCH_FLAG, input.targetBranch, "--title", input.title, MR_BODY_FLAG, input.body];
+}
+
+/** Keep only plain characters, so a title can never read as a flag cluster or carry control text. */
 export function sanitizeTitle(raw: string): string {
 	const clean = raw.replace(/[^A-Za-z0-9 .,:/()_-]/g, " ").replace(/\s+/g, " ").trim().slice(0, 72);
 	return clean.length > 0 ? clean : "Change";
@@ -86,13 +93,20 @@ export type MrOutcome =
 
 export interface OpenMrDeps {
 	readonly exec: MrExec;
-	readonly isWindows: boolean;
 }
 
-/** Real executor; Windows needs a shell for .cmd shims, which commandFor makes safe by quoting into one string. */
-export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined, isWindows: boolean): MrExec {
+const GLAB_TIMEOUT_MS = 60_000;
+
+/**
+ * Real executor, never through a shell: the body is free text, and cmd.exe would expand `%VAR%` and metacharacters
+ * in it. glab ships as a native executable; a `.cmd` shim is not found without a shell and is reported, not run.
+ */
+export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined): MrExec {
 	return (file, args) => {
-		const r = spawnSync(file, args, { cwd, env, encoding: "utf-8", shell: isWindows, timeout: 60_000, windowsHide: true });
+		const r = spawnSync(file, args, { cwd, env, encoding: "utf-8", shell: false, timeout: GLAB_TIMEOUT_MS, windowsHide: true });
+		if (r.error !== undefined) {
+			return { status: null, stdout: "", stderr: `${file} could not be started without a shell (${r.error.message}); install glab as a native executable on PATH` };
+		}
 		return { status: r.status, stdout: r.stdout ?? "", stderr: r.stderr ?? "" };
 	};
 }
@@ -101,16 +115,18 @@ export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined, isWin
  * The only place glab runs. Order is binding: classify first, execute only on allow, because a block that still
  * executes is not a block.
  */
-export function openMr(input: { targetBranch: string; title: string; bodyFile: string }, deps: OpenMrDeps): MrOutcome {
+export function openMr(input: MrInput, deps: OpenMrDeps): MrOutcome {
+	if (input.body.length > MAX_MR_BODY_CHARS) {
+		return { kind: "refused", reason: `the MR body is ${input.body.length} characters, over the ${MAX_MR_BODY_CHARS}-character command-line limit -- not truncating evidence` };
+	}
 	const argv = mrCreateArgv(input);
 	const [subcommand = "", ...rest] = argv;
 	const verdict = classifyGlabInvocation({ subcommand, args: rest }, PROTECTED_BRANCHES);
 	if (verdict.kind === "block") return { kind: "refused", reason: verdict.reason };
 
-	const [file, args] = commandFor("glab", [...argv], deps.isWindows);
-	const r = deps.exec(file, args);
+	const r = deps.exec("glab", [...argv]);
 	return r.status === 0 ? { kind: "opened", stdout: r.stdout } : { kind: "failed", code: r.status, stderr: r.stderr };
 }
 
-// This proves classification and the argv that would be sent. It cannot show that GitLab accepts the body-file
-// flag, that the target exists, or that server-side branch protection is configured.
+// This proves classification and the argv that would be sent. It cannot show that GitLab accepts the request,
+// that the target exists, or that server-side branch protection is configured.

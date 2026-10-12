@@ -418,8 +418,8 @@ path would be a false claim.
 **What these do and do not prove.** The offline tests prove the gates, the
 renderers, the argv classification and the packet arithmetic against scripted
 input and temp git repositories. They do not prove that a model drives the
-four commands well, that GitLab accepts the MR, that the `--description-file`
-flag exists in the installed glab, or that a subagent spawns. The packet-size
+four commands well, that GitLab accepts the MR, that the installed glab
+accepts `--description`, or that a subagent spawns. The packet-size
 figure of -447 estimated tokens (134 against 581, `Math.ceil(chars / 4)`, not
 a tokenizer) is one fixture's estimate, and the tests assert its arithmetic,
 never its sign.

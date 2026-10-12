@@ -1576,7 +1576,7 @@ Phase 9 built `/grill`, `/plan`, `/execute` and `/review` and proved each offlin
 3. Inspect the result: `glab mr view <iid>`
 4. Record whether the MR opened, its target branch, and whether the body matches the evidence in PROGRESS.md.
 
-**Expected output.** The MR exists, its target is `staging`, and its description carries the evidence-built body with the disclosure line. Open question this run settles: `mr.ts` passes the body with `--description-file`, and that flag name has never been checked against a real glab. If step 1 shows no such flag, `/review` fails on a real MR even though the stub passes, and that is a bug to fix in `mr.ts`. `/review` diffs against `git merge-base HEAD staging`, so the run also needs a local `staging` ref.
+**Expected output.** The MR exists, its target is `staging`, and its description carries the evidence-built body with the disclosure line. `mr.ts` passes the body as one argv element after `--description` (glab's documented `-d/--description`), spawning glab with no shell on every platform; this run confirms the installed glab accepts it and is a native executable on PATH (a `.cmd` shim is reported as not startable, never run through `cmd.exe`). `/review` diffs against `git merge-base HEAD staging`, so the run also needs a local `staging` ref.
 
 **Offline proxy:** `tests/integration/review-mr.test.ts` drives the MR step against an injected executor and a stubbed `glab` on PATH. It proves the harness classifies the argv before executing and always names an explicit staging target. It proves nothing about GitLab accepting the request, the target existing, or server-side branch protection (`RB-04-01`).
 

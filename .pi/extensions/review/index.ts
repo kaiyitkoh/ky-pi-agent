@@ -3,8 +3,7 @@
  * writes REVIEW.md and opens the MR through the glab classifier. Registers one command, zero tools.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workDir } from "../../lib/work-artifacts.ts";
@@ -111,19 +110,12 @@ export default function (pi: ExtensionAPI): void {
 					if (!approved) return void ctx.ui.notify("review: MR not opened -- approval declined", "warning");
 				}
 
-				const tmp = mkdtempSync(join(tmpdir(), "kypi-mr-"));
-				try {
-					const bodyFile = join(tmp, "body.md");
-					writeFileSync(bodyFile, buildMrBody({ spec: spec.spec, plan: plan.plan, progress, review }), "utf-8");
-					const title = sanitizeTitle(spec.spec.goal.split("\n")[0] ?? "");
-					const isWindows = process.platform === "win32";
-					const out = openMr({ targetBranch: MR_TARGET_BRANCH, title, bodyFile }, { exec: spawnExec(ctx.cwd, undefined, isWindows), isWindows });
-					if (out.kind === "refused") return fail(`review: MR refused -- ${out.reason}`);
-					if (out.kind === "failed") return fail(`review: glab exited ${out.code}: ${out.stderr}`);
-					ctx.ui.notify(`review: MR opened against ${MR_TARGET_BRANCH}\n${out.stdout}`, "info");
-				} finally {
-					rmSync(tmp, { recursive: true, force: true });
-				}
+				const body = buildMrBody({ spec: spec.spec, plan: plan.plan, progress, review });
+				const title = sanitizeTitle(spec.spec.goal.split("\n")[0] ?? "");
+				const out = openMr({ targetBranch: MR_TARGET_BRANCH, title, body }, { exec: spawnExec(ctx.cwd, undefined) });
+				if (out.kind === "refused") return fail(`review: MR refused -- ${out.reason}`);
+				if (out.kind === "failed") return fail(`review: glab exited ${out.code}: ${out.stderr}`);
+				ctx.ui.notify(`review: MR opened against ${MR_TARGET_BRANCH}\n${out.stdout}`, "info");
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
 			}
