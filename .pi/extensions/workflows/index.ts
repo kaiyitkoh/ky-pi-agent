@@ -10,6 +10,7 @@ import { classifyGitInvocation, currentBranch, currentSha, currentTree } from ".
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
 import { disarmExecuteRun, executeRunContext } from "../execute/progress.ts";
+import { claimWorkflow } from "../../lib/active-workflow.ts";
 
 export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("quick", {
@@ -44,6 +45,7 @@ export default function (pi: ExtensionAPI): void {
 					refundQualityCost({ ms: gate.totalMs });
 					return void ctx.ui.notify(gate.report, "error");
 				}
+				claimWorkflow("quick");
 				startRun(ctx.cwd, currentSha(ctx.cwd), currentTree(ctx.cwd)); // baseTree captured in the same try, so a throw refuses via the catch and never arms a run
 				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
 			} catch (err) {

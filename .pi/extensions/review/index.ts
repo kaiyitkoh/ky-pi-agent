@@ -6,6 +6,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { claimWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
 import { acceptedEntries, allowanceOf, pinnedAllowance, readLedger } from "../execute/ledger.ts";
 import { uncommittedPaths } from "../execute/progress.ts";
@@ -50,6 +51,7 @@ export default function (pi: ExtensionAPI): void {
 					return fail(candidates.length === 0 ? "review: no .pi/work/<slug>/PROGRESS.md found -- run /execute first" : `review: several runs exist (${candidates.join(", ")}) -- pass one: /review <slug>`);
 				}
 				const slug = arg !== "" ? arg : (candidates[0] as string);
+				claimWorkflow("review");
 				const dir = workDir(ctx.cwd, slug);
 
 				const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES });

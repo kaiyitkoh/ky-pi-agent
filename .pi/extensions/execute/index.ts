@@ -5,6 +5,7 @@
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { claimWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
@@ -112,6 +113,7 @@ export default function (pi: ExtensionAPI): void {
 				baseSha = pinned ?? headSha;
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
 				errorCount = 0;
+				claimWorkflow("execute");
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });
 				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nTouch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
 			} catch (err) {

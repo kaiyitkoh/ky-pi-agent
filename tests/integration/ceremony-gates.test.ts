@@ -12,6 +12,7 @@ import { HARD_QUESTION_BUDGET } from "../../.pi/extensions/grill/scorecard.ts";
 import { validateGatedSpec } from "../../.pi/extensions/grill/spec-gate.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import planExtension from "../../.pi/extensions/plan-ceremony/index.ts";
+import { claimWorkflow } from "../../.pi/lib/active-workflow.ts";
 import { makeTempRepo } from "../helpers/git.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
@@ -127,6 +128,21 @@ describe("/grill -- the settle hook gates whatever SPEC.md the model wrote", () 
 		expect(h.notes.at(-1)?.level).toBe("error");
 		expect(h.fire("before_agent_start")[0]).toBeUndefined();
 	});
+
+	it("stands down once another workflow command claims the session, and at session_start", async () => {
+		const h = harness(grillExtension as (pi: unknown) => void);
+		await h.run("grill", "add the a module");
+		expect(h.fire("before_agent_start")[0]).toBeDefined();
+		claimWorkflow("execute");
+		expect(h.fire("before_agent_start")[0], "an /execute turn must not carry the grill brief").toBeUndefined();
+		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 1);
+		h.fire("agent_end");
+		expect(h.notes, "a retired run gates nothing").toHaveLength(0);
+
+		await h.run("grill", "--resume");
+		h.fire("session_start");
+		expect(h.fire("before_agent_start")[0]).toBeUndefined();
+	});
 });
 
 describe("/plan -- refuses an ungated SPEC and gates whatever PLAN.md the model wrote", () => {
@@ -155,5 +171,29 @@ describe("/plan -- refuses an ungated SPEC and gates whatever PLAN.md the model 
 		expect(h.notes.at(-1)?.level).toBe("info");
 		expect(readFileSync(join(h.dir, "PLAN.md"), "utf-8")).toContain("## Task List");
 		expect(existsSync(join(h.dir, "PLAN.md"))).toBe(true);
+	});
+
+	it("disarms with an error after the same hard turn budget as /grill", async () => {
+		const h = harness(planExtension as (pi: unknown) => void);
+		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 0);
+		await h.run("plan", SLUG);
+		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R9] Create the a module in src/a.ts | verify: npm test\n", 1);
+		for (let i = 0; i < HARD_QUESTION_BUDGET; i++) h.fire("agent_end");
+		expect(h.notes.at(-1)?.level).toBe("error");
+		expect(h.notes.at(-1)?.text).toContain("turns passed");
+		expect(h.fire("before_agent_start")[0], "a spent /plan injects nothing into later turns").toBeUndefined();
+	});
+
+	it("stands down once another workflow command claims the session", async () => {
+		const h = harness(planExtension as (pi: unknown) => void);
+		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 0);
+		await h.run("plan", SLUG);
+		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R9] Create the a module in src/a.ts | verify: npm test\n", 1);
+		h.fire("agent_end");
+		claimWorkflow("execute");
+		expect(h.fire("before_agent_start")[0]).toBeUndefined();
+		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R1] Create the a module in src/a.ts | verify: npm test\n", 2);
+		h.fire("agent_end");
+		expect(readFileSync(join(h.dir, "PLAN.md"), "utf-8"), "a retired /plan re-renders nothing").not.toContain("## Task List");
 	});
 });

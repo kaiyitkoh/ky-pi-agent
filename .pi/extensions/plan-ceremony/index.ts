@@ -6,7 +6,9 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { claimWorkflow, isActiveWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
+import { HARD_QUESTION_BUDGET } from "../grill/scorecard.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
@@ -74,7 +76,8 @@ export function writePlanIfGated(cwd: string, slug: string, markdown: string): P
 }
 
 export default function (pi: ExtensionAPI): void {
-	let run: { readonly cwd: string; readonly slug: string; lastMtime: number; lastReject?: string } | undefined;
+	let run: { readonly cwd: string; readonly slug: string; lastMtime: number; turns: number; lastReject?: string } | undefined;
+	const armed = () => (run = run !== undefined && isActiveWorkflow("plan") ? run : undefined);
 
 	pi.registerCommand("plan", {
 		description: "Turn a SPEC.md that has passed its own gate into a coverage-complete PLAN.md task list",
@@ -106,7 +109,8 @@ export default function (pi: ExtensionAPI): void {
 
 			if (!ctx.isIdle()) return void ctx.ui.notify("plan: a turn is already in flight -- wait for it to finish", "error");
 
-			run = { cwd: ctx.cwd, slug, lastMtime: 0 };
+			claimWorkflow("plan");
+			run = { cwd: ctx.cwd, slug, lastMtime: 0, turns: 0 };
 			pi.sendUserMessage(
 				`Read the "plan-ceremony" skill before doing anything else, then write a PLAN.md task list for ` +
 					`.pi/work/${slug}/SPEC.md, covering every requirement id declared in its §3. Work in .pi/work/${slug}/.`,
@@ -114,25 +118,34 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.on("session_start", () => void (run = undefined));
+
 	pi.on("before_agent_start", () => {
-		if (run?.lastReject === undefined) return undefined;
-		return { message: { customType: "plan-gate", content: `The last ${PLAN_FILE_NAME} was refused by the gate: ${run.lastReject}`, display: false } };
+		const reject = armed()?.lastReject;
+		return reject === undefined ? undefined : { message: { customType: "plan-gate", content: `The last ${PLAN_FILE_NAME} was refused by the gate: ${reject}`, display: false } };
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
-		if (run === undefined) return;
-		const current = run;
+		const current = armed();
+		if (current === undefined) return;
+		current.turns += 1;
 		try {
 			const file = join(workDir(current.cwd, current.slug), PLAN_FILE_NAME);
-			if (!existsSync(file) || statSync(file).mtimeMs === current.lastMtime) return;
-			const gated = writePlanIfGated(current.cwd, current.slug, readFileSync(file, "utf-8"));
-			current.lastMtime = statSync(file).mtimeMs;
-			if (gated.ok) {
-				run = undefined;
-				return void ctx.ui.notify(`plan: .pi/work/${current.slug}/${PLAN_FILE_NAME} passed every gate and was re-rendered`, "info");
+			if (existsSync(file) && statSync(file).mtimeMs !== current.lastMtime) {
+				const gated = writePlanIfGated(current.cwd, current.slug, readFileSync(file, "utf-8"));
+				current.lastMtime = statSync(file).mtimeMs;
+				if (gated.ok) {
+					run = undefined;
+					return void ctx.ui.notify(`plan: .pi/work/${current.slug}/${PLAN_FILE_NAME} passed every gate and was re-rendered`, "info");
+				}
+				current.lastReject = gated.reason;
+				ctx.ui.notify(`plan: ${PLAN_FILE_NAME} refused -- ${gated.reason}`, "warning");
 			}
-			current.lastReject = gated.reason;
-			ctx.ui.notify(`plan: ${PLAN_FILE_NAME} refused -- ${gated.reason}`, "warning");
+			// The same hard turn budget as /grill, so a plan that never passes cannot stay armed all session.
+			if (current.turns >= HARD_QUESTION_BUDGET) {
+				run = undefined;
+				ctx.ui.notify(`plan: ${HARD_QUESTION_BUDGET} turns passed with no gated ${PLAN_FILE_NAME} -- run /plan again to continue`, "error");
+			}
 		} catch (err) {
 			run = undefined;
 			ctx.ui.notify(`plan: gate not applied -- ${err instanceof Error ? err.message : String(err)}`, "error");

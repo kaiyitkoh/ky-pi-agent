@@ -6,6 +6,7 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { claimWorkflow, isActiveWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
@@ -77,6 +78,8 @@ function turnBrief(run: GrillRun): string {
 
 export default function (pi: ExtensionAPI): void {
 	let run: GrillRun | undefined;
+	/** The armed run, dropped once another workflow command has claimed the session. */
+	const armed = (): GrillRun | undefined => (run = run !== undefined && isActiveWorkflow("grill") ? run : undefined);
 
 	pi.registerCommand("grill", {
 		description: "Interrogate a change into a gated SPEC.md before any plan or code exists",
@@ -118,6 +121,7 @@ export default function (pi: ExtensionAPI): void {
 			if (!ctx.isIdle()) return void ctx.ui.notify("grill: a turn is already in flight -- wait for it to finish", "error");
 
 			// A resume is the user's explicit choice to keep asking, so it starts a fresh budget.
+			claimWorkflow("grill");
 			run = { cwd: ctx.cwd, slug, asked: 0, lastMtime: 0 };
 			const description = task === "--resume" ? `resume the interrogation already in progress in .pi/work/${slug}` : task;
 			pi.sendUserMessage(
@@ -128,14 +132,16 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
+	pi.on("session_start", () => void (run = undefined));
+
 	pi.on("before_agent_start", () => {
-		if (run === undefined) return undefined;
-		return { message: { customType: "grill-turn", content: turnBrief(run), display: false } };
+		const current = armed();
+		return current === undefined ? undefined : { message: { customType: "grill-turn", content: turnBrief(current), display: false } };
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
-		if (run === undefined) return;
-		const current = run;
+		const current = armed();
+		if (current === undefined) return;
 		current.asked += 1;
 		try {
 			const file = join(workDir(current.cwd, current.slug), SPEC_FILE_NAME);
