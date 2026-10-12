@@ -16,8 +16,8 @@ import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import {
-	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort,
-	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, stallDetected, verificationRecord,
+	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, driftBase,
+	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase, stallDetected, verificationRecord,
 } from "./progress.ts";
 
 /** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
@@ -92,8 +92,11 @@ export default function (pi: ExtensionAPI): void {
 				}
 
 				// Base SHA and tree are read in the same try, so a throw refuses and never arms a run.
-				baseSha = currentSha(ctx.cwd);
-				startRun(ctx.cwd, baseSha, currentTree(ctx.cwd));
+				const headSha = currentSha(ctx.cwd);
+				const pinned = driftBase(done);
+				if (pinned === undefined) pinDriftBase(ctx.cwd, slug, headSha);
+				baseSha = pinned ?? headSha;
+				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
 				errorCount = 0;
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });
 				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nTouch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);

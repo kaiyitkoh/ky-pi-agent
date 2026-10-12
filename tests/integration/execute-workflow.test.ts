@@ -285,6 +285,25 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(bytes(progressFile(h))).toBe(before);
 	});
 
+	it("drift is sticky: the next /execute still HALTs on the earlier undeclared commit instead of re-basing past it", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		const before = bytes(progressFile(h));
+		commitIn(h.repo, "src/b.ts", "export const b = 1;\n");
+		verify(h);
+		h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("HALT");
+
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h);
+		h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("HALT");
+		expect(h.notes.at(-1)?.text).toContain("src/b.ts");
+		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
+		expect(bytes(progressFile(h)), "the second arm reuses the pinned base and appends nothing").toBe(before);
+	});
+
 	it("degraded dispatch: with no subagent tool registered the entry records the degraded mode and never claims delegation", async () => {
 		const h = harness();
 		await h.command(SLUG);

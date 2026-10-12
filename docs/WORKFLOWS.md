@@ -388,11 +388,15 @@ account of its own work, and carries a disclosure line.
 PLAN's files-touched, in both directions: drifted (changed, not declared) and
 undelivered (declared, not changed). The reviewer cannot supply it, and a
 review artifact that carries a model-supplied drift field is rejected. An
-empty declaration makes every change drift. `/review` diffs from
-`git merge-base HEAD staging`, because no base SHA is persisted. It reads the
-committed diff only; uncommitted and untracked work is not covered. A pure
-rename shows the new path as changed and the old path, if declared, as
-undelivered.
+empty declaration makes every change drift. `/execute` measures drift from
+the last accepted PROGRESS.md entry, or from the `Drift base:` line it pins in
+PROGRESS.md on a slug's first run, never from the HEAD of a fresh attempt: a
+rejected or halted commit stays in every later diff until it is reverted.
+`/review` diffs from `git merge-base HEAD staging`, and any drifted path needs
+explicit approval before the MR opens. It reads the
+committed diff only; uncommitted and untracked work is not covered. A rename
+reports both paths (`--no-renames`), so a move out of an undeclared path
+drifts.
 
 **Why `/execute` appends only after these checks.** The PROGRESS.md append
 happens only when the unmodified `gateCompletion` accepts, a bash call whose

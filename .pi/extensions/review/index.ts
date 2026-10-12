@@ -103,9 +103,11 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(`review: wrote .pi/work/${slug}/REVIEW.md`, "info");
 
 				const stop = decideWorkflowStop(review);
-				if (stop.stop) {
-					if (!stop.needsApproval) return fail(`review: not opening an MR -- ${stop.reason}`);
-					const approved = await ctx.ui.confirm("Open the MR anyway?", stop.reason);
+				if (stop.stop && !stop.needsApproval) return fail(`review: not opening an MR -- ${stop.reason}`);
+				const drifted = review.scopeDrift?.drifted ?? [];
+				const reasons = [...(stop.stop ? [stop.reason] : []), ...(drifted.length > 0 ? [`changed but not declared in SPEC or PLAN: ${drifted.join(", ")}`] : [])];
+				if (reasons.length > 0) {
+					const approved = await ctx.ui.confirm("Open the MR anyway?", reasons.join("\n"));
 					if (!approved) return void ctx.ui.notify("review: MR not opened -- approval declined", "warning");
 				}
 

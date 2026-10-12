@@ -45,6 +45,25 @@ export function appendProgress(cwd: string, slug: string, entry: ProgressEntry):
 	return file;
 }
 
+const DRIFT_BASE_LINE = /^Drift base: ([0-9a-f]{40})$/m;
+const ENTRY_HEAD_LINE = /^## T\d{3} @ ([0-9a-f]{40})$/gm;
+
+/**
+ * Where drift is measured from: the last accepted entry's SHA, else the base pinned on first arm. A rejected or
+ * halted commit therefore stays inside every later diff until it is reverted, instead of being absorbed by a fresh base.
+ */
+export function driftBase(progress: string): string | undefined {
+	const heads = [...progress.matchAll(ENTRY_HEAD_LINE)];
+	return heads.at(-1)?.[1] ?? DRIFT_BASE_LINE.exec(progress)?.[1];
+}
+
+/** Pin the drift base in PROGRESS.md once, on the slug's first arm; later arms read it back with {@link driftBase}. */
+export function pinDriftBase(cwd: string, slug: string, sha: string): void {
+	const dir = workDir(cwd, slug);
+	mkdirSync(dir, { recursive: true });
+	appendFileSync(join(dir, "PROGRESS.md"), `\nDrift base: ${sha}\n\n`, "utf-8");
+}
+
 export interface DriftAbortInput {
 	readonly attemptedPaths: readonly string[];
 	readonly specExpectedFiles: readonly string[];
