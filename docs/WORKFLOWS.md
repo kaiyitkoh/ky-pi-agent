@@ -311,6 +311,10 @@ says which mechanisms the workflow is allowed to run, not that every run
 exercised them: `/review` runs the deterministic, model-review and
 refute-or-promote mechanisms on a live change and does not run calibration,
 which scores seeded-defect fixtures and has no meaning for a live diff.
+`/execute` runs only the deterministic mechanism, on the base tree and again
+on the committed change. `/grill` and `/plan` consult none of these; their
+gates are the SPEC and PLAN validators. Each command's notice names only the
+mechanisms it actually runs.
 
 | Workflow | Mechanisms |
 |---|---|

@@ -85,7 +85,7 @@ export default function (pi: ExtensionAPI): void {
 					const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
 					if (gate.blocking) return fail(gate.report);
 				}
-				ctx.ui.notify(`execute: gate depth for ${task.id}: ${mechanisms.join(", ")}`, "info");
+				if (mechanisms.includes("deterministic")) ctx.ui.notify(`execute: ${task.id} runs the deterministic gate on the base tree now and on the committed change at settle`, "info");
 
 				const probe = probeSubagentAvailability(registeredToolNames());
 				let brief: string;

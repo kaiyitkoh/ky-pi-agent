@@ -66,7 +66,8 @@ export default function (pi: ExtensionAPI): void {
 				if (mismatch !== undefined) return fail(`review: ${mismatch}`);
 
 				const mechanisms = gateDepthFor("review").mechanisms;
-				ctx.ui.notify(`review: gate depth: ${mechanisms.join(", ")}`, "info");
+				// Calibration scores seeded-defect fixtures and has no meaning for a live diff, so it is never announced here.
+				ctx.ui.notify(`review: running ${mechanisms.filter((m) => m !== "calibration").join(", ")}`, "info");
 
 				let gateReport = "The deterministic stage is outside this workflow's gate depth and did not run.";
 				if (mechanisms.includes("deterministic")) {
