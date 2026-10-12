@@ -2,355 +2,299 @@
 phase: 09-ceremonial-workflows
 reviewed: 2026-10-13T00:00:00Z
 depth: deep
-files_reviewed: 24
+iteration: 3
+files_reviewed: 33
 files_reviewed_list:
   - .pi/extensions/execute/handoff.ts
   - .pi/extensions/execute/index.ts
+  - .pi/extensions/execute/ledger.ts
   - .pi/extensions/execute/progress.ts
   - .pi/extensions/grill/index.ts
   - .pi/extensions/grill/scorecard.ts
   - .pi/extensions/grill/scorecard-parse.ts
+  - .pi/extensions/grill/spec-gate.ts
   - .pi/extensions/grill/spec-schema.ts
   - .pi/extensions/plan-ceremony/index.ts
   - .pi/extensions/plan-ceremony/plan-schema.ts
   - .pi/extensions/plan-ceremony/requirement-ids.ts
   - .pi/extensions/plan-mode/index.ts
+  - .pi/extensions/plan-mode/PROVENANCE.md
   - .pi/extensions/quality/gates.ts
+  - .pi/extensions/quality/index.ts
   - .pi/extensions/quality/review-schema.ts
   - .pi/extensions/review/index.ts
   - .pi/extensions/review/mr.ts
   - .pi/extensions/review/scope-drift.ts
   - .pi/extensions/safety/git.ts
+  - .pi/extensions/safety/paths.ts
   - .pi/extensions/safety/policy.ts
+  - .pi/extensions/workflows/index.ts
+  - .pi/lib/active-workflow.ts
   - .pi/lib/work-artifacts.ts
   - .pi/agents/executor-handoff.md
   - .pi/skills/grill/SKILL.md
   - .pi/skills/plan-ceremony/SKILL.md
   - .pi/skills/review/SKILL.md
   - docs/WORKFLOWS.md
+  - docs/SAFETY.md
+  - docs/RUNBOOK.md
 findings:
-  critical: 7
-  warning: 13
-  info: 7
-  total: 27
+  critical: 2
+  warning: 2
+  info: 5
+  total: 9
 status: issues_found
 ---
 
-# Phase 9: Code Review Report
+# Phase 9: Code Review Report (re-review after fix iteration 2, final)
 
 **Reviewed:** 2026-10-13
 **Depth:** deep
-**Files Reviewed:** 24 production/docs files, plus the listed phase-9 tests (checked for vacuity)
+**Files Reviewed:** 33: the 29 files from the prior pass, plus `execute/ledger.ts`, `lib/active-workflow.ts`, `safety/paths.ts` and `quality/index.ts`. To follow call chains I also read `checkpoint/index.ts`, `checkpoint/store.ts`, `checkpoint/git.ts`, `workflows/evidence.ts` and `lib/jsonl.ts`.
 **Status:** issues_found
 
 ## Summary
 
-I traced /grill -> /plan -> /execute -> /review end to end against Pi 1.1.0 source in `node_modules`: `ExtensionRunner.emit` runs handlers in order, `discoverExtensionsInDir` uses unsorted `readdirSync`, and I checked `ToolExecutionEndEvent` and `ui.confirm`. I also ran the git/glab classifiers and `git diff --name-only` against scratch inputs.
+I read all eleven fix commits (`54ae8bc..12348a3`) and traced each one into its callers.
 
-The headline problem: several gates the docs and skills present as enforced either never run in production or can be bypassed:
+How I checked:
+- I ran the real `safety/git.ts` push classifier against 20 edge-case argv forms.
+- I reproduced one bypass against a local bare remote in the scratchpad.
+- I reproduced the `git status` behaviour that the clean-tree rule depends on.
+- I ran one targeted test file: `git-policy.test.ts`, 97 tests passing.
+- No remote was contacted and glab was not run.
 
-- The ambiguity gate, the question budget and the gated SPEC/PLAN writers have no production caller.
-- `driftAbort` cannot see renames.
-- PROGRESS.md writes "Exit code: 0" for a verification command nobody checked was run.
-- Neither /execute nor /review ever runs the deterministic gate over the executor's change.
-- The new `glab mr create` conditional allow takes the first `--target-branch` it sees, but glab honours the last one. That opens an MR-to-`main` bypass for the agent's own bash tool.
+Most fixes are real:
+- **CR-04:** the ledger lives outside the work tree, so PROGRESS.md edits change nothing.
+- **WR-01, WR-02, WR-03, WR-05, WR-06:** fixed.
+- **WR-04:** fixed, with the documented partial.
+- **WR-07:** fixed.
+- **IN-05 (old):** fixed as a side effect.
 
-All bypasses were reproduced with the real modules. glab is not installed on this machine (`which glab` -> not found), so the `--description-file` flag could not be checked locally.
+Two regressions block shipping:
+
+1. **The clean-tree rule (CR-03 fix) fails every `/execute` and `/review` in a real work repo.**
+   - The bundled checkpoint extension writes `<repo>/.pi/state/checkpoints.json` on every `turn_start`.
+   - Nothing in the work repo ignores that file, and `uncommittedPaths` does not exclude it, so every verification run counts as dirty.
+   - The rule exempts `.pi/logs/` instead of ignoring it, so the model's usual `git add -A` commits the harness's wire and evidence logs. Drift then HALTs on them.
+   - This repo's own `.gitignore` hides both problems, and the tests do not load the checkpoint extension.
+2. **The stricter push rule (CR-01 fix) can still be bypassed.**
+   - It reads `--delete`/`-d` anywhere in argv, including as the value of `-o`/`--push-option`.
+   - So `git push -o -d origin feat` passes as a "delete" while git pushes `feat` to whatever `remote.origin.push` names.
+   - I confirmed `feat -> main` against a bare remote.
+
+Two warnings:
+- The change gate reports `typecheck: PASS` for changes tsc never looked at. WORKFLOWS says such changes need approval.
+- The ledger is keyed only by slug in the shared git common dir, so it outlives the slug's `.pi/work/` directory and leaks across worktrees.
+
+Weighed against "don't overcomplicate":
+- The push strictness, the clean-tree rule and `--rebase-base` each earn their keep.
+- The active-workflow slot is 14 lines and earns its keep.
+- The HMAC layer on the ledger adds little over the path guard alone (IN-02). It does not cause real risk, so it is Info only.
+
+Status of the prior findings:
+
+| ID | Verdict |
+|---|---|
+| CR-01 (push refspecs) | Fixed for `:`, `+:`, wildcards, bare pushes, bare sources and `-c`. A new parser bug re-opens a config-routed push (CR-02 below). |
+| CR-02 (gate checks the harness) | Fixed for TS/JS changes. The approval rule misses non-TS changes in a TS-rooted repo (WR-01 below). |
+| CR-03 (working tree vs commit) | Fixed in logic. Regression: harness state makes every tree dirty (CR-01 below). |
+| CR-04 (model-writable state) | Fixed. Staleness issue in WR-02 below. |
+| WR-01 to WR-07 | Fixed. WR-04's second bullet is documented, not implemented, and that is acceptable. |
 
 ## Critical Issues
 
-### CR-01: `glab mr create` target check takes the FIRST target flag; glab honours the LAST, so an MR to `main` is allowed
+### CR-01: Harness state in the work repo makes every `/execute` verification and every `/review` "dirty", and `.pi/logs/` gets committed
 
-**File:** `.pi/extensions/safety/git.ts:265-290` (reached from `policy.ts:142-147` for every agent bash `glab` call, and from `review/mr.ts:107`)
-**Issue:** `extractMrCreateTarget` returns the first `--target-branch`/`-b` it sees. glab parses flags with cobra/pflag, where a repeated string flag overwrites the earlier value, so the last one wins. I ran the real classifier:
-- `mr create --target-branch staging --target-branch main` -> **allow**
-- `mr create -b staging --target-branch=main` -> **allow**
-- `mr create --target-branch=refs/heads/main` -> **allow** (`pushTargetsProtected` strips `refs/heads/`; this does not)
-- `mr create --target-branch "main "` -> **allow** (value not trimmed)
+**File:**
+- `.pi/extensions/execute/progress.ts:252-257` (`uncommittedPaths`) and `:272-285` (`ensureWorkIgnored`)
+- `.pi/extensions/execute/index.ts:144,168-169`
+- `.pi/extensions/review/index.ts:81-82`
+- The writers: `.pi/extensions/checkpoint/index.ts:30-35`, `.pi/extensions/checkpoint/store.ts:46`, `.pi/lib/jsonl.ts:135`
 
-This rule is new in this phase. Before it, every `mr create` fell into the unclassified-block path. The evasion corpus (EV-75..79) has no repeated-flag row, and `docs/SAFETY.md` describes the rule as closed.
-**Fix:** Collect every target occurrence (both forms, plus `-b=X` and `-bX`), normalise each one, and block unless there is exactly one and it is safe:
+**Issue:** Three facts combine:
+- `uncommittedPaths` excludes only `.pi/work` and `.pi/logs`.
+- The checkpoint extension, loaded by default through `"extensions": ["./.pi/extensions"]`, writes `<repo root>/.pi/state/checkpoints.json` on every `turn_start`.
+- `ensureWorkIgnored` adds only `/.pi/work/` to `.git/info/exclude`.
+
+In the user's work repo, which has no `.pi/state/` ignore line, `git status --porcelain --untracked-files=all -- :/ ':(exclude).pi/work' ':(exclude).pi/logs'` prints `?? .pi/state/checkpoints.json`. I reproduced this in a scratch repo. Then:
+- `noteToolEnd` records `dirty: ".pi/state/checkpoints.json"`.
+- `checkVerification` rejects every attempt with "ran on a working tree that is not the commit".
+- Each rejection counts toward `REVISION_CAP`, so the task escalates after three tries.
+- `/review` refuses up front for the same reason.
+
+If the model commits the file to clear the rejection, drift HALTs on an undeclared path.
+
+The second half concerns `.pi/logs/`. The CR-03 fix hides `.pi/logs/` from the status check, but nothing ignores it. Wire, turns, audit and evidence logs land there during every turn, and wire logs carry full provider payloads. A cheap model's habitual `git add -A && git commit` therefore stages them. I confirmed that `add -A` stages both `.pi/logs/wire-*.jsonl` and `.pi/state/checkpoints.json`. Drift then HALTs, and the logs now sit in a local commit on a branch the user may push.
+
+The `/execute` brief never tells the model to stage explicit paths.
+
+The tests pass only because this repo's `.gitignore:79-80` ignores `.pi/logs/` and `.pi/state/`, and the integration tests do not load the checkpoint extension.
+
+**Fix:** Ignore every harness-owned directory in the work repo, then drop the pathspec carve-outs so ignored state is invisible to both `status` and `add -A`:
+
 ```ts
-function extractMrCreateTargets(args: readonly string[]): string[] | undefined {
-  const out: string[] = [];
-  for (let i = 0; i < args.length; i++) {
-    const a = args[i];
-    if (a === "--target-branch" || a === "-b") { const v = args[i + 1]; if (v === undefined || v.startsWith("-")) return undefined; out.push(v); i++; continue; }
-    if (a.startsWith("--target-branch=")) { out.push(a.slice(16)); continue; }
-    if (a.startsWith("-b")) return undefined; // -bmain / -b=main: refuse rather than parse
-  }
-  return out;
+// progress.ts
+const HARNESS_DIRS = [".pi/work/", ".pi/logs/", ".pi/state/"] as const;
+export function ensureHarnessIgnored(cwd: string): string | undefined {
+	// for each dir: git check-ignore -q -- <dir>probe ; append `/${prefix}${dir}` to info/exclude when status === 1
 }
-const norm = (b: string) => b.trim().replace(/^refs\/heads\//, "").toLowerCase();
-// allow only when targets.length === 1 && norm(targets[0]) !== "" && !protected.has(norm(targets[0]))
-```
-Add corpus rows for the repeated-flag, `refs/heads/` and whitespace forms.
-
-### CR-02: `driftAbort` misses renames: a commit that moves or deletes an undeclared file passes
-
-**File:** `.pi/extensions/execute/progress.ts:184-198` (also feeds `review/scope-drift.ts:23-29`)
-**Issue:** `git diff --name-only base..head` has rename detection on by default, so it lists only the destination of a rename. Scratch-repo check: `git mv infra/prod.tf allowed2.ts && git commit` gives `--name-only` = `allowed2.ts` only; `--no-renames` gives `allowed2.ts` plus `infra/prod.tf`. So an executor can delete or move any undeclared file (Terraform, CI config, another service) into a declared path, and `driftAbort` still returns `ok`, so PROGRESS is written. `tests/integration/scope-drift.test.ts` ("a rename is reported by its new path only") locks this in as expected behaviour. The `diff.renames` user config can also change the output.
-**Fix:**
-```ts
-spawnSync("git", ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", `${baseSha}..${headSha}`], ...)
-// split on "\0" instead of "\n"
-```
-Then flip the scope-drift test to assert that both paths are reported.
-
-### CR-03: PROGRESS.md claims "Exit code: 0" for a verification command that nothing checked was run
-
-**File:** `.pi/extensions/execute/index.ts:133`, `.pi/extensions/workflows/index.ts:52-66`, `.pi/extensions/workflows/evidence.ts:61-115`
-**Issue:** `appendProgress` hard-codes `exitCode: 0` and writes `Verification command: <task.verificationCommand>`. Nothing checks that this command was ever run:
-- The evidence gate accepts any non-error tool record whose SHA equals the new HEAD.
-- The recorder reads `currentSha` *after* each tool runs, so the `git commit` bash call records itself at the new HEAD.
-
-A run of "edit file, `git commit -am x`" therefore passes branches (1)-(5). PROGRESS then shows `npm test`, exit 0, plus the commit's own stdout as "output". `/review` forwards this to the reviewer as `gateReport`, and `buildMrBody` publishes it under "## Verification". This fabricated evidence is exactly what the workflow exists to prevent. The happy-path test (`execute-workflow.test.ts`) fires one generic `bash` record and never proves the verification command ran.
-**Fix:** Require evidence of the verification command itself. Capture `tool_call` input for `bash` (keyed by `toolCallId`) during an armed /execute run. Then require at least one non-error `bash` record whose normalised command equals `task.verificationCommand`, executed at the final HEAD. Record that call's exit status and output, not a constant and not the concatenation of every tool output.
-
-### CR-04: The ambiguity gate, question budget and gated writers never run in production
-
-**File:** `.pi/extensions/grill/index.ts:42-59`, `.pi/extensions/plan-ceremony/index.ts:56-73`, `.pi/extensions/grill/scorecard.ts:121,241`, `.pi/extensions/grill/spec-schema.ts:458-597`
-**Issue:**
-- `writeSpecIfGated`, `writePlanIfGated`, `nextQuestionSlot` and `assumptionsFromUnmetFloors` have no production caller. A grep of `.pi/` finds only their definitions; they are imported only by tests.
-- /grill and /plan just call `pi.sendUserMessage`, so the model writes SPEC.md and PLAN.md with the ordinary `write` tool.
-- The downstream re-checks (`/plan`, `/execute`, `/review`) call `validateSpec` only. `validateSpec` never calls `gateAmbiguity` and does not require §3, §6, §7 or §8.
-
-As a result, a SPEC with no scorecard, or with every dimension at 0, flows through to /execute. `execute-workflow.test.ts` itself uses `scorecardBody: "Overall: 0.1"`, which `gateAmbiguity` would reject. The 5-question budget and perspective rotation exist only as skill prose. `.pi/skills/grill/SKILL.md` ("What will refuse you ... `gateAmbiguity`") and `docs/WORKFLOWS.md` section 6 ("SPEC.md must ... have passed its own ambiguity gate") claim enforcement that does not exist.
-**Fix:** Enforce at the consumer. Add an `ambiguity` check to the gate every downstream command runs:
-```ts
-export function validateGatedSpec(md: string): SpecValidation {
-  const v = validateSpec(md); if (!v.ok) return v;
-  const a = gateAmbiguity(parseAmbiguityScorecard(v.spec.scorecardBody));
-  if (!a.ok) return { ok: false, reason: a.reason };
-  if (extractSpecRequirementIds(v.spec.requirementsBody).length === 0) return { ok: false, reason: "§3 declares no R# ids" };
-  return v;
+export function uncommittedPaths(cwd: string): string {
+	const r = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	...
 }
 ```
-Use it in /plan, /execute and /review. Then either delete the uncalled writers or wire them in, and correct the skill and docs.
 
-### CR-05: Drift HALT and rejected runs are not sticky, so the next `/execute` launders the offending commit
+- Call it from `/grill` (which also closes old IN-04), `/execute` and `/review`.
+- Add "stage only the files you changed: `git add <path>...`" to the `/execute` brief.
+- Add an integration test that writes `.pi/state/checkpoints.json` and `.pi/logs/wire-x.jsonl` before the verification run.
 
-**File:** `.pi/extensions/execute/index.ts:95-96,124-132`, `.pi/extensions/review/index.ts:93-103`
-**Issue:**
-- On a gate reject or a drift HALT, the offending commit stays on the branch and only a notification is shown.
-- The next `/execute` for the same task re-arms with `baseSha = currentSha(cwd)`, which already includes that commit. The new attempt's `changedFiles(baseSha, newSha)` never contains the drifted paths, so `driftAbort` passes and PROGRESS records the task.
-- The only remaining check, `/review`'s `compareScope`, writes a "Scope Drift" table, but `decideWorkflowStop` ignores `scopeDrift`. The MR therefore opens without approval even when undeclared files changed.
+### CR-02: `git push -o -d origin feat` passes the push guard as a delete and pushes `feat` to the config-chosen destination
 
-**Fix:** Persist the run's base SHA per slug/task: write it in `.pi/work/<slug>/` on first arm, or record the HALT and refuse until it is resolved. Compute drift from that persisted base, or from the last accepted PROGRESS SHA. In /review, treat a non-empty `drifted` list as a stop that needs `ctx.ui.confirm` approval:
-```ts
-if ((review.scopeDrift?.drifted.length ?? 0) > 0) { /* needsApproval stop naming the drifted paths */ }
-```
+**File:** `.pi/extensions/safety/git.ts:207-226` (`pushRefusal`)
 
-### CR-06: No deterministic gate ever checks the executor's change
+**Issue:** `deleting` is computed as `args.includes("--delete") || args.includes("-d")` before the loop that consumes the values of `-o`, `--push-option`, `--repo`, `--receive-pack` and `--exec`. A `-d` or `--delete` that is really the value of `-o`/`--push-option` still sets `deleting = true`. The loop then skips it as a value, and the bare `feat` refspec passes the "no explicit destination" check.
 
-**File:** `.pi/extensions/execute/index.ts:74-80`, `.pi/extensions/review/index.ts:66-77`
-**Issue:**
-- `/execute` runs `runQuickGateStage` *before* the model is prompted, so it type-checks and lints the pre-change tree, never the commit.
-- `agent_end` re-runs nothing.
-- `/review` does not run it either: it passes PROGRESS.md as `gateReport` with the comment "deterministic output was captured when each task was recorded". It was not; PROGRESS holds tool output, not gate output.
-
-A change that breaks `tsc` is accepted, recorded and sent to an MR. That defeats the project's core value of mechanically catching what a cheap model misses.
-**Fix:** In the `/execute` `agent_end` handler, after the evidence verdict and before `appendProgress`, run `runQuickGateStage(cwd, trusted)` and reject on `blocking`. In `/review`, run the deterministic stage at HEAD and pass `gate.report` as `gateReport`, never PROGRESS.
-
-### CR-07: `git push origin +main`, `+refs/heads/main`, `--mirror` and `--all` from a feature branch are allowed
-
-**File:** `.pi/extensions/safety/git.ts:189-198,204-216`
-**Issue:** I ran `classifyGitInvocation` with HEAD=`feat`:
+Classifier results with HEAD=`feat`:
 
 | Push args | Verdict |
 |---|---|
-| `origin +main` | **allow** |
-| `origin +refs/heads/main` | **allow** |
-| `--mirror origin` | **allow** |
-| `--all --force origin` | **allow** |
+| `-o -d origin feat` | **allow** |
+| `--push-option --delete origin feat` | **allow** |
 
-`pushTargetsProtected` does not strip the leading `+` force marker before comparing names, and it ignores flags that push every ref. `+main` is the canonical force-push spelling, and the function's own comment says force pushes to protected targets are blocked. This code predates the phase but the file is in scope, and /review relies on it.
-**Fix:** Strip `/^\+/` before the `refs/heads/` strip. Treat `--all`, `--mirror` and `--branches` as targeting every protected branch:
+Against a local bare remote with `receive.advertisePushOptions=true`, after `git config remote.origin.push refs/heads/feat:refs/heads/main` (allowed, because HEAD is not protected), `git push -o -d origin feat` printed `c9326ed..b93ab5c  feat -> main`. GitLab advertises push options (`ci.skip` and others), so this works against the real server too.
+
+SAFETY.md:62-63 says "`--delete <name>` is the one bare-name form allowed". The code does not enforce that.
+
+**Fix:** Detect deletion inside the loop, only on tokens that are not consumed as values:
+
 ```ts
-if (args.some((a) => a === "--all" || a === "--mirror" || a === "--branches")) return true;
-const leaf = dst.replace(/^\+/, "").replace(/^refs\/heads\//, "");
+let deleting = false;
+for (let i = 0; i < args.length; i++) {
+	const a = args[i];
+	if (PUSH_VALUE_FLAGS.has(a)) { remoteGiven ||= a === "--repo"; i++; continue; }
+	if (a === "--delete" || a === "-d") { deleting = true; continue; }
+	...
+}
 ```
-Add corpus rows for each form.
+
+Add block rows for `-o -d origin feat`, `--push-option --delete origin feat` and `--exec -d origin feat` to `git-policy.test.ts`.
 
 ## Warnings
 
-### WR-01: Whether `/execute` ever records anything depends on directory listing order
+### WR-01: The change gate counts a typecheck that never saw the change, so Terraform, Python and docs changes in a TS-rooted repo record "PASS" with no approval
 
-**File:** `.pi/extensions/execute/index.ts:113-123`, `.pi/extensions/workflows/index.ts:68-79`
-**Issue:**
-- Both extensions call `endRun` in `agent_end`, and the first one consumes the run.
-- Pi 1.1.0 runs handlers in load order (`runner.js:813-838`). Load order is unsorted `fs.readdirSync` (`loader.js:638`): alphabetical on NTFS, but not guaranteed on APFS or ext4, which are the target macOS and the Linux CI.
-- When `workflows/` loads first, every `/execute` run silently ends with "no evidence verdict". The test `"workflows loaded first consumes the run"` asserts that broken outcome as expected behaviour.
+**File:** `.pi/extensions/quality/index.ts:187-210` (`runChangeGateStage`), `.pi/extensions/execute/index.ts:179-182`, `.pi/extensions/review/index.ts:96-97`, `docs/WORKFLOWS.md:327-332`
 
-**Fix:** Keep one owner of `endRun`. Have the workflows `agent_end` return early while `executeRunContext() !== undefined`, or tag the run with its owner (`startRun(..., owner: "execute")`) and only let the owner settle it.
+**Issue:** `ranAny` is true whenever `tsc --noEmit` ran, whatever the change contains. Take a work repo with a root `tsconfig.json`, the user's full-stack case, and a change to `infra/main.tf`:
+- the anti-pattern leg reports UNAVAILABLE;
+- the typecheck leg reports `PASS`;
+- so `ranAny` is true and the task records with "Deterministic gate: typecheck: PASS" and no `ctx.ui.confirm`.
 
-### WR-02: `--description-file` is very likely not a glab flag; `/review` would fail at the last step
+WORKFLOWS section 7 says a Terraform, Python or docs-only change needs the user's approval. In practice that holds only in repos with no tsc, while the MR shows a PASS that covered none of the changed files.
 
-**File:** `.pi/extensions/review/mr.ts:17,70-72`
-**Issue:** glab is not installed here, so `glab mr create --help` could not be run. As far as I know, glab's `mr create` takes the body through `-d/--description` and has no `--description-file`. RUNBOOK RB-09-02 and the 09-15 summary record the flag as never checked. The stub test (`review-mr.test.ts:103,152`) asserts the unverified flag, so it would stay green either way. Two more gaps: no `--yes`, and the source branch is never confirmed to be pushed.
-**Fix:** Check against real glab before trusting this path. If the flag does not exist, pass `--description "$(cat file)"`-equivalent through argv on POSIX. On Windows, use `shell:false` against `glab.exe` (see IN-04) so a long body never meets cmd.exe. Fail with a clear message if the branch has no upstream.
+The reverse also misleads. In a repo where TS lives only in a subdirectory, a root `tsc` exits non-zero. `/review` then asks for approval on every MR with "the typecheck fails at HEAD".
 
-### WR-03: The MR is not tied to what was reviewed or recorded
+**Fix:** Make the typecheck leg relevant only when the change contains TS/JS files:
 
-**File:** `.pi/extensions/review/index.ts:64-114`
-**Issue:**
-- /review reviews local `HEAD`, but `glab mr create` opens an MR for the *remote* source branch, which may be stale or different. Nothing checks that `HEAD` is pushed and equals `@{u}`.
-- Nothing checks that every PLAN task has a PROGRESS entry.
-- Nothing checks that the recorded SHAs are ancestors of HEAD, or that no unrecorded commits follow the last entry.
+```ts
+const typecheck: LegStatus = code.length === 0
+	? { status: "unavailable", reason: "no changed TypeScript/JavaScript file for tsc to check" }
+	: input.baseTypecheckFailed ? { status: "unavailable", reason: "..." } : runTypecheckAt(input.cwd, input.projectTrusted);
+```
 
-So an MR can carry unreviewed or unverified commits under a "Verification" section that implies otherwise.
-**Fix:** Before `openMr`, require all of:
-- every `plan.tasks[i].id` has a `## T### @ <sha>` entry
-- each recorded `<sha>` passes `git merge-base --is-ancestor <sha> HEAD`
-- the last recorded SHA equals HEAD, or the commits after it are named in the body
-- `git rev-parse @{u}` equals HEAD
+Add a test with a root `tsconfig.json` and a `.tf`-only change that requires approval.
 
-### WR-04: Raw tool output is written into PROGRESS.md unescaped, which breaks the markdown and can mark tasks done
+### WR-02: The ledger is keyed only by slug in the shared git common dir, so a re-used slug or another worktree inherits old accepted entries
 
-**File:** `.pi/extensions/execute/progress.ts:24-37`, `.pi/extensions/execute/index.ts:68-69`, `.pi/extensions/review/mr.ts:30-32,46-48`
-**Issue:**
-- Output containing a ```` ``` ```` line closes the fence early.
-- Output containing a line `## T002 @ ...` (from a `cat PROGRESS.md`, a markdown file, or `git log`) makes `done.includes("## T002 @ ")` treat T002 as done, so it is skipped forever.
-- The same line makes `progressEntries` split the MR's Verification section into fabricated entries.
+**File:** `.pi/extensions/execute/ledger.ts:28-32,50-79`, `.pi/extensions/execute/index.ts:70-89`, `.pi/extensions/review/index.ts:69-79`, `.pi/extensions/grill/index.ts:111-114`
 
-**Fix:** Fence with a delimiter longer than any backtick run in the output, for example `"`".repeat(maxRun + 1)`. Find completed tasks with a line-anchored regex that ignores fenced content, or keep a separate machine-readable index such as a JSON sidecar or a front-matter list.
+**Issue:** `<git common dir>/kypi-ledger/<slug>.jsonl` outlives `.pi/work/<slug>/`. `.pi/work/` is untracked, while the common dir is shared by every worktree. `deriveSlug` builds the slug from the task description, so a later `/grill fix login redirect` reproduces an earlier slug. That happens either after the user deleted the old work directory or in a fresh worktree, where `.pi/work/` does not exist.
 
-### WR-05: PROGRESS.md stores unredacted, unbounded tool output in the work repo
+Then:
+- **Allowance changed:** `/execute` refuses with "the SPEC/PLAN write allowance changed" and points at `--rebase-base`.
+- **After a re-pin, or when the allowance happens to match:** the old `accepted` rows mark T001, T002 and so on as done, because task ids restart at T001. `/execute` skips them or reports "every PLAN task already has a PROGRESS entry".
+- **In `/review`:** the old entries are exempt from the ancestry check after a re-pin, and they are published in the new MR's Verification section as evidence for work they never covered.
 
-**File:** `.pi/extensions/execute/index.ts:107-111,133`, `.pi/extensions/execute/progress.ts:116-132`
-**Issue:**
-- Every tool result of the run is stored verbatim on disk, including whole file bodies from `read` (`.env`, tfvars, kube config if allowed). Redaction happens only in `buildMrBody` and the reviewer context.
-- `.pi/work/` is git-ignored in *this* repo only, not in the user's work repo where /execute runs. A model `git add .` therefore commits PROGRESS.md. `driftAbort` HALTs on it, but per CR-05 the commit stays.
+There is no user command to retire a ledger. The model is blocked from the directory, and the docs do not say where to delete it.
 
-**Fix:** Record only the verification command's output (see CR-03), passed through `redactString` and size-capped. Have /grill or /execute refuse (or append to `.git/info/exclude`) when `.pi/work/` is not ignored in the cwd repo.
-
-### WR-06: `REVISION_CAP` is advisory, and its counters leak across tasks and slugs
-
-**File:** `.pi/extensions/execute/index.ts:35-39,124-129`
-**Issue:**
-- `attempts > REVISION_CAP` and `stallDetected` only change the wording of the error notification; `/execute` never refuses a further attempt.
-- `attempts` and `lastErrors` live in the extension closure and reset only on success, so the count follows the user across tasks and slugs.
-
-**Fix:** Persist attempts per `(slug, taskId)` and refuse arming once the cap is exceeded or a stall is detected, until the user explicitly resets.
-
-### WR-07: The overall ambiguity score is taken from the model, not computed
-
-**File:** `.pi/extensions/grill/scorecard.ts:200-221`, `.pi/extensions/grill/scorecard-parse.ts:11,18-19`
-**Issue:** `gateAmbiguity` trusts a model-written `Overall:` number. All four dimensions at the 0.7 floor imply roughly 0.3 ambiguity, above `SCORE_GATE` 0.2. A self-reported `Overall: 0.1` still passes. Also, `OVERALL_PATTERN` takes the first "overall" anywhere in §8.
-**Fix:** Derive the overall score, for example `overall = 1 - mean(dimension scores)`. Either ignore the model's value or reject when the two disagree.
-
-### WR-08: Gate-depth notices claim mechanisms that never run
-
-**File:** `.pi/extensions/execute/index.ts:75-80`, `.pi/extensions/review/index.ts:66-67`, `.pi/extensions/quality/gates.ts:245-251`
-**Issue:**
-- `/execute` tells the user "gate depth ...: deterministic, model-review, refute-or-promote, calibration" but runs only the (pre-change) deterministic stage.
-- `/review` announces all four but runs neither deterministic nor calibration.
-- `grill` and `plan` are listed with ALL_MECHANISMS but consult none.
-
-Notifications should describe what ran, not what is allowed.
-**Fix:** Have each command report only the mechanisms it actually executed, or narrow `GATE_DEPTH_BY_WORKFLOW` to what each command implements.
-
-### WR-09: The requirement-id grammar differs across modules, so delegated mode throws on valid plans
-
-**File:** `.pi/extensions/plan-ceremony/requirement-ids.ts:7`, `.pi/extensions/execute/handoff.ts:55-68,71-74,85-93`
-**Issue:**
-- `extractSpecRequirementIds` accepts any `R\d{1,4}` token, so `validatePlan` passes.
-- `buildHandoffPacket` only recognises `R<n>:` entries (colon required, body capped at 2000 characters, terminated only by the next `R\d:` or end of string). `- **R1** - ...`, `R1. ...`, or a final entry followed by more than 2000 characters makes it throw, after `/execute` has already validated the plan.
-- `selectReferencedFacts` requires a §2 claim to appear verbatim inside requirement text, which almost never happens, so the child almost never gets the §2 facts.
-
-**Fix:** Share one parser that both `validatePlan` and the handoff use, and reject a SPEC whose §3 ids lack an entry at /plan time. Select facts by an explicit `[R#]` tag on §2 rows instead of substring matching.
-
-### WR-10: The delegated dispatch never names `executor-handoff`, and its evidence would be the parent's view only
-
-**File:** `.pi/extensions/execute/index.ts:85-87`, `.pi/agents/executor-handoff.md`
-**Issue:**
-- The brief says "Dispatch this packet to the subagent tool" without naming the agent, so the model may pick any agent and the isolated-context contract is not guaranteed.
-- Child tool results do not raise the parent's `tool_execution_end`. In delegated mode the evidence is the `subagent`/`bg_wait` tool's summary text, which is a model claim.
-
-**Fix:** Put `agent: "executor-handoff"` into the brief explicitly. In delegated mode, require the parent to re-run the verification command itself after `bg_wait` (ties to CR-03).
-
-### WR-11: Plan-mode messages still point to `/plan`, which now launches the ceremony
-
-**File:** `.pi/extensions/plan-mode/index.ts:116,295,327`
-**Issue:**
-- The block reason shown when plan mode refuses a command says "Use /plan to disable plan mode first".
-- The todo hint says "Create a plan first with /plan".
-
-After the rename, `/plan` starts the ceremony, which asks a read-only session to write PLAN.md.
-**Fix:** Update all three strings to `/plan-mode` and record this as part of DEVIATION 6.
-
-### WR-12: `git diff --name-only` quotes non-ASCII paths
-
-**File:** `.pi/extensions/execute/progress.ts:185-197`, `.pi/extensions/review/index.ts:70-71`
-**Issue:** Verified: a file `é.ts` comes back as `"\303\251.ts"`. In /execute this fails closed (the path is "malformed"). In /review the quoted path fails `existsSync`, so the file's contents silently drop out of the reviewer contract, and it shows as bogus drift.
-**Fix:** Same as CR-02: use `-z` with `core.quotePath=false`.
-
-### WR-13: Several phase tests don't exercise the production path
-
-**File:** `tests/unit/artifact-count.test.ts:119-140`, `tests/integration/grill-command.test.ts:246+`, `tests/integration/plan-command.test.ts:258+`, `tests/integration/scope-drift.test.ts:44-51`, `tests/integration/review-mr.test.ts:96-104,152`, `tests/integration/execute-workflow.test.ts:144-162`
-**Issue:**
-- `artifact-count` ("drives the real write paths"), `grill-command` and `plan-command` prove `writeSpecIfGated`/`writePlanIfGated`, which no command calls (CR-04). `artifact-count` also writes REVIEW.md itself.
-- `scope-drift` asserts the rename gap as correct (CR-02).
-- `review-mr` asserts the unverified flag (WR-02).
-- No test drives the `/review` command handler: slug resolution, the stop/approval branch, "MR only after REVIEW.md".
-- The execute happy path never proves the verification command ran (CR-03).
-
-**Fix:** Drive each command handler through its real path. Add a /review handler test with a stubbed `runReview` and glab. Turn the rename and duplicate-flag cases into failing-then-passing regressions.
+**Fix:**
+- Bind each ledger to its SPEC. Store a random run id in the first `base` row and refuse a ledger whose first base is not an ancestor of HEAD.
+- Simpler still: have `/grill` refuse a new slug while `<common>/kypi-ledger/<slug>.jsonl` exists, and add a user-confirmed `/execute <slug> --forget` that renames the file.
+- Document the location and the recovery in WORKFLOWS section 10.
 
 ## Info
 
-### IN-01: Rendered SPEC and PLAN footers point to a section that no longer exists
+### IN-01: New comments break AGENTS.md's comment rules
 
-**File:** `.pi/extensions/grill/spec-schema.ts:680-684`, `.pi/extensions/plan-ceremony/plan-schema.ts:281-286`
-**Issue:** Both footers say "see this module's own 'WHAT THIS VALIDATOR DOES NOT, AND CANNOT, PROVE' section". That section was removed when the headers were trimmed.
-**Fix:** Point to `docs/WORKFLOWS.md` or drop the reference.
+**File:**
+- `.pi/lib/active-workflow.ts:1-4`
+- `.pi/extensions/review/mr.ts:109`
+- `.pi/extensions/quality/index.ts:150`
+- `.pi/extensions/execute/ledger.ts:1-6`
+- `.pi/extensions/execute/index.ts:140`
 
-### IN-02: Comment discipline (AGENTS.md) in new production code
-
-**File:** `.pi/lib/work-artifacts.ts:1-11,16-25,49-57,60-70`; `.pi/extensions/execute/handoff.ts:3-4`; `.pi/extensions/grill/scorecard.ts:1-8,22,71`; `.pi/extensions/grill/spec-schema.ts:9,281`
-**Issue:** These comments break AGENTS.md's rules:
-- Headers and JSDoc run far past one or two lines.
-- They name tests and callers: "contributing-boundary.test.ts matches...", "tests/unit/work-artifacts.test.ts asserts the count", "Named so quality/rules.ts magic-number does not fire".
-- They cite internal planning documents (FEATURES.md Part 2/3) rather than external facts.
-
-Requirement IDs also leak into model- and user-facing strings, which the comment scanner cannot see: `FLOW-04`, `FLOW-05`, `QUAL-03` in `spec-schema.ts`; `RB-07-02`/`RB-09-03` in `handoff.ts:28-30` and `gates.ts:44-46`; FEATURES.md references in the scorecard `why` strings.
-**Fix:** Trim to the WHY, move the rationale into docs/WORKFLOWS.md, and remove planning IDs from runtime strings.
-
-### IN-03: `executor-handoff.md` cites a stale version and ships a planning note into the child prompt
-
-**File:** `.pi/agents/executor-handoff.md:13-32`
-**Issue:** The file cites `pi-subagents@0.49.0`, but settings pin `0.76.1` and `handoff.ts` cites `0.76.1`. With `systemPromptMode: replace`, the HTML comment full of RB/ROUTE/FLOW IDs is likely sent verbatim as part of the child's system prompt, which wastes tokens on a cheap model.
-**Fix:** Move the note to docs and update the version citation.
-
-### IN-04: Windows glab spawn uses `shell: true` without needing it
-
-**File:** `.pi/extensions/review/mr.ts:93-97,110`
-**Issue:** glab ships as `glab.exe`, not a `.cmd` shim. Routing it through cmd.exe adds `%VAR%` expansion inside quoted arguments (for example a temp path) for no benefit.
-**Fix:** Use `shell: false` for glab on every platform.
-
-### IN-05: Unguarded throws and raw ENOENT messages
-
-**File:** `.pi/extensions/grill/index.ts:73-77`, `.pi/extensions/plan-ceremony/index.ts:80-84`, `.pi/extensions/execute/index.ts:58`
 **Issue:**
-- `currentBranch` can throw (git missing), and in /grill and /plan it sits outside the try.
-- /execute reads SPEC.md without an existence check, so the user sees a raw ENOENT.
+- **Caller references:**
+  - the `active-workflow.ts` header names its callers ("/grill and /plan keep per-turn hooks");
+  - `MrInput.sourceBranch` cites "The branch `upstreamMismatch` checked";
+  - `runTypecheckAt` is "a baseline for `runChangeGateStage`";
+  - `execute/index.ts:140` describes the workflows recorder.
+- **Length:** `ledger.ts`'s header runs to four dense lines. The rule allows one or two.
 
-**Fix:** Move the git check inside the try, and check that SPEC.md exists with a named message.
+Prior IN-02 is also still open:
+- the `spec-gate.ts` header lists its readers;
+- the `requirement-ids.ts` header names `validatePlan`;
+- `handoff.ts:32-34` still puts `RB-07-02`/`RB-09-03` in a runtime string.
 
-### IN-06: Re-running `/review` opens another MR, and withdrawn BLOCKERs disappear
+**Fix:** Cut each comment to the WHY and delete the caller names and planning ids.
 
-**File:** `.pi/extensions/review/index.ts:89-92,105-117`
+### IN-02: The HMAC layer adds little over the path guard, and the grep/find containment check does not cover the ledger
+
+**File:** `.pi/extensions/execute/ledger.ts:34-79`, `.pi/extensions/safety/paths.ts:269-273`
+
+**Issue:** Moving the state out of the work tree and blocking `kypi-ledger` paths does the real work. A process that evades the guard to write a row can usually evade it to read `key` too, by the same glob or variable route, which docs/SAFETY.md already lists. So the signature mostly catches accidental damage. In exchange it adds a hard failure mode: a lost `key` refuses the slug forever, with no documented recovery.
+
+Separately, `grep`/`find`'s `path` containment check covers `~/.aws` but not the ledger. `grep { path: ".git", pattern: "[0-9a-f]{64}" }` prints the key, and WORKFLOWS' residual list does not name this route.
+
+**Fix:** Add the ledger directory to the containment-aware search roots, and name the route in the residuals. Optionally drop the HMAC and keep the guarded location.
+
+### IN-03: The strict push rule refuses tag pushes and misleads for `.`-tracked branches
+
+**File:** `.pi/extensions/safety/git.ts:223-226`, `.pi/extensions/review/mr.ts:101-103`
+
 **Issue:**
-- A second `/review` calls `glab mr create` again.
-- BLOCKERs withdrawn by refutation are dropped from REVIEW.md without trace (`withdrawn` is discarded).
+- **Tag pushes:** `git push origin --tags` and `git push origin v1.2.0` are refused as "destination comes from config", which is fail-closed but misleading for tags. The accepted form, `refs/tags/v1.2.0:refs/tags/v1.2.0`, is not named.
+- **`.`-tracked branches:** for a branch with `branch.<b>.remote = .` (a local tracking setup), `upstreamMismatch` suggests `git push . feat:feat`, which is a no-op local push.
 
-**Fix:** Detect an existing MR with `glab mr list --source-branch` (an allowed read). Render a "Withdrawn after refutation" list.
+**Fix:** Name the tag form in the block reason. In `upstreamMismatch`, treat a remote of `.` as unset and fall back to `origin`.
 
-### IN-07: `/review` diffs against the local `staging` ref, which may be stale
+### IN-04: `/quick` still runs the harness's own self-check in a work repo
 
-**File:** `.pi/extensions/review/index.ts:69`
-**Issue:** If local `staging` lags `origin/staging`, the merge-base is older than it should be. Upstream files then show as drift and land in the reviewed diff.
-**Fix:** Run `git fetch origin staging`, then take the merge-base with `origin/staging` (both are allowed reads).
+**File:** `.pi/extensions/workflows/index.ts:42`, `.pi/extensions/quality/index.ts:141-147`
+
+**Issue:** CR-02 moved `/execute` and `/review` to `runChangeGateStage`. `/quick` still runs `runQuickGateStage`, which in a work repo has three weaknesses:
+- the anti-pattern leg scans `<cwd>/.pi/extensions` only;
+- the lint leg runs this repo's own tests;
+- UNAVAILABLE never blocks.
+
+So `/quick`'s pre-flight gate passes vacuously there. This is pre-existing and was outside the prior finding's scope.
+
+**Fix:** Make `/quick` use the change gate at settle, or document that `/quick`'s gate only means something inside ky-pi-agent.
+
+### IN-05: Prior Info findings still open
+
+**File:** see `09-REVIEW.iter3.md`
+
+**Issue:**
+- **Fixed:** iter3 IN-01, the dangling WORKFLOWS fragment, now reads correctly.
+- **Still open:**
+  - IN-03: `sanitizeTitle` keeps a leading `-`, so a goal beginning "-b ..." becomes a title the `mr create` scanner refuses.
+  - IN-04: `.pi/work/` is ignored only from `/execute` onward, and a tracked `.pi/work` file is not detected. CR-01 above extends this.
+  - IN-06 items: the stale footers, the `executor-handoff.md` version, the raw ENOENT for a missing SPEC in `/execute`, a duplicate MR on a re-run, and the stale local `staging` merge-base.
+- **Coupling:** `/plan` now imports `HARD_QUESTION_BUDGET`, a `/grill` question constant, as its turn budget. A named shared constant would make that intent explicit.
+
+**Fix:** As described in the prior review. Strip leading `-` in `sanitizeTitle`.
 
 ---
 
