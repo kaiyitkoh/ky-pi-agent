@@ -597,7 +597,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 2. Official skills installed at user level (`~/.pi/agent/skills/` via `openspec init --tools pi` or equivalent), expanded profile, with `disable-model-invocation: true` so they add zero per-turn prompt cost; not committed into the repo's `.pi/` (would trip workflow-budget tests).
 3. Safety guard classifies `openspec` CLI calls correctly (archive must not trip protected-path rules); `openspec/` stays out of this public repo.
 4. Bootstrap/runbook documents install + upgrade; third-party wrapper `openspec-pi` evaluated and rejected or vendored with justification.
-**Depends on:** Phase 11
+**Depends on:** Phase 9 (runs before Phase 11, which awaits a user decision on terminal vs GUI front-end)
 **Plans:** 0 plans
 
 Plans:
