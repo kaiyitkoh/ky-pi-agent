@@ -577,7 +577,7 @@ calibration grader, so a trial is "caught" only when a finding names the right f
 | A | minimal | Bare Pi: no extensions, skills, context files or prompt templates. The baseline. |
 | B | harness-implement | The harness as installed, default `implement` profile. |
 | F | harness-full | The harness with the `full` tool profile. The primary comparison is F against A. |
-| C | padded-minimal | A plus inert repo prose of the measured floor difference (`PAD_TOKENS`), separating token mass from harness behaviour. |
+| C | padded-minimal | A plus inert repo prose of the measured floor difference between F as it runs and A (`PAD_TOKENS` = 2,653 estimated tokens: the `full` floor without AGENTS.md, because a trial repo has none, minus the bare floor), separating token mass from harness behaviour. |
 
 **Design.** Paired and interleaved: each (defect, repeat) block runs all four arms contiguously in a seeded order and blocks are
 shuffled, so provider drift lands on every arm alike. First stage R=10 repeats (6 defects x 10 x 4 arms = 240 trials); a second

@@ -461,7 +461,7 @@ describe("summarise", () => {
 
 describe("PAD_TOKENS", () => {
 	it("equals the measured full-harness floor minus the bare floor", async () => {
-		const full = await measureFloor({ profile: "full" });
+		const full = await measureFloor({ profile: "full", agentsMd: false });
 		const bare = await measureFloor({ entryPoints: [], agentsMd: false, skills: false });
 		expect(PAD_TOKENS).toBe(full.budget.floor.estimatedTokens - bare.budget.floor.estimatedTokens);
 	}, 90_000);
