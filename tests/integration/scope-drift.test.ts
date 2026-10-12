@@ -41,13 +41,24 @@ describe("scope drift against a real git diff", () => {
 		expect(compareScope({ changed, specExpectedFiles: ["a.ts"], planFilesTouched: [] }).drifted).toEqual(["rogue.ts"]);
 	});
 
-	it("a rename is reported by its new path only (observed git behaviour)", () => {
+	it("a rename reports both the source and the destination path", () => {
 		const r = repo();
 		commitFile(r, "old.ts", "line one\nline two\nline three\nline four\n", "baseline");
 		const base = headSha(r);
 		execFileSync("git", ["mv", "old.ts", "new.ts"], { cwd: r });
 		execFileSync("git", ["commit", "-m", "rename"], { cwd: r, stdio: "ignore" });
-		expect(changedFilesSince(r, base)).toEqual(["new.ts"]);
+		expect([...changedFilesSince(r, base)].sort()).toEqual(["new.ts", "old.ts"]);
+		expect(compareScope({ changed: changedFilesSince(r, base), specExpectedFiles: ["new.ts"], planFilesTouched: [] }).drifted).toEqual(["old.ts"]);
+	});
+
+	it("a rename is reported in full even when diff.renames is configured on", () => {
+		const r = repo();
+		commitFile(r, "infra.tf", "line one\nline two\nline three\nline four\n", "baseline");
+		const base = headSha(r);
+		execFileSync("git", ["config", "diff.renames", "copies"], { cwd: r });
+		execFileSync("git", ["mv", "infra.tf", "allowed.ts"], { cwd: r });
+		execFileSync("git", ["commit", "-m", "move"], { cwd: r, stdio: "ignore" });
+		expect([...changedFilesSince(r, base)].sort()).toEqual(["allowed.ts", "infra.tf"]);
 	});
 
 	it("throws, and never returns an empty list, when git fails", () => {

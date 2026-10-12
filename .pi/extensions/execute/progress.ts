@@ -180,9 +180,13 @@ export function disarmExecuteRun(): void {
 	(globalThis as Record<string, unknown>)[EXECUTE_RUN_KEY] = undefined;
 }
 
-/** Repo-relative paths changed between two SHAs per git, so the drift check reads the tree and not a model's claim. */
+/**
+ * Repo-relative paths changed between two SHAs per git, so the drift check reads the tree and not a model's claim.
+ * `--no-renames` lists both sides of a move; with rename detection a move out of an undeclared path shows only its
+ * destination.
+ */
 export function changedFiles(cwd: string, baseSha: string, headSha: string): readonly string[] {
-	const result = spawnSync("git", ["diff", "--name-only", `${baseSha}..${headSha}`], {
+	const result = spawnSync("git", ["diff", "--name-only", "--no-renames", `${baseSha}..${headSha}`], {
 		cwd,
 		encoding: "utf-8",
 		shell: false,
