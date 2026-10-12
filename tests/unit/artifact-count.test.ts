@@ -6,7 +6,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { writeSpecIfGated } from "../../.pi/extensions/grill/index.ts";
 import { SPEC_SECTIONS, renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
-import { appendProgress } from "../../.pi/extensions/execute/progress.ts";
+import { appendProgress, renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { writePlanIfGated } from "../../.pi/extensions/plan-ceremony/index.ts";
 import { renderReviewMarkdown, validateReview } from "../../.pi/extensions/quality/review-schema.ts";
 import { ARTIFACT_FILES, workDir } from "../../.pi/lib/work-artifacts.ts";
@@ -119,7 +119,7 @@ describe("the artifact set is exactly SPEC, PLAN, REVIEW and PROGRESS", () => {
 	it("a full run of the four write paths yields exactly ARTIFACT_FILES and no subdirectory", () => {
 		expect(writeSpecIfGated(cwd, SLUG, renderSpecMarkdown(SPEC))).toEqual({ ok: true });
 		expect(writePlanIfGated(cwd, SLUG, PLAN)).toEqual({ ok: true });
-		appendProgress(cwd, SLUG, progressEntry("T001", "ok"));
+		appendProgress(cwd, SLUG, renderProgressAppend(progressEntry("T001", "ok")));
 		const review = validateReview(
 			{
 				verdicts: [
@@ -168,7 +168,7 @@ describe("the artifact set is exactly SPEC, PLAN, REVIEW and PROGRESS", () => {
 	it("PROGRESS.md is appended, not rewritten", () => {
 		const file = join(dir, "PROGRESS.md");
 		const first = readFileSync(file, "utf-8");
-		appendProgress(cwd, SLUG, progressEntry("T002", "second"));
+		appendProgress(cwd, SLUG, renderProgressAppend(progressEntry("T002", "second")));
 		const second = readFileSync(file, "utf-8");
 		expect(second.length).toBeGreaterThan(first.length);
 		expect(second.startsWith(first)).toBe(true);

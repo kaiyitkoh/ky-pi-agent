@@ -229,7 +229,10 @@ function parentDirOf(canonicalPath: string): string {
 	return parts.length >= 2 ? parts[parts.length - 2] : "";
 }
 
-/** Read classes that must never reach the model: `.env`-family, `~/.aws/{credentials,config}`, kubeconfig, Terraform state. Each has a paired negative in path-policy.test.ts. */
+/** The git-dir subdirectory holding the harness's signed /execute ledger and key. */
+export const HARNESS_LEDGER_SEGMENT = "kypi-ledger";
+
+/** Read classes that must never reach the model: `.env`-family, `~/.aws/{credentials,config}`, kubeconfig, Terraform state, the harness ledger. Each has a paired negative in path-policy.test.ts. */
 export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 	{
 		id: "dotenv",
@@ -262,6 +265,11 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 			return base.endsWith(".tfstate") || base.endsWith(".tfstate.backup");
 		},
 		reason: (path) => `"${path}" is Terraform state, which holds plaintext secrets in its resource attributes`,
+	},
+	{
+		id: "harness-ledger",
+		match: (path) => rootedSegmentsOf(path).parts.some((part) => part.toLowerCase() === HARNESS_LEDGER_SEGMENT),
+		reason: (path) => `"${path}" is the harness's signed /execute ledger or its key, which only the harness itself may read or write`,
 	},
 ];
 
@@ -370,6 +378,10 @@ export function classifyPathWrite(canonicalPath: string, facts: PathPolicyFacts)
 		if (target.match(canonicalPath, facts)) {
 			return { kind: "block", reason: target.reason(canonicalPath) };
 		}
+	}
+	const ledger = SENSITIVE_READ_PATTERNS.find((p) => p.id === "harness-ledger");
+	if (ledger?.match(canonicalPath, facts) === true) {
+		return { kind: "block", reason: ledger.reason(canonicalPath) };
 	}
 	if (!isWithinRoot(canonicalPath, facts.projectRoot)) {
 		return {

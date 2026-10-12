@@ -7,6 +7,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "
 import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { workDir } from "../../lib/work-artifacts.ts";
+import { acceptedEntries, allowanceOf, pinnedAllowance, readLedger } from "../execute/ledger.ts";
 import { uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
@@ -62,7 +63,13 @@ export default function (pi: ExtensionAPI): void {
 				const ids = extractSpecRequirementIds(spec.spec.requirementsBody);
 				const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), ids);
 				if (!plan.ok) return fail(plan.reason);
-				const progress = readFileSync(join(dir, "PROGRESS.md"), "utf-8");
+				// PROGRESS.md is model-editable; the signed ledger is the record the MR and the history check read.
+				const rows = readLedger(ctx.cwd, slug);
+				const pinned = pinnedAllowance(rows);
+				if (pinned !== undefined && pinned.join("\n") !== allowanceOf(spec.spec.scopePin.expectedFiles, plan.plan.filesTouched).join("\n")) {
+					return fail(`review: the SPEC/PLAN write allowance changed since /execute pinned it (pinned: ${pinned.join(", ")}) -- restore it`);
+				}
+				const progress = acceptedEntries(rows).map((e) => e.entry).join("\n");
 				const mismatch = historyMismatch(ctx.cwd, plan.plan.tasks.map((t) => t.id), progress);
 				if (mismatch !== undefined) return fail(`review: ${mismatch}`);
 				const dirty = uncommittedPaths(ctx.cwd);

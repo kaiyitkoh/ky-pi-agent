@@ -78,7 +78,9 @@ docstring for the structural argument). Concretely, it catches:
   compared case-insensitively after trimming and stripping `refs/heads/`. The blocked-subcommand check always runs
   first, so `mr merge` can never be admitted through the `mr create` rule.
 - **Sensitive reads that reach a tool as a normal string** — `.env`-family
-  files, `~/.aws/{credentials,config}`, kubeconfig, and `*.tfstate` block
+  files, `~/.aws/{credentials,config}`, kubeconfig, `*.tfstate` and the
+  harness's own signed `/execute` ledger (any path through a `kypi-ledger`
+  segment, which `write`/`edit` also refuse) block
   through the `read` tool directly and through quoted bash arguments.
   `grep`/`find`/`ls`'s own `path` field is additionally
   **containment-aware**, not only basename-aware: a search root that IS a

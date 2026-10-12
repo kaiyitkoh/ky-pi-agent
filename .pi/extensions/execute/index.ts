@@ -15,10 +15,10 @@ import { classifyGitInvocation, currentBranch, currentSha, currentTree } from ".
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
+import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, readLedger } from "./ledger.ts";
 import {
-	REVISION_CAP, appendAttempt, appendProgress, armExecuteRun, attemptState, changedFiles, checkVerification, disarmExecuteRun,
-	driftAbort, driftBase, ensureWorkIgnored, executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, pinDriftBase,
-	recordedEntries, uncommittedPaths, verificationRecord,
+	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureWorkIgnored,
+	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, renderProgressAppend, uncommittedPaths, verificationRecord,
 } from "./progress.ts";
 
 /** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
@@ -67,15 +67,19 @@ export default function (pi: ExtensionAPI): void {
 					return fail("execute: the write allowance (SPEC expected files and PLAN files-touched) is empty -- nothing may be written");
 				}
 
-				const done = existsSync(join(dir, "PROGRESS.md")) ? readFileSync(join(dir, "PROGRESS.md"), "utf-8") : "";
-				const recorded = new Set(recordedEntries(done).map((e) => e.taskId));
+				const rows = readLedger(ctx.cwd, slug);
+				const union = allowanceOf(allowance.spec, allowance.plan);
+				const pinnedUnion = pinnedAllowance(rows);
+				if (pinnedUnion !== undefined && pinnedUnion.join("\n") !== union.join("\n")) {
+					return fail(`execute: the SPEC/PLAN write allowance changed since ${slug}'s base was pinned (pinned: ${pinnedUnion.join(", ")}) -- restore it`);
+				}
+				const recorded = new Set(acceptedEntries(rows).map((e) => e.taskId));
 				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !recorded.has(t.id));
 				if (task === undefined || task.verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
 				if (isRunArmed() || !ctx.isIdle()) return fail("execute: a turn is already in flight -- wait for it to finish");
 
-				if (reset) appendAttempt(ctx.cwd, slug, task.id, "reset");
-				const prior = reset ? { attempts: 0, stalled: false } : attemptState(done, task.id);
+				const prior = reset ? { attempts: 0, stalled: false } : attemptState(rows, task.id);
 				if (prior.attempts > REVISION_CAP || prior.stalled) {
 					return fail(`execute: ${task.id} is escalated (${prior.attempts} rejected attempts${prior.stalled ? ", errors not dropping" : ""}) -- inspect it, then run /execute ${slug} --reset to allow another attempt`);
 				}
@@ -102,8 +106,9 @@ export default function (pi: ExtensionAPI): void {
 				const ignoredNow = ensureWorkIgnored(ctx.cwd);
 				if (ignoredNow !== undefined) ctx.ui.notify(ignoredNow, "info");
 				const headSha = currentSha(ctx.cwd);
-				const pinned = driftBase(done);
-				if (pinned === undefined) pinDriftBase(ctx.cwd, slug, headSha);
+				const pinned = ledgerBase(rows);
+				if (pinned === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, reason: "first /execute" });
+				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
 				baseSha = pinned ?? headSha;
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
 				errorCount = 0;
@@ -141,8 +146,8 @@ export default function (pi: ExtensionAPI): void {
 			// Unarmed means another settle handler consumed the run; no verdict, so nothing is written.
 			if (verdict === undefined) return void ctx.ui.notify(`execute: ${run.taskId} had no evidence verdict -- nothing written`, "error");
 			const reject = (reason: string) => {
-				appendAttempt(cwd, run.slug, run.taskId, "rejected", errorCount);
-				const state = attemptState(readFileSync(join(workDir(cwd, run.slug), "PROGRESS.md"), "utf-8"), run.taskId);
+				appendLedger(cwd, run.slug, { kind: "rejected", taskId: run.taskId, count: errorCount });
+				const state = attemptState(readLedger(cwd, run.slug), run.taskId);
 				const next = state.attempts > REVISION_CAP || state.stalled ? "escalated: further attempts are refused until /execute --reset" : "fix and run /execute again";
 				ctx.ui.notify(`execute: ${run.taskId} rejected -- ${reason}; ${next}`, "error");
 			};
@@ -162,7 +167,10 @@ export default function (pi: ExtensionAPI): void {
 				}
 				gateLine = `${gate.report.replace(/\n/g, "; ")}${gate.ranAny ? "" : " -- no check ran; recorded with the user's approval"}`;
 			}
-			appendProgress(cwd, run.slug, { taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, gate: gateLine, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
+			const rendered = renderProgressAppend({ taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, gate: gateLine, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
+			// The ledger row is the record; PROGRESS.md is the readable copy.
+			appendLedger(cwd, run.slug, { kind: "accepted", taskId: run.taskId, sha: verdict.sha, entry: rendered });
+			appendProgress(cwd, run.slug, rendered);
 			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode})`, "info");
 		} catch (err) {
 			ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${err instanceof Error ? err.message : String(err)}`, "error");

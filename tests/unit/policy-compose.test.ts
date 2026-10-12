@@ -212,6 +212,18 @@ const ROWS: readonly Row[] = [
 		expected: "allow",
 	},
 	{
+		name: "cat of the harness ledger key through bash -- blocked like any sensitive read",
+		toolName: "bash",
+		input: { command: "cat .git/kypi-ledger/key" },
+		expected: "block",
+	},
+	{
+		name: "rm -rf of the harness ledger -- blocked, an argument naming it is refused",
+		toolName: "bash",
+		input: { command: "rm -rf .git/kypi-ledger" },
+		expected: "block",
+	},
+	{
 		name: "git -c user.name=x diff on protected main -- allowed, -c takes a value and must be skipped as a pair",
 		toolName: "bash",
 		input: { command: "git -c user.name=x diff" },

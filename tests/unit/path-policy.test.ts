@@ -220,6 +220,9 @@ const READ_TABLE: readonly ReadRow[] = [
 	},
 	{ label: "terraform.tfstate", rawText: "terraform.tfstate", expected: "block", patternId: "tfstate" },
 	{ label: "terraform.tfstate.backup", rawText: "terraform.tfstate.backup", expected: "block", patternId: "tfstate" },
+	{ label: "the harness ledger key", rawText: ".git/kypi-ledger/key", expected: "block", patternId: "harness-ledger" },
+	{ label: "a harness ledger file", rawText: ".git/kypi-ledger/s1.jsonl", expected: "block", patternId: "harness-ledger" },
+	{ label: "a file merely named after the ledger", rawText: "docs/kypi-ledger.md", expected: "allow" },
 	// Paired negatives -- the false positives that matter (04-CONTEXT.md `<specifics>`).
 	{ label: ".env.example (deliberate carve-out)", rawText: ".env.example", expected: "allow" },
 	{ label: ".env.template (deliberate carve-out)", rawText: ".env.template", expected: "allow" },
@@ -300,6 +303,7 @@ const WRITE_TABLE: readonly WriteRow[] = [
 		targetId: "github-workflows",
 	},
 	{ label: ".gitlab-ci.yml", rawText: ".gitlab-ci.yml", expected: "block", targetId: "gitlab-ci" },
+	{ label: "a harness ledger file (model-forged evidence)", rawText: ".git/kypi-ledger/s1.jsonl", expected: "block" },
 	{
 		label: "absolute path elsewhere on the drive",
 		rawText: "C:/Elsewhere/file.txt",

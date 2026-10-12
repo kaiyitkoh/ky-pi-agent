@@ -410,11 +410,12 @@ characters.
 target as a constant and passes it explicitly on every call; it never relies
 on glab's default. The git/glab classifier is the single refuser of an absent
 or protected target, and `glab mr merge` is blocked unconditionally. The MR
-body is built from recorded evidence (PROGRESS.md), not from the model's
-account of its own work, and carries a disclosure line. Because glab opens the
-MR for the pushed branch, `/review` refuses unless every PLAN task has a
-PROGRESS entry, every recorded commit is on HEAD's history, the last recorded
-commit is HEAD, and the upstream (`@{u}`) is HEAD.
+body is built from recorded evidence (the harness ledger's accepted
+entries, described below), not from the model's account of its own work, and
+carries a disclosure line. Because glab opens the MR for the pushed branch,
+`/review` refuses unless every PLAN task has an accepted entry, every
+recorded commit is on HEAD's history, the last recorded commit is HEAD, and
+the upstream (`@{u}`) is HEAD.
 
 **Why the drift check is computed.** Scope drift is the difference between
 `git diff --name-only <base>..HEAD` and the union of SPEC's expected files and
@@ -422,9 +423,9 @@ PLAN's files-touched, in both directions: drifted (changed, not declared) and
 undelivered (declared, not changed). The reviewer cannot supply it, and a
 review artifact that carries a model-supplied drift field is rejected. An
 empty declaration makes every change drift. `/execute` measures drift from
-the last accepted PROGRESS.md entry, or from the `Drift base:` line it pins in
-PROGRESS.md on a slug's first run, never from the HEAD of a fresh attempt: a
-rejected or halted commit stays in every later diff until it is reverted.
+the last accepted entry, or from the base it pins on a slug's first run,
+never from the HEAD of a fresh attempt: a rejected or halted commit stays in
+every later diff until it is reverted.
 `/review` diffs from `git merge-base HEAD staging`, and any drifted path needs
 explicit approval before the MR opens. It reads the
 committed diff only, and `/review` refuses to start while anything outside
@@ -442,13 +443,36 @@ harness-read commit SHA; no other tool output is kept. The verification run
 and the settle gate both run on the working tree, so both require
 `git status` to be clean apart from the harness's own `.pi/work/` and
 `.pi/logs/`: a file the model forgot to `git add` would otherwise let a check
-pass that the commit cannot. Each rejection appends an invisible `<!-- rejected T### errors=N -->` line to
-PROGRESS.md; once a task passes `REVISION_CAP` rejections, or two in a row
-fail to lower the error count, `/execute` refuses it until the user runs
-`/execute <slug> --reset`. The shared workflows
+pass that the commit cannot. Each rejection is logged; once a task passes
+`REVISION_CAP` rejections, or two in a row fail to lower the error count,
+`/execute` refuses it until the user runs `/execute <slug> --reset`. The
+shared workflows
 settle handler stands aside while an `/execute` run is armed, so the result
 does not depend on extension load order, which Pi takes from an unsorted
 directory listing.
+
+**Why the record is a signed ledger, not PROGRESS.md.** The executor can
+write any file, so state kept in PROGRESS.md could be edited to erase the
+revision cap, move the drift base or add a finished task. `/execute` keeps
+that state in `<git common dir>/kypi-ledger/<slug>.jsonl`, outside the work
+tree. This covers the pinned base, the write allowance pinned with it,
+rejections, resets, and each accepted entry's full text. Every row is
+HMAC-SHA256 signed with a random key in the same directory, and carries its
+slug inside the signed body. A row that fails its signature refuses
+`/execute` and `/review` outright. A missing key beside existing rows is a
+refusal, never a fresh start. PROGRESS.md is a readable copy. Done-task
+detection, the drift base, the revision cap and the MR's Verification
+section all read the ledger, so an entry typed into PROGRESS.md changes
+nothing. `/execute` and `/review` also refuse when SPEC's expected files and
+PLAN's files-touched no longer match the allowance pinned with the base, so
+a model cannot widen its own allowance to absorb drift.
+
+The key is protected by the safety path guard, not by the operating system.
+Any `read`/`write`/`edit` path, or any bash argument, that passes through a
+`kypi-ledger` segment is refused. A process that reads the key by a route
+that guard does not see could forge rows. That covers the published bash
+residuals in docs/SAFETY.md, such as a glob (`.git/kypi*/key`), a variable,
+or an interpreter that builds the path at run time.
 
 **Why the handoff probe reports `UNAVAILABLE`.** `pi-subagents` is pinned
 and not installed. The probe checks for the minimum tools a handoff needs and

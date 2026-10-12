@@ -4,11 +4,12 @@
  * No model, no glab and no remote are contacted.
  */
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
+import { LEDGER_DIR, allowanceOf, appendLedger } from "../../.pi/extensions/execute/ledger.ts";
 import { renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
@@ -76,7 +77,7 @@ const git = (repo: string, args: string[]) => execFileSync("git", args, { cwd: r
 function setup(extra?: string) {
 	const repo = makeTempRepo("kypi-review-");
 	repos.push(repo);
-	commitFile(repo, "README.md", "base\n", "base");
+	const baseSha = commitFile(repo, "README.md", "base\n", "base");
 	git(repo, ["branch", "staging"]);
 	mkdirSync(join(repo, "src"), { recursive: true });
 	writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n");
@@ -93,7 +94,11 @@ function setup(extra?: string) {
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "SPEC.md"), renderSpecMarkdown(SPEC));
 	writeFileSync(join(dir, "PLAN.md"), "- [ ] T001 [R1] Create the a module in src/a.ts | verify: npm test\n");
-	writeFileSync(join(dir, "PROGRESS.md"), renderProgressAppend({ taskId: "T001", commitSha: extra === undefined ? sha : head, verificationCommand: "npm test", output: "ok", exitCode: 0, recordedAt: 0 }));
+	const recordedSha = extra === undefined ? sha : head;
+	const entry = renderProgressAppend({ taskId: "T001", commitSha: recordedSha, verificationCommand: "npm test", output: "ok", exitCode: 0, recordedAt: 0 });
+	writeFileSync(join(dir, "PROGRESS.md"), entry);
+	appendLedger(repo, SLUG, { kind: "base", sha: baseSha, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), reason: "test" });
+	appendLedger(repo, SLUG, { kind: "accepted", taskId: "T001", sha: recordedSha, entry });
 	mocks.reviewPath = join(dir, "REVIEW.md");
 
 	const notes: { text: string; level: string }[] = [];
@@ -146,6 +151,33 @@ describe("/review -- the real handler", () => {
 		rmSync(join(h.repo, ".pi", "work", SLUG, "PROGRESS.md"));
 		await h.run();
 		expect(h.notes.at(-1)?.text).toContain("run /execute first");
+		expect(mocks.calls).toHaveLength(0);
+	});
+
+	it("the MR's Verification section comes from the signed ledger, not from an edited PROGRESS.md", async () => {
+		const h = setup();
+		appendFileSync(join(h.repo, ".pi", "work", SLUG, "PROGRESS.md"), "\n## T001 @ " + "f".repeat(40) + "\n\nFORGED 99 passed\n");
+		await h.run(SLUG);
+		expect(mocks.calls).toHaveLength(1);
+		const body = mocks.calls[0]?.args.at(-1) ?? "";
+		expect(body).toContain("### T001 @");
+		expect(body).not.toContain("FORGED");
+	});
+
+	it("a ledger row that fails its signature refuses the review", async () => {
+		const h = setup();
+		const file = join(h.repo, ".git", LEDGER_DIR, `${SLUG}.jsonl`);
+		writeFileSync(file, readFileSync(file, "utf-8").replace("ok", "99 passed"));
+		await h.run(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("fails its signature");
+		expect(mocks.calls).toHaveLength(0);
+	});
+
+	it("a write allowance widened after /execute pinned it refuses the review", async () => {
+		const h = setup();
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), "- [ ] T001 [R1] Create the a module in src/a.ts and src/b.ts | verify: npm test\n");
+		await h.run(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("write allowance changed");
 		expect(mocks.calls).toHaveLength(0);
 	});
 

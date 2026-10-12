@@ -1,7 +1,7 @@
 /**
- * The /execute PROGRESS.md append format, the fail-closed drift abort, and the per-run state that binds real tool
- * output to a commit. The accept/reject verdict stays with ../workflows/evidence.ts gateCompletion; this file only
- * renders what that gate has already accepted. Impure: appendProgress, changedFiles, ensureWorkIgnored and the run state.
+ * The /execute PROGRESS.md entry format and parser, the fail-closed drift abort, and the per-run state that binds
+ * one verification run to a commit and a clean tree. Impure: appendProgress, changedFiles, uncommittedPaths,
+ * ensureWorkIgnored and the run state.
  */
 import { appendFileSync, mkdirSync } from "node:fs";
 import { spawnSync } from "node:child_process";
@@ -69,39 +69,15 @@ export function progressBlocks(progress: string): readonly string[] {
 	return blocks.map((b) => b.join("\n").trim());
 }
 
-const REJECTED_LINE = /^<!-- rejected (T\d{3}) errors=(\d+) -->$/;
-const RESET_LINE = /^<!-- reset (T\d{3}) -->$/;
-
-/** Record one rejected attempt (an HTML comment, invisible in the MR) so the revision cap survives restarts and slugs. */
-export function appendAttempt(cwd: string, slug: string, taskId: string, record: "rejected" | "reset", errors = 0): void {
-	const dir = workDir(cwd, slug);
-	mkdirSync(dir, { recursive: true });
-	appendFileSync(join(dir, "PROGRESS.md"), record === "reset" ? `<!-- reset ${taskId} -->\n` : `<!-- rejected ${taskId} errors=${errors} -->\n`, "utf-8");
-}
-
-/** Rejected attempts for `taskId` since its last reset, and whether the error count stopped dropping between the last two. */
-export function attemptState(progress: string, taskId: string): { readonly attempts: number; readonly stalled: boolean } {
-	let errors: number[] = [];
-	for (const { line, fenced } of scanLines(progress)) {
-		if (fenced) continue;
-		if (RESET_LINE.exec(line)?.[1] === taskId) errors = [];
-		const m = REJECTED_LINE.exec(line);
-		if (m?.[1] === taskId) errors.push(Number(m[2]));
-	}
-	const [prev, cur] = errors.slice(-2);
-	return { attempts: errors.length, stalled: prev !== undefined && cur !== undefined && stallDetected(prev, cur) };
-}
-
-/** Append to the slug's PROGRESS.md. Throws on an unwritable path so a lost append is never mistaken for a written one. */
-export function appendProgress(cwd: string, slug: string, entry: ProgressEntry): string {
+/** Append `rendered` to the slug's PROGRESS.md. Throws on an unwritable path so a lost append is never mistaken for a written one. */
+export function appendProgress(cwd: string, slug: string, rendered: string): string {
 	const dir = workDir(cwd, slug);
 	mkdirSync(dir, { recursive: true });
 	const file = join(dir, "PROGRESS.md");
-	appendFileSync(file, renderProgressAppend(entry), "utf-8");
+	appendFileSync(file, rendered, "utf-8");
 	return file;
 }
 
-const DRIFT_BASE_LINE = /^Drift base: ([0-9a-f]{40})$/m;
 const ENTRY_HEAD_LINE = /^## (T\d{3}) @ ([0-9a-f]{40})$/;
 
 /** Every recorded `## T### @ <sha>` entry outside fenced output, in file order. */
@@ -110,21 +86,6 @@ export function recordedEntries(progress: string): readonly { readonly taskId: s
 		.map((b) => ENTRY_HEAD_LINE.exec(b.split("\n")[0] ?? ""))
 		.filter((m): m is RegExpExecArray => m !== null)
 		.map((m) => ({ taskId: m[1] ?? "", sha: m[2] ?? "" }));
-}
-
-/**
- * Where drift is measured from: the last accepted entry's SHA, else the base pinned on first arm. A rejected or
- * halted commit therefore stays inside every later diff until it is reverted, instead of being absorbed by a fresh base.
- */
-export function driftBase(progress: string): string | undefined {
-	return recordedEntries(progress).at(-1)?.sha ?? DRIFT_BASE_LINE.exec(progress)?.[1];
-}
-
-/** Pin the drift base in PROGRESS.md once, on the slug's first arm; later arms read it back with {@link driftBase}. */
-export function pinDriftBase(cwd: string, slug: string, sha: string): void {
-	const dir = workDir(cwd, slug);
-	mkdirSync(dir, { recursive: true });
-	appendFileSync(join(dir, "PROGRESS.md"), `\nDrift base: ${sha}\n\n`, "utf-8");
 }
 
 export interface DriftAbortInput {

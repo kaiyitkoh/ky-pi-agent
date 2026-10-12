@@ -1,0 +1,111 @@
+/**
+ * The harness-owned record of each /execute slug: pinned drift base and write allowance, attempts, resets and
+ * accepted entries. PROGRESS.md is only a copy, because the model can edit it. Rows live under the git common dir,
+ * outside the work tree, each HMAC-signed with a key kept beside them; the safety path guard refuses tool reads and
+ * writes through LEDGER_DIR, so forging a row needs a key the model is kept from reading. Unverifiable rows throw.
+ */
+import { spawnSync } from "node:child_process";
+import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
+import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { join, resolve } from "node:path";
+
+import { workDir } from "../../lib/work-artifacts.ts";
+import { HARNESS_LEDGER_SEGMENT } from "../safety/paths.ts";
+import { stallDetected } from "./progress.ts";
+
+/** Directory under the git common dir; the safety path guard refuses any tool path through a segment of this name. */
+export const LEDGER_DIR = HARNESS_LEDGER_SEGMENT;
+
+export type LedgerRow =
+	| { readonly kind: "base"; readonly sha: string; readonly allowance: readonly string[]; readonly reason: string }
+	| { readonly kind: "rejected"; readonly taskId: string; readonly count: number | null }
+	| { readonly kind: "reset"; readonly taskId: string }
+	| { readonly kind: "accepted"; readonly taskId: string; readonly sha: string; readonly entry: string };
+
+const KEY_FILE = "key";
+const KEY_BYTES = 32;
+
+function ledgerRoot(cwd: string): string {
+	const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	if (r.status !== 0) throw new Error(`execute: cannot locate the git directory in ${cwd} for the harness ledger`);
+	return join(resolve(cwd, (r.stdout ?? "").trim()), LEDGER_DIR);
+}
+
+function signingKey(root: string): Buffer {
+	const file = join(root, KEY_FILE);
+	if (existsSync(file)) return Buffer.from(readFileSync(file, "utf-8").trim(), "hex");
+	// A lost key beside existing rows must never read as a fresh start.
+	if (existsSync(root) && readdirSync(root).some((f) => f.endsWith(".jsonl"))) {
+		throw new Error(`execute: the ledger key ${file} is missing, so the recorded rows cannot be verified -- refusing`);
+	}
+	mkdirSync(root, { recursive: true });
+	const key = randomBytes(KEY_BYTES);
+	writeFileSync(file, key.toString("hex"), { encoding: "utf-8", mode: 0o600 });
+	return key;
+}
+
+const sign = (key: Buffer, body: string): string => createHmac("sha256", key).update(body).digest("hex");
+
+/** Append one signed row; the slug is inside the signed body, so a row cannot be moved to another slug's file. */
+export function appendLedger(cwd: string, slug: string, row: LedgerRow): void {
+	workDir(cwd, slug);
+	const root = ledgerRoot(cwd);
+	const body = JSON.stringify({ slug, ...row });
+	appendFileSync(join(root, `${slug}.jsonl`), `${JSON.stringify({ body, mac: sign(signingKey(root), body) })}\n`, "utf-8");
+}
+
+/** Every row for `slug`, oldest first. Throws when any row fails its signature or names another slug. */
+export function readLedger(cwd: string, slug: string): readonly LedgerRow[] {
+	workDir(cwd, slug);
+	const root = ledgerRoot(cwd);
+	const file = join(root, `${slug}.jsonl`);
+	if (!existsSync(file)) return [];
+	const key = signingKey(root);
+	return readFileSync(file, "utf-8").split("\n").filter((l) => l.trim() !== "").map((line, i) => {
+		const tampered = new Error(`execute: row ${i + 1} of the harness ledger ${file} fails its signature -- the record was altered; refusing`);
+		let parsed: { body?: unknown; mac?: unknown };
+		try {
+			parsed = JSON.parse(line) as typeof parsed;
+		} catch {
+			throw tampered;
+		}
+		const { body, mac } = parsed;
+		if (typeof body !== "string" || typeof mac !== "string" || mac.length !== sign(key, body).length) throw tampered;
+		if (!timingSafeEqual(Buffer.from(sign(key, body)), Buffer.from(mac))) throw tampered;
+		const row = JSON.parse(body) as LedgerRow & { slug?: string };
+		if (row.slug !== slug) throw tampered;
+		return row;
+	});
+}
+
+/** Drift base: the latest accepted commit or pinned base, whichever came later. */
+export function ledgerBase(rows: readonly LedgerRow[]): string | undefined {
+	const last = rows.filter((r) => r.kind === "base" || r.kind === "accepted").at(-1);
+	return last !== undefined && "sha" in last ? last.sha : undefined;
+}
+
+/** The write allowance pinned with the latest base, so a widened SPEC/PLAN cannot absorb drift unnoticed. */
+export function pinnedAllowance(rows: readonly LedgerRow[]): readonly string[] | undefined {
+	const base = rows.filter((r) => r.kind === "base").at(-1);
+	return base?.kind === "base" ? base.allowance : undefined;
+}
+
+export function acceptedEntries(rows: readonly LedgerRow[]): readonly { readonly taskId: string; readonly sha: string; readonly entry: string }[] {
+	return rows.flatMap((r) => (r.kind === "accepted" ? [r] : []));
+}
+
+/** Rejected attempts for `taskId` since its last reset, and whether the recorded count stopped dropping between the last two. */
+export function attemptState(rows: readonly LedgerRow[], taskId: string): { readonly attempts: number; readonly stalled: boolean } {
+	let counts: (number | null)[] = [];
+	for (const r of rows) {
+		if (r.kind === "reset" && r.taskId === taskId) counts = [];
+		if (r.kind === "rejected" && r.taskId === taskId) counts.push(r.count);
+	}
+	const [prev, cur] = counts.slice(-2);
+	return { attempts: counts.length, stalled: typeof prev === "number" && typeof cur === "number" && stallDetected(prev, cur) };
+}
+
+/** The sorted union, so the same allowance always compares equal. */
+export function allowanceOf(spec: readonly string[], plan: readonly string[]): readonly string[] {
+	return [...new Set([...spec, ...plan])].sort();
+}

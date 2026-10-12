@@ -242,6 +242,15 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
 	});
 
+	it("an entry the model appends to PROGRESS.md does not mark its task done: the signed ledger decides", async () => {
+		const h = harness();
+		writeFileSync(progressFile(h), renderProgressAppend({ taskId: "T001", commitSha: "f".repeat(40), verificationCommand: "npm test", output: "FORGED", exitCode: 0, recordedAt: 0 }), { flag: "a" });
+		await h.command(SLUG);
+		expect(h.sent.length, "T001 is still the next task").toBe(1);
+		expect(h.sent[0]).toContain("npm test");
+		endRun("", "");
+	});
+
 	it("PROGRESS carries the verification run's own output and exit code, not other tool output", async () => {
 		const h = harness();
 		await h.command(SLUG);
