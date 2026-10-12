@@ -43,6 +43,8 @@ export const ESTIMATE_NOTE =
 	`Token figures marked ${TOKEN_ESTIMATE_MARKER} are ESTIMATES: Math.ceil(chars / 4), ` +
 	"Pi's own heuristic, roughly +/-20% error. Characters are the measurement.";
 
+export const FLOOR_LABEL = "per-turn floor (system prompt + tool schemas)";
+
 export const PROVIDER_REPORTED_LABEL = "provider-reported (ground truth)";
 
 export const NO_PROVIDER_USAGE_NOTE = "no assistant turn in this session yet";
@@ -179,6 +181,7 @@ export interface BudgetReport {
 	skillsIndex: SectionSize;
 	toolSchemas: SectionSize;
 	toolSchemasByName: NamedSectionSize[];
+	floor: SectionSize;
 	skillCount: number;
 	contextFilesFound: boolean;
 	skillsFound: boolean;
@@ -256,6 +259,8 @@ export function computeBudget(input: BudgetInput): BudgetReport {
 		skillsIndex: size(slices.skills),
 		toolSchemas: size(toolSchemaChars),
 		toolSchemasByName,
+		// Rounded once from the char sum so it can differ from the two rows' token sum by one.
+		floor: size(slices.total + toolSchemaChars),
 		skillCount: input.skills.length,
 		contextFilesFound: slices.contextFilesFound,
 		skillsFound: slices.skillsFound,
@@ -317,6 +322,7 @@ export function formatBudgetReport(report: BudgetReport): string {
 		),
 	);
 	lines.push(row(`tool schemas (${report.toolSchemasByName.length} active)`, report.toolSchemas));
+	lines.push(row(FLOOR_LABEL, report.floor));
 
 	if (report.contextFilesByPath.length > 0) {
 		lines.push("");

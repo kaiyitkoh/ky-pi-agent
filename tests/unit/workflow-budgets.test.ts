@@ -192,8 +192,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/diagnostics/budget.ts",
-		budget: 440,
-		why: "Phase 2's /budget command -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 435 raw lines 2026-08-14, rounded up to the next ten",
+		budget: 450,
+		why: "Phase 2's /budget command -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 435 raw lines 2026-08-14, rounded up to the next ten. Re-measured 441 on 2026-10-13 after the per-turn floor field and row (FLOOR_LABEL, floor, one computed value, one rendered row)",
 	},
 	{
 		file: ".pi/extensions/checkpoint/index.ts",
@@ -370,13 +370,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
-		budget: 1930,
+		budget: 1940,
 		why: "WR-03; measured 3913 raw lines across 10 files 2026-08-15 (08-04 added quality-cost.ts; not " +
 			"re-reviewed for tightness), rounded up to the next ten. Code-review fix pass WR-06 added " +
 			"refundQualityCost() to quality-cost.ts (see workflows/index.ts's own budget entry for the finding). " +
 			"Re-measured 1930 raw lines across 10 files 2026-08-15 (budget.ts 435, call-model.ts 217, index.ts " +
 			"305, jsonl.ts 73, prose.ts 74, quality-cost.ts 115, redact.ts 159, schema.ts 208, turns.ts 176, " +
-			"wire.ts 168), rounded up to the next ten",
+			"wire.ts 168), rounded up to the next ten. Re-measured 1936 raw lines across 10 files 2026-10-13 (budget.ts 441 after the per-turn floor)",
 	},
 	{
 		dir: ".pi/extensions/checkpoint",

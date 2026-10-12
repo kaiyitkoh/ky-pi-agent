@@ -51,10 +51,13 @@ import {
 	BUDGET_COMMAND_WHERE,
 	CONTEXT_FILES_CLOSE_MARKER,
 	CONTEXT_FILES_OPEN_MARKER,
+	FLOOR_LABEL,
 	PROVIDER_REPORTED_LABEL,
 	ROWS_WRITTEN_LABEL,
 	SKILLS_CLOSE_MARKER,
 	SKILLS_OPEN_MARKER,
+	computeBudget,
+	estimateTokensFromChars,
 	registerBudgetCommand,
 } from "../../.pi/extensions/diagnostics/budget.ts";
 import { logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
@@ -277,6 +280,30 @@ describe("DIAG-06 — the /budget handler runs, and the skills tripwire is real"
 				"persisted copy of it would be a copy of a user's global context-file layout " +
 				"[threats T-02-10-01, T-02-10-06]",
 		).toEqual([]);
+	});
+
+	// Mutation check: deleting the floor row from formatBudgetReport fails this test.
+	it("prints the per-turn floor line from the same chars the other rows use", async () => {
+		const { notified } = await invoke();
+		const line = (notified[0]?.text ?? "").split(/\r?\n/).find((l) => l.includes(FLOOR_LABEL));
+		expect(line, "the floor line must be rendered").toBeDefined();
+		expect(line).toContain("~");
+	});
+
+	it("computes the floor from the char sum, rounded once", () => {
+		const tools = [{ name: "ab", description: "cde", parameters: { a: 1 } }];
+		const report = computeBudget({
+			systemPrompt: "x".repeat(9),
+			contextFiles: [],
+			skills: [],
+			skillsBlock: "",
+			tools,
+			lastUsage: undefined,
+			rowsWritten: 0,
+		});
+		const toolChars = 2 + 3 + JSON.stringify({ a: 1 }).length;
+		expect(report.floor.chars).toBe(9 + toolChars);
+		expect(report.floor.estimatedTokens).toBe(estimateTokensFromChars(9 + toolChars));
 	});
 
 	it("cross-checks the recomputed skills block against a REAL sliced region", async () => {
