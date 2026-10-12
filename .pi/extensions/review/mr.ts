@@ -89,23 +89,32 @@ export function historyMismatch(cwd: string, taskIds: readonly string[], progres
 	return undefined;
 }
 
-/** Why the MR would not carry HEAD, or undefined: glab opens the MR for the pushed branch, not the local one. */
+/**
+ * Why the MR would not carry HEAD, or undefined. The MR's source is the remote branch named like the local one
+ * (passed explicitly as --source-branch), so that remote-tracking ref must equal HEAD; `@{u}` may track another name.
+ * This reads the local remote-tracking ref, which is only as fresh as the last push or fetch.
+ */
 export function upstreamMismatch(cwd: string): string | undefined {
 	const head = gitRead(cwd, ["rev-parse", "HEAD"]).out;
-	const upstream = gitRead(cwd, ["rev-parse", "--verify", "--quiet", "@{u}"]);
-	if (upstream.status !== 0) return "the branch has no upstream -- push it first";
-	return upstream.out === head ? undefined : `the pushed branch is at ${upstream.out}, not HEAD (${head}) -- push first`;
+	const branch = gitRead(cwd, ["symbolic-ref", "--short", "HEAD"]);
+	if (branch.status !== 0) return "HEAD is detached -- check out the branch the MR should come from";
+	const remote = gitRead(cwd, ["config", "--get", `branch.${branch.out}.remote`]).out || "origin";
+	const pushed = gitRead(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branch.out}`]);
+	if (pushed.status !== 0) return `${remote}/${branch.out} does not exist -- push the branch under its own name first: git push ${remote} ${branch.out}:${branch.out}`;
+	return pushed.out === head ? undefined : `${remote}/${branch.out} is at ${pushed.out}, not HEAD (${head}) -- push first`;
 }
 
 export interface MrInput {
 	readonly targetBranch: string;
+	/** The branch {@link upstreamMismatch} checked, so glab cannot open the MR from some other one. */
+	readonly sourceBranch: string;
 	readonly title: string;
 	readonly body: string;
 }
 
 /** Target first, so no earlier value-taking flag can swallow it; the body is one argv element and never meets a shell. */
 export function mrCreateArgv(input: MrInput): readonly string[] {
-	return ["mr", "create", MR_TARGET_BRANCH_FLAG, input.targetBranch, "--title", input.title, MR_BODY_FLAG, input.body];
+	return ["mr", "create", MR_TARGET_BRANCH_FLAG, input.targetBranch, "--source-branch", input.sourceBranch, "--title", input.title, MR_BODY_FLAG, input.body];
 }
 
 /** Keep only plain characters, so a title can never read as a flag cluster or carry control text. */

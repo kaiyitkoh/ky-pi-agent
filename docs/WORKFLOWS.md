@@ -419,7 +419,11 @@ entries, described below), not from the model's account of its own work, and
 carries a disclosure line. Because glab opens the MR for the pushed branch,
 `/review` refuses unless every PLAN task has an accepted entry, every
 recorded commit is on HEAD's history, the last recorded commit is HEAD, and
-the upstream (`@{u}`) is HEAD.
+`<remote>/<current branch>` is HEAD. The remote is the branch's configured
+remote, or `origin`. `/review` passes that branch to glab as
+`--source-branch`, so the MR opens from the branch that was checked rather
+than whatever `@{u}` happens to track. The check reads the local
+remote-tracking ref, which is only as fresh as the last push or fetch.
 
 **Why the drift check is computed.** Scope drift is the difference between
 `git diff --name-only <base>..HEAD` and the union of SPEC's expected files and

@@ -136,7 +136,7 @@ export default function (pi: ExtensionAPI): void {
 				if (unpushed !== undefined) return fail(`review: MR not opened -- ${unpushed}`);
 				const body = buildMrBody({ spec: spec.spec, plan: plan.plan, progress, review });
 				const title = sanitizeTitle(spec.spec.goal.split("\n")[0] ?? "");
-				const out = openMr({ targetBranch: MR_TARGET_BRANCH, title, body }, { exec: spawnExec(ctx.cwd, undefined) });
+				const out = openMr({ targetBranch: MR_TARGET_BRANCH, sourceBranch: currentBranch(ctx.cwd), title, body }, { exec: spawnExec(ctx.cwd, undefined) });
 				if (out.kind === "refused") return fail(`review: MR refused -- ${out.reason}`);
 				if (out.kind === "failed") return fail(`review: glab exited ${out.code}: ${out.stderr}`);
 				ctx.ui.notify(`review: MR opened against ${MR_TARGET_BRANCH}\n${out.stdout}`, "info");

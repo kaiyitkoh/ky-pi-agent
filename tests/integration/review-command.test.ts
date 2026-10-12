@@ -88,8 +88,7 @@ function setup(extra?: string) {
 		git(repo, ["commit", "--amend", "--no-edit"]);
 	}
 	const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf-8" }).trim();
-	git(repo, ["branch", "pushed"]);
-	git(repo, ["branch", "--set-upstream-to=pushed"]);
+	git(repo, ["update-ref", "refs/remotes/origin/work", "HEAD"]);
 	const dir = join(repo, ".pi", "work", SLUG);
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "SPEC.md"), renderSpecMarkdown(SPEC));
@@ -123,7 +122,7 @@ describe("/review -- the real handler", () => {
 		await h.run();
 		expect(mocks.calls).toHaveLength(1);
 		expect(mocks.calls[0]?.reviewWritten, "the MR must only ever follow REVIEW.md").toBe(true);
-		expect(mocks.calls[0]?.args.slice(0, 4)).toEqual(["mr", "create", "--target-branch", "staging"]);
+		expect(mocks.calls[0]?.args.slice(0, 6)).toEqual(["mr", "create", "--target-branch", "staging", "--source-branch", "work"]);
 		expect(h.notes.at(-1)?.text).toContain("MR opened");
 	});
 
@@ -167,7 +166,7 @@ describe("/review -- the real handler", () => {
 	it("after a rebase, /review refuses until the user re-pins, then discloses the re-pin in the MR", async () => {
 		const h = setup();
 		git(h.repo, ["commit", "--amend", "--no-edit", "-m", "task, rebased"]);
-		git(h.repo, ["branch", "-f", "pushed"]);
+		git(h.repo, ["update-ref", "refs/remotes/origin/work", "HEAD"]);
 		await h.run(SLUG);
 		expect(h.notes.at(-1)?.text).toContain("--rebase-base");
 		expect(mocks.calls).toHaveLength(0);
@@ -207,9 +206,9 @@ describe("/review -- the real handler", () => {
 
 	it("refuses to open an MR for an unpushed HEAD", async () => {
 		const h = setup();
-		git(h.repo, ["branch", "--unset-upstream"]);
+		git(h.repo, ["update-ref", "-d", "refs/remotes/origin/work"]);
 		await h.run(SLUG);
-		expect(h.notes.at(-1)?.text).toContain("no upstream");
+		expect(h.notes.at(-1)?.text).toContain("origin/work does not exist");
 		expect(mocks.calls).toHaveLength(0);
 	});
 });

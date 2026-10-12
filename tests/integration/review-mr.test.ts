@@ -65,7 +65,7 @@ function recorder(): { exec: MrExec; calls: { file: string; args: string[] }[] }
 	return { calls, exec: (file, args) => (calls.push({ file, args }), { status: 0, stdout: "https://example.invalid/mr/1", stderr: "" }) };
 }
 
-const input = (targetBranch: string) => ({ targetBranch, title: "Add the a module", body: "## Why" });
+const input = (targetBranch: string) => ({ targetBranch, sourceBranch: "work", title: "Add the a module", body: "## Why" });
 
 describe("openMr classification (injected executor)", () => {
 	it("allows an explicit staging target and sends it", () => {
@@ -98,7 +98,7 @@ describe("openMr classification (injected executor)", () => {
 	it("passes the whole body as the single argv element after --description, straight to glab", () => {
 		const r = recorder();
 		const full = buildMrBody({ spec: { ...SPEC, goal: `${BODY_TEXT} %PATH% & "q"` }, plan: PLAN, progress: PROGRESS, review: REVIEW });
-		expect(openMr({ targetBranch: "staging", title: "T", body: full }, { exec: r.exec }).kind).toBe("opened");
+		expect(openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: full }, { exec: r.exec }).kind).toBe("opened");
 		expect(r.calls[0]?.file).toBe("glab");
 		const args = r.calls[0]?.args ?? [];
 		expect(args[args.indexOf(MR_BODY_FLAG) + 1]).toBe(full);
@@ -107,14 +107,14 @@ describe("openMr classification (injected executor)", () => {
 
 	it("refuses an over-long body rather than truncating the evidence", () => {
 		const r = recorder();
-		const out = openMr({ targetBranch: "staging", title: "T", body: "x".repeat(MAX_MR_BODY_CHARS + 1) }, { exec: r.exec });
+		const out = openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: "x".repeat(MAX_MR_BODY_CHARS + 1) }, { exec: r.exec });
 		expect(out.kind).toBe("refused");
 		expect(r.calls).toHaveLength(0);
 	});
 
 	it("counts quotes and backslashes twice, as Windows argv quoting does", () => {
 		const r = recorder();
-		const out = openMr({ targetBranch: "staging", title: "T", body: '"'.repeat(MAX_MR_BODY_CHARS / 2 + 1) }, { exec: r.exec });
+		const out = openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: '"'.repeat(MAX_MR_BODY_CHARS / 2 + 1) }, { exec: r.exec });
 		expect(out.kind).toBe("refused");
 		expect(r.calls).toHaveLength(0);
 	});
@@ -184,12 +184,15 @@ describe("MR preconditions against a real temp repo (no remote)", () => {
 		expect(historyMismatch(r, ["T001", "T002"], entry("T001", side) + entry("T002", a))).toContain("not on HEAD's history");
 	});
 
-	it("needs an upstream that equals HEAD", () => {
+	it("needs the remote branch named like the local one to equal HEAD, whatever @{u} tracks", () => {
 		const r = repo();
 		commitFile(r, "a.ts", "a\n", "a");
-		expect(upstreamMismatch(r)).toContain("no upstream");
-		git(r, ["branch", "pushed"]);
-		git(r, ["branch", "--set-upstream-to=pushed"]);
+		expect(upstreamMismatch(r)).toContain("does not exist");
+		git(r, ["update-ref", "refs/remotes/origin/other", "HEAD"]);
+		git(r, ["config", "branch.work.remote", "origin"]);
+		git(r, ["config", "branch.work.merge", "refs/heads/other"]);
+		expect(upstreamMismatch(r), "an upstream under another name is not the MR's source").toContain("origin/work does not exist");
+		git(r, ["update-ref", "refs/remotes/origin/work", "HEAD"]);
 		expect(upstreamMismatch(r)).toBeUndefined();
 		commitFile(r, "b.ts", "b\n", "b");
 		expect(upstreamMismatch(r)).toContain("push first");
@@ -205,12 +208,12 @@ describe("stubbed glab on PATH", () => {
 		const logTo = join(dir, "calls.log");
 		const out = withStubBin(
 			{ glab: { logTo, match: [{ when: ["mr", "create"], stdout: "https://example.invalid/mr/1\n" }, { when: ["merge"], exitCode: 9 }] } },
-			(env) => openMr({ targetBranch: "staging", title: "Add the a module", body: "## Why" }, { exec: spawnExec(dir, env) }),
+			(env) => openMr({ targetBranch: "staging", sourceBranch: "work", title: "Add the a module", body: "## Why" }, { exec: spawnExec(dir, env) }),
 		);
 		expect(out.kind).toBe("opened");
 		const log = readFileSync(logTo, "utf-8").trim().split("\n");
 		expect(log).toHaveLength(1);
-		expect(log[0]).toContain("glab mr create --target-branch staging --title");
+		expect(log[0]).toContain("glab mr create --target-branch staging --source-branch work --title");
 		expect(log[0]).toContain("--description");
 	});
 
