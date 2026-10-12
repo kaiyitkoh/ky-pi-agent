@@ -28,7 +28,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.1: Pi 1.x Upgrade & Install Health** (INSERTED) - Re-pin to Pi 1.1.0, migrate tests/diagnostics, guard new tool paths, re-review composed extensions (completed 2026-10-12)
 - [x] **Phase 08.2: Comment Discipline & AGENTS.md** (INSERTED) - AGENTS.md comment rules shipped by the harness, ID-in-comment check, cleanup pass (completed 2026-10-12)
 - [x] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main` (completed 2026-10-12)
-- [ ] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause
+- [x] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause (completed 2026-10-12)
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
 - [ ] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost
 
@@ -585,7 +585,7 @@ Plans:
 
 **Wave 7** *(blocked on Wave 6 completion)*
 
-- [ ] 10-07-PLAN.md — RB-10-01..03 OUTSTANDING, docs-policy governance, decision docs, requirements reconciliation *(Wave 7)*
+- [x] 10-07-PLAN.md — RB-10-01..03 OUTSTANDING, docs-policy governance, decision docs, requirements reconciliation *(Wave 7)*
 
 **Research**: `--research-phase` required — the minimal-vs-full experiment is a research task with a designed protocol, not an implementation task. No study establishes a token threshold; anyone quoting one is guessing.
 
