@@ -50,12 +50,19 @@ docstring for the structural argument). Concretely, it catches:
   A leading git GLOBAL option before the subcommand (`git -C /repo status`,
   `git --no-pager log`) is skipped correctly rather than misread as an
   unclassified subcommand. `git push` ALSO blocks independently of `HEAD`
-  whenever its own refspec names a protected branch as the destination
-  (`git push --force origin main` from a feature branch, or
-  `git push origin HEAD:main`, including the forced `+main` and
-  `+refs/heads/main` spellings), and whenever it pushes every branch
-  (`--all`, `--branches`, `--mirror`) — the refspec target cannot be trusted from
-  argv alone, so it is checked regardless of the checked-out branch.
+  unless every refspec is an explicit `src:dst` with a non-protected
+  destination (`git push origin feat:feat`). It blocks when a destination
+  names a protected branch (`git push origin HEAD:main`, the forced `+main`
+  and `+refs/heads/main` spellings, and `heads/main`, which git expands on
+  the remote), when the destination is empty (`:`, `+:`), a wildcard
+  (`refs/heads/*:refs/heads/*`) or `HEAD`, when it pushes every branch
+  (`--all`, `--branches`, `--mirror`), when it names no refspec or only a
+  bare source (`git push`, `git push origin`, `git push origin feat`, all of
+  which take the destination from `remote.<r>.push` or `push.default`), and
+  when a global `-c`/`--config-env` overrides `push.*`, `remote.*` or
+  `branch.*`. `--delete <name>` is the one bare-name form allowed, for a
+  non-protected name. Config written earlier with `git config` cannot
+  redirect an explicit `src:dst`, so the rule does not read it.
   `glab mr merge` blocks unconditionally on every branch, because in this
   project's work repo an MR merge *is* the deploy trigger. `glab mr create`
   (plan 09-04, FLOW-08) is a conditional allow, independent of `HEAD` but

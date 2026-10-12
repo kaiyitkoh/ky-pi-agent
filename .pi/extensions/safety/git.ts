@@ -6,8 +6,8 @@
  *   `git worktree add -b feat main`, `git fetch origin main`, `git diff main`.
  * - Is this subcommand a WRITE given its args? A pure table of per-subcommand predicates
  *   (`{ subcommand, matches(args), why }`); `rebase` and `apply` appear in both tables with
- *   complementary predicates. `push` is always a write: the refspec target cannot be trusted
- *   from argv and resolving it would need a second git invocation.
+ *   complementary predicates. `push` is always a write while `HEAD` is protected; on any branch
+ *   it must also name an explicit, non-protected `src:dst`, since config can supply the rest.
  *
  * With `HEAD` protected: a matching write entry blocks; else a matching read entry allows; else a
  * subcommand in either table with no matching shape (`git stash pop`) or an unknown one blocks
@@ -99,6 +99,8 @@ export function currentTree(cwd: string): string {
 export interface GitInvocation {
 	readonly subcommand: string;
 	readonly args: readonly string[];
+	/** `name=value` from git's global `-c`/`--config-env`, which precede the subcommand. */
+	readonly configOverrides?: readonly string[];
 }
 
 export interface GitPolicyFacts {
@@ -181,37 +183,66 @@ function isProtected(facts: GitPolicyFacts): boolean {
 }
 
 const PUSH_EVERY_BRANCH_FLAGS: ReadonlySet<string> = new Set(["--all", "--mirror", "--branches"]);
+const PUSH_VALUE_FLAGS: ReadonlySet<string> = new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"]);
+/** Config that can redirect a push's destination (remote.<r>.push, push.default, branch.<b>.merge, ...). */
+const PUSH_CONFIG_KEY = /^(push\.|remote\.|branch\.)/i;
 
-/**
- * Does a `push` argv name a protected branch as destination, whatever `HEAD` is? A positional token is `src:dst`
- * when it has `:`, else a bare ref; a leading `+` (force) and `refs/heads/` are stripped; comparison is
- * case-insensitive. Flags that push every branch count as naming every protected one.
- */
-function pushTargetsProtected(args: readonly string[], protectedBranches: readonly string[]): boolean {
-	if (args.some((a) => PUSH_EVERY_BRANCH_FLAGS.has(a))) {
-		return true;
-	}
-	return args.some((a) => {
-		if (a.startsWith("-")) {
-			return false;
-		}
-		const dst = a.includes(":") ? a.slice(a.indexOf(":") + 1) : a;
-		const leaf = dst.replace(/^\+/, "").replace(/^refs\/heads\//, "");
-		return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
-	});
+/** Destinations git resolves to more than one branch, or to the remote's default branch, count as every protected one. */
+function destinationIsProtected(dst: string, protectedBranches: readonly string[]): boolean {
+	const ref = dst.replace(/^\+/, "");
+	if (ref === "" || ref.includes("*") || /^(head|@)$/i.test(ref)) return true;
+	// git DWIMs a short destination against the remote's refs, so `heads/main` reaches refs/heads/main.
+	const leaf = ref.replace(/^(refs\/)?heads\//i, "");
+	return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
 }
 
-/** Deny a push naming a protected destination regardless of `HEAD`, or any write while `HEAD` is protected; see the module header for the resolution order. */
+/**
+ * Why a `push` may reach a protected branch whatever `HEAD` is, or undefined. Fail closed: every positive refspec
+ * must be an explicit `src:dst` (or a `--delete` name), because a bare push, a bare `src` and `-c` overrides all
+ * take the destination from config that argv cannot show.
+ */
+function pushRefusal(args: readonly string[], configOverrides: readonly string[], protectedBranches: readonly string[]): string | undefined {
+	if (configOverrides.some((c) => PUSH_CONFIG_KEY.test(c))) return "overrides push or remote config with -c";
+	if (args.some((a) => PUSH_EVERY_BRANCH_FLAGS.has(a))) return "pushes every branch, protected ones included";
+	const deleting = args.includes("--delete") || args.includes("-d");
+	const positionals: string[] = [];
+	let remoteGiven = false;
+	for (let i = 0; i < args.length; i++) {
+		const a = args[i];
+		if (PUSH_VALUE_FLAGS.has(a)) {
+			remoteGiven ||= a === "--repo";
+			i++;
+		} else if (a.startsWith("--repo=")) {
+			remoteGiven = true;
+		} else if (/^-[^-]/.test(a) && a.length > 2 && a.includes("o")) {
+			return `short-flag cluster "${a}" may take a value and is not parsed`;
+		} else if (!a.startsWith("-")) {
+			positionals.push(a);
+		}
+	}
+	const refspecs = (remoteGiven ? positionals : positionals.slice(1)).filter((r) => !r.startsWith("^"));
+	if (refspecs.length === 0) return "names no refspec, so its destination comes from config";
+	for (const r of refspecs) {
+		if (!r.includes(":") && !deleting) return `refspec "${r}" has no explicit destination, so config may choose it`;
+		if (destinationIsProtected(r.includes(":") ? r.slice(r.indexOf(":") + 1) : r, protectedBranches)) {
+			return `refspec "${r}" reaches a protected branch`;
+		}
+	}
+	return undefined;
+}
+
+/** Deny a push that may reach a protected destination regardless of `HEAD`, or any write while `HEAD` is protected; see the module header for the resolution order. */
 export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolicyFacts): GitVerdict {
 	const display = `git ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
 
-	if (invocation.subcommand === "push" && pushTargetsProtected(invocation.args, facts.protectedBranches)) {
+	const pushWhy =
+		invocation.subcommand === "push" ? pushRefusal(invocation.args, invocation.configOverrides ?? [], facts.protectedBranches) : undefined;
+	if (pushWhy !== undefined) {
 		return {
 			kind: "block",
 			reason:
-				`"${display}" pushes to a protected ref by refspec -- the destination side of the argv names ` +
-				`a protected branch regardless of the checked-out branch ("${facts.currentBranch}"); the refspec ` +
-				"target cannot be trusted from argv alone, so this is checked independently of HEAD",
+				`"${display}" ${pushWhy} -- checked regardless of the checked-out branch ("${facts.currentBranch}"); ` +
+				"write an explicit non-protected destination: git push <remote> <branch>:<branch>",
 		};
 	}
 

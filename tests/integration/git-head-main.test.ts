@@ -115,7 +115,7 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 			"main",
 		);
 
-		const verdict = classifyGitInvocation({ subcommand: "push", args: [] }, facts(branch));
+		const verdict = classifyGitInvocation({ subcommand: "push", args: ["origin", "HEAD:feature/x"] }, facts(branch));
 		expect(verdict.kind, "HEAD is main (protected) and push is a write -- must block").toBe("block");
 	});
 
@@ -129,7 +129,7 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 				"oracle tracks a REAL change in HEAD, not a hardcoded string",
 		).toBe("feature/x");
 
-		const verdict = classifyGitInvocation({ subcommand: "push", args: [] }, facts(branch));
+		const verdict = classifyGitInvocation({ subcommand: "push", args: ["origin", "HEAD:feature/x"] }, facts(branch));
 		expect(
 			verdict.kind,
 			"the SAME push invocation that blocked on main must now allow -- the rule is about the checked-out " +
@@ -154,7 +154,7 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 		expect(branch).not.toBe("main");
 		expect(branch.length, "must not be the empty-string failure mode this module's docstring warns against").toBeGreaterThan(0);
 
-		const verdict = classifyGitInvocation({ subcommand: "push", args: [] }, facts(branch));
+		const verdict = classifyGitInvocation({ subcommand: "push", args: ["origin", "HEAD:feature/x"] }, facts(branch));
 		expect(verdict.kind, "DETACHED_HEAD can never equal a configured protected branch name -- must allow").toBe(
 			"allow",
 		);

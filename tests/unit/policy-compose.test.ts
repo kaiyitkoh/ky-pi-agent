@@ -58,7 +58,7 @@ const ROWS: readonly Row[] = [
 	{
 		name: "git push on protected main -- block, no approval path",
 		toolName: "bash",
-		input: { command: "git push" },
+		input: { command: "git push origin HEAD:feature/x" },
 		facts: PROTECTED_MAIN,
 		expected: "block",
 		reasonIncludes: "writes to the checked-out branch",
@@ -174,7 +174,7 @@ const ROWS: readonly Row[] = [
 	{
 		name: "git -C /repo push on protected main -- still blocked, -C must not shadow the real subcommand",
 		toolName: "bash",
-		input: { command: "git -C /repo push" },
+		input: { command: "git -C /repo push origin HEAD:feature/x" },
 		facts: PROTECTED_MAIN,
 		expected: "block",
 		reasonIncludes: "writes to the checked-out branch",
@@ -184,6 +184,31 @@ const ROWS: readonly Row[] = [
 		toolName: "bash",
 		input: { command: "git --no-pager log" },
 		facts: PROTECTED_MAIN,
+		expected: "allow",
+	},
+	{
+		name: "git -c push.default=matching push origin -- blocked on a feature branch, the override picks the destination",
+		toolName: "bash",
+		input: { command: "git -c push.default=matching push origin" },
+		expected: "block",
+	},
+	{
+		name: "git -c remote.origin.push=... push with an explicit refspec -- blocked, the override is refused outright",
+		toolName: "bash",
+		input: { command: "git -c remote.origin.push=refs/heads/feature/x:refs/heads/main push origin feature/x:feature/x" },
+		expected: "block",
+		reasonIncludes: "-c",
+	},
+	{
+		name: "git --config-env push.default=V push -- the separated form is a value option, not the subcommand",
+		toolName: "bash",
+		input: { command: "git --config-env push.default=V push origin feature/x:feature/x" },
+		expected: "block",
+	},
+	{
+		name: "git push origin feature/x:feature/x on a feature branch -- allowed",
+		toolName: "bash",
+		input: { command: "git push origin feature/x:feature/x" },
 		expected: "allow",
 	},
 	{

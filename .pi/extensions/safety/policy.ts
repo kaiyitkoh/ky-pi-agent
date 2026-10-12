@@ -111,21 +111,26 @@ function fromInfraVerdict(verdict: InfraVerdict, requestKey: string): Verdict {
  * git's global options (-C, -c, --git-dir, --work-tree, --namespace) precede the subcommand; skip them, consuming the
  * value of those that take one, so the subcommand is the first positional word rather than "-C" hitting the fail-closed arm.
  */
-const GIT_GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--git-dir", "--work-tree", "--namespace"]);
+const GIT_GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace"]);
 
 function toGitInvocation(invocation: CanonicalInvocation): GitInvocation {
 	const args = invocation.args;
+	const configOverrides: string[] = [];
 	let i = 0;
 	while (i < args.length && args[i].startsWith("-")) {
 		const flag = args[i];
-		if (GIT_GLOBAL_VALUE_OPTIONS.has(flag)) {
+		if (flag.startsWith("--config-env=")) {
+			configOverrides.push(flag.slice("--config-env=".length));
+			i += 1;
+		} else if (GIT_GLOBAL_VALUE_OPTIONS.has(flag)) {
+			if ((flag === "-c" || flag === "--config-env") && args[i + 1] !== undefined) configOverrides.push(args[i + 1]);
 			i += 2;
 		} else {
 			// Unrecognised or boolean flag: skip only itself, never guessing an arity that over-consumes the subcommand.
 			i += 1;
 		}
 	}
-	return { subcommand: args[i] ?? "", args: args.slice(i + 1) };
+	return { subcommand: args[i] ?? "", args: args.slice(i + 1), configOverrides };
 }
 
 /** One invocation's strongest verdict across git/glab, infra and path classification. */
