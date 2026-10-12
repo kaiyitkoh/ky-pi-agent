@@ -149,7 +149,7 @@ downgrade path anywhere in this subsystem.
 | web_search, fetch_content, get_search_content, source_check | yes | no | no | yes |
 | questionnaire, bg_run, bg_status, bg_logs, bg_kill, qoder_delegate | no | no | no | yes |
 
-Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,818 tok, review 1,945, implement 2,389, full 4,233.
+Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,773 tok, review 1,900, implement 2,344, full 4,179.
 
 Two rules keep this safe. Pi's registered-but-inactive built-ins (`grep`, `find`, `ls`) are neutral and never removed, because if they are active something chose them. A loadout with neither `edit` nor `write` was already chosen read-only (plan mode, a read-only subagent), so the profile leaves it alone.
 

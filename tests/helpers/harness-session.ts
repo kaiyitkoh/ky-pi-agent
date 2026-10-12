@@ -5,7 +5,8 @@
  * Differences from createFauxSession that matter for measurement:
  * - No `tools` allowlist is passed; an allowlist filters registration of every extension tool.
  * - Extensions load as ONE user-scope inline extension (project scope is trust-gated headless).
- * - Paths are normalised before counting so the numbers are equal on every machine and CI OS.
+ * - The background shell policy is pinned to bash, and paths plus the shell executable are replaced by
+ *   placeholders before counting, so the numbers do not depend on the checkout path, OS or login shell.
  */
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -31,6 +32,15 @@ const QODER_ENV = [
 	"QODER_ENVIRONMENT_ID",
 	"QODER_BASE_URL",
 ] as const;
+
+// background-tasks renders its resolved shell into the prompt; pinning bash keeps that section's text the
+// same on every OS and login shell (win32 ignores the POSIX variables and defaults to bash).
+const PINNED_ENV: Record<string, string | undefined> = {
+	PI_BG_SHELL: undefined,
+	PI_BG_SHELL_PATH: undefined,
+	PI_BG_POSIX_SHELL: "bash",
+	PI_BG_POSIX_SHELL_PATH: undefined,
+};
 
 // Mirrors Pi's loader discovery (no export inspection): `<dir>/*.ts` and `<dir>/<name>/index.ts`.
 const DISCOVERED = /^\.pi\/extensions\/(?:[^/]+\.ts|[^/]+\/index\.ts)$/;
@@ -93,6 +103,10 @@ function forwardSlash(path: string): string {
 	return path.replace(/\\/g, "/");
 }
 
+function backSlash(path: string): string {
+	return path.replace(/\//g, "\\");
+}
+
 function removeQuietly(dir: string): void {
 	try {
 		rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
@@ -128,6 +142,11 @@ export async function createHarnessSession(
 	for (const name of QODER_ENV) {
 		savedEnv.set(name, process.env[name]);
 		delete process.env[name];
+	}
+	for (const [name, value] of Object.entries(PINNED_ENV)) {
+		savedEnv.set(name, process.env[name]);
+		if (value === undefined) delete process.env[name];
+		else process.env[name] = value;
 	}
 	const restoreEnv = (): void => {
 		for (const [name, value] of savedEnv) {
@@ -228,7 +247,10 @@ export async function withHarnessSession<T>(
 	}
 }
 
-/** Replace temp dirs and the repo root (both slash forms, longest first) with fixed placeholders. */
+/**
+ * Replace temp dirs and the repo root (raw, forward- and back-slash forms, longest first) and the shell
+ * executable with fixed placeholders, then use `/` inside placeholder-rooted paths so every OS counts the same.
+ */
 export function normalisePaths(
 	text: string,
 	handle: Pick<HarnessHandle, "cwd" | "agentDir">,
@@ -241,11 +263,13 @@ export function normalisePaths(
 	const variants = pairs.flatMap(([path, placeholder]) => [
 		[path, placeholder] as const,
 		[forwardSlash(path), placeholder] as const,
+		[backSlash(path), placeholder] as const,
 	]);
 	variants.sort((a, b) => b[0].length - a[0].length);
 	let out = text;
 	for (const [path, placeholder] of variants) out = out.split(path).join(placeholder);
-	return out;
+	out = out.replace(/("executable":)"(?:[^"\\]|\\.)*"/g, '$1"<shell>"');
+	return out.replace(/<(?:repo|cwd|agent)>[\\/][^\s<]*/g, (m) => m.replace(/\\/g, "/"));
 }
 
 export async function measureFloor(opts: HarnessSessionOptions = {}): Promise<FloorMeasurement> {

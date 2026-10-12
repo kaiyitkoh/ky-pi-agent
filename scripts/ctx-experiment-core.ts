@@ -528,4 +528,4 @@ export function padFileText(targetChars: number, sources: readonly string[]): st
  * Measured full-harness floor minus bare floor in estimated tokens, without AGENTS.md because arm F runs in a fresh repo
  * that has none; a test re-measures it against the composed harness.
  */
-export const PAD_TOKENS = 2653;
+export const PAD_TOKENS = 2622;

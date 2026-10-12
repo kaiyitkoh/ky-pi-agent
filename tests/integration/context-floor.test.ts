@@ -1,7 +1,7 @@
 /**
  * Per-turn floor: what every request costs before the user types anything. Measured by the same
- * computation `/budget` uses, over a composed offline session, on path-normalised text so the
- * figures are identical on every machine.
+ * computation `/budget` uses, over a composed offline session, on text with paths and the shell
+ * executable replaced by placeholders, so the figures do not depend on the checkout path or OS.
  */
 import { describe, expect, it } from "vitest";
 
@@ -12,19 +12,19 @@ import {
 	measureFloor,
 } from "../helpers/harness-session.ts";
 
-/** The composed full-profile floor before any cut: 4233 tokens (16929 chars), measured 2026-10-13 with all 18 tracked entry points. */
-const BEFORE_FULL_FLOOR = 4233;
+/** The composed full-profile floor before any cut: 4179 tokens (16714 chars), measured 2026-10-13 with all 18 tracked entry points. */
+const BEFORE_FULL_FLOOR = 4179;
 
 /**
  * Ceilings in `/budget`-formula tokens (Math.ceil(chars / 4)) on normalised text, each the value measured
  * on 2026-10-13 plus under 3% headroom.
- * recon: measured 1818. review: measured 1945. implement: measured 2389. full: measured 4233.
+ * recon: measured 1773. review: measured 1900. implement: measured 2344. full: measured 4179.
  */
 const FLOOR_CEILINGS = {
-	recon: 1870,
-	review: 2000,
-	implement: 2460,
-	full: 4360,
+	recon: 1820,
+	review: 1950,
+	implement: 2410,
+	full: 4300,
 } as const;
 
 const PROFILES = ["recon", "review", "implement", "full"] as const;

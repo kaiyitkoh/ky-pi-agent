@@ -404,9 +404,14 @@ plus every active tool schema. `/budget` prints it as one line
 `AGENTS.md` and the repo skills, offline, no provider call. It captures the first
 outgoing request and runs `computeBudget` over the prompt and tool list. Unit:
 `/budget`'s formula, `Math.ceil(chars/4)`, tools counted as
-`name + description + JSON(parameters)`. Text is path-normalised (`<cwd>`, `<agent>`,
-`<repo>`) so the figures are identical on every machine. Measured 2026-10-13 on
-win32, Node 24.16.0, Pi 1.1.0. The four pinned packages in `.pi/settings.json` are
+`name + description + JSON(parameters)`. Before counting, the temp dirs and the repo root
+(raw, `/` and `` forms) become `<cwd>`, `<agent>` and `<repo>`, separators after a
+placeholder become `/`, the background shell policy is pinned to bash and its executable
+becomes `<shell>`. The figures are therefore the same for any checkout path, OS and login
+shell. A real session differs from them by the length of its actual paths (three Pi doc
+paths, three skill locations, the shell executable), a few tokens per path, and on a
+POSIX login shell that is not bash the shell-policy section carries extra guidance.
+Measured 2026-10-13 on win32, Node 24.16.0, Pi 1.1.0. The four pinned packages in `.pi/settings.json` are
 not installed in this harness, so their cost is not in these numbers (it is measured
 separately). The Phase 2 figure of 1,850 tokens is the bare-Pi-plus-context-file
 configuration, not this composed one.
@@ -415,13 +420,13 @@ configuration, not this composed one.
 
 | Configuration | system chars | tool chars | floor chars | floor tokens | tools |
 |---|---|---|---|---|---|
-| bare Pi | 2758 | 2544 | 5302 | 1326 | 4 |
-| bare Pi + AGENTS.md | 4567 | 2544 | 7111 | 1778 | 4 |
-| full composed | 8479 | 8450 | 16929 | 4233 | 12 |
+| bare Pi | 2668 | 2544 | 5212 | 1303 | 4 |
+| bare Pi + AGENTS.md | 4477 | 2544 | 7021 | 1756 | 4 |
+| full composed | 8264 | 8450 | 16714 | 4179 | 12 |
 
 The wire estimate for the composed tool list (`toToolDeclaration` JSON) is 9206 chars
 against 8450 by the `/budget` formula. The two are never compared with each other.
-The 4,233 figure is within 1% of the 4,255 estimated in research (the measured
+The 4,179 figure is within 2% of the 4,255 estimated in research (the measured
 value is the one that counts). Qoder's tool is deactivated when unconfigured, and no
 installed package is loaded.
 
@@ -430,12 +435,12 @@ AGENTS.md; zero rows are real measurements):
 
 | Entry point | chars | tokens | tools added | verdict |
 |---|---|---|---|---|
-| background-tasks/index.ts | 6191 | 1548 | bg_run, bg_status, bg_logs, bg_kill (plus a system-prompt section) | profile-gate |
+| background-tasks/index.ts | 6156 | 1539 | bg_run, bg_status, bg_logs, bg_kill (plus a system-prompt section) | profile-gate |
 | quality/index.ts | 511 | 128 | consult_advisor | budgeted |
 | questionnaire.ts | 1185 | 297 | questionnaire | profile-gate |
 | safety/index.ts | 248 | 62 | approve_ky_command | keep |
 | todo.ts | 310 | 78 | todo | profile-gate |
-| skills index | 1373 | 344 | none | budgeted |
+| skills index | 1283 | 321 | none | budgeted |
 | checkpoint, diagnostics, execute, grill, harness, loop-police, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | 0 | none | keep |
 
 Sum check: bare + AGENTS.md plus all deltas equals the composed floor with a residual
@@ -443,26 +448,26 @@ of 0 chars (tolerance 32).
 
 **AFTER (profiles plus the shell-policy gate).** Same method, same session, measured
 2026-10-13 on win32, Node 24.16.0, with `measureFloor({ profile })`. The delta column is
-against the BEFORE full composed floor of 4,233 tokens.
+against the BEFORE full composed floor of 4,179 tokens.
 
 | Profile | system chars | tool chars | floor tokens | delta vs BEFORE | tools |
 |---|---|---|---|---|---|
-| recon | 5162 | 2107 | 1818 | -2415 (-57.0%) | 3 |
-| review | 5162 | 2618 | 1945 | -2288 (-54.1%) | 4 |
-| implement (default) | 5162 | 4391 | 2389 | -1844 (-43.6%) | 7 |
-| full | 8479 | 8450 | 4233 | 0 | 12 |
+| recon | 4982 | 2107 | 1773 | -2406 (-57.6%) | 3 |
+| review | 4982 | 2618 | 1900 | -2279 (-54.5%) | 4 |
+| implement (default) | 4982 | 4391 | 2344 | -1835 (-43.9%) | 7 |
+| full | 8264 | 8450 | 4179 | 0 | 12 |
 
 Wire estimate (`toToolDeclaration` JSON), reported separately and never compared with
 the table above: recon 2359, review 2912, implement 4937, full 9206 tool chars.
 
-The shell-policy section (about 128 tokens) is now absent from recon, review and
+The shell-policy section (about 119 tokens) is now absent from recon, review and
 implement and present in full, unchanged. Per-profile CI ceilings in
 `tests/integration/context-floor.test.ts` (`FLOOR_CEILINGS`) sit under 3% above these
 measured values.
 
-**The ~1,850 target.** Claimed for recon only: its measured floor is 1,818 tokens, at or
-below 1,850. The default profile (implement) lands at 2,389, so the literal 1,850 figure
-is not met there; the claim for it is the measured 43.6% reduction from BEFORE.
+**The ~1,850 target.** Claimed for recon only: its measured floor is 1,773 tokens, at or
+below 1,850. The default profile (implement) lands at 2,344, so the literal 1,850 figure
+is not met there; the claim for it is the measured 43.9% reduction from BEFORE.
 
 **Levers not taken.** Pi's `docs` section needs a full custom prompt that drops tool
 snippets, which is a decision for a cheap model; it is tested as an optional arm in the
@@ -577,7 +582,7 @@ calibration grader, so a trial is "caught" only when a finding names the right f
 | A | minimal | Bare Pi: no extensions, skills, context files or prompt templates. The baseline. |
 | B | harness-implement | The harness as installed, default `implement` profile. |
 | F | harness-full | The harness with the `full` tool profile. The primary comparison is F against A. |
-| C | padded-minimal | A plus inert repo prose of the measured floor difference between F as it runs and A (`PAD_TOKENS` = 2,653 estimated tokens: the `full` floor without AGENTS.md, because a trial repo has none, minus the bare floor), separating token mass from harness behaviour. |
+| C | padded-minimal | A plus inert repo prose of the measured floor difference between F as it runs and A (`PAD_TOKENS` = 2,622 estimated tokens: the `full` floor without AGENTS.md, because a trial repo has none, minus the bare floor), separating token mass from harness behaviour. |
 
 **Design.** Paired and interleaved: each (defect, repeat) block runs all four arms contiguously in a seeded order and blocks are
 shuffled, so provider drift lands on every arm alike. One look at a fixed R=10 repeats (`REPEATS`; 6 defects x 10 x 4 arms = 240

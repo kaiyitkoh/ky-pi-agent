@@ -770,7 +770,7 @@ The original CTX criteria were written before Pi 1.x. Each was reinterpreted; th
 | R1 | Profiles set once at `session_start` via `setActiveTools()` and only ever added to; tool removal invalidates the prompt cache | `setActiveTools` once at `session_start`, before the first request, and only for a session with no messages; a resumed, forked or reloaded transcript keeps the loadout it declared. Before each prompt, out-of-profile tools the transcript has not declared (one re-enabled by leaving plan mode) are dropped, which records no removal. Mid-session changes are user commands only (the plan-mode toggle) | Narrowing before the first request writes no `toolsRemoved`, so nothing is invalidated. On DeepSeek (`openai-completions`) and Bedrock the transport re-sends the current tool list, so any mid-session change, add or remove, re-prices the prefix. The enforced rule is: no profile-driven change after the first request | `tests/integration/tool-profiles.test.ts` T1, T2 and the reopen/reload cases |
 | R2 | The `context` hook cannot strip tool definitions at all | Holds only for plain message rewrites. A `context` handler that returns a system-shaped message carrying `toolsRemoved` can change provider tools (Pi 1.1.0 `runner.js:101-106`, `restoreSystemMessages`, only filters inbound system messages). So the property is enforced by a lint, not by Pi | The lint bans `context_with_system`, `toolsAdded` and `toolsRemoved` in tracked source | `tests/integration/context-hook-tools.test.ts` and `tests/unit/context-hook-lint.test.ts` |
 | R3 | Named profiles via `setActiveTools()` | `setActiveTools` stays the primitive; no `exposure: "deferred"`, no `tool_search`, no vendored patches | `tool_search` costs about 173 tok/turn itself and each model-driven load re-prices the prefix; option (a) needs no safety change | `tests/unit/tool-profiles-table.test.ts`; `tests/integration/new-tool-paths.test.ts` stays green |
-| R4 | `/budget` shows the floor measurably below the ~1,850-token baseline | The 1,850 figure is bare Pi plus a context file. Measured BEFORE composed floor is 4,233 tok (bare Pi 1,326; bare + AGENTS.md 1,778). AFTER: recon 1,818, review 1,945, implement (default) 2,389, full 4,233. Only recon is below ~1,850 | "Measurably below" holds against the true baseline; the literal 1,850 is claimed for recon only, and the default is 43.6% below BEFORE | `tests/integration/context-floor.test.ts` (`FLOOR_CEILINGS`) |
+| R4 | `/budget` shows the floor measurably below the ~1,850-token baseline | The 1,850 figure is bare Pi plus a context file. Measured BEFORE composed floor is 4,179 tok (bare Pi 1,303; bare + AGENTS.md 1,756). AFTER: recon 1,773, review 1,900, implement (default) 2,344, full 4,179. Only recon is below ~1,850 | "Measurably below" holds against the true baseline; the literal 1,850 is claimed for recon only, and the default is 43.9% below BEFORE | `tests/integration/context-floor.test.ts` (`FLOOR_CEILINGS`) |
 | R5 | Each installed extension's per-turn cost is a recorded number | Local extensions measured exactly; the four uninstalled packages are static findings or OUTSTANDING under `RB-10-03` | Attribution closes on the composed floor with a residual of 0 chars | `tests/integration/context-floor.test.ts` attribution closure; `RB-10-03` |
 | R6 | No volatile content in the system prompt | Plus: no mid-run section patches (a patch is a second system message) | Byte equality is necessary, not sufficient | `tests/integration/prompt-stability.test.ts` |
 
@@ -780,12 +780,12 @@ Numbers are from `docs/DIAGNOSTICS.md`; the verdict is what this phase decided.
 
 | Entry point | tokens | verdict |
 |---|---|---|
-| background-tasks | 1548 | profile-gate (full only) |
+| background-tasks | 1539 | profile-gate (full only) |
 | questionnaire | 297 | profile-gate (full only; plan mode re-adds it) |
 | todo | 78 | profile-gate (implement and full) |
 | quality (`consult_advisor`) | 128 | budgeted |
 | safety (`approve_ky_command`) | 62 | keep, in every profile |
-| skills index | 344 | budgeted |
+| skills index | 321 | budgeted |
 | checkpoint, diagnostics, execute, grill, harness, loop-police, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | keep |
 
 Four pinned packages are not installed here. `pi-session-finder` is static: 0 tools, 0 tok. `@narumitw/pi-lsp` is a source-text estimate of about 500-650 tok, not a `/budget` number. `pi-subagents` and `pi-web-access` are not statically measurable. All four are OUTSTANDING under `RB-10-03`.
