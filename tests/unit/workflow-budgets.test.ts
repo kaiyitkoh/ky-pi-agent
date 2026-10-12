@@ -605,7 +605,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 1170,
+		budget: 1160,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -638,7 +638,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"gateAmbiguity, kept out of index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 250-line grill " +
 			"ceiling headroom for the skill body -- see that registry's own entry for this file). Measured " +
 			"110 (index.ts) + 21 (scorecard-parse.ts) + 246 (scorecard.ts) + 689 (spec-schema.ts) = 1066 raw " +
-			"lines across 4 files 2026-08-15, rounded up to the next ten. Re-measured 1,142 raw lines after spec-gate.ts and the settle hook were added, rounded up to the next ten. Re-measured 1,156 raw lines after scorecard.ts began deriving the overall score from the dimensions, rounded up to the next ten. Re-measured 1,160 raw lines after spec-gate.ts began refusing ids with no entry, rounded up to the next ten. Re-measured 1166 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten",
+			"lines across 4 files 2026-08-15, rounded up to the next ten. Re-measured 1,142 raw lines after spec-gate.ts and the settle hook were added, rounded up to the next ten. Re-measured 1,156 raw lines after scorecard.ts began deriving the overall score from the dimensions, rounded up to the next ten. Re-measured 1,160 raw lines after spec-gate.ts began refusing ids with no entry, rounded up to the next ten. Re-measured 1166 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 1158 raw lines after the unused assumption-stamp helper was removed, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/plan-ceremony",

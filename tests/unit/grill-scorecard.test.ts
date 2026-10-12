@@ -25,7 +25,6 @@ import {
 	HARD_QUESTION_BUDGET,
 	INTERVIEW_PERSPECTIVES,
 	SCORE_GATE,
-	assumptionsFromUnmetFloors,
 	gateAmbiguity,
 	nextQuestionSlot,
 	type AmbiguityScorecard,
@@ -221,20 +220,13 @@ describe("FLOW-02 -- nextQuestionSlot: one question at a time, rotating perspect
 	});
 });
 
-describe("FLOW-02 -- assumptionsFromUnmetFloors", () => {
-	it("returns one ⚠ ASSUMPTION-stamped line per unmet dimension", () => {
-		const card = scorecard({ "factual-grounding": 0.65, "failure-coverage": 0.6 }, 0.05);
-		const lines = assumptionsFromUnmetFloors(card);
-		expect(lines.length).toBe(2);
-		for (const line of lines) {
-			expect(line.startsWith("⚠ ASSUMPTION")).toBe(true);
+describe("FLOW-02 -- the exhausted brief never offers an override the gate refuses", () => {
+	it("tells the model a low dimension keeps SPEC.md refused, and names no ASSUMPTION stamp", () => {
+		const slot = nextQuestionSlot(HARD_QUESTION_BUDGET);
+		expect("exhausted" in slot).toBe(true);
+		if ("exhausted" in slot) {
+			expect(slot.reason).toContain("keeps SPEC.md refused");
+			expect(slot.reason).not.toMatch(/ASSUMPTION|stamp/i);
 		}
-		expect(lines.some((l) => l.includes("Factual Grounding"))).toBe(true);
-		expect(lines.some((l) => l.includes("Failure Coverage"))).toBe(true);
-	});
-
-	it("returns an empty array when every floor is met", () => {
-		const card = scorecard({}, 0.05);
-		expect(assumptionsFromUnmetFloors(card)).toEqual([]);
 	});
 });

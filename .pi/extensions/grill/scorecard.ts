@@ -2,7 +2,7 @@
  * Ambiguity scorecard as pure code: per-dimension floors, an overall gate, a hard question budget and rotating perspectives.
  * Two scales, stated to avoid a silent inversion: a dimension score is 0..1, higher is better, with `floor` as the minimum; the overall score is 0..1, lower is better, with SCORE_GATE as the maximum.
  * Floors are checked before the overall score so a scorecard that aces three dimensions and fails one is still rejected.
- * A user override is a caller decision, never a parameter: assumptionsFromUnmetFloors returns the ASSUMPTION-stamped lines for SPEC §7.
+ * There is no override: a dimension below its floor keeps the SPEC refused, because a reader cannot tell a user's override from a model's.
  * Shape only: honest scoring cannot be proven here; the §2 evidence gate and /review cover the rest.
  * Registers nothing and reaches no model.
  */
@@ -72,7 +72,7 @@ export const AMBIGUITY_DIMENSIONS: readonly AmbiguityDimension[] = Object.freeze
 export const SCORE_GATE = 0.2;
 
 
-/** Hard question ceiling (spec-kit's five). At `askedCount >= HARD_QUESTION_BUDGET` nextQuestionSlot returns `exhausted` and the caller must stamp unmet dimensions into §7 as ASSUMPTION; a soft budget burns tokens without limit. */
+/** Hard question ceiling (spec-kit's five). At `askedCount >= HARD_QUESTION_BUDGET` nextQuestionSlot returns `exhausted`; a soft budget burns tokens without limit. */
 export const HARD_QUESTION_BUDGET = 5;
 
 export interface InterviewPerspective {
@@ -124,8 +124,8 @@ export function nextQuestionSlot(askedCount: number): QuestionSlot {
 			exhausted: true,
 			reason:
 				`${askedCount} question(s) already asked, meeting or exceeding the hard budget of ` +
-				`${HARD_QUESTION_BUDGET} -- the interrogation ends here, whatever the scorecard says. Every ` +
-				"dimension that has not cleared its floor must be stamped into SPEC.md §7 via assumptionsFromUnmetFloors",
+				`${HARD_QUESTION_BUDGET} -- the interrogation ends here, whatever the scorecard says. Score honestly: ` +
+				"a dimension below its floor keeps SPEC.md refused, and only the user can continue with /grill --resume",
 		};
 	}
 	const index = askedCount % INTERVIEW_PERSPECTIVES.length;
@@ -248,12 +248,4 @@ function unmetFloors(scorecard: AmbiguityScorecard): readonly { dimension: Ambig
 		}
 	}
 	return out;
-}
-
-
-/** The user-override path as data, not a gate branch: one ASSUMPTION-stamped line per dimension below its floor, empty when all are met. The /grill write path puts them in SPEC §7. */
-export function assumptionsFromUnmetFloors(scorecard: AmbiguityScorecard): readonly string[] {
-	return unmetFloors(scorecard).map(
-		(u) => `⚠ ASSUMPTION: "${u.dimension.label}" scored ${u.score}, below its floor of ${u.dimension.floor} -- ${u.dimension.why}`,
-	);
 }

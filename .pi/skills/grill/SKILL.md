@@ -45,7 +45,7 @@ The spec-schema.ts and scorecard.ts modules under .pi/extensions/grill/ are AUTH
 | 4 | Error and Edge Behaviour | >= 3 entries, each `IF <condition> THEN THE SYSTEM SHALL <response>` | /plan, /review |
 | 5 | Scope Pin | In scope / Out of scope (non-empty, each with a reason) / Expected files | /review's drift detector |
 | 6 | Clarifications Log | `- Q: <question> -> A: <answer>` | a future human or agent re-reading this SPEC |
-| 7 | Assumptions | anything not verified in §2, plus `⚠ ASSUMPTION` overrides | /review |
+| 7 | Assumptions | anything not verified in §2; never a way past a floor | /review |
 | 8 | Ambiguity Scorecard | the four dimension scores + overall + gate result | the ambiguity gate itself |
 
 §4's required form, quoted once: `IF <condition> THEN THE SYSTEM SHALL <response>` -- exact case. Lower case wording, or `SHOULD` in place of `SHALL`, is rejected by code, not by this sentence.
