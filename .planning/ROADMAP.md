@@ -569,7 +569,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 10-03-PLAN.md — gate the background shell-policy section on `bg_run`; per-profile floor ceilings and AFTER record *(Wave 3)*
+- [x] 10-03-PLAN.md — gate the background shell-policy section on `bg_run`; per-profile floor ceilings and AFTER record *(Wave 3)*
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
