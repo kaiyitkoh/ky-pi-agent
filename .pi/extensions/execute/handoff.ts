@@ -4,7 +4,7 @@
  * would eventually carry it.
  *
  * BUILD IT OFFLINE AND MEASURE IT HONESTLY. Phase 7 installed nothing —
- * `pi-subagents@0.49.0` is pinned in this project's settings file's
+ * `pi-subagents@0.76.1` is pinned in this project's settings file's
  * `packages[]` list (line 6) and NOT INSTALLED (`RB-07-02`, OUTSTANDING).
  * This module builds the packet and its measurement now, unit-verified with no
  * extension installed, and degrades HONESTLY when asked whether a real
@@ -82,23 +82,23 @@ import { estimateTokensFromChars } from "../diagnostics/budget.ts";
 
 /**
  * The two tool names a real dispatch genuinely needs: `subagent` (spawn) and
- * `subagent_wait` (block on the result). Both are registered unconditionally
- * by `pi-subagents@0.49.0` into the PARENT session
- * (`tests/unit/tool-count-baseline.test.ts:132`'s own recorded citation:
- * `src/extension/index.ts:578` for `subagent`, `:623` -> `registerWaitTool`
- * for `subagent_wait`).
+ * `bg_wait` (block on the result). Re-derived from the pinned
+ * `pi-subagents@0.76.1` compiled source (08.1-04): `subagent` is registered
+ * at `src/extension/index.js:667,699`; `bg_wait` at
+ * `src/runs/background/wait-tool.js:28,34` (0.49.0 named it `subagent_wait`;
+ * the old name no longer exists, so a stale probe would report `unavailable`
+ * forever). Both are registered into the parent session regardless of
+ * dynamic tool activation: the `subagents_enable` loader
+ * (`src/extension/tool-activation.js:78,114`) only toggles which are ACTIVE,
+ * and this probe reads the registered list.
  *
- * The other two parent-session tools that same row names —
- * `subagent_supervisor` and `intercom` — are deliberately NOT probed here:
- * both exist only to let an already-running child talk back to its
- * supervisor mid-run (`native-supervisor-channel.ts:650-651`, per that same
- * row's citation); neither is needed to spawn a task and wait for its
- * result, which is the whole of what `/execute`'s one-subagent-per-task shape
- * (`FEATURES.md` Part 2 line 202) requires. Probing for the minimum
- * genuinely needed, rather than all four, means a future harness that wires
- * only spawn-and-wait (no mid-run steering) is correctly reported available.
+ * Child-to-parent tools (`contact_supervisor`,
+ * `src/intercom/native-supervisor-channel.js:183`) are deliberately NOT
+ * probed: they only let an already-running child talk back to its supervisor;
+ * neither is needed to spawn a task and wait for its result, which is the
+ * whole of what `/execute`'s one-subagent-per-task shape requires.
  */
-export const SUBAGENT_TOOL_NAMES = ["subagent", "subagent_wait"] as const;
+export const SUBAGENT_TOOL_NAMES = ["subagent", "bg_wait"] as const;
 
 /**
  * The subagent-dispatch leg. Requires BOTH {@link SUBAGENT_TOOL_NAMES} to be
@@ -110,7 +110,7 @@ export const SUBAGENT_TOOL_NAMES = ["subagent", "subagent_wait"] as const;
  * NEVER reads the project's settings file — that file reports what is
  * CONFIGURED, not what is LOADED (`gates.ts:17-33`'s own rule, carried
  * verbatim here). Reading it to decide availability would report "available"
- * for a dispatch that cannot possibly run, because `pi-subagents@0.49.0` is
+ * for a dispatch that cannot possibly run, because `pi-subagents@0.76.1` is
  * pinned there and NOT installed.
  */
 export function probeSubagentAvailability(registeredToolNames: readonly string[]): LegStatus {
@@ -119,7 +119,7 @@ export function probeSubagentAvailability(registeredToolNames: readonly string[]
 		return {
 			status: "unavailable",
 			reason:
-				`missing tool${missing.length > 1 ? "s" : ""} ${missing.join(", ")} — pi-subagents@0.49.0 is pinned in ` +
+				`missing tool${missing.length > 1 ? "s" : ""} ${missing.join(", ")} — pi-subagents@0.76.1 is pinned in ` +
 				"settings but not installed (RB-07-02); the live check that would exercise a real spawn once " +
 				"installed is RB-09-03",
 		};

@@ -110,7 +110,7 @@ async function callStub(name: string, args: Record<string, unknown>) {
 			extensionSource: stubSource([name]),
 			tools: [name],
 			responses: [
-				fauxAssistantMessage([fauxToolCall(name, args)], { stopReason: "toolUse" }),
+				fauxAssistantMessage([fauxToolCall(name, args as Parameters<typeof fauxToolCall>[1])], { stopReason: "toolUse" }),
 				capturing(outgoing, fauxAssistantMessage([fauxText("noted")], { stopReason: "stop" })),
 			],
 		},

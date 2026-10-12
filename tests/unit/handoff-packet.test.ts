@@ -37,7 +37,7 @@ describe("FLOW-09 -- probeSubagentAvailability: honest degradation, never a sile
 		expect(result.status).toBe("unavailable");
 		if (result.status !== "unavailable") throw new Error("unreachable");
 		expect(result.reason).toContain("subagent");
-		expect(result.reason).toContain("subagent_wait");
+		expect(result.reason).toContain("bg_wait");
 		expect(result.reason).toContain("pi-subagents");
 		expect(result.reason).toContain("RB-07-02");
 		expect(result.reason).toContain("RB-09-03");
@@ -47,7 +47,7 @@ describe("FLOW-09 -- probeSubagentAvailability: honest degradation, never a sile
 		const result = probeSubagentAvailability(["subagent"]);
 		expect(result.status).toBe("unavailable");
 		if (result.status !== "unavailable") throw new Error("unreachable");
-		expect(result.reason).toContain("subagent_wait");
+		expect(result.reason).toContain("bg_wait");
 		// A partial install must not read as available, and the reason must not
 		// re-name the tool that IS present as though it too were missing.
 		expect(result.reason.includes("missing tools")).toBe(false);
@@ -72,7 +72,7 @@ describe("FLOW-09 -- probeSubagentAvailability: honest degradation, never a sile
 		// parameter this object could even be passed through. Declaring the
 		// package here and then calling the probe with an EMPTY registered-tool
 		// list proves the probe answers only from the list it was given.
-		const settingsShapedFixture = { packages: ["npm:pi-subagents@0.49.0"] };
+		const settingsShapedFixture = { packages: ["npm:pi-subagents@0.76.1"] };
 		expect(Object.keys(settingsShapedFixture)).toContain("packages"); // vacuity guard on the fixture itself
 		const result = probeSubagentAvailability([]);
 		expect(result.status).toBe("unavailable");

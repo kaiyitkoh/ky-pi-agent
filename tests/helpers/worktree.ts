@@ -136,17 +136,24 @@ export function makeTempRepoWithNodeModulesAndEnv(prefix: string): string {
 }
 
 /**
- * `git worktree add <worktreePath> -b <branch> HEAD`, run from `repo`.
+ * `git worktree add <worktreePath> -b <branch> <baseCommit>`, run from `repo`,
+ * where `<baseCommit>` is HEAD resolved to a commit id first.
  *
- * Mirrors `pi-subagents@0.49.0`'s own invocation exactly
- * (`src/runs/shared/worktree.ts:393`: `git -C <toplevel> worktree add <path>
- * -b <branch> HEAD`), so a proof built on this helper exercises the same
- * command shape the real package issues. Throws naming the full argv and
- * exit code on non-zero status. Returns `worktreePath` on success, mirroring
+ * Mirrors `pi-subagents@0.76.1`'s own invocation
+ * (`src/runs/shared/worktree.js:784`: `git -C <toplevel> worktree add <path>
+ * -b <branch> <baseCommit>`, with `baseCommit` resolved by
+ * `rev-parse --verify --end-of-options HEAD^{commit}` at :228). The 0.49.0
+ * shape passed the literal `HEAD`; the argv SHAPE otherwise matches, and a
+ * resolved sha is equivalent for HEAD. Throws naming the full argv and exit
+ * code on non-zero status. Returns `worktreePath` on success, mirroring
  * `makeTempRepo`'s own return-the-path convention.
  */
 export function addWorktree(repo: string, worktreePath: string, branch: string): string {
-	const args = ["worktree", "add", worktreePath, "-b", branch, "HEAD"];
+	const resolved = run(["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"], repo);
+	if (resolved.status !== 0) {
+		throw new Error(`git rev-parse HEAD^{commit} failed (exit ${resolved.status}) in ${repo}`);
+	}
+	const args = ["worktree", "add", worktreePath, "-b", branch, resolved.stdout.trim()];
 	const { status } = run(args, repo);
 	if (status !== 0) {
 		throw new Error(`git ${args.join(" ")} failed (exit ${status}) in ${repo}`);
@@ -158,7 +165,7 @@ export function addWorktree(repo: string, worktreePath: string, branch: string):
  * Tear down a worktree created by {@link addWorktree}: `git worktree remove
  * --force <path>`, then `git branch -D <branch>`, then `git worktree prune`
  * -- matching `pi-subagents`' own teardown sequence
- * (`src/runs/shared/worktree.ts:428, :430, :640, :740`).
+ * (`pi-subagents@0.76.1 src/runs/shared/worktree.js:1100, :1108, :1317`).
  *
  * The `remove` and `prune` steps throw naming the full argv and exit code on
  * non-zero status. The `branch -D` step is tolerated non-zero ONLY when the

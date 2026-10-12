@@ -6,19 +6,25 @@
  * ---------------------------------------------------------------------------
  * `.pi/agents/*.md` frontmatter decides three of EXT-01's four properties
  * (system prompt, tool restriction, thinking level) and must NEVER decide the
- * fourth (model). `pi-subagents@0.49.0 src/agents/agents.ts:1155`:
- *
- *     if (override.model !== undefined && !agentHasFrontmatterField(agent, "model")) {
- *
- * A `model:` key in an agent file's own frontmatter makes
- * `settings.subagents.agentOverrides` (written by
- * `.pi/extensions/routing/agent-overrides.ts`, ROUTE-05) INERT for that
- * agent — `/cheap`, `/balanced`, `/max` and `/escalate` would silently stop
- * affecting it. This file is the mechanical proof that no shipped agent file
- * carries that key, plus the EXT-01 coverage proof (name, description,
- * tools, thinking, systemPromptMode all present) and the completeness proof
- * (every subagent role in `AGENT_NAME_BY_ROLE` ships a file, and every
- * shipped file names a role).
+ * fourth (model). RE-DERIVED at `pi-subagents@0.76.1` (08.1-04): the 0.49.0
+ * guard (`override.model !== undefined && !agentHasFrontmatterField(agent,
+ * "model")`) NO LONGER EXISTS. `applyBuiltinOverride`
+ * (`src/agents/agents.js:1211-1215`) sets `next.model = override.model`
+ * unconditionally, and project/user agents receive overrides through
+ * `applyCustomAgentOverrides` (`agents.js:1340-1356`, called at :2646 for
+ * project agents), so a frontmatter `model:` key no longer makes
+ * `settings.subagents.agentOverrides` inert. The "no `model:` key" rule is
+ * kept as a conservative invariant, not because the override is blocked:
+ * `applyDefaults` (`agents.js:1079`) only fills a default model when
+ * `agent.model === undefined`, and a pinned frontmatter model would still beat
+ * every default and would hide the routing decision inside an agent file.
+ * Phase 5's routing writes (written by
+ * `.pi/extensions/routing/agent-overrides.ts`, ROUTE-05) therefore reach
+ * these agents; this file is the mechanical proof that no shipped agent file
+ * carries a frontmatter model, plus the EXT-01 coverage proof (name,
+ * description, tools, thinking, systemPromptMode all present) and the
+ * completeness proof (every subagent role in `AGENT_NAME_BY_ROLE` ships a
+ * file, and every shipped file names a role).
  *
  * ---------------------------------------------------------------------------
  * THE PARSER IS A DELIBERATE SUBSET, NOT REAL YAML

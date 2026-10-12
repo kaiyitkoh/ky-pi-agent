@@ -16,7 +16,7 @@
  * A CORRECTION FROM THE PLAN THIS FILE WAS WRITTEN AGAINST. 07-12-PLAN.md's
  * own Task 2 text specifies Binding 4 as "`.pi/settings.json` sets
  * `agentScope` to a value that loads project agents". That is false for the
- * pinned `pi-subagents@0.49.0`: `agentScope` is not a `.pi/settings.json` key
+ * pinned `pi-subagents@0.76.1`: `agentScope` is not a `.pi/settings.json` key
  * at all -- it is a per-tool-call parameter on the `subagent` tool's own
  * schema, resolved to `"both"` whenever a caller omits it (07-09-SUMMARY.md's
  * Task 1 finding 3, re-confirmed while writing `docs/EXTENSIONS.md`'s
@@ -240,7 +240,7 @@ describe("subagent-capabilities Binding 3 -- the converse: no requirement's row 
 describe("subagent-capabilities Binding 4 -- this repo's own composition, asserted separately from the third-party mechanism", () => {
 	// This half is enforced (this repo controls it): the agent file exists and
 	// is tracked, and .pi/settings.json's packages[] names pi-subagents at a
-	// pinned version. The OTHER half -- what pi-subagents@0.49.0 itself does
+	// pinned version. The OTHER half -- what pi-subagents@0.76.1 itself does
 	// with that agent file -- is recorded above in the evidence table, never
 	// asserted here, per this file's own separation-of-concerns rule.
 
@@ -255,14 +255,14 @@ describe("subagent-capabilities Binding 4 -- this repo's own composition, assert
 	// CORRECTED per this file's header docstring: the plan this file was
 	// written against drafted this binding as ".pi/settings.json sets
 	// agentScope to a value that loads project agents", which is false for
-	// pi-subagents@0.49.0 -- agentScope is not a settings key at any scope
+	// pi-subagents@0.76.1 -- agentScope is not a settings key at any scope
 	// (07-09-SUMMARY.md Task 1 finding 3). The true, machine-checkable fact is
 	// its absence: writing one would be dead configuration nothing reads.
-	it(".pi/settings.json deliberately carries no agentScope key -- pi-subagents@0.49.0 reads none from there", () => {
+	it(".pi/settings.json deliberately carries no agentScope key -- pi-subagents@0.76.1 reads none from there", () => {
 		const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8")) as Record<string, unknown>;
 		expect(
 			Object.prototype.hasOwnProperty.call(settings, "agentScope"),
-			"agentScope must not appear as a top-level .pi/settings.json key -- nothing in pi-subagents@0.49.0 " +
+			"agentScope must not appear as a top-level .pi/settings.json key -- nothing in pi-subagents@0.76.1 " +
 				"reads it from there; its real default (per-call, resolves to \"both\") already discovers " +
 				".pi/agents/planner.md with no write required",
 		).toBe(false);

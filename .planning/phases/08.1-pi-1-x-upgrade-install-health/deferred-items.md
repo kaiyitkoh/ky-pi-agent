@@ -14,3 +14,8 @@
 - **NEW, not fixed (out of scope):** `tests/unit/capability-guard.test.ts` suite cannot load: `amazon-bedrock/deepseek.r1-v1:0` and `us.deepseek.r1-v1:0` are gone from the 1.1.0 Bedrock catalogue (only `deepseek.v3-v1:0`, `deepseek.v3.2` remain). Needs a decision on the deny-list fixture.
 
 - **capability-guard Bedrock R1 fixtures: RESOLVED.** pi-ai 1.1.0 amazon-bedrock.json has no R1 (only `deepseek.v3-v1:0`, `deepseek.v3.2`; no replacement for R1). Operative code `routing/guard.ts` `NO_TOOL_CALLING_MODEL_IDS` is an id deny-list and stays (still protects custom/older entries); docs/ROUTING.md note updated. Test fixtures `bedrockR1`/`bedrockR1Us` now built locally from the v3 catalogue entry (text-only, reasoning, 128k). Scan of literal provider/id pairs in tests/.pi against all 1.1.0 catalogues found no other missing ids (the two remaining R1 refs in mode-switch/agent-overrides are intentional denied-candidate config strings, tests pass).
+
+## From 08.1-04
+
+- **tests/unit/workflow-budgets.test.ts directory budgets are red (4 cases), not caused by 08.1-04.** `.pi/extensions/safety` is 4709 raw lines vs declared budget 4570 (grown by 08.1-03: index.ts 973, audit.ts 138, schema.ts 81). `.pi/extensions/execute` totals 673 vs declared 340 because the UNTRACKED `progress.ts` (341 lines, belongs to a paused plan, must not be touched) is counted. Both need a budget raise with a `why` update; the execute figure should be re-measured when progress.ts lands. Needs a plan before phase verification.
+- Typecheck error in `tests/integration/new-tool-paths.test.ts:113` (08.1-03, `Record<string, unknown>` vs Pi 1.1.0 `JsonObject`) was blocking `npm run typecheck`; fixed with a one-line cast in 08.1-04 (Rule 3).

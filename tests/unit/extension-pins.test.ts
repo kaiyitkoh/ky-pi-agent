@@ -336,8 +336,8 @@ describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' o
 
 	it("agentScope is deliberately absent from .pi/settings.json -- pi-subagents@0.76.1 has no such config key", () => {
 		// agentScope is a PER-INVOCATION parameter on the subagent tool's own
-		// schema (pi-subagents src/extension/schemas.ts:333), resolved to
-		// "both" whenever a caller omits it (src/agents/agent-scope.ts:3-6) --
+		// schema (pi-subagents src/extension/schemas.js:228), resolved to
+		// "both" whenever a caller omits it (src/agents/agent-scope.js:1-5) --
 		// not a settings key at any scope. Writing one into .pi/settings.json
 		// would be dead configuration nothing reads; see 07-09-SUMMARY.md.
 		expect(

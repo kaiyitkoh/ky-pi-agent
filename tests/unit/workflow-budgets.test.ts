@@ -629,7 +629,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 		dir: ".pi/extensions/execute",
 		budget: 340,
 		why: "plan 09-11 (FLOW-09) -- the first file of the /execute subsystem, handoff.ts: the honest-degradation " +
-			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/subagent_wait pair, never " +
+			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/bg_wait pair, never " +
 			"reading the settings file), the pure buildHandoffPacket/renderHandoffPacket, and the real " +
 			"measurePacketDelta -- built and unit-verified entirely offline, per this plan's own constraint that " +
 			"pi-subagents (RB-07-02, OUTSTANDING) is never installed. This directory holds no registerCommand( " +
