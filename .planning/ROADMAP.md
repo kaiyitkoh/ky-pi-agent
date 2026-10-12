@@ -573,7 +573,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 10-04-PLAN.md — `context` hook cannot strip tools (+ `context_with_system` lint), prompt byte-stability with negative control, prompt-metadata lint, AGENTS.md token budget *(Wave 4)*
+- [x] 10-04-PLAN.md — `context` hook cannot strip tools (+ `context_with_system` lint), prompt byte-stability with negative control, prompt-metadata lint, AGENTS.md token budget *(Wave 4)*
 
 **Wave 5** *(blocked on Wave 4 completion)*
 
