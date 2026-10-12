@@ -66,7 +66,7 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
-		let sha = ""; // currentSha fails closed by design (safety/git.ts:171)
+		let sha = ""; // currentSha fails closed by design (safety/git.ts#currentSha)
 		let tree = ""; // same fail-closed contract: an empty tree or sha never matches, so the gate rejects
 		try { sha = currentSha(armedCwd() ?? ctx.cwd); tree = currentTree(armedCwd() ?? ctx.cwd); } catch { /* gate rejects on unknown SHA/tree below */ }
 		try {

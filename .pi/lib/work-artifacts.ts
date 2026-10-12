@@ -67,7 +67,7 @@
  *   2. The resolved path is asserted to sit inside
  *      `resolve(cwd, ".pi", "work")` before it is ever returned.
  * `workDir` THROWS on either failure -- fail closed, the same posture
- * `.pi/extensions/safety/git.ts:462-465` states for an unclassified `glab`
+ * `.pi/extensions/safety/git.ts#classifyGlabInvocation` states for an unclassified `glab`
  * form: an untrusted input that cannot be positively classified as safe is
  * refused, not defaulted through.
  */

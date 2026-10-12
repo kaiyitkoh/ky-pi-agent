@@ -301,7 +301,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 		},
 	});
 
-	// Best-effort like `safety/index.ts:832-838`: a bad payload must not stop session start.
+	// Best-effort like safety/index.ts's session_start prune: a bad payload must not stop session start.
 	pi.on("session_start", (_event, ctx) => {
 		try {
 			restoreModeFromBranch(ctx.sessionManager.getBranch());

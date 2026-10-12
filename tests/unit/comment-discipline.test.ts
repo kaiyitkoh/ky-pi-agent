@@ -9,6 +9,8 @@ import {
 	emitWithoutComments,
 	extractComments,
 	findIdTokens,
+	findRepoLineCitations,
+	isExempt,
 	lineMetrics,
 	subsystemOf,
 } from "../helpers/comment-scan.ts";
@@ -119,6 +121,25 @@ describe("comment discipline", () => {
 			offenders,
 			`Delete history and IDs from these comments (strings are out of scope):\n${offenders.join("\n")}`,
 		).toEqual([]);
+	});
+
+	it("flags an in-repo file:line citation but not an external one", () => {
+		const repo = [".pi/extensions/safety/git.ts", "tests/unit/a.test.ts"];
+		expect(findRepoLineCitations("// see safety/git.ts:171", repo)).toEqual(["safety/git.ts:171"]);
+		expect(findRepoLineCitations("// see .pi/extensions/safety/git.ts:1-2", repo)).toEqual([".pi/extensions/safety/git.ts:1"]);
+		expect(findRepoLineCitations("// see safety/git.ts#currentSha", repo)).toEqual([]);
+		expect(findRepoLineCitations("// pi-ai src/types.ts:179", repo)).toEqual([]);
+	});
+
+	it("cites in-repo code by symbol, never by line number", () => {
+		const repoFiles = trackedFiles().filter((p) => p.endsWith(".ts") && !isExempt(p));
+		const offenders: string[] = [];
+		for (const f of files) {
+			for (const c of extractComments(sources.get(f) ?? "")) {
+				for (const hit of findRepoLineCitations(c.text, repoFiles)) offenders.push(`${f}: ${hit}`);
+			}
+		}
+		expect(offenders, `Replace with a path.ts#symbol reference:\n${offenders.join("\n")}`).toEqual([]);
 	});
 
 	it("reports comment ratio", () => {

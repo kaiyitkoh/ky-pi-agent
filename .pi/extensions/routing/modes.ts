@@ -33,7 +33,7 @@ export interface ModelRegistryLike {
 }
 
 
-/** `globalThis` slot key: jiti keeps separate module registries, so a module-level `let` would split state across copies (same hazard as `diagnostics/index.ts:192-224`). */
+/** `globalThis` slot key: jiti keeps separate module registries, so a module-level `let` would split state across copies (same hazard as `diagnostics/index.ts#ROWS_WRITTEN_KEY`). */
 const MODE_STATE_KEY = "__kypiRoutingModeState";
 
 /** The mode/escalation shape a resolution actually needs — no `at`, no `escalatedFrom`. */

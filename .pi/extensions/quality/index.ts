@@ -148,7 +148,7 @@ export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateRes
 }
 
 export default function (pi: ExtensionAPI): void {
-	// Registered first so a name collision resolves in this file's favour (safety/index.ts:32-46).
+	// Registered first so a name collision resolves in this file's favour (first-registration-wins; see safety/index.ts default export).
 	// `name` stays a literal because tool-count-baseline.test.ts scans source text for it; this check stops drift.
 	if (CONSULT_ADVISOR_TOOL_NAME !== "consult_advisor") {
 		throw new Error(

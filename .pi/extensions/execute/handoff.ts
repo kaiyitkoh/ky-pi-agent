@@ -153,7 +153,7 @@ export interface PacketDeltaMeasurement {
 }
 
 /**
- * Measure a packet against the parent-context text it replaces with estimateTokensFromChars (diagnostics/budget.ts:223-225,
+ * Measure a packet against the parent-context text it replaces with estimateTokensFromChars (diagnostics/budget.ts#estimateTokensFromChars,
  * chars/4, not a tokenizer). Measures, never asserts: neither sign of `deltaTokens` is a target.
  */
 export function measurePacketDelta(input: { readonly packetText: string; readonly parentContextText: string }): PacketDeltaMeasurement {

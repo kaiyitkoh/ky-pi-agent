@@ -92,6 +92,18 @@ export function isExempt(path: string): boolean {
 	return VENDORED_EXEMPT.some((prefix) => path.startsWith(prefix));
 }
 
+const LINE_CITATION = /((?:[\w.-]+\/)+[\w.-]+\.ts):\d+/g;
+
+/** In-repo `path.ts:N` citations go stale on any edit; cite a symbol (`path.ts#name`) instead. */
+export function findRepoLineCitations(commentText: string, repoFiles: readonly string[]): string[] {
+	const hits: string[] = [];
+	for (const m of commentText.matchAll(LINE_CITATION)) {
+		const cited = m[1].replace(/^\.\//, "");
+		if (repoFiles.some((f) => f === cited || f.endsWith(`/${cited}`))) hits.push(m[0]);
+	}
+	return hits;
+}
+
 export function authoredFiles(): string[] {
 	return trackedFiles(".pi/extensions")
 		.filter((p) => p.endsWith(".ts") && !isExempt(p))

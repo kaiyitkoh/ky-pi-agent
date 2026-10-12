@@ -97,7 +97,7 @@ export function runTypecheckLeg(cwd: string, exec: ExecRunner): LegStatus {
 
 /**
  * The repository's structural vitest suites (the lint equivalent; no ESLint by design,
- * `tests/unit/pinning.test.ts:253`).
+ * pinning.test.ts "declares no dev dependency beyond the audited pins").
  */
 export const LINT_GATE_FILES = [
 	"tests/unit/chokepoint-lint.test.ts",

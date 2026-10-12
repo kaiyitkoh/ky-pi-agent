@@ -28,7 +28,7 @@
  * The rule, stated up front: `appendFileSync` only, never a buffered stream
  * ---------------------------------------------------------------------------
  * The `node:fs` stream constructor is deliberately NOT spelled anywhere in this
- * file, exactly the way `harness/index.ts:36` refuses to spell the
+ * file, exactly the way `harness/index.ts` refuses to spell the
  * tool-registration call. A plain-substring grep over this file for that
  * constructor is the mechanical proof that no stream is opened here, and naming
  * it in a warning would turn that proof into a permanent false positive —

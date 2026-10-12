@@ -12,7 +12,7 @@
  * metacharacter. This repository already had the correct, tested answer, but
  * it lived under `tests/helpers/`, and production code under
  * `.pi/extensions/` does not import from `tests/` (`calibration.ts`'s own
- * docstring states the same rule; `safety/git.ts:97` too). So the quoter
+ * docstring states the same rule; `safety/git.ts` too). So the quoter
  * moved here, to `.pi/lib/`, exactly the way `jsonl.ts` moved here for
  * `safety`/`diagnostics` to share without crossing that same boundary.
  * `tests/helpers/win-quote.ts` now re-exports from this file rather than
