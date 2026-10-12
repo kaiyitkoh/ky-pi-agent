@@ -512,7 +512,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 2200,
+		budget: 2250,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
@@ -551,7 +551,10 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 				"shouldRunDesignReview in the same family (426 -> 486); no other file in this directory changed. " +
 				"Re-measured 2,191 raw lines across the same 8 files 2026-10-13 (advisor.ts 74, calibration.ts " +
 				"122, gates.ts 257, index.ts 173, review-schema.ts 392, reviewer.ts 231, rules.ts 631, verdict.ts " +
-				"311), rounded up to the next ten",
+				"311), rounded up to the next ten. RAISED 2200 -> 2250 by plan 09-14 (FLOW-05): review-schema.ts gained the " +
+				"optional scopeDrift field, the validateReview rejection of a model-supplied drift property and the Scope " +
+				"Drift render block (392 -> 443). Re-measured 2,242 raw lines across the same 8 files 2026-10-13, rounded up " +
+				"to the next ten",
 	},
 	{
 		dir: ".pi/extensions/providers",

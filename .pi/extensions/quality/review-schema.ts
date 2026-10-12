@@ -89,6 +89,16 @@ export interface ReviewArtifact {
 	readonly properFix?: string;
 	/** Present only when `classification === "workaround"` -- see branch (7) of {@link validateReview}. */
 	readonly deferralReason?: string;
+	/** Computed from git by the caller and never taken from the model's arguments. */
+	readonly scopeDrift?: ScopeDriftReport;
+}
+
+// Declared structurally so quality/ does not import the review/ module and its git-reading dependency chain.
+export interface ScopeDriftReport {
+	readonly declared: readonly string[];
+	readonly changed: readonly string[];
+	readonly drifted: readonly string[];
+	readonly undelivered: readonly string[];
 }
 
 /** Cap on NIT findings: a reviewer told to find gaps pads with trivia, so over-reporting is rejected as well as under-reporting. */
@@ -160,6 +170,15 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 		return {
 			ok: false,
 			reason: `submit_review arguments must be an object, received ${describeType(raw)} (${describeValue(raw)})`,
+		};
+	}
+
+	// Drift is computed from git; a model-supplied value would be a verdict on its own work, and ignoring it would hide the attempt.
+	const driftKey = Object.keys(raw).find((k) => /drift/i.test(k));
+	if (driftKey !== undefined) {
+		return {
+			ok: false,
+			reason: `submit_review must not carry "${driftKey}": scope drift is computed from git by the harness, not reported by the reviewer`,
 		};
 	}
 
@@ -362,6 +381,37 @@ export function renderReviewMarkdown(review: ReviewArtifact): string {
 	}
 	lines.push("");
 
+	lines.push("## Scope Drift");
+	lines.push("");
+	const drift = review.scopeDrift;
+	if (drift === undefined) {
+		lines.push("Scope drift NOT COMPUTED: no git diff was compared against the declared files.");
+	} else {
+		if (drift.drifted.length === 0 && drift.undelivered.length === 0) {
+			lines.push(`No drift detected: ${drift.changed.length} changed file(s), all declared, all declared files changed.`);
+		}
+		if (drift.drifted.length > 0) {
+			lines.push("Changed but not declared:");
+			lines.push("");
+			lines.push("| Path |");
+			lines.push("| --- |");
+			for (const path of drift.drifted) {
+				lines.push(`| ${path} |`);
+			}
+			lines.push("");
+		}
+		if (drift.undelivered.length > 0) {
+			lines.push("Declared but not changed:");
+			lines.push("");
+			lines.push("| Path |");
+			lines.push("| --- |");
+			for (const path of drift.undelivered) {
+				lines.push(`| ${path} |`);
+			}
+		}
+	}
+	lines.push("");
+
 	lines.push("## Checked and cleared");
 	lines.push("");
 	lines.push(review.checkedAndCleared);
@@ -383,7 +433,8 @@ export function renderReviewMarkdown(review: ReviewArtifact): string {
 	lines.push("");
 	lines.push(
 		"*Evidence and location strings above are the reviewer's own claims, not verified facts -- see " +
-			"`review-schema.ts`'s own \"WHAT THIS DOES NOT PROVE\" section.*",
+			"`review-schema.ts`'s own \"WHAT THIS DOES NOT PROVE\" section. Scope drift compares path sets from git, not " +
+			"whether a change inside a declared file was in scope.*",
 	);
 	lines.push("");
 
