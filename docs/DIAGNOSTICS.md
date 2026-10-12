@@ -439,8 +439,34 @@ AGENTS.md; zero rows are real measurements):
 | checkpoint, diagnostics, execute, grill, harness, loop-police, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | 0 | none | keep |
 
 Sum check: bare + AGENTS.md plus all deltas equals the composed floor with a residual
-of 0 chars (tolerance 32). Ceiling: `FLOOR_CEILINGS.composedBefore` holds the line at
-4,360 tokens until the cut lands.
+of 0 chars (tolerance 32).
+
+**AFTER (profiles plus the shell-policy gate).** Same method, same session, measured
+2026-10-13 on win32, Node 24.16.0, with `measureFloor({ profile })`. The delta column is
+against the BEFORE full composed floor of 4,233 tokens.
+
+| Profile | system chars | tool chars | floor tokens | delta vs BEFORE | tools |
+|---|---|---|---|---|---|
+| recon | 5162 | 2107 | 1818 | -2415 (-57.0%) | 3 |
+| review | 5162 | 2618 | 1945 | -2288 (-54.1%) | 4 |
+| implement (default) | 5162 | 4391 | 2389 | -1844 (-43.6%) | 7 |
+| full | 8479 | 8450 | 4233 | 0 | 12 |
+
+Wire estimate (`toToolDeclaration` JSON), reported separately and never compared with
+the table above: recon 2359, review 2912, implement 4937, full 9206 tool chars.
+
+The shell-policy section (about 128 tokens) is now absent from recon, review and
+implement and present in full, unchanged. Per-profile CI ceilings in
+`tests/integration/context-floor.test.ts` (`FLOOR_CEILINGS`) sit under 3% above these
+measured values.
+
+**The ~1,850 target.** Claimed for recon only: its measured floor is 1,818 tokens, at or
+below 1,850. The default profile (implement) lands at 2,389, so the literal 1,850 figure
+is not met there; the claim for it is the measured 43.6% reduction from BEFORE.
+
+**Levers not taken.** Pi's `docs` section needs a full custom prompt that drops tool
+snippets, which is a decision for a cheap model; it is tested as an optional arm in the
+experiment protocol and is not adopted by default.
 
 ---
 

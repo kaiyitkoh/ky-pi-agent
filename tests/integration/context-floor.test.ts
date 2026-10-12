@@ -12,16 +12,26 @@ import {
 	measureFloor,
 } from "../helpers/harness-session.ts";
 
+/** The composed full-profile floor before any cut: 4233 tokens (16929 chars), measured 2026-10-13 with all 18 tracked entry points. */
+const BEFORE_FULL_FLOOR = 4233;
+
 /**
- * Ceilings in `/budget`-formula tokens (Math.ceil(chars / 4)), measured on normalised text.
- * composedBefore: measured 4233 tokens (16929 chars) on 2026-10-13 with all 18 tracked entry points,
- * skills and AGENTS.md and no uninstalled packages; ceiling is that plus under 3% headroom.
+ * Ceilings in `/budget`-formula tokens (Math.ceil(chars / 4)) on normalised text, each the value measured
+ * on 2026-10-13 plus under 3% headroom.
+ * recon: measured 1818. review: measured 1945. implement: measured 2389. full: measured 4233.
  */
 const FLOOR_CEILINGS = {
-	composedBefore: 4360,
-};
+	recon: 1870,
+	review: 2000,
+	implement: 2460,
+	full: 4360,
+} as const;
+
+const PROFILES = ["recon", "review", "implement", "full"] as const;
 
 const CLOSURE_TOLERANCE_CHARS = 32;
+
+const SHELL_POLICY_SECTION_NAME = "pi_background_shell_policy";
 
 let composed: FloorMeasurement;
 let bare: FloorMeasurement;
@@ -46,8 +56,38 @@ describe("composed default", () => {
 				`systemMessages=${composed.systemMessageCount}`,
 		);
 		console.info(`TOOLS ${composed.toolNames.join(",")}`);
-		expect(composed.budget.floor.estimatedTokens).toBeLessThanOrEqual(FLOOR_CEILINGS.composedBefore);
+		expect(composed.budget.floor.estimatedTokens).toBeLessThanOrEqual(FLOOR_CEILINGS.full);
 	}, 60_000);
+});
+
+describe("per-profile floors", () => {
+	it("holds each profile under its ceiling and below BEFORE", async () => {
+		const floors = {} as Record<(typeof PROFILES)[number], FloorMeasurement>;
+		for (const p of PROFILES) floors[p] = await measureFloor({ profile: p });
+		for (const p of PROFILES) {
+			const m = floors[p];
+			console.info(
+				`AFTER ${p} tokens=${m.budget.floor.estimatedTokens} chars=${m.budget.floor.chars} ` +
+					`system=${m.budget.systemPrompt.chars} tools=${m.budget.toolSchemas.chars} wireToolChars=${m.wireToolChars}`,
+			);
+			expect(m.budget.floor.estimatedTokens, `${p} floor`).toBeLessThanOrEqual(FLOOR_CEILINGS[p]);
+		}
+		const full = floors.full.budget.floor.estimatedTokens;
+		const impl = floors.implement.budget.floor.estimatedTokens;
+		console.info(
+			`REDUCTION implement ${BEFORE_FULL_FLOOR - impl} tokens (${(((BEFORE_FULL_FLOOR - impl) / BEFORE_FULL_FLOOR) * 100).toFixed(1)}%)`,
+		);
+		expect(impl).toBeLessThan(BEFORE_FULL_FLOOR);
+		expect(full).toBeLessThanOrEqual(BEFORE_FULL_FLOOR);
+		const recon = floors.recon.budget.floor.estimatedTokens;
+		for (const p of ["review", "implement", "full"] as const) {
+			expect(recon, `recon must be below ${p}`).toBeLessThan(floors[p].budget.floor.estimatedTokens);
+		}
+		expect(floors.full.systemPrompt, "non-vacuity: full carries the section").toContain(SHELL_POLICY_SECTION_NAME);
+		for (const p of ["recon", "review", "implement"] as const) {
+			expect(floors[p].systemPrompt, `${p} must not carry the shell policy`).not.toContain(SHELL_POLICY_SECTION_NAME);
+		}
+	}, 120_000);
 });
 
 describe("bare baselines", () => {
