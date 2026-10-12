@@ -673,6 +673,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"367 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 370 -> 510 by plan 09-13 for index.ts, the /execute command: 169 + 198 + 142 = 509 raw lines across 3 files 2026-10-13, rounded up to the next ten",
 	},
 	{
+		dir: ".pi/extensions/review",
+		budget: 50,
+		why: "plan 09-14 (FLOW-05) -- scope-drift.ts: the pure compareScope and the git-diff-backed changedFilesSince that make the scope pin machine-checkable. Measured 47 raw lines across 1 file 2026-10-13, rounded up to the next ten",
+	},
+	{
 		dir: ".pi/extensions/todo.ts",
 		budget: 0,
 		why: "Phase 7 plan 08's vendored todo.ts is a FLAT top-level file (`.pi/extensions/todo.ts`, not a " +

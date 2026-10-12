@@ -55,7 +55,7 @@ export type DriftVerdict = { readonly ok: true } | { readonly ok: false; readonl
 
 // Backslashes become slashes and one leading "./" is dropped, before both shape and membership checks, so a Windows
 // path is neither rejected as malformed nor missed against the union's forward-slash forms. Case is compared exactly.
-function normalisePathForDrift(path: string): string {
+export function normalisePathForDrift(path: string): string {
 	return path.replace(/\\/g, "/").replace(/^\.\//, "");
 }
 
