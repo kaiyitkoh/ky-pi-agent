@@ -644,7 +644,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "custom_extension_tool",
 		input: { anything: "goes" },
 		expect: "OUT-OF-SCOPE",
-		why: "evaluate() governs exactly bash/read/write/edit/grep/find/ls by name -- an eighth tool name it does not recognise is allowed by construction (see policy.ts's own 'WHY UNKNOWN TOOL NAMES ARE ALLOWED' docstring section), and any extension-registered tool that shells out internally is exactly this case.",
+		why: "evaluate() governs exactly bash/read/write/edit/grep/find/ls by name -- an eighth tool name it does not recognise is allowed by construction (see policy.ts's own 'WHY UNKNOWN TOOL NAMES ARE ALLOWED' docstring section), and any extension-registered tool that shells out internally is exactly this case. (08.1-03: the named Pi 1.x tools and bg_run are now covered by the tool_call hook deny table / bash mapping, not by evaluate(); the generic hole remains for other extension tools.)",
 		reference: "PITFALLS.md:469 (custom tool, listed separately from the 14-row table); policy.ts evaluate() default arm; T-04-41",
 	},
 
