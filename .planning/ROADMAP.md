@@ -556,7 +556,16 @@ Plans:
   4. **Verified live on the work laptop**: a controlled minimal-vs-full-harness experiment produces a recorded answer on whether context pollution actually degrades output quality, so the roadmap's remaining root-cause candidates are discriminated rather than assumed.
 
 **Contains [RUNBOOK] requirements**: CTX-05.
-**Plans**: TBD
+**Plans**: 7 plans (sequential waves 1-7)
+
+Plans:
+- [ ] 10-01-PLAN.md — `/budget` floor line, composed-harness faux helper, BEFORE floor and per-extension attribution recorded *(Wave 1)*
+- [ ] 10-02-PLAN.md — tool profiles (recon/review/implement/full) via `--ky-profile`, applied once at `session_start`; completeness guard; Criterion reinterpretations R1-R6 *(Wave 2)*
+- [ ] 10-03-PLAN.md — gate the background shell-policy section on `bg_run`; per-profile floor ceilings and AFTER record *(Wave 3)*
+- [ ] 10-04-PLAN.md — `context` hook cannot strip tools (+ `context_with_system` lint), prompt byte-stability with negative control, prompt-metadata lint, AGENTS.md token budget *(Wave 4)*
+- [ ] 10-05-PLAN.md — pre-registered minimal-vs-full experiment core (TDD): run plan, Newcombe interval, decision and discrimination, scoring with controls *(Wave 5)*
+- [ ] 10-06-PLAN.md — POSIX launcher + node CLI with scrubbed env, fake-pi end-to-end test, protocol doc *(Wave 6)*
+- [ ] 10-07-PLAN.md — RB-10-01..03 OUTSTANDING, docs-policy governance, decision docs, requirements reconciliation *(Wave 7)*
 **Research**: `--research-phase` required — the minimal-vs-full experiment is a research task with a designed protocol, not an implementation task. No study establishes a token threshold; anyone quoting one is guessing.
 
 ### Phase 11: Terminal UI
