@@ -2,9 +2,9 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
-status: verifying
-stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-12T17:13:06.995Z"
+status: ready_to_plan
+stopped_at: Phase 08.1 complete (7/7) — ready to discuss Phase 08.2
+last_updated: 2026-10-12T17:22:11.333Z
 last_activity: 2026-10-12
 progress:
   total_phases: 14
@@ -21,13 +21,13 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 08.1 — pi-1-x-upgrade-install-health
+**Current focus:** Phase 08.2 — comment discipline agents md
 
 ## Current Position
 
-Phase: 08.1 (pi-1-x-upgrade-install-health) — EXECUTING
-Plan: 7 of 7
-Status: Phase complete — ready for verification
+Phase: 08.2
+Plan: Not started
+Status: Ready to plan
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
@@ -49,7 +49,7 @@ credentials can do has been done".
 
 **Velocity:**
 
-- Total plans completed: 60
+- Total plans completed: 67
 - Average duration: —
 - Total execution time: 0.0 hours
 
@@ -63,6 +63,7 @@ credentials can do has been done".
 | 04 | 12 | - | - |
 | 05 | 12 | - | - |
 | 06 | 4 | - | - |
+| 08.1 | 7 | - | - |
 
 **Recent Trend:**
 
