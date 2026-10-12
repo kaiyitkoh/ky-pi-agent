@@ -48,6 +48,8 @@ export interface HarnessSessionOptions {
 	flags?: Record<string, boolean | string>;
 	/** A second inline user-scope extension, for negative controls. */
 	extraExtensionSource?: string;
+	/** Runs after the session exists and before extensions bind, e.g. to seed session entries. */
+	beforeBind?: (session: AgentSession) => void;
 	/** Faux steps. Default: one "ok" reply. */
 	responses?: FauxResponseStep[];
 }
@@ -182,6 +184,7 @@ export async function createHarnessSession(
 		for (const [name, value] of Object.entries(flags)) {
 			session.extensionRunner.setFlagValue(name, value);
 		}
+		opts.beforeBind?.(session);
 		await session.bindExtensions({});
 
 		return {

@@ -41,7 +41,7 @@ export const TOOL_PROFILES: Readonly<Record<string, readonly ProfileName[]>> = {
 };
 
 /** Pi built-ins that are inactive by default; when active, plan mode or a subagent chose them, so never remove them. */
-export const PROFILE_NEUTRAL_TOOLS: readonly string[] = ["grep", "find", "ls"];
+export const PROFILE_NEUTRAL_TOOLS: readonly string[] = ["grep", "find", "ls", "powershell"];
 
 export function classifiedToolNames(): string[] {
 	return [...Object.keys(TOOL_PROFILES), ...PROFILE_NEUTRAL_TOOLS];
