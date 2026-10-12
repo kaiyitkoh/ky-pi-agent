@@ -59,10 +59,14 @@ docstring for the structural argument). Concretely, it catches:
   (plan 09-04, FLOW-08) is a conditional allow, independent of `HEAD` but
   dependent on the invocation's own DESTINATION branch: permitted only with
   an explicit, present, non-protected `--target-branch`/`-b` target
-  (separated or `=` form), blocked — fail closed — on an omitted target
+  (separated or `=` form) given exactly once and straight after `create`,
+  blocked — fail closed — on a repeated target flag (glab's flag parser keeps
+  the LAST value), a target placed after another flag (a value-taking flag
+  such as `--title` swallows the next token), a clustered or attached short
+  flag (`-db x`, `-bmain`), an omitted target
   (GitLab silently defaults an omitted target to the project default
   branch, so silence is itself the deploy trigger) or a protected one,
-  compared case-insensitively. The blocked-subcommand check always runs
+  compared case-insensitively after trimming and stripping `refs/heads/`. The blocked-subcommand check always runs
   first, so `mr merge` can never be admitted through the `mr create` rule.
 - **Sensitive reads that reach a tool as a normal string** — `.env`-family
   files, `~/.aws/{credentials,config}`, kubeconfig, and `*.tfstate` block

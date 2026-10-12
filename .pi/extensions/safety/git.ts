@@ -14,8 +14,8 @@
  * (fail closed). Fix a false positive by adding a fixture-backed row, never by widening a predicate.
  *
  * `glab mr merge` blocks on every branch: an MR merge is the deploy trigger on GitLab's server,
- * regardless of local `HEAD`. `mr create` is a conditional allow only with an explicit,
- * non-protected `--target-branch`/`-b` (GitLab defaults an omitted target to the protected default
+ * regardless of local `HEAD`. `mr create` is a conditional allow only with one explicit,
+ * non-protected `--target-branch`/`-b` given first (GitLab defaults an omitted target to the protected default
  * branch, so silence is the trigger). The blocked table is consulted first so `create` can never
  * admit a `merge`.
  *
@@ -261,32 +261,54 @@ const GLAB_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "ci", matches: (args) => args[0] === "status", why: "read-only pipeline status" },
 ];
 
-/** The explicit `mr create` target (`--target-branch X`, `-b X`, `--target-branch=X`); a missing or flag-like value is treated as absent, since an omitted target is the same danger. */
-function extractMrCreateTarget(argsAfterCreate: readonly string[]): string | undefined {
-	for (let i = 0; i < argsAfterCreate.length; i++) {
-		const a = argsAfterCreate[i];
-		if (a === "--target-branch" || a === "-b") {
-			const value = argsAfterCreate[i + 1];
-			return value !== undefined && value.trim().length > 0 && !value.startsWith("-") ? value : undefined;
-		}
-		if (a.startsWith("--target-branch=")) {
-			const value = a.slice("--target-branch=".length);
-			return value.length > 0 ? value : undefined;
-		}
-	}
-	return undefined;
+const MR_TARGET_FLAG = "--target-branch";
+const MR_TARGET_SHORT = "-b";
+const MR_TARGET_EQ = `${MR_TARGET_FLAG}=`;
+
+/** Strip a `refs/heads/` prefix and surrounding whitespace, lower-cased, so every spelling of a branch compares equal. */
+function normaliseBranch(raw: string): string {
+	return raw.trim().replace(/^refs\/heads\//i, "").toLowerCase();
 }
 
-/** `mr create` conditional allow: true only for an explicit, non-protected target. Closes over `protectedBranches` so the shared single-argument rule type stays unchanged. */
-function mrCreateTargetsSafeBranch(args: readonly string[], protectedBranches: readonly string[]): boolean {
-	if (args[0] !== "create") {
-		return false;
+type MrTargetScan =
+	| { readonly kind: "ok"; readonly target: string }
+	| { readonly kind: "refused"; readonly why: string };
+
+/**
+ * glab parses flags with pflag: a repeated flag keeps its LAST value, a value-taking flag swallows the next token
+ * even when it looks like a flag, and short flags cluster (`-db x`). So allow only one target, given first.
+ */
+function scanMrCreateTarget(argsAfterCreate: readonly string[]): MrTargetScan {
+	let target: string | undefined;
+	let occurrences = 0;
+	for (let i = 0; i < argsAfterCreate.length; i++) {
+		const a = argsAfterCreate[i];
+		if (a === MR_TARGET_FLAG || a === MR_TARGET_SHORT) {
+			occurrences++;
+			const value = argsAfterCreate[i + 1];
+			if (i === 0 && value !== undefined && !value.startsWith("-")) target = value;
+			i++;
+			continue;
+		}
+		if (a.startsWith(MR_TARGET_EQ)) {
+			occurrences++;
+			if (i === 0) target = a.slice(MR_TARGET_EQ.length);
+			continue;
+		}
+		if (/^-[^-]/.test(a) && a.includes("b")) {
+			return { kind: "refused", why: `short-flag form "${a}" may set the target and is not parsed` };
+		}
 	}
-	const target = extractMrCreateTarget(args.slice(1));
-	if (target === undefined) {
-		return false;
+	if (occurrences === 0) {
+		return { kind: "refused", why: "names no explicit --target-branch/-b, and GitLab defaults an omitted target to the protected default branch" };
 	}
-	return !protectedBranches.some((b) => b.toLowerCase() === target.toLowerCase());
+	if (occurrences > 1) {
+		return { kind: "refused", why: "repeats the target flag, and glab honours the last one" };
+	}
+	if (target === undefined || normaliseBranch(target) === "") {
+		return { kind: "refused", why: "the target flag must come straight after `create` with a value, so no earlier flag can swallow it" };
+	}
+	return { kind: "ok", target: normaliseBranch(target) };
 }
 
 /** `glab mr merge` blocks on every branch; `mr list`/`view`/`ci status` stay allowed; `mr create` is the conditional allow; unknown forms fail closed. Takes `protectedBranches` rather than `GitPolicyFacts` because the destination check does not depend on `HEAD`. */
@@ -304,20 +326,17 @@ export function classifyGlabInvocation(invocation: GitInvocation, protectedBranc
 	}
 
 	if (invocation.subcommand === "mr" && invocation.args[0] === "create") {
-		if (mrCreateTargetsSafeBranch(invocation.args, protectedBranches)) {
-			return { kind: "allow" };
+		const scan = scanMrCreateTarget(invocation.args.slice(1));
+		if (scan.kind === "refused") {
+			return { kind: "block", reason: `"${display}" ${scan.why} -- defaults to block (fail closed)` };
 		}
-		const target = extractMrCreateTarget(invocation.args.slice(1));
-		return {
-			kind: "block",
-			reason:
-				target === undefined
-					? `"${display}" names no explicit --target-branch/-b -- GitLab defaults an omitted target to ` +
-						`the project default branch, which is protected (${protectedBranches.join(", ")}); silence is ` +
-						"the deploy trigger, so this defaults to block (fail closed)"
-					: `"${display}" targets "${target}", a protected branch (${protectedBranches.join(", ")}) -- ` +
-						"defaults to block (fail closed)",
-		};
+		if (protectedBranches.some((b) => b.toLowerCase() === scan.target)) {
+			return {
+				kind: "block",
+				reason: `"${display}" targets "${scan.target}", a protected branch (${protectedBranches.join(", ")}) -- defaults to block (fail closed)`,
+			};
+		}
+		return { kind: "allow" };
 	}
 
 	return {

@@ -158,7 +158,14 @@ const ROWS: readonly Row[] = [
 	{ command: "glab mr create --target-branch staging", rest: "mr create --target-branch staging", kind: "glab", currentBranch: "main", expected: "allow", why: "an explicit, present, non-protected target -- the separated form" },
 	{ command: "glab mr create --target-branch=staging", rest: "mr create --target-branch=staging", kind: "glab", currentBranch: "main", expected: "allow", why: "the = form of the same flag" },
 	{ command: "glab mr create -b staging", rest: "mr create -b staging", kind: "glab", currentBranch: "main", expected: "allow", why: "the -b short flag" },
-	{ command: "glab mr create --draft --target-branch staging --title x", rest: "mr create --draft --target-branch staging --title x", kind: "glab", currentBranch: "main", expected: "allow", why: "unrelated flags interleaved before and after the target flag -- argv position is not load-bearing" },
+	{ command: "glab mr create --target-branch staging --draft --title x", rest: "mr create --target-branch staging --draft --title x", kind: "glab", currentBranch: "main", expected: "allow", why: "unrelated flags after the leading target flag" },
+	{ command: "glab mr create --draft --target-branch staging --title x", rest: "mr create --draft --target-branch staging --title x", kind: "glab", currentBranch: "main", expected: "block", why: "the target must come first: an earlier value-taking flag could swallow it (`--title --target-branch staging`)" },
+	{ command: "glab mr create --title --target-branch staging", rest: "mr create --title --target-branch staging", kind: "glab", currentBranch: "main", expected: "block", why: "pflag gives --title the value \"--target-branch\", so the real target is omitted and defaults to the protected branch" },
+	{ command: "glab mr create --target-branch staging --target-branch main", rest: "mr create --target-branch staging --target-branch main", kind: "glab", currentBranch: "main", expected: "block", why: "a repeated flag keeps its last value in pflag, so this targets main" },
+	{ command: "glab mr create -b staging --target-branch=main", rest: "mr create -b staging --target-branch=main", kind: "glab", currentBranch: "main", expected: "block", why: "mixed spellings of a repeated target flag" },
+	{ command: "glab mr create --target-branch=refs/heads/main", rest: "mr create --target-branch=refs/heads/main", kind: "glab", currentBranch: "main", expected: "block", why: "refs/heads/ prefix is normalised before the protected comparison" },
+	{ command: "glab mr create -bmain", rest: "mr create -bmain", kind: "glab", currentBranch: "main", expected: "block", why: "attached short-flag value is refused rather than parsed" },
+	{ command: "glab mr create -db staging", rest: "mr create -db staging", kind: "glab", currentBranch: "main", expected: "block", why: "clustered short flags containing b are refused rather than parsed" },
 	{ command: "glab mr create", rest: "mr create", kind: "glab", currentBranch: "main", expected: "block", why: "no explicit target -- GitLab defaults an omitted target to the project default branch, so silence is the deploy trigger" },
 	{ command: "glab mr create --target-branch main", rest: "mr create --target-branch main", kind: "glab", currentBranch: "main", expected: "block", why: "the target is a protected branch" },
 	{ command: "glab mr create --target-branch MAIN", rest: "mr create --target-branch MAIN", kind: "glab", currentBranch: "main", expected: "block", why: "case-insensitive match against protected branch names, mirroring isProtected" },
@@ -188,6 +195,13 @@ describe("SAFE-04/SAFE-05 -- classifyGitInvocation / classifyGlabInvocation over
 			).toBe(row.expected);
 		});
 	}
+});
+
+describe("glab mr create target normalisation", () => {
+	it("trims whitespace around the target before the protected comparison", () => {
+		const verdict = classifyGlabInvocation({ subcommand: "mr", args: ["create", "--target-branch", "main "] }, PROTECTED);
+		expect(verdict.kind).toBe("block");
+	});
 });
 
 describe("SAFE-04/SAFE-05 -- liveness guard: every table key is exercised", () => {
