@@ -10,6 +10,7 @@ import {
 	COMMENT_RULES_HEADING,
 	COMMENT_RULES_SECTION,
 	COMMENT_RULES_TEXT,
+	hasCommentRulesHeading,
 } from "../../.pi/extensions/harness/comment-rules.ts";
 import { transcriptView } from "../helpers/faux.ts";
 import { repoRoot } from "../helpers/git.ts";
@@ -57,6 +58,26 @@ describe("comment rules constant", () => {
 	});
 });
 
+describe("comment rules heading match", () => {
+	it("matches a level-2 heading line regardless of case, spacing or CRLF", () => {
+		for (const text of ["## Code comments", "x\n## Code Comments\ny", "##  code comments  ", "a\r\n## Code comments\r\nb"]) {
+			expect(hasCommentRulesHeading(text), JSON.stringify(text)).toBe(true);
+		}
+	});
+
+	it("ignores other levels, inline mentions and fenced samples", () => {
+		for (const text of [
+			"### Code comments",
+			"See the ## Code comments section",
+			"## Code comments and more",
+			"```md\n## Code comments\n```\n",
+			"~~~\n## Code comments\n~~~",
+		]) {
+			expect(hasCommentRulesHeading(text), JSON.stringify(text)).toBe(false);
+		}
+	});
+});
+
 describe("harness delivers the comment rules", () => {
 	it("injects once as <code_comments> in a project without the heading", async () => {
 		const { prompt, calls } = await capturePrompt({ extensionPath: HARNESS });
@@ -72,6 +93,14 @@ describe("harness delivers the comment rules", () => {
 		});
 		expect(occurrences(prompt, COMMENT_RULES_HEADING)).toBe(1);
 		expect(prompt).not.toContain("<code_comments>");
+	});
+
+	it("still injects when a context file only has a level-3 or fenced heading", async () => {
+		const { prompt } = await capturePrompt({
+			extensionPath: HARNESS,
+			cwdFiles: { "AGENTS.md": "### Code comments\n- local note\n\n```md\n## Code comments\n```\n" },
+		});
+		expect(prompt).toContain("<code_comments>");
 	});
 
 	it("is absent without the harness (non-vacuity)", async () => {

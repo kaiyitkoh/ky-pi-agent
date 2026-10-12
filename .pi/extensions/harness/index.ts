@@ -7,7 +7,7 @@
  * No build step and no .gitignore under .pi/extensions/: package-manager.ts honours one, extensions/loader.ts does not.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { COMMENT_RULES_HEADING, COMMENT_RULES_SECTION, COMMENT_RULES_TEXT } from "./comment-rules.ts";
+import { COMMENT_RULES_SECTION, COMMENT_RULES_TEXT, hasCommentRulesHeading } from "./comment-rules.ts";
 
 /** The sentinel string every load-path assertion greps for; tests import it instead of duplicating it. */
 export const SELFTEST_MODEL_ID = "ky-harness-selftest";
@@ -19,12 +19,12 @@ export const SELFTEST_PROVIDER_ID = "ky-harness";
 const DEAD_ENDPOINT = "http://127.0.0.1:1/v1";
 
 export default function (pi: ExtensionAPI): void {
-	// Skip when a context file already carries the rules so they appear once.
+	// A context file with its own "## Code comments" section replaces these rules, so they appear once.
 	pi.on("before_agent_start", (event) => {
 		const o = event.systemPromptOptions;
-		if (o.contextFiles.some((f) => f.content.includes(COMMENT_RULES_HEADING))) return undefined;
+		if (o.contextFiles.some((f) => hasCommentRulesHeading(f.content))) return undefined;
 		if (typeof o.forceSystemPrompt === "string") {
-			if (!o.forceSystemPrompt.includes(COMMENT_RULES_HEADING)) {
+			if (!hasCommentRulesHeading(o.forceSystemPrompt)) {
 				o.forceSystemPrompt += `
 
 ${COMMENT_RULES_TEXT}`;

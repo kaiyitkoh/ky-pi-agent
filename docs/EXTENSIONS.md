@@ -756,7 +756,7 @@ Notes only. Nothing here was built in Phase 08.1. Source: pi-coding-agent / pi-a
 
 - Mechanism: the harness `before_agent_start` hook sets `systemPromptOptions.sections.code_comments` (Pi 1.1.0 `dist/core/extensions/runner.js:1121-1170`, `dist/core/system-prompt.js:110-114`).
 - Why not a bootstrap-written `~/.pi/agent/AGENTS.md`: it needs a manual step, risks clobbering user content, and is absent for `pi install`-only users.
-- Skip rule: a loaded context file containing `## Code comments` wins, so a project's own rules override.
+- Skip rule: a loaded context file with a level-2 `## Code comments` heading line (case-insensitive, outside fenced code) replaces the harness rules entirely, whatever that section says.
 - The text is a constant, so the cache prefix stays stable.
 - Source of truth: `.pi/extensions/harness/comment-rules.ts`, parity-tested against `AGENTS.md`.
 - Known limit: pi-subagents child sessions may not load user-scope package extensions (unverified).

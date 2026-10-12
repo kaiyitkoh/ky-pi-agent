@@ -14,3 +14,11 @@ export const COMMENT_RULES_TEXT = [
 	"- JSDoc only on exported API: one sentence plus non-obvious params.",
 	"- When editing code, update or delete its comments; a wrong comment is worse than none.",
 ].join("\n");
+
+const FENCED_BLOCK = /^(```|~~~)[^\n]*\n[\s\S]*?^\1[ \t]*\r?$/gm;
+const HEADING_LINE = /^##[ \t]+code comments[ \t]*\r?$/im;
+
+/** True when `text` has a level-2 "Code comments" heading outside fenced code; such a section replaces the harness rules. */
+export function hasCommentRulesHeading(text: string): boolean {
+	return HEADING_LINE.test(text.replace(FENCED_BLOCK, ""));
+}

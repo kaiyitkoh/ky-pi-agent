@@ -343,8 +343,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/harness",
-		budget: 80,
-		why: "WR-03; measured 80 raw lines across 2 files 2026-10-13, rounded up to the next ten",
+		budget: 90,
+		why:
+			"WR-03; measured 80 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 80 -> 90 " +
+			"by the 08.2 review fix WR-05: comment-rules.ts gained hasCommentRulesHeading (heading-line match " +
+			"outside fenced code). Re-measured 88 raw lines on 2026-10-13 (index.ts 63, comment-rules.ts 25), " +
+			"rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
