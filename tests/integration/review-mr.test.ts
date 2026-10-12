@@ -8,6 +8,7 @@
  * Does not prove: that GitLab accepts the request, that the
  * target branch exists, or that server-side branch protection is configured. Those need the work laptop.
  */
+import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -19,10 +20,11 @@ import type { PlanArtifact } from "../../.pi/extensions/plan-ceremony/plan-schem
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
 import { renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import {
-	AI_AUTHORSHIP_DISCLOSURE, MAX_MR_BODY_CHARS, MR_BODY_FLAG, MR_TARGET_BRANCH, buildMrBody, mrCreateArgv, openMr, spawnExec, type MrExec,
+	AI_AUTHORSHIP_DISCLOSURE, MAX_MR_BODY_CHARS, MR_BODY_FLAG, MR_TARGET_BRANCH, buildMrBody, historyMismatch, mrCreateArgv, openMr, spawnExec, upstreamMismatch, type MrExec,
 } from "../../.pi/extensions/review/mr.ts";
 import { classifyGlabInvocation } from "../../.pi/extensions/safety/git.ts";
 import { PROTECTED_BRANCHES } from "../../.pi/extensions/safety/index.ts";
+import { commitFile, makeTempRepo } from "../helpers/git.ts";
 import { withStubBin } from "../helpers/stub-bin.ts";
 
 const isWindows = process.platform === "win32";
@@ -139,6 +141,51 @@ describe("buildMrBody", () => {
 		});
 		expect(wb).toContain("rewrite the cache layer");
 		expect(wb).toContain("needs a migration window");
+	});
+});
+
+describe("MR preconditions against a real temp repo (no remote)", () => {
+	const entry = (taskId: string, sha: string) => renderProgressAppend({ taskId, commitSha: sha, verificationCommand: "npm test", output: "ok", exitCode: 0, recordedAt: 0 });
+	const git = (repo: string, args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+	function repo(): string {
+		const r = makeTempRepo("kypi-mrpre-");
+		dirs.push(r);
+		return r;
+	}
+
+	it("refuses a PLAN task with no PROGRESS entry", () => {
+		const r = repo();
+		const a = commitFile(r, "a.ts", "a\n", "a");
+		expect(historyMismatch(r, ["T001", "T002"], entry("T001", a))).toContain("T002");
+	});
+
+	it("refuses commits after the last recorded entry, and accepts when the last entry is HEAD", () => {
+		const r = repo();
+		const a = commitFile(r, "a.ts", "a\n", "a");
+		expect(historyMismatch(r, ["T001"], entry("T001", a))).toBeUndefined();
+		commitFile(r, "b.ts", "b\n", "unrecorded");
+		expect(historyMismatch(r, ["T001"], entry("T001", a))).toContain("no verification covers");
+	});
+
+	it("refuses a recorded commit that is not on HEAD's history", () => {
+		const r = repo();
+		commitFile(r, "base.txt", "base\n", "base");
+		git(r, ["checkout", "-b", "side"]);
+		const side = commitFile(r, "s.ts", "s\n", "side");
+		git(r, ["checkout", "work"]);
+		const a = commitFile(r, "a.ts", "a\n", "a");
+		expect(historyMismatch(r, ["T001", "T002"], entry("T001", side) + entry("T002", a))).toContain("not on HEAD's history");
+	});
+
+	it("needs an upstream that equals HEAD", () => {
+		const r = repo();
+		commitFile(r, "a.ts", "a\n", "a");
+		expect(upstreamMismatch(r)).toContain("no upstream");
+		git(r, ["branch", "pushed"]);
+		git(r, ["branch", "--set-upstream-to=pushed"]);
+		expect(upstreamMismatch(r)).toBeUndefined();
+		commitFile(r, "b.ts", "b\n", "b");
+		expect(upstreamMismatch(r)).toContain("push first");
 	});
 });
 

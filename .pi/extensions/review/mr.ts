@@ -5,6 +5,7 @@
 import { spawnSync } from "node:child_process";
 
 import { redactString } from "../diagnostics/redact.ts";
+import { recordedEntries } from "../execute/progress.ts";
 import type { SpecArtifact } from "../grill/spec-schema.ts";
 import type { PlanArtifact } from "../plan-ceremony/plan-schema.ts";
 import type { ReviewArtifact } from "../quality/review-schema.ts";
@@ -65,6 +66,32 @@ export function buildMrBody(input: MrBodyInput): string {
 	lines.push("## Disclosure", "", AI_AUTHORSHIP_DISCLOSURE, "");
 
 	return redactString(lines.join("\n"));
+}
+
+function gitRead(cwd: string, args: string[]): { status: number | null; out: string } {
+	const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	return { status: r.status, out: (r.stdout ?? "").trim() };
+}
+
+/** Why the recorded history does not match HEAD, or undefined: every task recorded, each record on HEAD's history, none after the last. */
+export function historyMismatch(cwd: string, taskIds: readonly string[], progress: string): string | undefined {
+	const entries = recordedEntries(progress);
+	const missing = taskIds.filter((id) => !entries.some((e) => e.taskId === id));
+	if (missing.length > 0) return `PLAN task(s) with no PROGRESS entry: ${missing.join(", ")} -- run /execute first`;
+	const offHistory = entries.filter((e) => gitRead(cwd, ["merge-base", "--is-ancestor", e.sha, "HEAD"]).status !== 0);
+	if (offHistory.length > 0) return `recorded commit(s) not on HEAD's history: ${offHistory.map((e) => `${e.taskId} @ ${e.sha}`).join(", ")}`;
+	const head = gitRead(cwd, ["rev-parse", "HEAD"]).out;
+	const last = entries.at(-1)?.sha;
+	if (last !== head) return `HEAD (${head}) carries commits after the last recorded entry (${last ?? "none"}) that no verification covers`;
+	return undefined;
+}
+
+/** Why the MR would not carry HEAD, or undefined: glab opens the MR for the pushed branch, not the local one. */
+export function upstreamMismatch(cwd: string): string | undefined {
+	const head = gitRead(cwd, ["rev-parse", "HEAD"]).out;
+	const upstream = gitRead(cwd, ["rev-parse", "--verify", "--quiet", "@{u}"]);
+	if (upstream.status !== 0) return "the branch has no upstream -- push it first";
+	return upstream.out === head ? undefined : `the pushed branch is at ${upstream.out}, not HEAD (${head}) -- push first`;
 }
 
 export interface MrInput {

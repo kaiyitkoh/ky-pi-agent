@@ -17,7 +17,7 @@ import { renderReviewMarkdown, type ReviewArtifact } from "../quality/review-sch
 import { decideWorkflowStop, runRefuteOrPromote } from "../quality/verdict.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { MR_TARGET_BRANCH, buildMrBody, openMr, sanitizeTitle, spawnExec } from "./mr.ts";
+import { MR_TARGET_BRANCH, buildMrBody, historyMismatch, openMr, sanitizeTitle, spawnExec, upstreamMismatch } from "./mr.ts";
 import { changedFilesSince, compareScope } from "./scope-drift.ts";
 
 function slugsWithProgress(cwd: string): string[] {
@@ -62,6 +62,8 @@ export default function (pi: ExtensionAPI): void {
 				const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), ids);
 				if (!plan.ok) return fail(plan.reason);
 				const progress = readFileSync(join(dir, "PROGRESS.md"), "utf-8");
+				const mismatch = historyMismatch(ctx.cwd, plan.plan.tasks.map((t) => t.id), progress);
+				if (mismatch !== undefined) return fail(`review: ${mismatch}`);
 
 				const mechanisms = gateDepthFor("review").mechanisms;
 				ctx.ui.notify(`review: gate depth: ${mechanisms.join(", ")}`, "info");
@@ -110,6 +112,8 @@ export default function (pi: ExtensionAPI): void {
 					if (!approved) return void ctx.ui.notify("review: MR not opened -- approval declined", "warning");
 				}
 
+				const unpushed = upstreamMismatch(ctx.cwd);
+				if (unpushed !== undefined) return fail(`review: MR not opened -- ${unpushed}`);
 				const body = buildMrBody({ spec: spec.spec, plan: plan.plan, progress, review });
 				const title = sanitizeTitle(spec.spec.goal.split("\n")[0] ?? "");
 				const out = openMr({ targetBranch: MR_TARGET_BRANCH, title, body }, { exec: spawnExec(ctx.cwd, undefined) });

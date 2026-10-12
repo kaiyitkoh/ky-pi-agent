@@ -381,7 +381,10 @@ target as a constant and passes it explicitly on every call; it never relies
 on glab's default. The git/glab classifier is the single refuser of an absent
 or protected target, and `glab mr merge` is blocked unconditionally. The MR
 body is built from recorded evidence (PROGRESS.md), not from the model's
-account of its own work, and carries a disclosure line.
+account of its own work, and carries a disclosure line. Because glab opens the
+MR for the pushed branch, `/review` refuses unless every PLAN task has a
+PROGRESS entry, every recorded commit is on HEAD's history, the last recorded
+commit is HEAD, and the upstream (`@{u}`) is HEAD.
 
 **Why the drift check is computed.** Scope drift is the difference between
 `git diff --name-only <base>..HEAD` and the union of SPEC's expected files and

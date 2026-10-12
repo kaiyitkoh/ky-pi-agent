@@ -46,15 +46,19 @@ export function appendProgress(cwd: string, slug: string, entry: ProgressEntry):
 }
 
 const DRIFT_BASE_LINE = /^Drift base: ([0-9a-f]{40})$/m;
-const ENTRY_HEAD_LINE = /^## T\d{3} @ ([0-9a-f]{40})$/gm;
+const ENTRY_HEAD_LINE = /^## (T\d{3}) @ ([0-9a-f]{40})$/gm;
+
+/** Every recorded `## T### @ <sha>` entry, in file order. */
+export function recordedEntries(progress: string): readonly { readonly taskId: string; readonly sha: string }[] {
+	return [...progress.matchAll(ENTRY_HEAD_LINE)].map((m) => ({ taskId: m[1] ?? "", sha: m[2] ?? "" }));
+}
 
 /**
  * Where drift is measured from: the last accepted entry's SHA, else the base pinned on first arm. A rejected or
  * halted commit therefore stays inside every later diff until it is reverted, instead of being absorbed by a fresh base.
  */
 export function driftBase(progress: string): string | undefined {
-	const heads = [...progress.matchAll(ENTRY_HEAD_LINE)];
-	return heads.at(-1)?.[1] ?? DRIFT_BASE_LINE.exec(progress)?.[1];
+	return recordedEntries(progress).at(-1)?.sha ?? DRIFT_BASE_LINE.exec(progress)?.[1];
 }
 
 /** Pin the drift base in PROGRESS.md once, on the slug's first arm; later arms read it back with {@link driftBase}. */
