@@ -429,7 +429,7 @@ Plans:
 **Goal:** Code comments in this repo — and code written by the harness's models in the user's other projects — state only non-obvious WHY in one or two lines, and the rule is enforced rather than hoped for.
 **Requirements**: CMT-01..05 (inserted 2026-10-12, see 08.2-CONTEXT.md)
 **Depends on:** Phase 08.1
-**Plans:** 11/13 plans executed
+**Plans:** 12/13 plans executed
 
 **Success Criteria:**
 
@@ -451,7 +451,7 @@ Plans:
 - [x] 08.2-09-PLAN.md — cleanup: quality rules/review-schema/verdict
 - [x] 08.2-10-PLAN.md — cleanup: quality gates/index/reviewer/calibration/advisor
 - [x] 08.2-11-PLAN.md — cleanup: providers + qoder
-- [ ] 08.2-12-PLAN.md — cleanup: grill + plan-ceremony (ratchet empties)
+- [x] 08.2-12-PLAN.md — cleanup: grill + plan-ceremony (ratchet empties)
 - [ ] 08.2-13-PLAN.md — empty-ratchet lock, 35% aggregate check, tsc + single full-suite run, sign-off
 
 **Cross-cutting constraints:**
