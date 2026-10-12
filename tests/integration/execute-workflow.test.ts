@@ -22,6 +22,7 @@ import { driftAbort, executeRunContext, progressBlocks, recordedEntries, renderP
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import workflowsExtension from "../../.pi/extensions/workflows/index.ts";
 import { EVIDENCE_LOG_BASE, endRun, isRunArmed } from "../../.pi/extensions/workflows/evidence.ts";
+import { setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
 import { commitFile, headSha, makeTempRepo } from "../helpers/git.ts";
 import { readJsonl } from "../helpers/logs.ts";
 
@@ -330,6 +331,38 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		verify(h);
 		await h.fire("agent_end", {});
 		expect(readFileSync(progressFile(h), "utf-8")).toContain("no check ran; recorded with the user's approval");
+	});
+
+	it("a passing typecheck does not count for a change with no TypeScript/JavaScript file, so a .tf change still needs approval", async () => {
+		const tf = "infra/main.tf";
+		const spec = renderSpecMarkdown({ ...SPEC, scopePin: { ...SPEC.scopePin, expectedFiles: [tf] } });
+		const h = harness({ spec, plan: `- [ ] T001 [R1] Add the bucket in ${tf} | verify: npm test\n` });
+		commitIn(h.repo, "tsconfig.json", "{}\n");
+		setQuickGateExecOverrideForTests(() => ({ code: 0, stdout: "", stderr: "" }));
+		try {
+			await h.command(SLUG);
+			commitIn(h.repo, tf, "resource \"x\" \"y\" {}\n");
+			verify(h);
+			await h.fire("agent_end", {});
+		} finally {
+			setQuickGateExecOverrideForTests(undefined);
+		}
+		expect(h.confirms.join("\n")).toContain("typecheck: UNAVAILABLE (no changed TypeScript/JavaScript file");
+		expect(h.notes.at(-1)?.text).toContain("not approved");
+	});
+
+	it("a changed TypeScript file still runs the typecheck leg", async () => {
+		const h = harness();
+		setQuickGateExecOverrideForTests(() => ({ code: 0, stdout: "", stderr: "" }));
+		try {
+			await h.command(SLUG);
+			commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+			verify(h);
+			await h.fire("agent_end", {});
+		} finally {
+			setQuickGateExecOverrideForTests(undefined);
+		}
+		expect(readFileSync(progressFile(h), "utf-8")).toContain("- Deterministic gate: typecheck: PASS");
 	});
 
 	it("PROGRESS keeps the verification output redacted and bounded, and .pi/work/ is excluded from the work repo", async () => {

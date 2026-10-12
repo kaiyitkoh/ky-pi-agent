@@ -319,8 +319,10 @@ In `/execute` and `/review` the deterministic mechanism is
 `runChangeGateStage`, which checks the work repo's change rather than this
 harness. It has two legs. The anti-pattern rules run on the changed
 TypeScript/JavaScript files, and a finding already present at the base commit
-is not counted. `tsc --noEmit` runs in the work repo when the project is
-trusted and TypeScript is installed. `/execute` skips the typecheck leg when
+is not counted. `tsc --noEmit` runs in the work repo when the change touches
+a TypeScript/JavaScript file, the project is trusted and TypeScript is
+installed, so a root `tsconfig.json` never vouches for a Terraform, Python or
+docs change. `/execute` skips the typecheck leg when
 it already failed on the base tree, because such a failure cannot be blamed
 on the change. The harness-only lint and LSP legs do not run here.
 

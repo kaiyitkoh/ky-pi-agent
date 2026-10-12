@@ -174,8 +174,8 @@ const findingKey = (f: QualityFinding): string => `${f.path}\0${f.ruleId}\0${f.m
 
 /**
  * The deterministic stage for a work repo's change between `baseSha` and the tree on disk: anti-pattern rules on
- * the changed code files, counting only findings `baseSha` did not already have, and `tsc --noEmit` unless the
- * base already failed it (a failure there cannot be attributed to the change).
+ * the changed code files, counting only findings `baseSha` did not already have, and `tsc --noEmit` only when a code
+ * file changed and the base did not already fail it (a failure there cannot be attributed to the change).
  */
 export function runChangeGateStage(input: {
 	readonly cwd: string;
@@ -200,9 +200,11 @@ export function runChangeGateStage(input: {
 		});
 		antiPattern = added.length === 0 ? { status: "pass" } : { status: "fail", findings: added.map((f) => `${f.path}:${f.line} ${f.ruleId}: ${f.message}`) };
 	}
-	const typecheck: LegStatus = input.baseTypecheckFailed
-		? { status: "unavailable", reason: "tsc already failed on the base tree, so a failure cannot be attributed to this change" }
-		: runTypecheckAt(input.cwd, input.projectTrusted);
+	const typecheck: LegStatus = !input.changed.some((p) => CODE_FILE.test(p))
+		? { status: "unavailable", reason: "no changed TypeScript/JavaScript file for tsc to check" }
+		: input.baseTypecheckFailed
+			? { status: "unavailable", reason: "tsc already failed on the base tree, so a failure cannot be attributed to this change" }
+			: runTypecheckAt(input.cwd, input.projectTrusted);
 	const legs = [["typecheck", typecheck], ["anti-pattern", antiPattern]] as const;
 	const report = legs
 		.map(([id, leg]) => leg.status === "fail" ? `${id}: FAIL\n${leg.findings.map((f) => `  - ${f}`).join("\n")}` : `${id}: ${leg.status === "pass" ? "PASS" : `UNAVAILABLE (${leg.reason})`}`)
