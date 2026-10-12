@@ -16,7 +16,6 @@ import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
 // Remove an entry in the same commit that cleans it; must be empty at phase end.
 const PENDING_CLEANUP: readonly string[] = [
-	".pi/extensions/quality/",
 	".pi/extensions/providers/",
 	".pi/extensions/qoder/",
 	".pi/extensions/grill/",
