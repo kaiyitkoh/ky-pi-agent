@@ -179,6 +179,26 @@ describe("ctx-experiment launcher with a fake pi", () => {
 		expect(result.stdout).toContain("Context-pollution experiment summary");
 	}, TIMEOUT_MS);
 
+	it("refuses a key variable name the scrubbed environment sets itself, before any trial", () => {
+		const before = readdirSync(evidence).length;
+		for (const name of ["HOME", "userprofile", "PI_CODING_AGENT_DIR", "TMPDIR", "Path", "aws_secret_access_key"]) {
+			const result = runLauncher({ ...base, KY_EXP_OUT: fwd(tempDir("ctx-out3-")), KY_EXP_KEY_VAR: name });
+			expect(result.status, name).not.toBe(0);
+			expect(result.stderr, name).toContain("not an acceptable variable name");
+		}
+		expect(readdirSync(evidence).length).toBe(before);
+	});
+
+	it("run refuses a colliding key variable name even when called directly", () => {
+		const result = spawnSync(process.execPath, [CLI, "run", "r", "o", "e", "sh", "pi"], {
+			env: { ...process.env, KY_EXP_KEY_VAR: "HOME" },
+			encoding: "utf-8",
+			windowsHide: true,
+		});
+		expect(result.status).toBe(1);
+		expect(result.stderr).toContain("not an acceptable variable name");
+	});
+
 	it("refuses to start without a model, before any trial", () => {
 		const before = readdirSync(evidence).length;
 		const env: Record<string, string> = { ...base, KY_EXP_OUT: fwd(tempDir("ctx-out2-")) };

@@ -115,6 +115,9 @@ async function main(argv) {
 		// The key travels in the child's env object, never on any argv (process listings and audit logs record argv).
 		const [trialRoot, stdoutFile, stderrFile, shBin, piBin, ...piArgs] = rest;
 		const keyVar = process.env.KY_EXP_KEY_VAR ?? "";
+		if (!/^[A-Z_][A-Z0-9_]*$/i.test(keyVar) || /^(AWS_|PI_)|^(PATH|HOME|USERPROFILE|TMP|TEMP|TMPDIR|SYSTEMROOT)$/i.test(keyVar)) {
+			throw new Error(`run: KY_EXP_KEY_VAR is not an acceptable variable name: ${keyVar}`);
+		}
 		const key = process.env[keyVar];
 		if (key === undefined || key === "") {
 			throw new Error("run: the variable named by KY_EXP_KEY_VAR is not set");

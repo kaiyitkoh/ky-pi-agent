@@ -619,7 +619,8 @@ KY_EXP_MODEL=deepseek/deepseek-v4-flash KY_EXP_KEY_VAR=DEEPSEEK_API_KEY sh scrip
 ```
 
 `KY_EXP_MODEL` is the same provider/model id for every arm. `KY_EXP_KEY_VAR` is the NAME of the variable holding the provider
-key; only that one variable is passed to pi. Optional: `KY_EXP_SEED`, `KY_EXP_REPEATS`, `KY_EXP_DEFECTS` (comma list),
+key; only that one variable is passed to pi. Names the launcher sets itself (`PATH`, `HOME`, `USERPROFILE`, `TMP`, `TEMP`,
+`TMPDIR`, `SYSTEMROOT`, any `PI_*`) and any `AWS_*` name are refused, case-insensitively, before any trial starts. Optional: `KY_EXP_SEED`, `KY_EXP_REPEATS`, `KY_EXP_DEFECTS` (comma list),
 `KY_EXP_PI` (default `pi`), `KY_EXP_OUT` (default `logs/ctx-experiment/<UTC timestamp>`). Output is `trials.tsv`, one `.jsonl` and
 `.stderr.log` per trial, `failures.tsv`, `summary.json`, and a human summary on stdout. `logs/` and `*.jsonl` are gitignored.
 Cost: 240 model calls with a few thousand input tokens each; budget it as a few dollars at cheap-model prices.

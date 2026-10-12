@@ -24,8 +24,10 @@ die() {
 
 [ -n "${KY_EXP_MODEL:-}" ] || die "KY_EXP_MODEL is required (provider/model id)"
 [ -n "${KY_EXP_KEY_VAR:-}" ] || die "KY_EXP_KEY_VAR is required (the NAME of the env var holding the provider key)"
-case "$KY_EXP_KEY_VAR" in
-	*[!A-Za-z0-9_]* | [0-9]* | [Aa][Ww][Ss]_*) die "KY_EXP_KEY_VAR is not an acceptable variable name: $KY_EXP_KEY_VAR" ;;
+# Names the scrubbed environment sets itself are refused too: as the key they would restore the operator's real value.
+case $(printf '%s' "$KY_EXP_KEY_VAR" | tr '[:lower:]' '[:upper:]') in
+	*[!A-Z0-9_]* | [0-9]* | AWS_* | PI_* | PATH | HOME | USERPROFILE | TMP | TEMP | TMPDIR | SYSTEMROOT)
+		die "KY_EXP_KEY_VAR is not an acceptable variable name: $KY_EXP_KEY_VAR" ;;
 esac
 [ -n "$(printenv "$KY_EXP_KEY_VAR" 2>/dev/null || true)" ] || die "environment variable $KY_EXP_KEY_VAR is not set"
 export KY_EXP_KEY_VAR
