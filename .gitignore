@@ -78,6 +78,7 @@ kubeconfig
 .pi/cache/
 .pi/logs/
 .pi/state/
+.pi/tasks/
 .pi/*.local.json
 .pi/auth.json
 
