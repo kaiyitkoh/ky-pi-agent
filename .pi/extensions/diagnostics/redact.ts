@@ -73,7 +73,7 @@ export function redactString(value: string): string {
 	return out;
 }
 
-/** Redact a header map into a NEW map; `null` (delete this header, pi-ai `types.ts:110`) stays `null`. */
+/** Redact a header map into a NEW map; `null` (delete this header, pi-ai `types.ts` ProviderHeaders) stays `null`. */
 export function redactHeaders(headers: Record<string, string | null>): Record<string, string | null> {
 	const out: Record<string, string | null> = {};
 	for (const [key, value] of Object.entries(headers)) {

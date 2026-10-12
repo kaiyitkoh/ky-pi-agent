@@ -1,7 +1,7 @@
 /**
  * Rewrites an expired-AWS-credential error into one line naming `aws sso login --profile <resolved>`.
  * Uses `message_end`, not `after_provider_response`, which never sees a thrown provider error
- * (pi-ai dist/api/bedrock-converse-stream.js:218; docs/DIAGNOSTICS.md:341-354). Registers no tool, provider or command.
+ * (pi-ai dist/api/bedrock-converse-stream.js; docs/DIAGNOSTICS.md:341-354). Registers no tool, provider or command.
  */
 import type {
 	ExtensionAPI,
@@ -27,7 +27,7 @@ import { classifySso } from "./sso.ts";
 /** `where` recorded on the turns row if this handler ever throws. */
 const HANDLER_NAME = "providers.message_end";
 
-/** Result type of `message_end`; derived because Pi does not re-export it (dist/index.d.ts:7, types.d.ts:801-804). */
+/** Result type of `message_end`; derived because Pi does not re-export it (dist/index.d.ts, core/extensions/types.d.ts). */
 interface MessageEndReplacement {
 	message: MessageEndEvent["message"];
 }
@@ -48,7 +48,7 @@ function usableProfileName(value: string | undefined): string | undefined {
 }
 
 /**
- * The profile name a stored Bedrock credential names, if any (pi dist/core/model-registry.d.ts:35).
+ * The profile name a stored Bedrock credential names, if any (pi dist/core/model-registry.d.ts).
  * Resolution failure falls through to the ambient variable: a degraded message beats the raw SDK string.
  */
 async function storedProfileName(ctx: ExtensionContext): Promise<string | undefined> {
@@ -62,7 +62,7 @@ async function storedProfileName(ctx: ExtensionContext): Promise<string | undefi
 
 /**
  * The profile to re-authenticate: stored credential, then ambient variable, then placeholder, which is Pi's own order
- * (pi-ai src/providers/amazon-bedrock.ts:65-71). Exported because the integration seam only reaches the ambient branch;
+ * (pi-ai 1.1.0 src/providers/amazon-bedrock.ts:65-71). Exported because the integration seam only reaches the ambient branch;
  * tests/unit/bedrock-auth.test.ts case 6 covers both with a stub.
  */
 export async function resolveProfileName(ctx: ExtensionContext): Promise<string> {
@@ -78,13 +78,13 @@ export default function (pi: ExtensionAPI): void {
 	pi.on(
 		"message_end",
 		safeHandler<MessageEndEvent, MessageEndReplacement>(HANDLER_NAME, async (event, ctx) => {
-			// Role check first: message_end also fires for user and toolResult messages (types.d.ts:573-576).
+			// Role check first: message_end also fires for user and toolResult messages (core/extensions/types.d.ts MessageEndEvent).
 			if (event.message.role !== "assistant") {
 				return;
 			}
 			const message = event.message;
 
-			// Only an error-stopped message with text can be a credential failure (pi-ai dist/utils/retry.js:166-167).
+			// Only an error-stopped message with text can be a credential failure (pi-ai dist/utils/retry.js).
 			if (message.stopReason !== "error") {
 				return;
 			}
@@ -95,8 +95,8 @@ export default function (pi: ExtensionAPI): void {
 
 			// Only Bedrock reaches the AWS credential chain; another vendor's body that quotes
 			// `CredentialsProviderError` would lose its text, which survives only on diagnostics[].
-			// The adapter sets `provider` before the try whose catch sets errorMessage (bedrock-converse-stream.js:22-25, :218).
-			// An expired AWS_BEARER_TOKEN_BEDROCK (amazon-bedrock.js:63) has no profile and gets the placeholder hint.
+			// The adapter sets `provider` before the try whose catch sets errorMessage (pi-ai 1.1.0 bedrock-converse-stream.js:32, :231-236).
+			// An expired AWS_BEARER_TOKEN_BEDROCK (pi-ai 1.1.0 amazon-bedrock.js:63) has no profile and gets the placeholder hint.
 			if (message.provider !== BEDROCK_PROVIDER_ID) {
 				return;
 			}
@@ -112,13 +112,13 @@ export default function (pi: ExtensionAPI): void {
 
 			return {
 				// A complete message, not a patch: the runner deletes every key of the live object
-				// before assigning (agent-session.js:425-438), and the spread keeps the required
-				// role (runner.js:624-631).
+				// before assigning (agent-session.js), and the spread keeps the required
+				// role (runner.js#emitMessageEnd).
 				message: {
 					...message,
 					// The original SDK text stays out: `timed out` or a 5xx would re-admit Pi's retry loop.
 					errorMessage: `${SSO_MESSAGE_LEAD}${AWS_SSO_LOGIN_PREFIX}${profile}${hint}`,
-					// Original text goes on diagnostics[], which the retry classifier ignores (types.d.ts:303); appended, never replaced.
+					// Original text goes on diagnostics[], which the retry classifier ignores (pi-ai types.d.ts); appended, never replaced.
 					diagnostics: [
 						...(message.diagnostics ?? []),
 						{

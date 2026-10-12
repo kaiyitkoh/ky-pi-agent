@@ -1,7 +1,7 @@
 /**
  * Evidence gate: a completion claim needs a Pi-computed tool result captured at the SHA that is still HEAD.
- * `isError` is trusted because Pi sets it from the real exit code (dist/core/tools/bash.js:320-348 throws on non-zero;
- * types.d.ts:593-599); the model's content blocks are never consulted. Emitted for every finalized call, which is why capture is at tool_execution_end.
+ * `isError` is trusted because Pi sets it from the real exit code (dist/core/tools/bash.js throws on non-zero;
+ * core/extensions/types.d.ts ToolExecutionEndEvent); the model's content blocks are never consulted. Emitted for every finalized call, which is why capture is at tool_execution_end.
  * Owns log base "evidence"; pruning only touches that base. Registers nothing and imports nothing from ../routing or ../safety.
  */
 import { redactString } from "../diagnostics/redact.ts";

@@ -2,7 +2,7 @@
  * Advisor escalation: the executor consults a stronger model mid-turn without changing its own model.
  * A tool, not a command, because the answer must return into the same turn. Registered in quality/index.ts;
  * this file only defines the mechanism. A thrown routing refusal propagates uncaught (Pi turns it into
- * `isError`, `pi-agent-core/dist/agent-loop.js:444-449`) and is never charged.
+ * `isError`, `pi-agent-core/dist/agent-loop.js`) and is never charged.
  */
 import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";

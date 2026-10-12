@@ -1,6 +1,6 @@
 /**
  * Derives and writes `settings.subagents.agentOverrides` so a mode switch swaps the whole role-to-model map, not just the executor.
- * Writes the GLOBAL agent settings (`getAgentDir()`, honours `PI_CODING_AGENT_DIR`, `dist/config.d.ts:68,76`): the project `.pi/settings.json`
+ * Writes the GLOBAL agent settings (`getAgentDir()`, honours `PI_CODING_AGENT_DIR`, `dist/config.d.ts` getAgentDir): the project `.pi/settings.json`
  * is tracked and would dirty `git status`, and headless subagents never get project trust. Chokepoint-lint scans comments, so no model route is named.
  * Shape `{ subagents: { agentOverrides: { <agent>: { model: "<provider>/<id>" } } } }` is unverified against the pinned `pi-subagents` schema.
  */

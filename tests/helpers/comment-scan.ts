@@ -104,6 +104,16 @@ export function findRepoLineCitations(commentText: string, repoFiles: readonly s
 	return hits;
 }
 
+const ANY_LINE_CITATION = /[\w@./-]+\.(?:js|ts):\d+/g;
+const VERSION = /\b\d+\.\d+\.\d+\b/;
+
+/** External `file.js:N` citations drift with every upstream release, so the comment must name the version it was read at. */
+export function findUnversionedCitations(commentText: string, repoFiles: readonly string[]): string[] {
+	if (VERSION.test(commentText)) return [];
+	const repo = new Set(findRepoLineCitations(commentText, repoFiles));
+	return [...commentText.matchAll(ANY_LINE_CITATION)].map((m) => m[0]).filter((c) => !repo.has(c));
+}
+
 export function authoredFiles(): string[] {
 	return trackedFiles(".pi/extensions")
 		.filter((p) => p.endsWith(".ts") && !isExempt(p))

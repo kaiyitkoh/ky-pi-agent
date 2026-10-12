@@ -1,7 +1,7 @@
 /**
  * Safety entry: wires policy.evaluate into the tool_call hook AND each wrapped built-in's execute(); registers approve_ky_command.
- * Two layers because Pi never re-validates event.input after a later handler mutates it (types.d.ts:687-688).
- * Tools register before the hook: tool-name collisions resolve first-registration-wins (runner.js:280-291).
+ * Two layers because Pi never re-validates event.input after a later handler mutates it (core/extensions/types.d.ts ToolCallEvent).
+ * Tools register before the hook: tool-name collisions resolve first-registration-wins (pi 1.1.0 runner.js:410-417).
  */
 import { homedir } from "node:os";
 
@@ -78,7 +78,7 @@ function extractCommandOrPath(toolName: string, input: unknown): string {
 
 /**
  * NEVER THROWS: a classification bug becomes a block verdict, because Pi swallows handler exceptions
- * (runner.js:861-870) and a swallowed guard error would allow.
+ * (core/extensions/runner.js) and a swallowed guard error would allow.
  */
 function classifyAtWrapper(toolName: string, input: unknown, ctx: ExtensionContext): Verdict {
 	try {
@@ -140,7 +140,7 @@ export function guardBgRun(input: unknown, ctx: ExtensionContext): Verdict {
 
 /**
  * Write one audit row, then return (allow, or consumed grant) or throw (block, or confirm with no grant).
- * A throw from execute() becomes isError:true for the model (agent-loop.js:444-449).
+ * A throw from execute() becomes isError:true for the model (pi-agent-core agent-loop.js).
  */
 function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext, verdict: Verdict): void {
 	if (verdict.kind === "allow") {
@@ -181,10 +181,10 @@ function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext
 
 /**
  * Wrap bash/read/write/edit so execute() re-evaluates the params that actually arrive (second enforcement layer).
- * grep/find/ls are deliberately not wrapped: extension tools are force-activated (agent-session.js:158-161,1993-2003)
- * against Pi's default set (sdk.js:132,136), costing ~532 tokens/turn; they stay hook-only (docs/SAFETY.md).
+ * grep/find/ls are deliberately not wrapped: extension tools are force-activated (agent-session.js)
+ * against Pi's default set (sdk.js), costing ~532 tokens/turn; they stay hook-only (docs/SAFETY.md).
  * Delegates are built fresh from ctx.cwd per call so policy and the real tool act on the same root.
- * The delegate call omits ctx: AgentTool.execute declares no fifth parameter (agent-core types.d.ts:348).
+ * The delegate call omits ctx: AgentTool.execute declares no fifth parameter (agent-core types.d.ts AgentTool).
  */
 function registerWrappedTools(pi: ExtensionAPI): void {
 	// Static metadata only (name/description/schema); this instance's execute never runs.
@@ -280,7 +280,7 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 				);
 			}
 
-			// Approve ONLY on an explicit affirmative; undefined (noOpUIContext, runner.js:88-119) and no UI both refuse.
+			// Approve ONLY on an explicit affirmative; undefined (noOpUIContext, pi 1.1.0 runner.js:132) and no UI both refuse.
 			const choice = ctx.hasUI
 				? await ctx.ui.select(
 						`Approve this command?\n\n  ${command}\n\nSummary: ${summary}\nBlast radius: ${blast_radius}\n` +
@@ -337,7 +337,7 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 
 /**
  * Tools the hook denies outright (unparseable or unreviewed paths). Sources at Pi 1.1.0:
- * powershell types.d.ts:922-925; codemode extensions/codemode/tool.js:31; tool_search extensions/tool-search/tool.js:11;
+ * pi 1.1.0: powershell types.d.ts:922-925; codemode extensions/codemode/tool.js:31; tool_search extensions/tool-search/tool.js:11;
  * MCP resources extensions/mcp/resources.js:2-3,192,208,224; "mcp__" extensions/mcp/tools.js:46;
  * pi-background-tasks@2.6.9 prompt/argv tools (src/extension.ts:1036, src/core/delegate/types.ts:32,
  * src/delegate-child-extension.ts:601, src/core/fusion/*.ts). Nested codemode calls reach the hook (agent-session.js:326-343).
@@ -502,13 +502,13 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 }
 
 /**
- * No idempotency guard: /reload rebuilds the runner and calls this factory again in-process (agent-session.js:2052),
+ * No idempotency guard: /reload rebuilds the runner and calls this factory again in-process (agent-session.js#reload),
  * so a once-per-process flag would leave a reloaded session unwrapped. The bootstrap stub does not dedupe either: file
- * existence is no proxy for Pi loading the project copy (untrusted headless runs skip it, package-manager.js:1980),
+ * existence is no proxy for Pi loading the project copy (untrusted headless runs skip it, package-manager.js),
  * and deduping on it left both copies unregistered. The resulting double load is accepted (docs/SAFETY.md "Load order").
  */
 export default function (pi: ExtensionAPI): void {
-	// Registrations first (first-registration-wins, runner.js:280-291); safety-entry.test pins this order.
+	// Registrations first (first-registration-wins, pi 1.1.0 runner.js:410-417); safety-entry.test pins this order.
 	registerWrappedTools(pi);
 	registerApprovalTool(pi);
 

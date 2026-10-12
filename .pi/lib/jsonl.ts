@@ -65,8 +65,8 @@
  * ---------------------------------------------------------------------------
  * Why `withFileMutationQueue` is deliberately not used
  * ---------------------------------------------------------------------------
- * Pi exports it (`src/index.ts:322`), but its state is a module-level `Map`
- * inside one process (`core/tools/file-mutation-queue.ts:4`). Subagents are
+ * Pi exports it (`src/index.ts`), but its state is a module-level `Map`
+ * inside one process (pi 1.1.0 `core/tools/file-mutation-queue.ts:4`). Subagents are
  * separate `pi` child processes, so it serialises nothing across them — the
  * only case that matters here. Its real purpose is stopping our writes racing
  * the built-in `edit`/`write` tools on a path they share, and nothing else
@@ -113,7 +113,7 @@
  * `logs-gitignored.test.ts` reads `producedPaths()` expecting ONE process-wide
  * view. This is the same class of hazard `.pi/extensions/diagnostics/index.ts`
  * already documents and fixes for its own rows-written counter (see
- * `index.ts:192-224`, `ROWS_WRITTEN_KEY`): a module-level `let`/`Map`/`Set` is
+ * `diagnostics/index.ts#ROWS_WRITTEN_KEY`): a module-level `let`/`Map`/`Set` is
  * per JITI INSTANCE, not per process, so both pieces of mutable state here are
  * kept in a `globalThis`-keyed slot instead. That makes the state genuinely
  * per-process regardless of how many times this file is loaded through

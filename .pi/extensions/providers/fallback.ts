@@ -1,7 +1,7 @@
 /**
  * Two-hop provider chain (named exports only): walks CHAIN through the diagnostics chokepoint and stops on the first
  * non-error message or the first `fatal` failure. It is a failure path, not routing, and registers no hook.
- * It is a function because the registry facade has no retry (compaction.ts:450) and a nested call fires no events (sdk.ts:294-360).
+ * It is a function because the registry facade has no retry (compaction.ts) and a nested call fires no events (sdk.ts).
  * Advancing sends the prompt to another vendor, so CHAIN is a fixed table, `fatal` never advances, and no backoff is added (docs/settings.md:136-149).
  */
 import type { Api, AssistantMessage } from "@earendil-works/pi-ai";
@@ -24,7 +24,7 @@ import {
 export type CallWithFallbackOptions = Omit<CallModelOptions<Api>, "model">;
 
 /**
- * The two fields Pi's retry predicate reads (pi-ai dist/utils/retry.js:165-172). A rejection carries no message,
+ * The two fields Pi's retry predicate reads (pi-ai dist/utils/retry.js). A rejection carries no message,
  * so one probe keeps rejections and returned failures on the same rule.
  */
 function retryProbe(errorText: string): AssistantMessage {

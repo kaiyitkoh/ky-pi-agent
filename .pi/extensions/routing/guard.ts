@@ -1,7 +1,7 @@
 /**
  * Capability guard: four hard refusals as pure predicates over a resolved `Model<Api>` (no `ctx`, env or fs).
  * Returns a verdict, never a substituted model. Blocks run in order and the first match returns: image against text-only,
- * request over `contextWindow`, thinking on non-Claude Bedrock (Pi drops it silently, `bedrock-converse-stream.js:889-927`),
+ * request over `contextWindow`, thinking on non-Claude Bedrock (Pi drops it silently, `bedrock-converse-stream.js#buildAdditionalModelRequestFields`),
  * and a tool-loop role on Bedrock DeepSeek R1. Contributing-boundary and chokepoint-lint scan comments, so those calls are not named here.
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -21,7 +21,7 @@ export interface GuardNeed {
 	readonly usesToolLoop?: boolean;
 }
 
-/** Bedrock DeepSeek R1 ids (lower-cased). `Model<Api>` (`pi-ai dist/types.d.ts:661-682`) has no tool-calling field, so this cannot be a catalogue predicate. */
+/** Bedrock DeepSeek R1 ids (lower-cased). `Model<Api>` (`pi-ai dist/types.d.ts`) has no tool-calling field, so this cannot be a catalogue predicate. */
 export const NO_TOOL_CALLING_MODEL_IDS: readonly string[] = ["deepseek.r1-v1:0", "us.deepseek.r1-v1:0"];
 
 function isNoToolCallingModel(model: Model<Api>): boolean {
@@ -29,7 +29,7 @@ function isNoToolCallingModel(model: Model<Api>): boolean {
 	return NO_TOOL_CALLING_MODEL_IDS.some((denied) => id === denied);
 }
 
-/** Local copy of pi-ai's unexported `isAnthropicClaudeModel` (`bedrock-converse-stream.js:542-550`); it diverges silently if Pi changes it. */
+/** Local copy of pi-ai's unexported `isAnthropicClaudeModel` (pi-ai 1.1.0 `bedrock-converse-stream.js:650`); it diverges silently if Pi changes it. */
 export function isAnthropicClaudeModel(model: Model<Api>): boolean {
 	const id = model.id.toLowerCase();
 	const name = model.name.toLowerCase();
@@ -62,7 +62,7 @@ export function guardRoute(model: Model<Api>, role: string, need: GuardNeed): Gu
 		};
 	}
 
-	// Pi drops thinking config silently here while the UI still offers it (`bedrock-converse-stream.js:889-927`).
+	// Pi drops thinking config silently here while the UI still offers it (`bedrock-converse-stream.js#buildAdditionalModelRequestFields`).
 	if (
 		model.provider === "amazon-bedrock" &&
 		model.reasoning === true &&

@@ -28,7 +28,7 @@ export interface GateResult {
 	readonly report: string;
 }
 
-/** Tool names `@narumitw/pi-lsp` registers (`src/pi-lsp.ts:146-147`); both must be present. */
+/** Tool names `@narumitw/pi-lsp` registers (`src/pi-lsp.ts`); both must be present. */
 const LSP_TOOL_NAMES = ["lsp_diagnostics", "lsp_fix"] as const;
 
 /**

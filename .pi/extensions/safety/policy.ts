@@ -1,6 +1,6 @@
 /**
  * evaluate(toolName, input, facts): the single deny-by-default decision composing the shell, paths, git and infra classifiers.
- * Never reads ctx (a `hasUI && !ok` guard allows headless, runner.js:88-119); the running verdict only moves toward block.
+ * Never reads ctx (a `hasUI && !ok` guard allows headless, pi 1.1.0 runner.js:132 noOpUIContext); the running verdict only moves toward block.
  * Pure: no ctx, process.env, node:fs or default export; the one impure fact (current branch) arrives via PolicyFacts.
  */
 import type { CanonicalInvocation } from "./shell.ts";

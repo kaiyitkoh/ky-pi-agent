@@ -91,7 +91,7 @@ export default function (pi: ExtensionAPI): void {
 		if (!match) return undefined;
 
 		if (!ctx.hasUI) {
-			// Pi's no-UI notify is a no-op (dist/core/extensions/runner.js:92), so the observable headless channel is the audit log.
+			// Pi's no-UI notify is a no-op (pi 1.1.0 dist/core/extensions/runner.js:132 noOpUIContext), so the observable headless channel is the audit log.
 			// writeAuditRow never throws, so this cannot turn a fork into an exception.
 			writeAuditRow(root, {
 				event: "checkpoint_available_at_fork",

@@ -3,12 +3,12 @@
  * (a default export makes extension-layout.test.ts treat this as an entry point).
  */
 
-/** Pi's provider id for Amazon Bedrock (pi-ai dist/types.d.ts:19). */
+/** Pi's provider id for Amazon Bedrock (pi-ai dist/types.d.ts). */
 export const BEDROCK_PROVIDER_ID = "amazon-bedrock";
 
 /**
  * Env var Pi's Bedrock chain reads and the key a stored profile is reported under
- * (pi-ai src/providers/amazon-bedrock.ts:65-71).
+ * (pi-ai 1.1.0 src/providers/amazon-bedrock.ts:65-71).
  */
 export const AWS_PROFILE_ENV = "AWS_PROFILE";
 
@@ -30,19 +30,19 @@ export const TEMPLATE_SENTINEL_PREFIX = "REPLACE_WITH_";
 
 /**
  * The `env.AWS_PROFILE` value the template ships: a sentinel, not a name. It passes SAFE_PROFILE_NAME's shape, so only
- * equality rejects it, and installed it would shadow a working ambient AWS_PROFILE (amazon-bedrock.ts:65-71).
+ * equality rejects it, and installed it would shadow a working ambient AWS_PROFILE (pi-ai 1.1.0 amazon-bedrock.ts:65-71).
  */
 export const PROFILE_TEMPLATE_SENTINEL = `${TEMPLATE_SENTINEL_PREFIX}AWS_PROFILE_NAME`;
 
 /**
  * Allowed shape of a resolved profile name: AWS's own charset, because the value is pasted into a shell line.
- * Bounds shape only; a name like `timeout` still matches Pi's retryable pattern (pi-ai src/utils/retry.ts:26-89).
+ * Bounds shape only; a name like `timeout` still matches Pi's retryable pattern (pi-ai src/utils/retry.ts#RETRYABLE_PROVIDER_ERROR_PATTERN).
  */
 export const SAFE_PROFILE_NAME = /^[A-Za-z0-9_.@-]{1,64}$/;
 
 /**
  * `type` of the diagnostic carrying the original SDK text, kept out of `errorMessage` so Pi's retry classifier
- * never sees it (pi-ai dist/utils/retry.js:165-172).
+ * never sees it (pi-ai dist/utils/retry.js).
  */
 export const SSO_DIAGNOSTIC_TYPE = "kypi.sso_credential_expiry";
 
@@ -153,12 +153,12 @@ export const ADVANCING_CLASSES: readonly FailureClass[] = FAILURE_CLASSES.filter
 /**
  * Quota exhaustion, checked before the retryable predicate: Pi calls it non-retryable, but a second provider survives it.
  * Alternatives are anchored (no bare `billing`) because a match forwards the prompt to another vendor; compare
- * pi-ai src/utils/retry.ts:7-23. `arrearage` and `allocated quota` are DashScope wording. No `g` flag, no `.` wildcard.
+ * pi-ai src/utils/retry.ts#NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN. `arrearage` and `allocated quota` are DashScope wording. No `g` flag, no `.` wildcard.
  */
 export const QUOTA_PATTERN =
 	/insufficient_quota|out of budget|quota exceeded|exceeded your current quota|allocated quota|arrearage|billing (?:details|quota|limit)/i;
 
-/** Availability and transport failures, from pi-ai src/utils/retry.ts:25-88; same chain action as transient. */
+/** Availability and transport failures, from pi-ai src/utils/retry.ts#RETRYABLE_PROVIDER_ERROR_PATTERN; same chain action as transient. */
 export const UNAVAILABLE_PATTERN =
 	/503|service[ _-]?unavailable|overloaded|fetch failed|getaddrinfo|timed? out|ENOTFOUND/i;
 

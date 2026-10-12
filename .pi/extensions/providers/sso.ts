@@ -1,7 +1,7 @@
 /**
  * Pure predicate: is this provider error a dead AWS credential? Bedrock maps no expiry exception, so it arrives raw
- * (pi-ai dist/api/bedrock-converse-stream.js:234-270). The profile name comes from the session and lives in index.ts.
- * No pattern may match anything Pi's RETRYABLE_PROVIDER_ERROR_PATTERN matches (retry.js:19-74): the rewrite only moves
+ * (pi-ai dist/api/bedrock-converse-stream.js). The profile name comes from the session and lives in index.ts.
+ * No pattern may match anything Pi's RETRYABLE_PROVIDER_ERROR_PATTERN matches (pi-ai utils/retry.js): the rewrite only moves
  * retryable to non-retryable. Patterns are anchored to exception names, bounded, with no `.` and no `g` flag.
  */
 

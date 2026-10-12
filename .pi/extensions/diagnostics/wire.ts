@@ -1,7 +1,7 @@
 /**
  * Main-loop wire capture: three provider hooks, redacted at capture, appended to `wire-<date>.jsonl`.
  * Handlers must return `undefined`: a non-`undefined` return replaces the request payload
- * (dist/core/extensions/runner.js:1066-1079). Known limits and the single-request-at-a-time
+ * (pi 1.1.0 dist/core/extensions/runner.js:1066-1079). Known limits and the single-request-at-a-time
  * assumption: docs/DIAGNOSTICS.md. Registers hooks only, never a tool.
  */
 import type {
@@ -24,7 +24,7 @@ import {
 
 /**
  * The `after_provider_response` event, recovered from the `ExtensionEvent` union because the
- * package root does not re-export it (dist/index.d.ts:7; declared at types.d.ts:518).
+ * package root does not re-export it (dist/index.d.ts; declared in core/extensions/types.d.ts).
  */
 type AfterProviderResponseEvent = Extract<ExtensionEvent, { type: "after_provider_response" }>;
 
@@ -127,7 +127,7 @@ export function registerWireHooks(
 					headers: redactHeaders(event.headers),
 				}),
 			);
-			// Pi ignores this hook's return value (runner.ts:1059-1064); shape kept identical to the others.
+			// Pi ignores this hook's return value (core/extensions/runner.ts); shape kept identical to the others.
 		}),
 	);
 
@@ -144,7 +144,7 @@ export function registerWireHooks(
 					payload: redactDeep(event.payload),
 				}),
 			);
-			// No return: a non-`undefined` return replaces the payload (runner.ts:1031-1033).
+			// No return: a non-`undefined` return replaces the payload (pi 1.1.0 runner.js:1077-1078).
 		}),
 	);
 
@@ -161,7 +161,7 @@ export function registerWireHooks(
 					headers: redactHeaders(event.headers),
 				}),
 			);
-			// Never fires on a provider error (openai-completions.ts:239, :590): derive nothing but `httpStatus` from it.
+			// Never fires on a provider error (openai-completions.ts): derive nothing but `httpStatus` from it.
 		}),
 	);
 }

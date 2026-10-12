@@ -22,7 +22,7 @@ export interface RoutingTestOptions {
 
 /**
  * Shared path for the three mode commands. Order is the requirement: idle first (`waitForIdle` exists only on
- * `ExtensionCommandContext`, `dist/core/extensions/types.d.ts:258`), then resolve, guard, `setModel`, persist, notify.
+ * `ExtensionCommandContext`, `dist/core/extensions/types.d.ts`), then resolve, guard, `setModel`, persist, notify.
  * An explicit mode pick clears any sticky escalation.
  */
 async function applyMode(
@@ -51,7 +51,7 @@ async function applyMode(
 		return;
 	}
 
-	// `setModel` returns false without auth (`dist/core/agent-session.js:1885-1890`) and can throw in a TOCTOU window (`:1197-1209`);
+	// `setModel` returns false without auth (`dist/core/agent-session.js#setModel`) and can throw in a TOCTOU window;
 	// surface both, never silently try another model.
 	let switched: boolean;
 	try {
@@ -243,7 +243,7 @@ function isModeName(value: unknown): value is ModeName {
 /**
  * Restores mode name and escalation bookkeeping from a session branch (root-to-leaf).
  * Deliberately never calls `setModel`: Pi already restores the executor from its native `model_change` entry
- * (`dist/core/agent-session.js:1204`, `dist/core/session-manager.js:146-161`); a second source of truth could disagree.
+ * (pi 1.1.0 `dist/core/session-manager.js:146-161`); a second source of truth could disagree.
  * NEVER THROWS on a malformed payload: an invalid mode falls back to {@link DEFAULT_MODE}, an invalid `escalatedFrom` is dropped.
  * `session_start` does not fire in a headless `createAgentSession` (see `tests/integration/call-model.test.ts`), so tests call this directly.
  */

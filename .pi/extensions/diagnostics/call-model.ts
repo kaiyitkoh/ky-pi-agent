@@ -1,6 +1,6 @@
 /**
  * The chokepoint: every nested model call goes through `callModel` with a mandatory `role` (the join key for cost queries).
- * Extension hooks do not fire for nested completions (dist/core/sdk.js:225-230), so the per-call callbacks capture instead.
+ * Extension hooks do not fire for nested completions (dist/core/sdk.js), so the per-call callbacks capture instead.
  * Routes the build gate cannot close: docs/DIAGNOSTICS.md. Registers nothing, never a tool.
  */
 import type {
@@ -32,7 +32,7 @@ import { nextCorrelationId, wireRecord, type WireFieldsFor } from "./wire.ts";
 
 /**
  * The caller's option bag minus the keys this function owns. Distributive (`T extends unknown`):
- * a plain `Omit` over the `Api` union would delete every per-API key (pi-ai src/types.ts:179).
+ * a plain `Omit` over the `Api` union would delete every per-API key (pi-ai src/types.ts#ApiStreamOptions).
  * Advisory only for `Model<Api>`; the spread order at the call site is the enforcement.
  */
 type WithoutCaptures<T> = T extends unknown
@@ -53,7 +53,7 @@ export interface CallModelOptions<TApi extends Api> {
 	signal?: AbortSignal;
 }
 
-/** Zero `Usage`, fresh per call because `calculateCost` mutates it (pi-ai src/models.ts:878-898). */
+/** Zero `Usage`, fresh per call because `calculateCost` mutates it (pi-ai src/models.ts#calculateCost). */
 function zeroUsage(): Usage {
 	return {
 		input: 0,
@@ -67,7 +67,7 @@ function zeroUsage(): Usage {
 
 /**
  * Synthesise the message a rejected completion never produced. Rarely fires: failures normally
- * arrive as a `stopReason: "error"` message (pi-ai src/utils/event-stream.ts:69-83, src/api/lazy.ts).
+ * arrive as a `stopReason: "error"` message (pi-ai src/utils/event-stream.ts, src/api/lazy.ts).
  * Text is redacted here so no unredacted string sits on a row.
  */
 function errorMessageFor<TApi extends Api>(model: Model<TApi>, error: unknown): AssistantMessage {
@@ -153,7 +153,7 @@ export async function callModel<TApi extends Api>(
 				record("nested.headers", { headers: redactHeaders(headers) });
 			});
 			// Returned unchanged and outside the containment: `prepareRequest` sends what comes back
-						// (model-runtime.ts:590-593), so the redacted map must never be returned.
+						// (core/model-runtime.ts), so the redacted map must never be returned.
 			return headers;
 		},
 		onPayload: (payload: unknown) => {
@@ -161,7 +161,7 @@ export async function callModel<TApi extends Api>(
 			contained(() => {
 				record("nested.request", { payload: redactDeep(payload) });
 			});
-			// Returns nothing: a non-`undefined` return replaces the payload (pi-ai src/types.ts:66-70).
+			// Returns nothing: a non-`undefined` return replaces the payload (pi 1.1.0 runner.js:1077-1078).
 			return undefined;
 		},
 		onResponse: (response: { status: number; headers: Record<string, string> }) => {
@@ -174,7 +174,7 @@ export async function callModel<TApi extends Api>(
 				});
 			});
 		},
-		// Double cast: `ApiStreamOptions<TApi>` does not resolve for an unbound `TApi` (pi-ai src/types.ts:179).
+		// Double cast: `ApiStreamOptions<TApi>` does not resolve for an unbound `TApi` (pi-ai src/types.ts#ApiStreamOptions).
 	} as unknown as ModelsApiStreamOptions<TApi>;
 
 	// No `finally`: it would append on both paths and double-write, and both `recordTurn` calls are total.

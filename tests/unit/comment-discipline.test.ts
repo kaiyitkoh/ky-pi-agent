@@ -10,6 +10,7 @@ import {
 	extractComments,
 	findIdTokens,
 	findRepoLineCitations,
+	findUnversionedCitations,
 	isExempt,
 	lineMetrics,
 	subsystemOf,
@@ -140,6 +141,24 @@ describe("comment discipline", () => {
 			}
 		}
 		expect(offenders, `Replace with a path.ts#symbol reference:\n${offenders.join("\n")}`).toEqual([]);
+	});
+
+	it("flags an unversioned external file:line citation", () => {
+		expect(findUnversionedCitations("// see runner.js:410", [])).toEqual(["runner.js:410"]);
+		expect(findUnversionedCitations("// see pi 1.1.0 runner.js:410", [])).toEqual([]);
+		expect(findUnversionedCitations("// see pkg@2.6.9 src/x.ts:3", [])).toEqual([]);
+		expect(findUnversionedCitations("// see runner.js#emitMessageEnd", [])).toEqual([]);
+	});
+
+	it("anchors every external file:line citation to a version", () => {
+		const repoFiles = trackedFiles().filter((p) => p.endsWith(".ts") && !isExempt(p));
+		const offenders: string[] = [];
+		for (const f of files) {
+			for (const c of extractComments(sources.get(f) ?? "")) {
+				for (const hit of findUnversionedCitations(c.text, repoFiles)) offenders.push(`${f}: ${hit}`);
+			}
+		}
+		expect(offenders, `Add the version read (pi 1.1.0 file.js:N) or drop the line number:\n${offenders.join("\n")}`).toEqual([]);
 	});
 
 	it("reports comment ratio", () => {

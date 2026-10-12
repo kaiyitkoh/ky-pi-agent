@@ -83,7 +83,7 @@ function writeTurnsRow(cwd: string, record: TurnRow | Record<string, unknown>): 
 
 /** State accumulated between `turn_start` and `turn_end`; one record, because the loop is serial. */
 interface TurnAccumulator {
-	/** `turn_start.timestamp` (dist/core/agent-session.js:448-453). */
+	/** `turn_start.timestamp` (dist/core/agent-session.js). */
 	startedAt: number;
 	corr?: string;
 	message?: AssistantMessage;
@@ -118,7 +118,7 @@ function degradedModel(message: AssistantMessage): Model<Api> {
 /**
  * Wrap a handler so a throw leaves an error row instead of vanishing. Never rethrows and
  * returns `undefined` on failure: several Pi hooks treat any other return as a replacement
- * (runner.ts:1031-1033). The error text is redacted before logging.
+ * (pi 1.1.0 runner.js:1077-1078). The error text is redacted before logging.
  */
 export function safeHandler<E, R = undefined>(
 	where: string,
@@ -128,7 +128,7 @@ export function safeHandler<E, R = undefined>(
 		try {
 			const result = await fn(event, ctx);
 			// `null` becomes `undefined`: a `null` from before_provider_request would replace the request body
-						// (dist/core/extensions/runner.js:789-792).
+						// (dist/core/extensions/runner.js).
 			return (result ?? undefined) as R | undefined;
 		} catch (err) {
 			try {
@@ -181,7 +181,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on(
 		"message_end",
 		safeHandler<MessageEndEvent>("message_end", (event, ctx) => {
-			// `message_end` also fires for user and toolResult messages (types.d.ts:573).
+			// `message_end` also fires for user and toolResult messages (core/extensions/types.d.ts MessageEndEvent).
 			if (event.message.role !== "assistant") {
 				return;
 			}
@@ -218,7 +218,7 @@ export default function (pi: ExtensionAPI): void {
 
 			proseRetriesThisRun += 1;
 
-			// Immediate record that survives if `turn_end` throws (runner.ts:861-870). No `kind`, so it is not counted as a turn.
+			// Immediate record that survives if `turn_end` throws (core/extensions/runner.ts). No `kind`, so it is not counted as a turn.
 			writeTurnsRow(ctx.cwd, {
 				ts: Date.now(),
 				event: PROSE_EVENT,
@@ -227,12 +227,12 @@ export default function (pi: ExtensionAPI): void {
 				corr: turn.corr,
 			});
 
-			// `deliverAs` is mandatory: `prompt` throws mid-stream (agent-session.ts:1167-1172).
-						// `followUp` resumes the same run (pi-agent-core agent-loop.ts:262-268).
+			// `deliverAs` is mandatory: `prompt` throws mid-stream (core/agent-session.ts#prompt).
+						// `followUp` resumes the same run (pi-agent-core agent-loop.ts).
 			pi.sendUserMessage(PROSE_RETRY_PROMPT, { deliverAs: "followUp" });
 
 			// Returns nothing by contract: a returned `{ message }` replaces the finalized message
-						// (types.ts:1097-1100), which is how scraped prose would become an executed call.
+						// (core/extensions/types.ts), which is how scraped prose would become an executed call.
 		}),
 	);
 

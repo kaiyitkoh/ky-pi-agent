@@ -58,7 +58,7 @@ export const PROSE_RETRY_PROMPT =
 	"Your previous message described a tool call in prose instead of emitting one. " +
 	"Re-issue it as a real tool call.";
 
-/** `event` value on the row a failed diagnostics handler writes; Pi swallows handler exceptions (`runner.ts:861-870`). */
+/** `event` value on the row a failed diagnostics handler writes; Pi swallows handler exceptions (`core/extensions/runner.ts`). */
 export const DIAGNOSTICS_ERROR_EVENT = "diagnostics.error";
 
 // ---------------------------------------------------------------------------
@@ -71,7 +71,7 @@ export type RowKind = "turn" | "nested";
 /** Coarse verdict derived from `stopReason`; the raw `stopReason` stays on the row beside it. */
 export type Outcome = "ok" | "tool_use" | "length" | "error" | "aborted" | "deferred" | "pending";
 
-/** The `stopReason` to `outcome` mapping; `Record<StopReason, ...>` makes a new Pi member a compile error (pi-ai `dist/types.d.ts:275`). */
+/** The `stopReason` to `outcome` mapping; `Record<StopReason, ...>` makes a new Pi member a compile error (pi-ai `dist/types.d.ts` StopReason). */
 export const OUTCOME_BY_STOP_REASON: Record<StopReason, Outcome> = {
 	stop: "ok",
 	toolUse: "tool_use",
@@ -82,7 +82,7 @@ export const OUTCOME_BY_STOP_REASON: Record<StopReason, Outcome> = {
 	pending: "pending",
 };
 
-/** Per-turn cost in dollars, as `calculateCost` computes it (pi-ai models.ts:878-898). */
+/** Per-turn cost in dollars, as `calculateCost` computes it (pi-ai models.ts#calculateCost). */
 export interface TurnCost {
 	input: number;
 	output: number;
@@ -116,15 +116,15 @@ export interface TurnRow {
 	/**
 	 * Subset of `cacheWrite` written with 1h retention; key omitted when the provider does not report it.
 	 * Needed because `calculateCost` prices the 1h part at 2x the INPUT rate, so without it
-	 * `cost.cacheWrite` cannot be reproduced from the row (pi-ai `dist/models.js:538-543`).
-	 * Only Anthropic reports the split (`dist/types.d.ts:258-259`).
+	 * `cost.cacheWrite` cannot be reproduced from the row (pi-ai `dist/models.js` calculateCost).
+	 * Only Anthropic reports the split (pi 1.1.0 `dist/types.d.ts:296-297` cacheWrite1h).
 	 */
 	cacheWrite1h?: number;
 	totalTokens: number;
 	/**
 	 * Reasoning tokens, a subset of `output`. Key omitted when the provider reports no breakdown,
 	 * never `0` or `null`: absence is not zero billed thinking. Bedrock never assigns it
-	 * (`bedrock-converse-stream.ts:589-602`), `openai-completions.ts:1404` does.
+	 * (`bedrock-converse-stream.ts`), `openai-completions.ts` does.
 	 */
 	reasoning?: number;
 	/**
@@ -146,7 +146,7 @@ export interface TurnRow {
 	/**
 	 * HTTP status as a per-call `onResponse` reported it; ONLY present on a `kind:"nested"` row.
 	 * Main-loop rows never get one because `after_provider_response` sits after the retry wrapper
-	 * and never fires on a 4xx/5xx (`openai-completions.ts:239`). On a nested row it can sit beside
+	 * and never fires on a 4xx/5xx (`openai-completions.ts`). On a nested row it can sit beside
 	 * `outcome: "error"` (a 200 whose stream then errored); absent if no response was reached.
 	 */
 	httpStatus?: number;
@@ -190,8 +190,8 @@ interface WireRecordBase {
 /**
  * One row of `wire-*.jsonl`, already redacted. A union so a record with both a request `payload`
  * and a response `status` does not typecheck. The response arm carries `status` and `headers`
- * together because `AfterProviderResponseEvent` is one event with both (Pi `types.ts:691-696`);
- * `headers` is optional since Bedrock supplies only `x-amzn-requestid` (`bedrock-converse-stream.ts:255-261`).
+ * together because `AfterProviderResponseEvent` is one event with both (Pi `core/extensions/types.ts`);
+ * `headers` is optional since Bedrock supplies only `x-amzn-requestid` (`bedrock-converse-stream.ts`).
  */
 export type WireRecord =
 	| (WireRecordBase & { payload: unknown; headers?: never; status?: never })

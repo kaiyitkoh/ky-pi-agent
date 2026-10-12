@@ -4,8 +4,8 @@
  * effect lives in `index.ts`. Nothing here parses arguments: promoting scraped prose to a real call would run an
  * unvetted tool. It reports a name and a verdict.
  *
- * Four gates, all required: `stopReason === "stop"` (pi-ai `dist/types.d.ts:275`); no `toolCall` content block
- * (`dist/types.d.ts:295-297`); a non-empty active-tool list; text matching a pattern anchored to those names.
+ * Four gates, all required: `stopReason === "stop"` (pi-ai `dist/types.d.ts` StopReason); no `toolCall` content block
+ * (`dist/types.d.ts` ToolCall); a non-empty active-tool list; text matching a pattern anchored to those names.
  * `rawStopReason` is not a gate, since `fauxAssistantMessage` never sets it. A miss is cheap and a false positive
  * corrupts the measured rate, so the pattern needs `name(` and `{` and every gate is a conjunction.
  * Matching is bounded (counted quantifiers, no `.*`) against ReDoS on untrusted output.

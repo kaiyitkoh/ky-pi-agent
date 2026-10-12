@@ -2,7 +2,7 @@
  * Per-turn row composition: a finalized `AssistantMessage` plus timing in, one `TurnRow` out.
  *
  * Every field comes from the finalized message, never `after_provider_response`, which does not fire on a
- * provider error (`openai-completions.ts:239`); only the optional caller-supplied `httpStatus` is an exception.
+ * provider error (`openai-completions.ts`); only the optional caller-supplied `httpStatus` is an exception.
  * Omitted-key rule: an optional field is assigned only when it has a value. Absent `reasoning` means the
  * provider reports no breakdown (not zero billed); "present but undefined" and "absent" differ in memory.
  * Imports `calculateCost` (a value) from pi-ai, one of three sanctioned import sites with `schema.ts` and
@@ -68,7 +68,7 @@ export function cacheReadRatio(usage: Usage): number | undefined {
 
 /**
  * Recompute cost from the model's rates into a FRESH {@link TurnCost}. `fauxProvider` zeroes `usage.cost`
- * (`faux.ts:256-266`), so offline cost assertions would be `0 === 0` otherwise. `calculateCost` mutates
+ * (pi-ai 1.1.0 `faux.ts:256-266`), so offline cost assertions would be `0 === 0` otherwise. `calculateCost` mutates
  * `usage.cost`, so it gets a copy rather than the finalized message's own object.
  */
 function costFor(model: Model<Api>, usage: Usage): TurnCost {
@@ -109,7 +109,7 @@ export function composeTurnRow(input: TurnRowInput): TurnRow {
 		toolCalls: message.content.filter((block) => block.type === "toolCall").length,
 	};
 
-	// Only when it differs from `model` (OpenRouter `auto` resolves elsewhere, `types.ts:419`).
+	// Only when it differs from `model` (OpenRouter `auto` resolves elsewhere, pi-ai `types.ts` Model).
 	if (message.responseModel !== undefined && message.responseModel !== message.model) {
 		row.responseModel = message.responseModel;
 	}
@@ -124,7 +124,7 @@ export function composeTurnRow(input: TurnRowInput): TurnRow {
 		row.reasoning = usage.reasoning;
 	}
 
-	// `calculateCost` prices 1h cache writes at 2x the INPUT rate (`dist/models.js:538-543`); only Anthropic reports the split.
+	// `calculateCost` prices 1h cache writes at 2x the INPUT rate (pi-ai `dist/models.js` calculateCost); only Anthropic reports the split.
 	if (usage.cacheWrite1h !== undefined) {
 		row.cacheWrite1h = usage.cacheWrite1h;
 	}

@@ -23,17 +23,17 @@ export const BUDGET_COMMAND_DESCRIPTION =
 
 export const BUDGET_COMMAND_WHERE = "command.budget";
 
-/** Context-file block opener: section `project_context` (dist/core/system-prompt.js:100, wrapper :118). */
+/** Context-file block opener: section `project_context` (pi 1.1.0 dist/core/system-prompt.js:100, wrapper :118). */
 export const CONTEXT_FILES_OPEN_MARKER = "<project_context>\n";
 
 export const CONTEXT_FILES_CLOSE_MARKER = "</project_context>";
 
-/** Skills index opener (dist/core/skills.js:284); truncated so a harmless upstream copy-edit cannot move past it. */
+/** Skills index opener (pi 1.1.0 dist/core/skills.js:284); truncated so a harmless upstream copy-edit cannot move past it. */
 export const SKILLS_OPEN_MARKER = "The following skills provide specialized instructions";
 
 export const SKILLS_CLOSE_MARKER = "</available_skills>";
 
-/** Per-file wrapper overhead; the template expression is the citation (dist/core/system-prompt.js:28). */
+/** Per-file wrapper overhead; the template expression is the citation (pi 1.1.0 dist/core/system-prompt.js:28). */
 export const PROJECT_INSTRUCTIONS_WRAPPER_CHARS =
 	'<project_instructions path="">\n\n</project_instructions>'.length;
 
@@ -81,7 +81,7 @@ export const SKILLS_DIVERGENCE_WARNING =
 
 /**
  * Characters to tokens: `Math.ceil(chars / 4)`, roughly +/-20%, the same formula as Pi's own
- * (src/core/compaction/compaction.ts:274). No tokenizer dependency may be added; pinning.test.ts enforces it.
+ * (src/core/compaction/compaction.ts#estimateTokens). No tokenizer dependency may be added; pinning.test.ts enforces it.
  */
 export function estimateTokensFromChars(chars: number): number {
 	return Math.ceil(chars / 4);
@@ -361,7 +361,7 @@ export function formatBudgetReport(report: BudgetReport): string {
 
 /**
  * Register `/budget`. Counters are passed in to avoid an import cycle with index.ts. The handler
- * is wrapped because Pi swallows command exceptions (runner.ts:861-870); failures go to the UI and a row.
+ * is wrapped because Pi swallows command exceptions (core/extensions/runner.ts); failures go to the UI and a row.
  */
 export function registerBudgetCommand(
 	pi: ExtensionAPI,
@@ -376,7 +376,7 @@ export function registerBudgetCommand(
 				const prompt = ctx.getSystemPrompt();
 				const opts = ctx.getSystemPromptOptions();
 				const skills = opts.skills ?? [];
-				// Pi trims the formatter output before embedding it (system-prompt.js:106).
+				// Pi trims the formatter output before embedding it (pi 1.1.0 system-prompt.js:106).
 				const skillsBlock = formatSkillsForPrompt(skills).trim();
 
 				const active = new Set(pi.getActiveTools());

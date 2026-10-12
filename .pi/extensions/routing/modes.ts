@@ -177,11 +177,11 @@ export function planRoleCall(registry: ModelRegistryLike, opts: PlanRoleCallOpti
 
 /**
  * Builds the nested call's `api` options for the resolved candidate's `model.api`.
- * `BedrockOptions` has no `reasoningEffort` field (`pi-ai/dist/api/bedrock-converse-stream.d.ts:6-11`), so it needs `{ reasoning }`;
- * openai-completions takes `{ reasoningEffort }` (`dist/api/openai-completions.d.ts:4-9`).
+ * `BedrockOptions` has no `reasoningEffort` field (pi-ai 1.1.0 `dist/api/bedrock-converse-stream.d.ts:10`), so it needs `{ reasoning }`;
+ * openai-completions takes `{ reasoningEffort }` (pi-ai 1.1.0 `dist/api/openai-completions.d.ts:7`).
  * `anthropic-messages` throws: it needs a measured `thinkingBudgetTokens` and none exists.
- * `default` keeps the openai shape because `Api` is an open union (`pi-ai types.d.ts:16`) that cannot be exhaustively narrowed,
- * and faux test providers carry random api ids (`pi-ai src/providers/faux.js:297`).
+ * `default` keeps the openai shape because `Api` is an open union (`pi-ai types.d.ts` Api) that cannot be exhaustively narrowed,
+ * and faux test providers carry random api ids (`pi-ai providers/faux.js`).
  */
 export function buildNestedApiOptions(
 	model: Model<Api>,

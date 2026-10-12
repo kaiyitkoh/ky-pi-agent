@@ -1,7 +1,7 @@
 /**
  * Registers the single `qoder_delegate` tool over client.ts; the justification for a registered tool sits beside its
  * allowlist entry in tests/unit/contributing-boundary.test.ts. Config is read only here, and a refusal throws an
- * actionable Error, which Pi turns into isError for the model (pi-agent-core dist/agent-loop.js:444-449).
+ * actionable Error, which Pi turns into isError for the model (pi-agent-core dist/agent-loop.js).
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -69,7 +69,7 @@ export default function (pi: ExtensionAPI): void {
 				);
 			}
 			// Flatten control characters, then bound length: the selector renders the title uncapped above the options and
-			// pre-highlights the first one (extension-selector.js:12,29,35-36), so task content must not change the dialog's shape.
+			// pre-highlights the first one (extension-selector.js), so task content must not change the dialog's shape.
 			const flattened = Array.from(task)
 				.map((ch) => {
 					const cp = ch.codePointAt(0) ?? 0;
@@ -132,9 +132,9 @@ export default function (pi: ExtensionAPI): void {
 		},
 	});
 
-	// Gate from session_start, never the factory: get/setActiveTools throw until the runtime binds (loader.js:134-153;
-	// the factory is awaited at loader.js:425, bind is at agent-session.js:2041) and a throw discards the whole extension.
-	// A new tool is active by default (agent-session.js:158-161, 2003-2006) and costs ~329 tokens per request, so
+	// Gate from session_start, never the factory: get/setActiveTools throw until the runtime binds (extensions/loader.js;
+	// the factory is awaited in loader.js, bound later by agent-session.js) and a throw discards the whole extension.
+	// A new tool is active by default (agent-session.js) and costs ~329 tokens per request, so
 	// deactivate it when unconfigured. Best-effort: on error it stays active and execute() still refuses.
 	pi.on("session_start", () => {
 		try {

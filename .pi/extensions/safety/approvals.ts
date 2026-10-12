@@ -10,7 +10,7 @@ export const APPROVAL_TTL_MS = 10 * 60 * 1000;
 
 /**
  * Bounds how long the hook may defer to a wrapper that never consumes the grant (tool-name collision, unregistered wrapper)
- * before a distinct tool call is re-blocked. A replayed toolCallId (provider-supplied, agent-loop.js:268,301,337,462) is not
+ * before a distinct tool call is re-blocked. A replayed toolCallId (provider-supplied, pi-agent-core agent-loop.js) is not
  * capped; reachable only if the wrapper never runs, the exact command was human-approved and the id is replayed (docs/SAFETY.md "Load order").
  */
 export const HOOK_DEFER_TTL_MS = 5_000;

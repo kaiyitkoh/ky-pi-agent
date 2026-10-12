@@ -3,8 +3,8 @@
  * registerProvider calls in the factory are queued and flushed (docs/extensions.md:1709), which makes them listable.
  * Ungated on purpose: registration is the observation. The id stays `ky-harness-selftest`; every load-path assertion greps it.
  * Registers commands and a provider, never a tool: tools[] is serialised into every request
- * (pi-ai src/api/openai-completions.ts:1337-1370), commands cost zero per-turn tokens.
- * No build step and no .gitignore under .pi/extensions/: package-manager.ts:571 honours one, loader.ts:652-684 does not.
+ * (pi-ai src/api/openai-completions.ts), commands cost zero per-turn tokens.
+ * No build step and no .gitignore under .pi/extensions/: package-manager.ts honours one, extensions/loader.ts does not.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { COMMENT_RULES_HEADING, COMMENT_RULES_SECTION, COMMENT_RULES_TEXT } from "./comment-rules.ts";
