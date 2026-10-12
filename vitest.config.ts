@@ -8,6 +8,8 @@ export default defineConfig({
 		// pays a cold jiti compile on first run. The default 5s is not enough.
 		testTimeout: 120_000,
 		hookTimeout: 120_000,
+		// D-06: cap worker processes (the full suite pegged the dev machine's CPU at 99%).
+		maxWorkers: 2,
 		// A vacuously-empty suite must never report success.
 		passWithNoTests: false,
 		// Suite-wide tripwire: fails the run if any tracked file ends up

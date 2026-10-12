@@ -20,7 +20,7 @@
  * property.
  *
  * ---------------------------------------------------------------------------
- * WHY `session.extensionRunner.createCommandContext()` SATISFIES `execute()`'s
+ * WHY `session.extensionRunner.createToolContext("qoder-test-call", undefined)` SATISFIES `execute()`'s
  * `ctx: ExtensionContext` PARAMETER
  * ---------------------------------------------------------------------------
  * `ExtensionCommandContext extends ExtensionContext`
@@ -43,7 +43,7 @@
 import { join } from "node:path";
 
 import { fauxAssistantMessage } from "@earendil-works/pi-ai";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -149,7 +149,7 @@ function setConfiguredQoderEnv(baseUrl: string): void {
 
 /** Replace `ctx.hasUI`/`ctx.ui` with stand-ins, via `defineProperty` -- see this file's own header. */
 function withStubbedUI(
-	ctx: ExtensionCommandContext,
+	ctx: ExtensionContext,
 	opts: { hasUI: boolean; select?: (message: string, choices: string[]) => Promise<string> },
 ): void {
 	Object.defineProperty(ctx, "hasUI", { value: opts.hasUI, writable: true, configurable: true, enumerable: true });
@@ -296,7 +296,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						return;
 					}
 
-					const ctx = handle.session.extensionRunner.createCommandContext();
+					const ctx = handle.session.extensionRunner.createToolContext("qoder-test-call", undefined);
 					let selectCallCount = 0;
 					withStubbedUI(ctx, {
 						hasUI: true,
@@ -349,7 +349,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						return;
 					}
 
-					const ctx = handle.session.extensionRunner.createCommandContext();
+					const ctx = handle.session.extensionRunner.createToolContext("qoder-test-call", undefined);
 					withStubbedUI(ctx, { hasUI: false });
 
 					await expect(
@@ -381,7 +381,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						return;
 					}
 
-					const ctx = handle.session.extensionRunner.createCommandContext();
+					const ctx = handle.session.extensionRunner.createToolContext("qoder-test-call", undefined);
 					let selectCallCount = 0;
 					withStubbedUI(ctx, {
 						hasUI: true,
@@ -429,7 +429,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						return;
 					}
 
-					const ctx = handle.session.extensionRunner.createCommandContext();
+					const ctx = handle.session.extensionRunner.createToolContext("qoder-test-call", undefined);
 					let capturedTitle: string | undefined;
 					withStubbedUI(ctx, {
 						hasUI: true,
@@ -483,7 +483,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						return;
 					}
 
-					const ctx = handle.session.extensionRunner.createCommandContext();
+					const ctx = handle.session.extensionRunner.createToolContext("qoder-test-call", undefined);
 					withStubbedUI(ctx, { hasUI: true, select: async () => "Delegate to Qoder" });
 
 					const result = await tool.execute(
@@ -537,7 +537,7 @@ describe("qoder_delegate tool -- WR-02: the two previously-silent refusal branch
 					return;
 				}
 
-				const ctx = handle.session.extensionRunner.createCommandContext();
+				const ctx = handle.session.extensionRunner.createToolContext("qoder-test-call", undefined);
 				withStubbedUI(ctx, { hasUI: true });
 
 				await expect(
@@ -574,7 +574,7 @@ describe("qoder_delegate tool -- WR-02: the two previously-silent refusal branch
 						return;
 					}
 
-					const ctx = handle.session.extensionRunner.createCommandContext();
+					const ctx = handle.session.extensionRunner.createToolContext("qoder-test-call", undefined);
 					withStubbedUI(ctx, { hasUI: true });
 
 					const overLimitTask = "x".repeat(MAX_TASK_CHARS + 1);
