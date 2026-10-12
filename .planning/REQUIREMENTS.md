@@ -140,8 +140,8 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 
 ### Context Budget
 
-- [ ] **CTX-01**: Named tool profiles (recon / implement / review / full) are set once at `session_start` and only added to — tool *removal* invalidates the prompt cache **[FAUX]**
-- [ ] **CTX-02**: `pi.setActiveTools()` is the mechanism; the `context` hook cannot strip tool definitions and is not used for this **[FAUX]**
+- [x] **CTX-01**: Named tool profiles (recon / implement / review / full) are set once at `session_start` and only added to — tool *removal* invalidates the prompt cache **[FAUX]**
+- [x] **CTX-02**: `pi.setActiveTools()` is the mechanism; the `context` hook cannot strip tool definitions and is not used for this **[FAUX]**
 - [ ] **CTX-03**: `AGENTS.md` has a hard token budget enforced in CI
 - [ ] **CTX-04**: No volatile content — timestamps, running cost, git branch, changed files — appears in the system prompt; DeepSeek cache reads are ~50× cheaper than fresh input, so one volatile token re-prices the whole prefix every turn **[FAUX]**
 - [ ] **CTX-05**: A controlled minimal-vs-full-harness experiment measures whether context pollution actually degrades output quality **[RUNBOOK]**
@@ -332,8 +332,8 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | FLOW-09 | Phase 9 | Partial — offline proof only; not complete until `RB-09-03` is executed |
 | FLOW-10 | Phase 9 | Complete |
 | FLOW-11 | Phase 6 | Complete |
-| CTX-01 | Phase 10 | Pending |
-| CTX-02 | Phase 10 | Pending |
+| CTX-01 | Phase 10 | Complete |
+| CTX-02 | Phase 10 | Complete |
 | CTX-03 | Phase 10 | Pending |
 | CTX-04 | Phase 10 | Pending |
 | CTX-05 | Phase 10 | Pending |

@@ -565,7 +565,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 10-02-PLAN.md — tool profiles (recon/review/implement/full) via `--ky-profile`, applied once at `session_start`; completeness guard; Criterion reinterpretations R1-R6 *(Wave 2)*
+- [x] 10-02-PLAN.md — tool profiles (recon/review/implement/full) via `--ky-profile`, applied once at `session_start`; completeness guard; Criterion reinterpretations R1-R6 *(Wave 2)*
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
