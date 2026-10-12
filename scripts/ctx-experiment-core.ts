@@ -3,6 +3,17 @@
  * The constants are pre-registered, so changing the rule after seeing data must show up as a test edit.
  * No model call and no I/O; the CLI that spends tokens lives elsewhere.
  */
+import type { AssistantMessage } from "@earendil-works/pi-ai";
+
+import { scoreCalibration, type SeededDefectExpectation } from "../.pi/extensions/quality/calibration.ts";
+import { isProseToolCall } from "../.pi/extensions/diagnostics/prose.ts";
+import { validateReview } from "../.pi/extensions/quality/review-schema.ts";
+import {
+	REVIEWER_SYSTEM_PROMPT,
+	buildImportGraph,
+	buildReviewerContext,
+	type TouchedFile,
+} from "../.pi/extensions/quality/reviewer.ts";
 
 /** A drop in catch rate at least this large (absolute, 0..1) counts as degradation. */
 export const DEGRADE_POINTS = 0.15;
@@ -218,3 +229,226 @@ export function discriminate(summary: ExperimentSummary, secondRouteMinimal?: Ar
 	}
 	return "inconclusive";
 }
+
+/** The one requirement every trial states; the reviewer must give it exactly one verdict. */
+export const TRIAL_REQUIREMENT_IDS: readonly string[] = ["R1"];
+
+const TRIAL_REQUIREMENT_TEXT = "The change does what its names and comments claim, with no defect a careful reviewer would block.";
+
+/**
+ * Identical in every arm: no tool is needed, so no arm can win by owning a tool another lacks, and the output
+ * contract matches the reviewer's submit_review arguments.
+ */
+export const TRIAL_OUTPUT_INSTRUCTION = [
+	"For this task the submit_review tool is not available and you must not call any tool.",
+	"Instead, do not call a tool: output your review as exactly one JSON object in a ```json block, with the same",
+	"fields as the submit_review arguments (verdicts, findings, checkedAndCleared, classification,",
+	"classificationJustification, and properFix/deferralReason when classification is workaround).",
+].join(" ");
+
+export interface TrialInput {
+	readonly diff: string;
+	readonly touchedFiles: readonly TouchedFile[];
+}
+
+/** Reviewer prompt plus contract context as one user message; there is deliberately no arm parameter. */
+export function buildTrialPrompt(built: TrialInput): string {
+	const context = buildReviewerContext({
+		diff: built.diff,
+		touchedFiles: built.touchedFiles,
+		gateReport: "(no deterministic gate output exists for this trial)",
+		requirements: TRIAL_REQUIREMENT_IDS.map((id) => ({ id, text: TRIAL_REQUIREMENT_TEXT })),
+		filesTouchedUnion: built.touchedFiles.map((f) => f.path),
+		importGraph: buildImportGraph(built.touchedFiles.map((f) => ({ path: f.path, text: f.contents }))),
+	});
+	return `${REVIEWER_SYSTEM_PROMPT}\n\n${context}\n\n${TRIAL_OUTPUT_INSTRUCTION}\n`;
+}
+
+/** Live output is untrusted and can be huge; everything past these caps is ignored. */
+const MAX_OUTPUT_CHARS = 20_000_000;
+const MAX_SCAN_CHARS = 400_000;
+
+export interface ParsedOutput {
+	readonly finalText: string;
+	readonly assistantMessages: readonly AssistantMessage[];
+	readonly usage: { readonly input: number; readonly cacheRead: number } | undefined;
+	readonly stopReason: string | undefined;
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function textOf(message: AssistantMessage): string {
+	return message.content
+		.filter((block) => block.type === "text")
+		.map((block) => block.text)
+		.join("\n");
+}
+
+/** Collects finalized assistant messages from the JSONL stream; blank, non-JSON and truncated lines are skipped. */
+export function parseJsonModeOutput(text: string): ParsedOutput {
+	const capped = text.length > MAX_OUTPUT_CHARS ? text.slice(0, MAX_OUTPUT_CHARS) : text;
+	const assistantMessages: AssistantMessage[] = [];
+	for (const rawLine of capped.split("\n")) {
+		const line = rawLine.endsWith("\r") ? rawLine.slice(0, -1) : rawLine;
+		if (!line.startsWith("{")) {
+			continue;
+		}
+		let event: unknown;
+		try {
+			event = JSON.parse(line);
+		} catch {
+			continue;
+		}
+		if (!isRecord(event) || event.type !== "message_end" || !isRecord(event.message)) {
+			continue;
+		}
+		const message = event.message;
+		if (message.role === "assistant" && Array.isArray(message.content)) {
+			assistantMessages.push(message as unknown as AssistantMessage);
+		}
+	}
+	const last = assistantMessages[assistantMessages.length - 1];
+	if (last === undefined) {
+		return { finalText: "", assistantMessages, usage: undefined, stopReason: undefined };
+	}
+	const usage = isRecord(last.usage)
+		? { input: Number(last.usage.input) || 0, cacheRead: Number(last.usage.cacheRead) || 0 }
+		: undefined;
+	return { finalText: textOf(last), assistantMessages, usage, stopReason: last.stopReason };
+}
+
+export interface TrialScore {
+	readonly caught: boolean;
+	readonly malformed: boolean;
+	readonly unmatchedFindings: number;
+}
+
+const FENCE_OPEN = "```json";
+const FENCE_CLOSE = "```";
+
+/** Grades the last json block against `defectId` using the existing grader; unusable output is counted, never thrown. */
+export function scoreTrial(
+	finalText: string,
+	defectId: string,
+	expected: readonly SeededDefectExpectation[],
+): TrialScore {
+	const malformed: TrialScore = { caught: false, malformed: true, unmatchedFindings: 0 };
+	const tail = finalText.length > MAX_SCAN_CHARS ? finalText.slice(-MAX_SCAN_CHARS) : finalText;
+	const open = tail.lastIndexOf(FENCE_OPEN);
+	if (open === -1) {
+		return malformed;
+	}
+	const bodyStart = open + FENCE_OPEN.length;
+	const close = tail.indexOf(FENCE_CLOSE, bodyStart);
+	if (close === -1) {
+		return malformed;
+	}
+	let raw: unknown;
+	try {
+		raw = JSON.parse(tail.slice(bodyStart, close));
+	} catch {
+		return malformed;
+	}
+	const validation = validateReview(raw, TRIAL_REQUIREMENT_IDS);
+	if (!validation.ok) {
+		return malformed;
+	}
+	const result = scoreCalibration(expected, validation.review.findings);
+	return {
+		caught: result.perDefectClass[defectId] === true,
+		malformed: false,
+		unmatchedFindings: result.unmatchedFindings,
+	};
+}
+
+export interface ScoredTrial {
+	readonly arm: ArmId;
+	readonly defect: string;
+	readonly repeat: number;
+	readonly score: TrialScore;
+	readonly output: ParsedOutput;
+}
+
+type MutableArmSummary = { -readonly [K in keyof ArmSummary]: ArmSummary[K] };
+
+/** Per-arm aggregates; an arm with no trials is absent. Prose is judged against that arm's own active tools. */
+export function summarise(
+	trials: readonly ScoredTrial[],
+	activeToolsByArm: Readonly<Record<ArmId, readonly string[]>>,
+): ExperimentSummary {
+	const totals = new Map<ArmId, MutableArmSummary>();
+	for (const trial of trials) {
+		const tools = activeToolsByArm[trial.arm];
+		const proseCount = trial.output.assistantMessages.filter((m) => isProseToolCall(m, tools)).length;
+		const row: MutableArmSummary = totals.get(trial.arm) ?? {
+			arm: trial.arm,
+			trials: 0,
+			caught: 0,
+			malformed: 0,
+			assistantMessages: 0,
+			proseMessages: 0,
+			proseTrials: 0,
+			misses: 0,
+			missesInProseTrials: 0,
+			unmatchedFindings: 0,
+			inputTokens: 0,
+			cacheReadTokens: 0,
+		};
+		row.trials += 1;
+		row.caught += trial.score.caught ? 1 : 0;
+		row.malformed += trial.score.malformed ? 1 : 0;
+		row.assistantMessages += trial.output.assistantMessages.length;
+		row.proseMessages += proseCount;
+		row.proseTrials += proseCount > 0 ? 1 : 0;
+		if (!trial.score.caught) {
+			row.misses += 1;
+			row.missesInProseTrials += proseCount > 0 ? 1 : 0;
+		}
+		row.unmatchedFindings += trial.score.unmatchedFindings;
+		row.inputTokens += trial.output.usage?.input ?? 0;
+		row.cacheReadTokens += trial.output.usage?.cacheRead ?? 0;
+		totals.set(trial.arm, row);
+	}
+	return Object.fromEntries(totals) as ExperimentSummary;
+}
+
+/** Flags common to every arm: one-shot JSON events on stdout. */
+const COMMON_FLAGS = ["--mode", "json", "-p"] as const;
+
+const MINIMAL_FLAGS = ["-ne", "-ns", "-nc", "-np", "--tools", "read,bash,edit,write"] as const;
+
+/** CLI flags (before the prompt) for one arm. The padded arm needs the path of its filler file. */
+export function armArgs(arm: ArmId, options: { readonly padFile?: string }): string[] {
+	switch (arm) {
+		case "A":
+			return [...COMMON_FLAGS, ...MINIMAL_FLAGS];
+		case "C":
+			if (options.padFile === undefined) {
+				throw new Error("armArgs: the padded-minimal arm needs a padFile");
+			}
+			return [...COMMON_FLAGS, ...MINIMAL_FLAGS, "--append-system-prompt", options.padFile];
+		case "B":
+			return [...COMMON_FLAGS, "--ky-profile", "implement"];
+		case "F":
+			return [...COMMON_FLAGS, "--ky-profile", "full"];
+	}
+}
+
+/** Exactly `targetChars` characters cycled from the caller's own repo prose, so the filler is real and deterministic. */
+export function padFileText(targetChars: number, sources: readonly string[]): string {
+	const usable = sources.filter((s) => s.length > 0);
+	if (usable.length === 0) {
+		throw new Error("padFileText: at least one non-empty source is required");
+	}
+	const cycle = `${usable.join("\n\n")}\n\n`;
+	let out = "";
+	while (out.length < targetChars) {
+		out += cycle;
+	}
+	return out.slice(0, targetChars);
+}
+
+/** Measured full-harness floor minus bare floor in estimated tokens; a test re-measures it against the composed harness. */
+export const PAD_TOKENS = 2907;
