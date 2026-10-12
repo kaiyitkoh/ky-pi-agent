@@ -328,8 +328,15 @@ describe("QUAL-01 Group C — dead-rule guard", () => {
  * (`08-02-PLAN.md` builds and proves the rules; it does not remediate six
  * phases of pre-existing code) and is left for a future gate-integration
  * plan to triage.
+ *
+ * 08.1-07 RE-MEASURE (2026-10-13): 22 -> 67. Phase 08.1 vendored upstream
+ * pi-background-tasks under `.pi/extensions/background-tasks/` (tracked), which
+ * adds 45 findings: `magic-number` x42 (e.g. src/core/common.ts) and
+ * `swallowed-exception` x3. They are third-party code kept byte-faithful to
+ * upstream, so they are recorded here rather than remediated. The 22
+ * pre-existing findings are unchanged (swallowed-exception 17, magic-number 5).
  */
-const ERROR_BUDGET_ON_OWN_SOURCE = 22;
+const ERROR_BUDGET_ON_OWN_SOURCE = 67;
 
 function realExtensionSources(): QualitySource[] {
 	return trackedFiles(".pi/extensions")
