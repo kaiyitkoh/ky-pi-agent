@@ -267,7 +267,7 @@ function extractMrCreateTarget(argsAfterCreate: readonly string[]): string | und
 		const a = argsAfterCreate[i];
 		if (a === "--target-branch" || a === "-b") {
 			const value = argsAfterCreate[i + 1];
-			return value !== undefined && !value.startsWith("-") ? value : undefined;
+			return value !== undefined && value.trim().length > 0 && !value.startsWith("-") ? value : undefined;
 		}
 		if (a.startsWith("--target-branch=")) {
 			const value = a.slice("--target-branch=".length);
