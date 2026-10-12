@@ -7,8 +7,10 @@ import { describe, expect, it } from "vitest";
 import { AUTHORED_ROOTS, authoredFiles, codeTokens, isExempt } from "../helpers/comment-scan.ts";
 import { repoRoot } from "../helpers/git.ts";
 
+// Opt-in on purpose: it proves a claimed comment-only range, and ordinary code work would fail it.
+// Run: COMMENT_BASE_REF=<ref> npx vitest run tests/unit/comment-only-diff.test.ts --maxWorkers=2
 const REF = process.env.COMMENT_BASE_REF ?? "";
-// Comma-separated paths whose code changed on purpose; they still get the marker checks.
+// Comma-separated paths whose code changed or that were added on purpose; changed ones still get the marker checks.
 const EXEMPT = (process.env.COMMENT_DIFF_EXEMPT ?? "")
 	.split(",")
 	.map((p) => p.trim())
@@ -75,7 +77,6 @@ describe.skipIf(REF === "")("comment-only diff vs COMMENT_BASE_REF", () => {
 	it("resolves the base ref and compares enough files", () => {
 		expect(verify.status, `COMMENT_BASE_REF=${REF} is not a valid commit`).toBe(0);
 		expect(pairs.length).toBeGreaterThanOrEqual(40);
-		if (added.length > 0) console.info(`comment-only-diff: new since ref, skipped: ${added.join(", ")}`);
 		console.info(`comment-only-diff: compared ${pairs.length} files against ${REF}`);
 	});
 
@@ -83,9 +84,15 @@ describe.skipIf(REF === "")("comment-only diff vs COMMENT_BASE_REF", () => {
 		expect(deleted, "deleted since the ref").toEqual([]);
 	});
 
-	it("names only compared files in COMMENT_DIFF_EXEMPT", () => {
-		const unknown = EXEMPT.filter((p) => !pairs.some((pair) => pair.path === p));
-		expect(unknown, "COMMENT_DIFF_EXEMPT entries that match no compared file").toEqual([]);
+	// A new extension file changes runtime behaviour without touching any compared file.
+	it("adds no authored file unless COMMENT_DIFF_EXEMPT declares it", () => {
+		const undeclared = added.filter((p) => !EXEMPT.includes(p));
+		expect(undeclared, "new authored files since the ref; list them in COMMENT_DIFF_EXEMPT").toEqual([]);
+	});
+
+	it("names only compared or added files in COMMENT_DIFF_EXEMPT", () => {
+		const unknown = EXEMPT.filter((p) => !added.includes(p) && !pairs.some((pair) => pair.path === p));
+		expect(unknown, "COMMENT_DIFF_EXEMPT entries that match no compared or added file").toEqual([]);
 	});
 
 	it("keeps every code token identical once comments are removed", () => {
