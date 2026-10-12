@@ -183,10 +183,10 @@ export function disarmExecuteRun(): void {
 /**
  * Repo-relative paths changed between two SHAs per git, so the drift check reads the tree and not a model's claim.
  * `--no-renames` lists both sides of a move; with rename detection a move out of an undeclared path shows only its
- * destination.
+ * destination. `-z` keeps non-ASCII paths unquoted (`é.ts`, not `"\303\251.ts"`).
  */
 export function changedFiles(cwd: string, baseSha: string, headSha: string): readonly string[] {
-	const result = spawnSync("git", ["diff", "--name-only", "--no-renames", `${baseSha}..${headSha}`], {
+	const result = spawnSync("git", ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", `${baseSha}..${headSha}`], {
 		cwd,
 		encoding: "utf-8",
 		shell: false,
@@ -196,7 +196,7 @@ export function changedFiles(cwd: string, baseSha: string, headSha: string): rea
 		throw new Error(`execute: git diff --name-only ${baseSha}..${headSha} failed (exit ${result.status}) in ${cwd}: ${result.stderr ?? ""}`);
 	}
 	return (result.stdout ?? "")
-		.split("\n")
-		.map((line) => line.trim().replace(/\\/g, "/"))
+		.split("\0")
+		.map((line) => line.replace(/\\/g, "/"))
 		.filter((line) => line.length > 0);
 }

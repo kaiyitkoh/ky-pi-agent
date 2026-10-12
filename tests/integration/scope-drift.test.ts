@@ -61,6 +61,14 @@ describe("scope drift against a real git diff", () => {
 		expect([...changedFilesSince(r, base)].sort()).toEqual(["allowed.ts", "infra.tf"]);
 	});
 
+	it("reports a non-ASCII path verbatim rather than git's quoted octal form", () => {
+		const r = repo();
+		commitFile(r, "base.txt", "base\n", "baseline");
+		const base = headSha(r);
+		commitFile(r, "é.ts", "x\n", "non-ascii");
+		expect(changedFilesSince(r, base)).toEqual(["é.ts"]);
+	});
+
 	it("throws, and never returns an empty list, when git fails", () => {
 		const r = repo();
 		commitFile(r, "base.txt", "base\n", "baseline");
