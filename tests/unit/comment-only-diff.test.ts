@@ -4,32 +4,61 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
-import { authoredFiles, emitWithoutComments } from "../helpers/comment-scan.ts";
+import { authoredFiles, codeTokens, isExempt } from "../helpers/comment-scan.ts";
 import { repoRoot } from "../helpers/git.ts";
 
 const REF = process.env.COMMENT_BASE_REF ?? "";
+// Comma-separated paths whose code changed on purpose; they still get the marker checks.
+const EXEMPT = (process.env.COMMENT_DIFF_EXEMPT ?? "")
+	.split(",")
+	.map((p) => p.trim())
+	.filter((p) => p !== "");
 
 const NEVER_THROWS = /NEVER THROWS|never throws/g;
 const QUALITY_ALLOW = /quality-allow:/g;
 const VENDOR_MARKER = /VENDORED\b|vendored from|Re-authored from Pi's own bundled example/;
 const count = (text: string, re: RegExp): number => text.match(re)?.length ?? 0;
 
+function git(args: string[]): { status: number | null; stdout: string } {
+	const r = spawnSync("git", args, { cwd: repoRoot(), encoding: "utf-8", maxBuffer: 64 * 1024 * 1024 });
+	return { status: r.status, stdout: r.stdout };
+}
+
 function gitShow(ref: string, path: string): string | undefined {
-	const r = spawnSync("git", ["show", `${ref}:${path}`], {
-		cwd: repoRoot(),
-		encoding: "utf-8",
-		maxBuffer: 64 * 1024 * 1024,
-	});
+	const r = git(["show", `${ref}:${path}`]);
 	return r.status === 0 ? r.stdout : undefined;
 }
 
+/** First index where two token streams diverge, for a readable failure. */
+function firstDiff(a: string[], b: string[]): string {
+	const n = Math.max(a.length, b.length);
+	for (let i = 0; i < n; i++) if (a[i] !== b[i]) return `token ${i}: ${JSON.stringify(a[i])} -> ${JSON.stringify(b[i])}`;
+	return "identical";
+}
+
+describe("comment-only diff self-tests", () => {
+	it("ignores comment edits but sees type, modifier and literal edits", () => {
+		const base = 'const s: string = "a//b"; // one\nconst r = /\\/\\//;\n';
+		expect(codeTokens(base)).toEqual(codeTokens('/** doc */\nconst s: string = "a//b"; // two, longer\nconst r = /\\/\\//;\n'));
+		expect(codeTokens(base)).not.toEqual(codeTokens('const s: number = "a//b"; // one\nconst r = /\\/\\//;\n'));
+		expect(codeTokens(base)).not.toEqual(codeTokens('const s: string = "a//c"; // one\nconst r = /\\/\\//;\n'));
+		expect(codeTokens(base)).not.toEqual(codeTokens('const s: string = "a//b"; // one\nconst r = /\\/x\\//;\n'));
+		expect(codeTokens("const a = [1] as const;")).not.toEqual(codeTokens("const a = [1];"));
+		expect(codeTokens("interface I { readonly a: 1 }")).not.toEqual(codeTokens("interface I { a: 1 }"));
+	});
+});
+
 describe.skipIf(REF === "")("comment-only diff vs COMMENT_BASE_REF", () => {
-	const verify = spawnSync("git", ["rev-parse", "--verify", `${REF}^{commit}`], { cwd: repoRoot(), encoding: "utf-8" });
+	const verify = git(["rev-parse", "--verify", `${REF}^{commit}`]);
 	const pairs: { path: string; before: string; after: string }[] = [];
 	const deleted: string[] = [];
 	const added: string[] = [];
 	if (verify.status === 0) {
-		for (const path of authoredFiles()) {
+		const atRef = git(["ls-tree", "-r", "--name-only", REF, "--", ".pi/extensions"])
+			.stdout.split("\n")
+			.map((l) => l.trim())
+			.filter((p) => p.endsWith(".ts") && !isExempt(p));
+		for (const path of [...new Set([...atRef, ...authoredFiles()])].sort()) {
 			const before = gitShow(REF, path);
 			if (before === undefined) {
 				added.push(path);
@@ -54,9 +83,21 @@ describe.skipIf(REF === "")("comment-only diff vs COMMENT_BASE_REF", () => {
 		expect(deleted, "deleted since the ref").toEqual([]);
 	});
 
-	it("emits identical code once comments are removed", () => {
-		const changed = pairs.filter((p) => emitWithoutComments(p.before) !== emitWithoutComments(p.after)).map((p) => p.path);
-		expect(changed, `behaviour changed in:\n${changed.join("\n")}`).toEqual([]);
+	it("names only compared files in COMMENT_DIFF_EXEMPT", () => {
+		const unknown = EXEMPT.filter((p) => !pairs.some((pair) => pair.path === p));
+		expect(unknown, "COMMENT_DIFF_EXEMPT entries that match no compared file").toEqual([]);
+	});
+
+	it("keeps every code token identical once comments are removed", () => {
+		const changed: string[] = [];
+		for (const { path, before, after } of pairs) {
+			if (EXEMPT.includes(path)) continue;
+			const a = codeTokens(before);
+			const b = codeTokens(after);
+			if (a.length !== b.length || a.some((t, i) => t !== b[i])) changed.push(`${path} (${firstDiff(a, b)})`);
+		}
+		if (EXEMPT.length > 0) console.info(`comment-only-diff: exempt from the token check: ${EXEMPT.join(", ")}`);
+		expect(changed, `code changed in:\n${changed.join("\n")}`).toEqual([]);
 	});
 
 	it("preserves the NEVER THROWS, quality-allow and vendoring markers", () => {

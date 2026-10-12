@@ -130,3 +130,20 @@ export function emitWithoutComments(text: string): string {
 		compilerOptions: { target: ts.ScriptTarget.ESNext, module: ts.ModuleKind.ESNext, removeComments: true },
 	}).outputText;
 }
+
+/** Parser leaf tokens (kind + exact text), JSDoc excluded: types, modifiers and literals all count, comments never do. */
+export function codeTokens(text: string): string[] {
+	const sf = ts.createSourceFile("x.ts", text, ts.ScriptTarget.Latest, false, ts.ScriptKind.TS);
+	const out: string[] = [];
+	const walk = (node: ts.Node): void => {
+		if (node.kind >= ts.SyntaxKind.FirstJSDocNode && node.kind <= ts.SyntaxKind.LastJSDocNode) return;
+		const kids = node.getChildren(sf);
+		if (kids.length === 0) {
+			if (node.kind !== ts.SyntaxKind.EndOfFileToken) out.push(`${node.kind}:${node.getText(sf)}`);
+		} else {
+			for (const kid of kids) walk(kid);
+		}
+	};
+	walk(sf);
+	return out;
+}
