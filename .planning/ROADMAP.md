@@ -559,13 +559,34 @@ Plans:
 **Plans**: 7 plans (sequential waves 1-7)
 
 Plans:
+**Wave 1**
+
 - [ ] 10-01-PLAN.md — `/budget` floor line, composed-harness faux helper, BEFORE floor and per-extension attribution recorded *(Wave 1)*
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
 - [ ] 10-02-PLAN.md — tool profiles (recon/review/implement/full) via `--ky-profile`, applied once at `session_start`; completeness guard; Criterion reinterpretations R1-R6 *(Wave 2)*
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
 - [ ] 10-03-PLAN.md — gate the background shell-policy section on `bg_run`; per-profile floor ceilings and AFTER record *(Wave 3)*
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 10-04-PLAN.md — `context` hook cannot strip tools (+ `context_with_system` lint), prompt byte-stability with negative control, prompt-metadata lint, AGENTS.md token budget *(Wave 4)*
+
+**Wave 5** *(blocked on Wave 4 completion)*
+
 - [ ] 10-05-PLAN.md — pre-registered minimal-vs-full experiment core (TDD): run plan, Newcombe interval, decision and discrimination, scoring with controls *(Wave 5)*
+
+**Wave 6** *(blocked on Wave 5 completion)*
+
 - [ ] 10-06-PLAN.md — POSIX launcher + node CLI with scrubbed env, fake-pi end-to-end test, protocol doc *(Wave 6)*
+
+**Wave 7** *(blocked on Wave 6 completion)*
+
 - [ ] 10-07-PLAN.md — RB-10-01..03 OUTSTANDING, docs-policy governance, decision docs, requirements reconciliation *(Wave 7)*
+
 **Research**: `--research-phase` required — the minimal-vs-full experiment is a research task with a designed protocol, not an implementation task. No study establishes a token threshold; anyone quoting one is guessing.
 
 ### Phase 11: Terminal UI
