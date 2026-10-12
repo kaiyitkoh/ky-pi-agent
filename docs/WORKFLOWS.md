@@ -394,10 +394,13 @@ committed diff only; uncommitted and untracked work is not covered. A pure
 rename shows the new path as changed and the old path, if declared, as
 undelivered.
 
-**Why `/execute` appends only after two checks.** The PROGRESS.md append
-happens only when the unmodified `gateCompletion` accepts and `driftAbort`
-allows every path git reports as changed. Output in PROGRESS.md is captured
-tool output bound to a harness-read commit SHA. If the shared workflows
+**Why `/execute` appends only after these checks.** The PROGRESS.md append
+happens only when the unmodified `gateCompletion` accepts, a bash call whose
+command equals the task's verification command ran cleanly at the commit
+being recorded (seen on `tool_execution_start`, since `tool_execution_end`
+carries no arguments), and `driftAbort` allows every path git reports as
+changed. PROGRESS.md records that run's own output and exit code, bound to a
+harness-read commit SHA; no other tool output is kept. If the shared workflows
 handler consumes the run first, `/execute` finds no verdict and writes
 nothing.
 

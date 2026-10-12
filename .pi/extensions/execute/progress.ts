@@ -133,7 +133,7 @@ export function renderToolResultText(result: unknown): string {
 
 // Held on globalThis because Pi loads each extension entry through its own jiti module graph; a module-level
 // variable would not be shared between copies of this file. evidence.ts redacts command input and never keeps
-// output, so the output PROGRESS.md needs lives in this separate slot.
+// output, so the verification record PROGRESS.md needs lives in this separate slot.
 const EXECUTE_RUN_KEY = "__kypiExecuteRun";
 
 export interface ExecuteRunContext {
@@ -144,17 +144,31 @@ export interface ExecuteRunContext {
 	readonly mode: "delegated" | "degraded (ordinary prompt loop)";
 }
 
+/** One observed bash run of the task's verification command: its own output and exit status, and the HEAD it ran at. */
+export interface VerificationRecord {
+	readonly output: string;
+	readonly exitCode: number;
+	readonly isError: boolean;
+	readonly sha: string;
+}
+
 interface ExecuteRunState extends ExecuteRunContext {
-	output: string[];
+	readonly pending: Map<string, string>;
+	verification?: VerificationRecord;
 }
 
 function runState(): ExecuteRunState | undefined {
 	return (globalThis as Record<string, unknown>)[EXECUTE_RUN_KEY] as ExecuteRunState | undefined;
 }
 
+/** Whitespace-insensitive form, so `npm  test` and `npm test` match and nothing else does. */
+export function normaliseCommand(command: string): string {
+	return command.trim().replace(/\s+/g, " ");
+}
+
 /** Arm the run context, replacing any prior one. */
 export function armExecuteRun(context: ExecuteRunContext): void {
-	const state: ExecuteRunState = { ...context, output: [] };
+	const state: ExecuteRunState = { ...context, pending: new Map() };
 	(globalThis as Record<string, unknown>)[EXECUTE_RUN_KEY] = state;
 }
 
@@ -166,14 +180,43 @@ export function executeRunContext(): ExecuteRunContext | undefined {
 		: { cwd: state.cwd, slug: state.slug, taskId: state.taskId, verificationCommand: state.verificationCommand, mode: state.mode };
 }
 
-/** Append output text to the armed run; a no-op when none is armed. */
-export function recordExecuteOutput(text: string): void {
-	runState()?.output.push(text);
+/** Remember a bash call's command by id; `tool_execution_end` carries no arguments, so this is the only place to see it. */
+export function noteToolStart(toolCallId: string, toolName: string, args: unknown): void {
+	const command = (args as { command?: unknown } | null)?.command;
+	if (toolName === "bash" && typeof command === "string") runState()?.pending.set(toolCallId, normaliseCommand(command));
 }
 
-/** Every recorded chunk joined by a blank line; empty when nothing is armed or recorded. */
-export function drainExecuteOutput(): string {
-	return runState()?.output.join("\n\n") ?? "";
+/** Keep the latest run of exactly the verification command; every other tool result is ignored here. */
+export function noteToolEnd(toolCallId: string, isError: boolean, result: unknown, sha: string): void {
+	const state = runState();
+	const command = state?.pending.get(toolCallId);
+	if (state === undefined || command === undefined) return;
+	state.pending.delete(toolCallId);
+	if (command !== normaliseCommand(state.verificationCommand)) return;
+	const reported = (result as { structuredContent?: { exit_code?: unknown } } | null)?.structuredContent?.exit_code;
+	const exitCode = typeof reported === "number" ? reported : isError ? 1 : 0;
+	state.verification = { output: renderToolResultText(result), exitCode, isError, sha };
+}
+
+/** HEAD at `cwd`, or "" when git cannot say; "" never equals a recorded commit, so an unknown HEAD fails the check. */
+export function headShaOrEmpty(cwd: string): string {
+	const r = spawnSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	return r.status === 0 ? (r.stdout ?? "").trim() : "";
+}
+
+/** The verification run observed in this armed run, if any. */
+export function verificationRecord(): VerificationRecord | undefined {
+	return runState()?.verification;
+}
+
+/** Accept only a clean run of the verification command at the commit being recorded. */
+export function checkVerification(record: VerificationRecord | undefined, command: string, headSha: string): DriftVerdict {
+	if (record === undefined) return { ok: false, reason: `the verification command \`${command}\` was never run with the bash tool` };
+	if (record.isError || record.exitCode !== 0) return { ok: false, reason: `the verification command \`${command}\` exited ${record.exitCode}` };
+	if (record.sha !== headSha) {
+		return { ok: false, reason: `the verification command last ran at ${record.sha || "an unknown HEAD"}, not at the recorded commit ${headSha} -- run it after committing` };
+	}
+	return { ok: true };
 }
 
 export function disarmExecuteRun(): void {

@@ -131,7 +131,15 @@ function harness(opts: { plan?: string | null; spec?: string | null; branch?: st
 }
 
 const progressFile = (h: Harness): string => join(h.repo, ".pi", "work", SLUG, "PROGRESS.md");
-const toolEnd = (text: string, isError = false) => ({ toolName: "bash", isError, result: { content: [{ type: "text", text }] } });
+let callIds = 0;
+const toolEnd = (text: string, isError = false, toolCallId = `other-${++callIds}`) => ({ toolCallId, toolName: "bash", isError, result: { content: [{ type: "text", text }] } });
+/** One observed bash run of `command`: start (which carries the args) then end (which carries the result). */
+function bash(h: Harness, command: string, text: string, exitCode = 0): void {
+	const toolCallId = `call-${++callIds}`;
+	h.fire("tool_execution_start", { toolCallId, toolName: "bash", args: { command } });
+	h.fire("tool_execution_end", { ...toolEnd(text, exitCode !== 0, toolCallId), result: { content: [{ type: "text", text }], structuredContent: { exit_code: exitCode } } });
+}
+const verify = (h: Harness, text = "ok"): void => bash(h, "npm test", text);
 
 describe("/execute -- refusals hand nothing to the model and arm nothing", () => {
 	const cases: [string, () => Harness][] = [
@@ -164,7 +172,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(isRunArmed()).toBe(true);
 
 		const sha = commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
-		h.fire("tool_execution_end", toolEnd("REAL-OUTPUT 1 passed"));
+		verify(h, "REAL-OUTPUT 1 passed");
 		h.fire("agent_end", {});
 
 		const text = readFileSync(progressFile(h), "utf-8");
@@ -177,6 +185,42 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(rows.length, "the evidence log must hold the verdict row").toBeGreaterThan(0);
 		expect(rows.at(-1)?.verdict).toBe("accept");
 		expect(rows.at(-1)?.recordCount, "one tool execution must be recorded once, not once per extension").toBe(1);
+	});
+
+	it("a commit whose only bash call was the commit itself is rejected: the verification command never ran", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		const before = bytes(progressFile(h));
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		bash(h, "git commit -am x", "[work abc] x");
+		h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("never run");
+		expect(bytes(progressFile(h))).toBe(before);
+	});
+
+	it("a verification run before the commit is rejected: it did not check the recorded commit", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		const before = bytes(progressFile(h));
+		verify(h);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		bash(h, "git log -1", "commit");
+		h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("run it after committing");
+		expect(bytes(progressFile(h))).toBe(before);
+	});
+
+	it("PROGRESS carries the verification run's own output and exit code, not other tool output", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		bash(h, "cat README.md", "UNRELATED-OUTPUT");
+		verify(h, "VERIFY-OUTPUT");
+		h.fire("agent_end", {});
+		const text = readFileSync(progressFile(h), "utf-8");
+		expect(text).toContain("VERIFY-OUTPUT");
+		expect(text).not.toContain("UNRELATED-OUTPUT");
+		expect(text).toContain("- Exit code: 0");
 	});
 
 	it("fabrication: a commit with narrated output and no structured tool result is rejected, file unchanged", async () => {
@@ -220,7 +264,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		const before = bytes(progressFile(h));
 		commitIn(h.repo, "src/b.ts", "export const b = 1;\n");
-		h.fire("tool_execution_end", toolEnd("ok"));
+		verify(h);
 		h.fire("agent_end", {});
 		expect(h.notes.at(-1)?.text).toContain("HALT");
 		expect(h.notes.at(-1)?.text).toContain("src/b.ts");
@@ -233,7 +277,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(h.notes.some((n) => n.text.includes("not delegated"))).toBe(true);
 		expect(h.sent[0]).not.toContain("Dispatch this packet");
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
-		h.fire("tool_execution_end", toolEnd("ok"));
+		verify(h);
 		h.fire("agent_end", {});
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain("degraded (ordinary prompt loop)");

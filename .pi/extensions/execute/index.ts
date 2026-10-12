@@ -16,8 +16,8 @@ import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import {
-	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, disarmExecuteRun, drainExecuteOutput, driftAbort,
-	executeRunContext, recordExecuteOutput, renderToolResultText, stallDetected,
+	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort,
+	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, stallDetected, verificationRecord,
 } from "./progress.ts";
 
 /** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
@@ -96,29 +96,36 @@ export default function (pi: ExtensionAPI): void {
 				startRun(ctx.cwd, baseSha, currentTree(ctx.cwd));
 				errorCount = 0;
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });
-				pi.sendUserMessage(`${brief}\n\nRun the verification command with the bash tool: ${task.verificationCommand}\nEnd with exactly one atomic commit made with the bash tool. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
+				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nTouch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
 			}
 		},
 	});
 
-	// The evidence record itself is taken by the workflows recorder on the shared run; this handler keeps only the output text.
+	pi.on("tool_execution_start", (event) => {
+		if (executeRunContext() !== undefined) noteToolStart(event.toolCallId, event.toolName, event.args);
+	});
+
+	// The evidence record itself is taken by the workflows recorder on the shared run; this handler keeps only the verification run.
 	pi.on("tool_execution_end", (event) => {
-		if (executeRunContext() === undefined) return;
-		recordExecuteOutput(renderToolResultText(event.result));
+		const run = executeRunContext();
+		if (run === undefined) return;
+		noteToolEnd(event.toolCallId, event.isError, event.result, headShaOrEmpty(run.cwd));
 		if (event.isError) errorCount += 1;
 	});
 
 	pi.on("agent_end", (_event, ctx) => {
 		const run = executeRunContext();
 		if (run === undefined) return;
-		const output = drainExecuteOutput();
+		const verification = verificationRecord();
 		disarmExecuteRun();
 		try {
 			const cwd = run.cwd;
 			const sha = currentSha(cwd);
-			const verdict = endRun(sha, currentTree(cwd));
+			const ended = endRun(sha, currentTree(cwd));
+			const checked = ended?.ok === true ? checkVerification(verification, run.verificationCommand, ended.sha) : undefined;
+			const verdict = ended?.ok === true && checked?.ok === false ? { ok: false as const, reason: checked.reason } : ended;
 			// Unarmed means another settle handler consumed the run; no verdict, so nothing is written.
 			if (verdict === undefined) return void ctx.ui.notify(`execute: ${run.taskId} had no evidence verdict -- nothing written`, "error");
 			if (!verdict.ok) {
@@ -130,7 +137,7 @@ export default function (pi: ExtensionAPI): void {
 			}
 			const drift = driftAbort({ attemptedPaths: changedFiles(cwd, baseSha, verdict.sha), specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
 			if (!drift.ok) return void ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error");
-			appendProgress(cwd, run.slug, { taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, output, exitCode: 0, recordedAt: Date.now() });
+			appendProgress(cwd, run.slug, { taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
 			attempts = 0;
 			lastErrors = undefined;
 			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode})`, "info");
