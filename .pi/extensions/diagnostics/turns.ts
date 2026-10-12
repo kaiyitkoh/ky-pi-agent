@@ -68,7 +68,7 @@ export function cacheReadRatio(usage: Usage): number | undefined {
 
 /**
  * Recompute cost from the model's rates into a FRESH {@link TurnCost}. `fauxProvider` zeroes `usage.cost`
- * (pi-ai 1.1.0 `faux.ts:256-266`), so offline cost assertions would be `0 === 0` otherwise. `calculateCost` mutates
+ * (pi-ai 1.1.0 `src/providers/faux.ts#withUsageEstimate`), so offline cost assertions would be `0 === 0` otherwise. `calculateCost` mutates
  * `usage.cost`, so it gets a copy rather than the finalized message's own object.
  */
 function costFor(model: Model<Api>, usage: Usage): TurnCost {

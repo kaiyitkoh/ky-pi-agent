@@ -11,7 +11,7 @@ import { estimateTokensFromChars } from "../diagnostics/budget.ts";
 /**
  * Tool names a real dispatch needs: `subagent` (spawn) and `bg_wait` (block on the result).
  * pi-subagents@0.76.1 src/extension/index.js:667,699 and src/runs/background/wait-tool.js:28,34.
- * Registered regardless of dynamic activation (tool-activation.js:78,114); child-to-parent tools are deliberately not probed.
+ * Registered regardless of dynamic activation (pi-subagents@0.76.1 tool-activation.js:78,114); child-to-parent tools are deliberately not probed.
  */
 export const SUBAGENT_TOOL_NAMES = ["subagent", "bg_wait"] as const;
 

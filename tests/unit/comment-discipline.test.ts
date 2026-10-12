@@ -167,6 +167,17 @@ describe("comment discipline", () => {
 		expect(findUnversionedCitations("// see pkg@2.6.9 src/x.ts:3", [])).toEqual([]);
 		expect(findUnversionedCitations("// see runner.js#emitMessageEnd", [])).toEqual([]);
 		expect(findUnversionedCitations("// see docs/extensions.md:676", [])).toEqual(["docs/extensions.md:676"]);
+		expect(findUnversionedCitations("// 127.0.0.1 runner.js:410", [])).toEqual(["runner.js:410"]);
+		expect(
+			findUnversionedCitations(`// pi 1.1.0 runner.js:410 is the anchor; far beyond it, ${"x".repeat(60)} skills.js:155`, []),
+		).toEqual(["skills.js:155"]);
+	});
+
+	it("treats a bare tracked basename as an in-repo citation", () => {
+		const repo = [".pi/extensions/diagnostics/budget.ts"];
+		expect(findRepoLineCitations("// pi 1.1.0 runner.js:410; see budget.ts:225", repo)).toEqual(["budget.ts:225"]);
+		expect(findUnversionedCitations("// see budget.ts:225", repo)).toEqual([]);
+		expect(findRepoLineCitations("// see @scope/pkg/budget.ts:3", repo)).toEqual([]);
 	});
 
 	it("anchors every external file:line citation to a version", () => {

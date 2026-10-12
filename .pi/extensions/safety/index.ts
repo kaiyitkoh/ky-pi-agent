@@ -336,11 +336,11 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 }
 
 /**
- * Tools the hook denies outright (unparseable or unreviewed paths). Sources at Pi 1.1.0:
- * pi 1.1.0: powershell types.d.ts:922-925; codemode extensions/codemode/tool.js:31; tool_search extensions/tool-search/tool.js:11;
- * MCP resources extensions/mcp/resources.js:2-3,192,208,224; "mcp__" extensions/mcp/tools.js:46;
+ * Tools the hook denies outright (unparseable or unreviewed paths). Sources, each anchored to the version read:
+ * pi 1.1.0: powershell types.d.ts:922-925; codemode extensions/codemode/tool.js:31; pi 1.1.0 tool_search extensions/tool-search/tool.js:11;
+ * pi 1.1.0 MCP resources extensions/mcp/resources.js:2-3,192,208,224; pi 1.1.0 "mcp__" extensions/mcp/tools.js:46;
  * pi-background-tasks@2.6.9 prompt/argv tools (src/extension.ts:1036, src/core/delegate/types.ts:32,
- * src/delegate-child-extension.ts:601, src/core/fusion/*.ts). Nested codemode calls reach the hook (agent-session.js:326-343).
+ * pi-background-tasks@2.6.9 src/delegate-child-extension.ts:601, src/core/fusion/*.ts). Nested codemode calls reach the hook (pi 1.1.0 agent-session.js:326-343).
  */
 const DENIED_TOOL_NAMES: ReadonlySet<string> = new Set([
 	"powershell",

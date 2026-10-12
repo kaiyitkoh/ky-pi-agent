@@ -96,26 +96,34 @@ export function isExempt(path: string): boolean {
 	return VENDORED_EXEMPT.some((prefix) => path.startsWith(prefix));
 }
 
-const LINE_CITATION = /((?:[\w.-]+\/)+[\w.-]+\.(?:ts|md|json)):\d+/g;
+const LINE_CITATION = /(?<![\w@./-])((?:[\w.-]+\/)*[\w.-]+\.(?:ts|md|json)):\d+/g;
+
+// A bare name (`budget.ts:225`) is in-repo when any tracked file has that basename.
+function isRepoCitation(cited: string, repoFiles: readonly string[]): boolean {
+	const path = cited.replace(/^\.\//, "");
+	return repoFiles.some((f) => f === path || f.endsWith(`/${path}`));
+}
 
 /** In-repo `path.ts:N` (or `.md`/`.json`) citations go stale on any edit; cite a symbol (`path.ts#name`) instead. */
 export function findRepoLineCitations(commentText: string, repoFiles: readonly string[]): string[] {
-	const hits: string[] = [];
-	for (const m of commentText.matchAll(LINE_CITATION)) {
-		const cited = m[1].replace(/^\.\//, "");
-		if (repoFiles.some((f) => f === cited || f.endsWith(`/${cited}`))) hits.push(m[0]);
-	}
-	return hits;
+	return [...commentText.matchAll(LINE_CITATION)].filter((m) => isRepoCitation(m[1], repoFiles)).map((m) => m[0]);
 }
 
 const ANY_LINE_CITATION = /[\w@./-]+\.(?:js|ts|md|json):\d+/g;
-const VERSION = /\b\d+\.\d+\.\d+\b/;
+// A package-qualified version (`pi 1.1.0`, `pkg@2.6.9`); an IP such as 127.0.0.1 is not one.
+const VERSION_ANCHOR = /[\w-][ @]v?\d+\.\d+\.\d+(?![.\d])/;
+const ANCHOR_WINDOW = 60;
 
-/** External `file.js:N` citations drift with every upstream release, so the comment must name the version it was read at. */
+/** External `file.js:N` citations drift with every upstream release, so each must sit just after the version it was read at. */
 export function findUnversionedCitations(commentText: string, repoFiles: readonly string[]): string[] {
-	if (VERSION.test(commentText)) return [];
-	const repo = new Set(findRepoLineCitations(commentText, repoFiles));
-	return [...commentText.matchAll(ANY_LINE_CITATION)].map((m) => m[0]).filter((c) => !repo.has(c));
+	const hits: string[] = [];
+	for (const m of commentText.matchAll(ANY_LINE_CITATION)) {
+		const start = m.index ?? 0;
+		if (findRepoLineCitations(m[0], repoFiles).length > 0) continue;
+		if (VERSION_ANCHOR.test(commentText.slice(Math.max(0, start - ANCHOR_WINDOW), start))) continue;
+		hits.push(m[0]);
+	}
+	return hits;
 }
 
 /** Authored runtime code: every extension plus the shared `.pi/lib` modules they import. */
