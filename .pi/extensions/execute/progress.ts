@@ -16,6 +16,8 @@ export interface ProgressEntry {
 	readonly taskId: string;
 	readonly commitSha: string;
 	readonly verificationCommand: string;
+	/** The deterministic gate's per-leg summary, so an unverified leg is visible in the MR. */
+	readonly gate?: string;
 	readonly output: string;
 	readonly exitCode: number;
 	readonly recordedAt: number;
@@ -28,6 +30,7 @@ export function renderProgressAppend(entry: ProgressEntry): string {
 	lines.push("");
 	lines.push(`- Verification command: \`${entry.verificationCommand}\``);
 	lines.push(`- Exit code: ${entry.exitCode}`);
+	if (entry.gate !== undefined) lines.push(`- Deterministic gate: ${entry.gate}`);
 	lines.push(`- Recorded: ${new Date(entry.recordedAt).toISOString()}`);
 	lines.push("");
 	// Longer than any backtick run in the output, so the output can never close the fence early.

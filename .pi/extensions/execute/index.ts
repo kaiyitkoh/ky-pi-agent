@@ -10,7 +10,7 @@ import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan, type ParsedTask } from "../plan-ceremony/plan-schema.ts";
 import { gateDepthFor } from "../quality/gates.ts";
-import { registeredToolNames, runQuickGateStage } from "../quality/index.ts";
+import { registeredToolNames, runChangeGateStage, runTypecheckAt } from "../quality/index.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
@@ -36,6 +36,7 @@ export default function (pi: ExtensionAPI): void {
 	let baseSha = "";
 	let allowance: { spec: readonly string[]; plan: readonly string[] } = { spec: [], plan: [] };
 	let errorCount = 0;
+	let baseTypecheckFailed = false;
 
 	pi.registerCommand("execute", {
 		description: "Run the next unfinished PLAN.md task, evidence-gated, and append PROGRESS.md on acceptance",
@@ -79,13 +80,10 @@ export default function (pi: ExtensionAPI): void {
 					return fail(`execute: ${task.id} is escalated (${prior.attempts} rejected attempts${prior.stalled ? ", errors not dropping" : ""}) -- inspect it, then run /execute ${slug} --reset to allow another attempt`);
 				}
 
-				// The deterministic stage runs on the base tree here, so a failure at settle is the change's own, and again on the commit at settle.
-				const mechanisms = gateDepthFor("execute").mechanisms;
-				if (mechanisms.includes("deterministic")) {
-					const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
-					if (gate.blocking) return fail(gate.report);
-				}
-				if (mechanisms.includes("deterministic")) ctx.ui.notify(`execute: ${task.id} runs the deterministic gate on the base tree now and on the committed change at settle`, "info");
+				// A typecheck that already fails on the base tree cannot blame the change, so the settle gate skips that leg.
+				const deterministic = gateDepthFor("execute").mechanisms.includes("deterministic");
+				baseTypecheckFailed = deterministic && runTypecheckAt(ctx.cwd, ctx.isProjectTrusted()).status === "fail";
+				if (deterministic) ctx.ui.notify(`execute: ${task.id} runs the deterministic gate on the changed files at settle`, "info");
 
 				const probe = probeSubagentAvailability(registeredToolNames());
 				let brief: string;
@@ -129,7 +127,7 @@ export default function (pi: ExtensionAPI): void {
 		if (event.isError) errorCount += 1;
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_end", async (_event, ctx) => {
 		const run = executeRunContext();
 		if (run === undefined) return;
 		const verification = verificationRecord();
@@ -149,13 +147,20 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify(`execute: ${run.taskId} rejected -- ${reason}; ${next}`, "error");
 			};
 			if (!verdict.ok) return reject(verdict.reason);
-			const drift = driftAbort({ attemptedPaths: changedFiles(cwd, baseSha, verdict.sha), specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
+			const changed = changedFiles(cwd, baseSha, verdict.sha);
+			const drift = driftAbort({ attemptedPaths: changed, specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
 			if (!drift.ok) return void ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error");
+			let gateLine = "outside this workflow's gate depth";
 			if (gateDepthFor("execute").mechanisms.includes("deterministic")) {
-				const gate = runQuickGateStage(cwd, ctx.isProjectTrusted());
-				if (gate.blocking) return reject(`the deterministic gate fails on the committed change:\n${gate.report}`);
+				const gate = runChangeGateStage({ cwd, projectTrusted: ctx.isProjectTrusted(), baseSha, changed, baseTypecheckFailed });
+				if (gate.typecheck.status === "fail" || gate.antiPattern.status === "fail") return reject(`the deterministic gate fails on the committed change:\n${gate.report}`);
+				// Awaited only when nothing ran, so an ordinary settle stays synchronous.
+				if (!gate.ranAny && !(await ctx.ui.confirm("Record with no deterministic check?", `No deterministic check applies to ${run.taskId}:\n${gate.report}`))) {
+					return void ctx.ui.notify(`execute: ${run.taskId} not recorded -- no deterministic check ran and recording without one was not approved`, "error");
+				}
+				gateLine = `${gate.report.replace(/\n/g, "; ")}${gate.ranAny ? "" : " -- no check ran; recorded with the user's approval"}`;
 			}
-			appendProgress(cwd, run.slug, { taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
+			appendProgress(cwd, run.slug, { taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, gate: gateLine, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
 			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode})`, "info");
 		} catch (err) {
 			ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${err instanceof Error ? err.message : String(err)}`, "error");

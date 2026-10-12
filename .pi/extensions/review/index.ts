@@ -11,7 +11,7 @@ import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
 import { gateDepthFor } from "../quality/gates.ts";
-import { runQuickGateStage } from "../quality/index.ts";
+import { runChangeGateStage } from "../quality/index.ts";
 import { buildImportGraph, runReview, type ReviewerContractInput } from "../quality/reviewer.ts";
 import { renderReviewMarkdown, type ReviewArtifact } from "../quality/review-schema.ts";
 import { decideWorkflowStop, runRefuteOrPromote } from "../quality/verdict.ts";
@@ -69,15 +69,18 @@ export default function (pi: ExtensionAPI): void {
 				// Calibration scores seeded-defect fixtures and has no meaning for a live diff, so it is never announced here.
 				ctx.ui.notify(`review: running ${mechanisms.filter((m) => m !== "calibration").join(", ")}`, "info");
 
-				let gateReport = "The deterministic stage is outside this workflow's gate depth and did not run.";
-				if (mechanisms.includes("deterministic")) {
-					const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
-					if (gate.blocking) return fail(`review: the deterministic gate fails at HEAD -- not reviewing:\n${gate.report}`);
-					gateReport = gate.report;
-				}
-
 				const base = git(ctx.cwd, ["merge-base", "HEAD", MR_TARGET_BRANCH]).trim();
 				const changed = changedFilesSince(ctx.cwd, base);
+				let gateReport = "The deterministic stage is outside this workflow's gate depth and did not run.";
+				const gateDoubts: string[] = [];
+				if (mechanisms.includes("deterministic")) {
+					const gate = runChangeGateStage({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted(), baseSha: base, changed, baseTypecheckFailed: false });
+					if (gate.antiPattern.status === "fail") return fail(`review: the deterministic gate fails on the change -- not reviewing:\n${gate.report}`);
+					// No base-tree baseline exists here, so a typecheck failure may predate the change: the user decides.
+					if (gate.typecheck.status === "fail") gateDoubts.push(`the typecheck fails at HEAD:\n${gate.report}`);
+					if (!gate.ranAny) gateDoubts.push(`no deterministic check applies to this change:\n${gate.report}`);
+					gateReport = gate.report;
+				}
 				const touched = changed.filter((p) => existsSync(join(ctx.cwd, p))).map((p) => ({ path: p, contents: readFileSync(join(ctx.cwd, p), "utf-8") }));
 				const filesTouchedUnion = [...new Set([...spec.spec.scopePin.expectedFiles, ...plan.plan.filesTouched])];
 				const contract: ReviewerContractInput = {
@@ -107,7 +110,7 @@ export default function (pi: ExtensionAPI): void {
 				const stop = decideWorkflowStop(review);
 				if (stop.stop && !stop.needsApproval) return fail(`review: not opening an MR -- ${stop.reason}`);
 				const drifted = review.scopeDrift?.drifted ?? [];
-				const reasons = [...(stop.stop ? [stop.reason] : []), ...(drifted.length > 0 ? [`changed but not declared in SPEC or PLAN: ${drifted.join(", ")}`] : [])];
+				const reasons = [...(stop.stop ? [stop.reason] : []), ...gateDoubts, ...(drifted.length > 0 ? [`changed but not declared in SPEC or PLAN: ${drifted.join(", ")}`] : [])];
 				if (reasons.length > 0) {
 					const approved = await ctx.ui.confirm("Open the MR anyway?", reasons.join("\n"));
 					if (!approved) return void ctx.ui.notify("review: MR not opened -- approval declined", "warning");

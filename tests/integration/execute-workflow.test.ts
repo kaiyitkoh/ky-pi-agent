@@ -31,7 +31,10 @@ interface Harness {
 	readonly sent: string[];
 	readonly notes: { text: string; level: string }[];
 	command(args: string): Promise<void>;
-	fire(name: string, event: unknown): void;
+	fire(name: string, event: unknown): Promise<void>;
+	/** What the next `ctx.ui.confirm` answers, and every prompt body it was shown. */
+	approve: boolean;
+	readonly confirms: string[];
 }
 
 const SPEC: SpecArtifact = {
@@ -108,28 +111,31 @@ function harness(opts: { plan?: string | null; spec?: string | null; branch?: st
 		},
 		getAllTools: () => [],
 	};
+	const confirms: string[] = [];
+	const self = { approve: false };
 	const ctx = {
 		cwd: repo,
-		ui: { notify: (text: string, level: string) => void notes.push({ text, level }) },
+		ui: { notify: (text: string, level: string) => void notes.push({ text, level }), confirm: async (_t: string, body: string) => (confirms.push(body), self.approve) },
 		isIdle: () => true,
 		isProjectTrusted: () => false,
 	};
 	const loaders = opts.order === "workflows-first" ? [workflowsExtension, executeExtension] : [executeExtension, workflowsExtension];
 	for (const load of loaders) (load as (p: unknown) => void)(pi);
 
-	return {
+	return Object.assign(self, {
 		repo,
 		sent,
 		notes,
-		command: async (args) => {
+		confirms,
+		command: async (args: string) => {
 			const fn = commands.get("execute");
 			if (fn === undefined) throw new Error("execute command not registered");
 			await fn(args, ctx);
 		},
-		fire: (name, event) => {
-			for (const fn of handlers.get(name) ?? []) fn(event, ctx);
+		fire: async (name: string, event: unknown) => {
+			await Promise.all((handlers.get(name) ?? []).map((fn) => fn(event, ctx)));
 		},
-	};
+	});
 }
 
 const progressFile = (h: Harness): string => join(h.repo, ".pi", "work", SLUG, "PROGRESS.md");
@@ -226,7 +232,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 	});
 
 	it("a committed change the deterministic gate fails is rejected at settle, file unchanged", async () => {
-		const bad = ".pi/extensions/bad.ts";
+		const bad = "src/bad.ts";
 		const spec = renderSpecMarkdown({ ...SPEC, scopePin: { ...SPEC.scopePin, expectedFiles: [bad] } });
 		const h = harness({ spec, plan: `- [ ] T001 [R1] Add the guard to ${bad} | verify: npm test\n` });
 		await h.command(SLUG);
@@ -237,6 +243,43 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		h.fire("agent_end", {});
 		expect(h.notes.at(-1)?.text).toContain("deterministic gate fails on the committed change");
 		expect(bytes(progressFile(h))).toBe(before);
+	});
+
+	it("an anti-pattern already present at the base is not blamed on the change", async () => {
+		const bad = "src/bad.ts";
+		const swallow = "export function f(): void {\n\ttry {\n\t\tJSON.parse(\"x\");\n\t} catch {}\n}\n";
+		const spec = renderSpecMarkdown({ ...SPEC, scopePin: { ...SPEC.scopePin, expectedFiles: [bad] } });
+		const h = harness({ spec, plan: `- [ ] T001 [R1] Extend ${bad} | verify: npm test\n` });
+		commitIn(h.repo, bad, swallow);
+		await h.command(SLUG);
+		commitIn(h.repo, bad, `${swallow}export const g = 1;\n`);
+		verify(h);
+		await h.fire("agent_end", {});
+		const text = readFileSync(progressFile(h), "utf-8");
+		expect(text).toContain("## T001 @");
+		expect(text).toContain("- Deterministic gate: typecheck: UNAVAILABLE");
+		expect(text).toContain("anti-pattern: PASS");
+	});
+
+	it("a change no deterministic leg can check is recorded only with the user's approval, and says so", async () => {
+		const doc = "docs/a.md";
+		const spec = renderSpecMarkdown({ ...SPEC, scopePin: { ...SPEC.scopePin, expectedFiles: [doc] } });
+		const h = harness({ spec, plan: `- [ ] T001 [R1] Write ${doc} | verify: npm test\n` });
+		await h.command(SLUG);
+		const before = bytes(progressFile(h));
+		commitIn(h.repo, doc, "# a\n");
+		verify(h);
+		await h.fire("agent_end", {});
+		expect(h.confirms.join("\n")).toContain("anti-pattern: UNAVAILABLE");
+		expect(h.notes.at(-1)?.text).toContain("not approved");
+		expect(bytes(progressFile(h))).toBe(before);
+
+		h.approve = true;
+		await h.command(SLUG);
+		commitIn(h.repo, doc, "# a\n\nmore\n");
+		verify(h);
+		await h.fire("agent_end", {});
+		expect(readFileSync(progressFile(h), "utf-8")).toContain("no check ran; recorded with the user's approval");
 	});
 
 	it("PROGRESS keeps the verification output redacted and bounded, and .pi/work/ is excluded from the work repo", async () => {

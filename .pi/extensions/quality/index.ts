@@ -15,8 +15,8 @@ import {
 	consultAdvisorParameters,
 	executeConsultAdvisor,
 } from "./advisor.ts";
-import { type ExecRunner, type GateResult, runDeterministicGates } from "./gates.ts";
-import type { QualitySource } from "./rules.ts";
+import { type ExecRunner, type GateResult, type LegStatus, runDeterministicGates, runTypecheckLeg } from "./gates.ts";
+import { type QualityFinding, type QualitySource, runAntiPatternRules } from "./rules.ts";
 import { commandFor } from "../../lib/win-quote.ts";
 
 const REGISTERED_TOOL_NAMES_KEY = "__kypiQualityRegisteredToolNames";
@@ -145,6 +145,69 @@ export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateRes
 		cwd,
 		exec: resolveExec(cwd, projectTrusted),
 	});
+}
+
+/** `tsc --noEmit` at `cwd`, alone; a baseline for {@link runChangeGateStage}. */
+export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus {
+	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
+}
+
+const CODE_FILE = /\.[cm]?[tj]sx?$/;
+
+export interface ChangeGateResult {
+	readonly typecheck: LegStatus;
+	readonly antiPattern: LegStatus;
+	/** False when every leg was unavailable, so nothing deterministic checked the change. */
+	readonly ranAny: boolean;
+	/** One line per leg. */
+	readonly report: string;
+}
+
+const GIT_SHOW_MAX_BUFFER = 16_777_216;
+
+function showAt(cwd: string, sha: string, path: string): string | undefined {
+	const r = spawnSync("git", ["show", `${sha}:${path}`], { cwd, encoding: "utf-8", shell: false, windowsHide: true, maxBuffer: GIT_SHOW_MAX_BUFFER });
+	return r.status === 0 ? r.stdout : undefined;
+}
+
+const findingKey = (f: QualityFinding): string => `${f.path}\0${f.ruleId}\0${f.message}`;
+
+/**
+ * The deterministic stage for a work repo's change between `baseSha` and the tree on disk: anti-pattern rules on
+ * the changed code files, counting only findings `baseSha` did not already have, and `tsc --noEmit` unless the
+ * base already failed it (a failure there cannot be attributed to the change).
+ */
+export function runChangeGateStage(input: {
+	readonly cwd: string;
+	readonly projectTrusted: boolean;
+	readonly baseSha: string;
+	readonly changed: readonly string[];
+	readonly baseTypecheckFailed: boolean;
+}): ChangeGateResult {
+	const code = input.changed.filter((p) => CODE_FILE.test(p) && existsSync(join(input.cwd, p)));
+	let antiPattern: LegStatus = { status: "unavailable", reason: "no changed TypeScript/JavaScript file to scan" };
+	if (code.length > 0) {
+		const before = new Map<string, number>();
+		const baseSources = code.flatMap((path) => {
+			const text = showAt(input.cwd, input.baseSha, path);
+			return text === undefined ? [] : [{ path, text }];
+		});
+		for (const f of runAntiPatternRules(baseSources)) before.set(findingKey(f), (before.get(findingKey(f)) ?? 0) + 1);
+		const added = runAntiPatternRules(code.map((path) => ({ path, text: readFileSync(join(input.cwd, path), "utf-8") }))).filter((f) => {
+			const left = before.get(findingKey(f)) ?? 0;
+			before.set(findingKey(f), left - 1);
+			return left <= 0 && f.tier === "error";
+		});
+		antiPattern = added.length === 0 ? { status: "pass" } : { status: "fail", findings: added.map((f) => `${f.path}:${f.line} ${f.ruleId}: ${f.message}`) };
+	}
+	const typecheck: LegStatus = input.baseTypecheckFailed
+		? { status: "unavailable", reason: "tsc already failed on the base tree, so a failure cannot be attributed to this change" }
+		: runTypecheckAt(input.cwd, input.projectTrusted);
+	const legs = [["typecheck", typecheck], ["anti-pattern", antiPattern]] as const;
+	const report = legs
+		.map(([id, leg]) => leg.status === "fail" ? `${id}: FAIL\n${leg.findings.map((f) => `  - ${f}`).join("\n")}` : `${id}: ${leg.status === "pass" ? "PASS" : `UNAVAILABLE (${leg.reason})`}`)
+		.join("\n");
+	return { typecheck, antiPattern, ranAny: legs.some(([, l]) => l.status !== "unavailable"), report };
 }
 
 export default function (pi: ExtensionAPI): void {

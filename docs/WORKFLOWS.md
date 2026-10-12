@@ -311,10 +311,29 @@ says which mechanisms the workflow is allowed to run, not that every run
 exercised them: `/review` runs the deterministic, model-review and
 refute-or-promote mechanisms on a live change and does not run calibration,
 which scores seeded-defect fixtures and has no meaning for a live diff.
-`/execute` runs only the deterministic mechanism, on the base tree and again
-on the committed change. `/grill` and `/plan` consult none of these; their
-gates are the SPEC and PLAN validators. Each command's notice names only the
-mechanisms it actually runs.
+`/execute` runs only the deterministic mechanism, on the committed change.
+`/grill` and `/plan` consult none of these; their gates are the SPEC and PLAN
+validators. Each command's notice names only the mechanisms it actually runs.
+
+In `/execute` and `/review` the deterministic mechanism is
+`runChangeGateStage`, which checks the work repo's change rather than this
+harness. It has two legs. The anti-pattern rules run on the changed
+TypeScript/JavaScript files, and a finding already present at the base commit
+is not counted. `tsc --noEmit` runs in the work repo when the project is
+trusted and TypeScript is installed. `/execute` skips the typecheck leg when
+it already failed on the base tree, because such a failure cannot be blamed
+on the change. The harness-only lint and LSP legs do not run here.
+
+A leg that cannot run is UNAVAILABLE, never a pass. Each PROGRESS entry
+carries a `Deterministic gate:` line naming every leg's status, and the MR's
+Verification section shows it. When no leg ran at all (a Terraform, Python or
+docs-only change, or an untrusted project), `/execute` records the task only
+after the user approves with `ctx.ui.confirm`. A declined prompt, or a
+session with no UI, records nothing and counts no attempt. `/review` adds
+"no deterministic check applies" to the reasons that need approval before
+the MR opens. A typecheck failure at `/review` time also needs approval
+rather than refusing, because `/review` has no base-tree baseline. A new
+anti-pattern finding refuses outright.
 
 | Workflow | Mechanisms |
 |---|---|
