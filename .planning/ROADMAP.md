@@ -404,7 +404,7 @@ Plans:
 **Goal:** The harness runs on `@earendil-works/pi-coding-agent@1.1.0` with every authored extension, test helper and composed extension verified against 1.1.0 source, and no new 1.x tool path (powershell, codemode, MCP, tool_search) can bypass the safety guard.
 **Requirements**: UPG-01..06 (inserted 2026-10-12, see 08.1-CONTEXT.md)
 **Depends on:** Phase 8
-**Plans:** 2/7 plans executed
+**Plans:** 3/7 plans executed
 
 **Success Criteria:**
 1. Pi family (`pi-coding-agent`, `pi-ai`, `pi-tui`, `pi-agent-core`) pinned to exactly 1.1.0 in devDependencies; `typebox`/`vitest` match Pi's own pins; global `pi` reinstalled at 1.1.0 and `~/.pi/agent/settings.json` `piPinned` updated (RUNBOOK entry if it needs the user).
@@ -416,7 +416,7 @@ Plans:
 Plans:
 - [x] 08.1-01-PLAN.md — vitest maxWorkers 2, Pi 1.1.0 family + typebox/vitest pins, operative version strings, global pi reinstall via bootstrap
 - [x] 08.1-02-PLAN.md — faux helpers + provider-context tests migrated to TranscriptContext; diagnostics/harness/routing re-verified
-- [ ] 08.1-03-PLAN.md — safety hook: deny powershell/MCP/codemode/tool_search, bg_run mapped to bash, nested-call proof, built-ins disabled
+- [x] 08.1-03-PLAN.md — safety hook: deny powershell/MCP/codemode/tool_search, bg_run mapped to bash, nested-call proof, built-ins disabled
 - [ ] 08.1-04-PLAN.md — re-pin pi-subagents/pi-web-access/pi-lsp/pi-session-finder after review; registries, evidence, compiled-JS exception, /execute probe
 - [ ] 08.1-05-PLAN.md — vendor pi-background-tasks@2.6.9 process-only with PROVENANCE, load + guard test, registries npm->vendored
 - [ ] 08.1-06-PLAN.md — vendored extensions re-checked at 1.1.0; supply-chain posture, install log, citation policy, 1.x notes
