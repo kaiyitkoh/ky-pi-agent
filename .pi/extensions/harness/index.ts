@@ -46,6 +46,7 @@
  * pass and BOOT-02 fail with no error message anywhere.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
+import { COMMENT_RULES_HEADING, COMMENT_RULES_SECTION, COMMENT_RULES_TEXT } from "./comment-rules.ts";
 
 /**
  * The sentinel string every load-path assertion greps for.
@@ -66,6 +67,22 @@ export const SELFTEST_PROVIDER_ID = "ky-harness";
 const DEAD_ENDPOINT = "http://127.0.0.1:1/v1";
 
 export default function (pi: ExtensionAPI): void {
+	// Skip when a context file already carries the rules so they appear once.
+	pi.on("before_agent_start", (event) => {
+		const o = event.systemPromptOptions;
+		if (o.contextFiles.some((f) => f.content.includes(COMMENT_RULES_HEADING))) return undefined;
+		if (typeof o.forceSystemPrompt === "string") {
+			if (!o.forceSystemPrompt.includes(COMMENT_RULES_HEADING)) {
+				o.forceSystemPrompt += `
+
+${COMMENT_RULES_TEXT}`;
+			}
+			return undefined;
+		}
+		o.sections[COMMENT_RULES_SECTION] = COMMENT_RULES_TEXT;
+		return undefined;
+	});
+
 	// A command, not a tool. Zero per-turn tokens. See BOUNDARY RULE above.
 	pi.registerCommand("ky-hello", {
 		description: "ky-pi-agent liveness check",

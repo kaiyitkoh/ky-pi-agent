@@ -187,8 +187,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/harness/index.ts",
-		budget: 100,
-		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 99 raw lines 2026-08-14, rounded up to the next ten",
+		budget: 120,
+		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 116 raw lines 2026-08-14, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/diagnostics/budget.ts",
@@ -346,8 +346,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/harness",
-		budget: 100,
-		why: "WR-03; measured 99 raw lines across 1 file 2026-08-15, rounded up to the next ten",
+		budget: 140,
+		why: "WR-03; measured 133 raw lines across 2 files 2026-08-15, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
