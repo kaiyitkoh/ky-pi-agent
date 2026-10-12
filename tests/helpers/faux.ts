@@ -68,7 +68,7 @@
  * {@link wrapFauxWithStatus} exists for PROV-08 — the DeepSeek-direct →
  * DashScope fallback chain. `faux` hard-codes
  * `onResponse({ status: 200, headers: {} })` unconditionally
- * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510], so without a wrapper
+ * [VERIFIED: pi-ai 1.1.0 dist/providers/faux.js:359], so without a wrapper
  * nothing downstream can ever see a 429 or a 503.
  *
  * CORRECTED, BECAUSE THE OBVIOUS READING IS WRONG. The three error classes are
@@ -81,13 +81,37 @@
  * because there is not one. [IN-04]
  */
 import type {
-	Context,
 	FauxProviderHandle,
 	Message,
 	Model,
 	Provider,
 	StreamOptions,
+	Tool,
+	TranscriptContext,
 } from "@earendil-works/pi-ai";
+import { getCurrentSystemPrompt, getCurrentTools } from "@earendil-works/pi-ai";
+
+/** A message that is not a `system` role (system content is read via accessors). */
+type NonSystemMessage = Exclude<Message, { role: "system" }>;
+
+/**
+ * Read a pi-ai 1.1.0 {@link TranscriptContext} the only correct way: the system
+ * prompt and tools live in `role: "system"` messages, so they are replayed with
+ * `getCurrentSystemPrompt` / `getCurrentTools`, and `messages` is the
+ * non-system remainder. TranscriptContext is structurally assignable to the old
+ * Context, so reading `.systemPrompt` compiles and silently yields undefined.
+ */
+export function transcriptView(context: TranscriptContext): {
+	systemPrompt: string;
+	tools: Tool[];
+	messages: NonSystemMessage[];
+} {
+	return {
+		systemPrompt: getCurrentSystemPrompt(context.messages),
+		tools: getCurrentTools(context.messages),
+		messages: context.messages.filter((m): m is NonSystemMessage => m.role !== "system"),
+	};
+}
 
 /**
  * A builder that turns the outgoing request into a provider-shaped payload
@@ -100,7 +124,7 @@ import type {
  */
 export type FixturePayloadBuilder = (
 	model: Model<string>,
-	context: Context,
+	context: TranscriptContext,
 	options: unknown,
 ) => unknown;
 
@@ -139,7 +163,7 @@ export function withSecretHeader(payload: Record<string, unknown>): Record<strin
 }
 
 /** Flatten a message's content to the string an OpenAI-shaped body would carry. */
-function messageContent(message: Message): unknown {
+function messageContent(message: NonSystemMessage): unknown {
 	if (typeof message.content === "string") {
 		return message.content;
 	}
@@ -174,9 +198,10 @@ function messageContent(message: Message): unknown {
  */
 export function buildOpenAiFixturePayload(
 	model: Model<string>,
-	context: Context,
+	transcript: TranscriptContext,
 	options: unknown,
 ): Record<string, unknown> {
+	const context = transcriptView(transcript);
 	const messages: { role: string; content: unknown }[] = [];
 	if (context.systemPrompt) {
 		messages.push({ role: "system", content: context.systemPrompt });
@@ -241,9 +266,10 @@ export function buildOpenAiFixturePayload(
  */
 export function buildBedrockFixturePayload(
 	model: Model<string>,
-	context: Context,
+	transcript: TranscriptContext,
 	options: unknown,
 ): Record<string, unknown> {
+	const context = transcriptView(transcript);
 	const inferenceConfig: Record<string, unknown> = {};
 	const maxTokens = readOption(options, "maxTokens");
 	if (maxTokens !== undefined) {
@@ -326,8 +352,8 @@ export function wrapFauxWithPayload(
  *
  * `faux` has no path to a 429 or a 503: `stream()` runs
  * `await streamOptions?.onResponse?.({ status: 200, headers: {} }, requestModel)`
- * unconditionally [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510, and :577 /
- * :641 for the deferred paths]. PROV-08's error taxonomy — quota, transient,
+ * unconditionally [VERIFIED: pi-ai 1.1.0 dist/providers/faux.js:359, and :404 /
+ * :443 for the deferred paths]. PROV-08's error taxonomy — quota, transient,
  * unavailable — is a claim about statuses, so without this wrapper all three
  * classes are the same green 200 and the chain test verifies nothing.
  *

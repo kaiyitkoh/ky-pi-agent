@@ -19,12 +19,17 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "no
 import { tmpdir } from "node:os";
 import { delimiter, join, resolve } from "node:path";
 
-import type { FauxProviderHandle, Provider } from "@earendil-works/pi-ai";
-import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
+import type { FauxProviderHandle, Provider, TranscriptContext } from "@earendil-works/pi-ai";
+import {
+	fauxAssistantMessage,
+	fauxProvider,
+	getCurrentSystemPrompt,
+	getCurrentTools,
+} from "@earendil-works/pi-ai";
 import { ModelRuntime } from "@earendil-works/pi-coding-agent";
 import { afterAll, describe, expect, it } from "vitest";
 
-import { wrapFauxWithPayload, wrapFauxWithStatus } from "../helpers/faux.ts";
+import { buildOpenAiFixturePayload, wrapFauxWithPayload, wrapFauxWithStatus } from "../helpers/faux.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { logFilesIn, readJsonl, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
 import { assertLoopbackUrl, withLoopbackCompletions } from "../helpers/loopback.ts";
@@ -373,6 +378,44 @@ describe("faux helper -- before_provider_request actually fires", () => {
 					"would let a redactor pass here and fail on the wire",
 			).toEqual(expect.arrayContaining(["model", "messages", "stream"]));
 		});
+	});
+});
+
+describe("faux helper -- TranscriptContext accessors are not vacuous (pi-ai 1.1.0)", () => {
+	// TranscriptContext is structurally assignable to Context, so a builder that
+	// still reads `.systemPrompt` / `.tools` compiles and silently reads undefined.
+	it("a captured transcript yields a real system prompt, the tool, and exactly one system message", async () => {
+		const captured: TranscriptContext[] = [];
+		await withFauxSession(
+			{
+				tools: ["read"],
+				responses: [
+					(context: TranscriptContext) => {
+						captured.push(context);
+						return fauxAssistantMessage("ok");
+					},
+				],
+			},
+			async (handle) => {
+				await handle.session.prompt("hello");
+			},
+		);
+
+		expect(captured.length, "response factory never ran; assertions below would be vacuous").toBeGreaterThan(0);
+		const ctx = captured[0] as TranscriptContext;
+		const prompt = getCurrentSystemPrompt(ctx.messages);
+		expect(prompt.length).toBeGreaterThan(0);
+		expect(prompt).toContain("read");
+		expect(getCurrentTools(ctx.messages).map((t) => t.name)).toContain("read");
+
+		const model = { id: "faux-flash" } as Parameters<typeof buildOpenAiFixturePayload>[0];
+		const payload = buildOpenAiFixturePayload(model, ctx, undefined) as {
+			messages: { role: string; content: unknown }[];
+			tools?: { function: { name: string } }[];
+		};
+		expect(payload.messages.filter((m) => m.role === "system")).toHaveLength(1);
+		expect(payload.messages[0]?.content).toBe(prompt);
+		expect(payload.tools?.map((t) => t.function.name)).toContain("read");
 	});
 });
 
