@@ -47,6 +47,10 @@ import {
 import { repoRoot } from "../helpers/git.ts";
 import { RULE_IDS } from "../../.pi/extensions/quality/rules.ts";
 import { DEFECT_CLASSES } from "../fixtures/seeded-defects/index.ts";
+import { ARTIFACT_FILES } from "../../.pi/lib/work-artifacts.ts";
+import { SPEC_SECTIONS } from "../../.pi/extensions/grill/spec-schema.ts";
+import { AMBIGUITY_DIMENSIONS } from "../../.pi/extensions/grill/scorecard.ts";
+import { GATE_DEPTH_BY_WORKFLOW, QUALITY_MECHANISMS } from "../../.pi/extensions/quality/gates.ts";
 
 const ROOT = repoRoot();
 const README = readFileSync(join(ROOT, "README.md"), "utf-8");
@@ -1298,5 +1302,128 @@ describe("Group E — docs/QUALITY.md agrees with RULE_IDS and DEFECT_CLASSES, i
 				"Falsified by hand: adding a fake id (e.g. `off-by-one`) to the calibration section " +
 				"turns this exact case red, before being reverted",
 		).toEqual([]);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Group F — docs/WORKFLOWS.md agrees with the workflow code tables, in both directions
+// ---------------------------------------------------------------------------
+
+const WORKFLOWS_PATH = join(ROOT, "docs", "WORKFLOWS.md");
+const BUDGETS_SOURCE = readFileSync(join(ROOT, "tests", "unit", "workflow-budgets.test.ts"), "utf-8");
+
+/** Body of one `## N. …` section of docs/WORKFLOWS.md, up to the next `## `. */
+function workflowsSection(doc: string, heading: string): string {
+	const start = doc.indexOf(heading);
+	expect(start, `docs/WORKFLOWS.md has no ${JSON.stringify(heading.trim())} heading; the group would be vacuous`).toBeGreaterThan(-1);
+	const rest = doc.slice(start + heading.length);
+	const end = rest.indexOf("\n## ");
+	return end === -1 ? rest : rest.slice(0, end);
+}
+
+/** Data rows of the first markdown table in a section, as trimmed cells (header and separator dropped). */
+function tableRows(section: string): string[][] {
+	const rows = section
+		.split("\n")
+		.filter((l) => l.trimStart().startsWith("|"))
+		.map((l) => l.split("|").slice(1, -1).map((c) => c.trim()));
+	return rows.slice(2);
+}
+
+const unquote = (cell: string): string => cell.replace(/`/g, "");
+
+/** The frozen ceilings and workflow rows, read from the budgets registry's source: its constants are not exported. */
+function budgetRegistry(): { ceilings: Record<string, number>; rows: { name: string; commandFile: string; bodies: string[] }[] } {
+	const ceilingBlock = /const FEATURES_CEILINGS[^=]*=\s*\{([^}]*)\}/.exec(BUDGETS_SOURCE);
+	expect(ceilingBlock, "FEATURES_CEILINGS literal not found in workflow-budgets.test.ts").not.toBeNull();
+	const ceilings: Record<string, number> = {};
+	for (const m of ceilingBlock![1].matchAll(/(\w+):\s*(\d+)/g)) ceilings[m[1]] = Number(m[2]);
+
+	const start = BUDGETS_SOURCE.indexOf("const WORKFLOW_TEXT_BUDGETS");
+	expect(start, "WORKFLOW_TEXT_BUDGETS not found in workflow-budgets.test.ts").toBeGreaterThan(-1);
+	const rows: { name: string; commandFile: string; bodies: string[] }[] = [];
+	const rowRe = /name:\s*"(\w+)",\s*commandFile:\s*"([^"]+)",\s*bodies:\s*\[([^\]]*)\]/g;
+	for (const m of BUDGETS_SOURCE.slice(start).matchAll(rowRe)) {
+		rows.push({ name: m[1], commandFile: m[2], bodies: Array.from(m[3].matchAll(/"([^"]+)"/g), (b) => b[1]) });
+	}
+	return { ceilings, rows };
+}
+
+describe("Group F — docs/WORKFLOWS.md agrees with the workflow code tables, in both directions", () => {
+	const doc = readFileSync(WORKFLOWS_PATH, "utf-8");
+
+	it("declares the code authoritative and the Phase 9 live checks outstanding", () => {
+		expect(doc).toContain("the code is authoritative");
+		for (const id of PHASE_NINE_IDS) expect(doc, `${id} must be named in the STATUS section`).toContain(id);
+		expect(doc).toContain("no subagent has ever spawned");
+	});
+
+	it("workflow table matches WORKFLOW_TEXT_BUDGETS and FEATURES_CEILINGS", () => {
+		const { ceilings, rows: codeRows } = budgetRegistry();
+		expect(codeRows.length, "no workflow rows parsed from the registry").toBeGreaterThan(1);
+		const docRows = tableRows(workflowsSection(doc, "\n## 5. ")).map((r) => ({
+			name: unquote(r[0]),
+			commandFile: unquote(r[1]),
+			body: r[2] === "none" ? "none" : unquote(r[2]),
+			ceiling: Number(r[3]),
+		}));
+		expect(docRows.map((r) => r.name).sort(), "doc and code disagree on the set of workflows").toEqual(
+			codeRows.map((r) => r.name).sort(),
+		);
+		for (const code of codeRows) {
+			const row = docRows.find((r) => r.name === code.name)!;
+			expect(row.commandFile, `${code.name}: command file`).toBe(code.commandFile);
+			expect(row.body, `${code.name}: skill body`).toBe(code.bodies.length === 0 ? "none" : code.bodies.join(", "));
+			expect(row.ceiling, `${code.name}: ceiling`).toBe(ceilings[code.name]);
+		}
+	});
+
+	it("artifact table matches ARTIFACT_FILES (names and consumers)", () => {
+		const docRows = tableRows(workflowsSection(doc, "\n## 6. "));
+		expect(docRows.map((r) => unquote(r[0])), "doc and code disagree on the artifact set").toEqual(
+			ARTIFACT_FILES.map((a) => a.name),
+		);
+		for (const a of ARTIFACT_FILES) {
+			const row = docRows.find((r) => unquote(r[0]) === a.name)!;
+			expect(row[1], `${a.name}: consumer`).toBe(a.consumer);
+		}
+	});
+
+	it("gate-depth table matches GATE_DEPTH_BY_WORKFLOW", () => {
+		const docRows = tableRows(workflowsSection(doc, "\n## 7. "));
+		const code = Object.entries(GATE_DEPTH_BY_WORKFLOW);
+		expect(docRows.map((r) => unquote(r[0])).sort(), "doc and code disagree on the set of workflows").toEqual(
+			code.map(([k]) => k).sort(),
+		);
+		for (const [workflow, mechanisms] of code) {
+			const row = docRows.find((r) => unquote(r[0]) === workflow)!;
+			expect(unquote(row[1]).split(", "), `${workflow}: mechanisms`).toEqual([...mechanisms]);
+		}
+		expect(new Set(code.flatMap(([, m]) => m)), "a mechanism used in the table is missing from QUALITY_MECHANISMS").toEqual(
+			new Set(QUALITY_MECHANISMS.map((m) => m.id)),
+		);
+	});
+
+	it("SPEC outline matches SPEC_SECTIONS", () => {
+		const docRows = tableRows(workflowsSection(doc, "\n## 8. "));
+		expect(docRows.map((r) => r[1]), "doc and code disagree on the SPEC sections").toEqual(
+			SPEC_SECTIONS.map((s) => s.heading),
+		);
+		for (const s of SPEC_SECTIONS) {
+			const row = docRows.find((r) => r[1] === s.heading)!;
+			expect(Number(row[0]), `${s.heading}: ordinal`).toBe(s.ordinal);
+			expect(row[2], `${s.heading}: consumer`).toBe(s.consumer);
+		}
+	});
+
+	it("ambiguity dimension table matches AMBIGUITY_DIMENSIONS and their floors", () => {
+		const docRows = tableRows(workflowsSection(doc, "\n## 9. "));
+		expect(docRows.map((r) => unquote(r[0])), "doc and code disagree on the dimensions").toEqual(
+			AMBIGUITY_DIMENSIONS.map((d) => d.id),
+		);
+		for (const d of AMBIGUITY_DIMENSIONS) {
+			const row = docRows.find((r) => unquote(r[0]) === d.id)!;
+			expect(Number(row[1]), `${d.id}: floor`).toBe(d.floor);
+		}
 	});
 });

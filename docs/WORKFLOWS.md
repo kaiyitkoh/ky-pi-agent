@@ -1,4 +1,4 @@
-# Workflows — `/quick`'s rationale, evicted from its own header
+# Workflows — `/quick`'s rationale, and the four ceremonial workflows
 
 `.pi/extensions/workflows/index.ts` carries a header short enough to fit the
 line budget this document explains. The reasoning that header cannot hold
@@ -9,6 +9,13 @@ its pointer here.
 if the code and this document disagree, the code is authoritative and this
 document is a bug. Fix the document; do not fix the code to match the
 document.
+
+Sections 1 to 4 explain `/quick`. Sections 5 to 11 describe `/grill`,
+`/plan`, `/execute` and `/review`. The tables in sections 5 to 9 are
+asserted against the code in both directions by
+`tests/unit/docs-policy.test.ts`: a row the code does not have, or a code
+row the table omits, fails the suite. The prose in sections 10 and 11 is not
+derived and is not asserted.
 
 ## 1. What `/quick` is
 
@@ -266,3 +273,144 @@ text says only what was checked
 (`quick: HEAD moved to <sha> with a changed tree and no failed tool result
 -- no commit was verified and the work itself is NOT verified`), never the
 stronger, and sometimes false, "a commit landed" or "evidence accepted."
+
+## 5. The workflows and their text ceilings
+
+Each command is a Pi command, never a tool. The ceiling is the frozen
+FEATURES.md number for that workflow, summed over the command file and its
+skill body (`FEATURES_CEILINGS` and `WORKFLOW_TEXT_BUDGETS` in
+`tests/unit/workflow-budgets.test.ts`). Supporting modules are bound by the
+per-directory ratchets instead, as section 3 explains.
+
+| Workflow | Command file | Skill body | Ceiling |
+|---|---|---|---|
+| `grill` | `.pi/extensions/grill/index.ts` | `.pi/skills/grill/SKILL.md` | 250 |
+| `plan` | `.pi/extensions/plan-ceremony/index.ts` | `.pi/skills/plan-ceremony/SKILL.md` | 200 |
+| `execute` | `.pi/extensions/execute/index.ts` | none | 250 |
+| `review` | `.pi/extensions/review/index.ts` | `.pi/skills/review/SKILL.md` | 250 |
+| `quick` | `.pi/extensions/workflows/index.ts` | none | 100 |
+
+## 6. The artifact set
+
+`.pi/work/<slug>/` holds exactly these four files and nothing else
+(`ARTIFACT_FILES` in `.pi/lib/work-artifacts.ts`;
+`tests/unit/artifact-count.test.ts` drives the real write paths and compares
+the directory to this list). A file with no named consumer does not ship.
+
+| File | Consumer (verbatim from `ARTIFACT_FILES`) |
+|---|---|
+| `SPEC.md` | /plan (pre-flight gate: SPEC.md must exist and have passed its own ambiguity gate) and /review (requirement verdicts read against SPEC §3/§4) |
+| `PLAN.md` | /execute (per-task self-contained handoff) and /review (the files-touched union is the drift baseline) |
+| `REVIEW.md` | the human reviewer and the MR (requirement verdicts, findings and the checked-and-cleared section) |
+| `PROGRESS.md` | /review's MR body (pasted verification evidence -- commit SHA, verification command, actual output -- per task) |
+
+## 7. Gate depth per workflow
+
+`GATE_DEPTH_BY_WORKFLOW` in `.pi/extensions/quality/gates.ts`. A table row
+says which mechanisms the workflow is allowed to run, not that every run
+exercised them: `/review` runs the deterministic, model-review and
+refute-or-promote mechanisms on a live change and does not run calibration,
+which scores seeded-defect fixtures and has no meaning for a live diff.
+
+| Workflow | Mechanisms |
+|---|---|
+| `quick` | `deterministic` |
+| `grill` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
+| `plan` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
+| `execute` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
+| `review` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
+
+## 8. The SPEC.md outline
+
+`SPEC_SECTIONS` in `.pi/extensions/grill/spec-schema.ts`. Root Cause is a
+conditional ninth section, required only for a change framed as a fix, and is
+deliberately not a table entry.
+
+| § | Heading | Consumer (verbatim from `SPEC_SECTIONS`) |
+|---|---|---|
+| 1 | Goal | every downstream reader (plan, execute, review) as the single falsifiable anchor sentence |
+| 2 | Verified Codebase Facts | this module's own gateRequirementsAuthorship, which refuses §3 authorship until this section is populated with evidence |
+| 3 | Requirements | /plan (each Rn becomes plan tasks) and /review (requirement verdicts are read against this section) |
+| 4 | Error and Edge Behaviour | /plan (each entry becomes an acceptance case) and /review (requirement verdicts read against this section too) |
+| 5 | Scope Pin | /review's drift detector, which compares the expected-files list here against the files a PLAN.md actually touched |
+| 6 | Clarifications Log | a future human or agent re-reading this SPEC, so the interrogation that produced it stays auditable |
+| 7 | Assumptions | /review, which must not treat an assumption stamped here as a verified fact from §2 |
+| 8 | Ambiguity Scorecard | the ambiguity gate itself -- a mechanical, re-readable record of why /grill judged itself done |
+
+## 9. The ambiguity dimensions
+
+`AMBIGUITY_DIMENSIONS` in `.pi/extensions/grill/scorecard.ts`. `/grill`
+stops asking when every dimension clears its floor or the hard question budget
+runs out. A dimension still below its floor at that point is written into
+SPEC.md section 7 as an assumption, never silently dropped.
+
+| Dimension | Floor |
+|---|---|
+| `factual-grounding` | 0.7 |
+| `requirement-precision` | 0.7 |
+| `failure-coverage` | 0.7 |
+| `scope-definiteness` | 0.7 |
+
+## 10. Rationale the command headers were told to leave out
+
+This section is prose. Nothing asserts it.
+
+**Why `/plan` displaced the vendored example.** Pi's example plan mode was
+vendored with a `/plan` command of its own. Two commands cannot share a name,
+so the vendored copy was renamed `/plan-mode` (DEVIATION 6 in its
+`PROVENANCE.md`, following the earlier `/todos` to `/plan-todos` rename)
+and the name went to the ceremonial workflow. Its directory is
+`plan-ceremony` for the same reason. The Pi flag namespace is separate from
+the command namespace and needed no rename.
+
+**Why `.pi/work/` is git-ignored.** The artifacts describe features of a
+private work codebase, and this repository is public. They are per-feature
+scratch, not harness source.
+
+**Why the MR targets staging.** `main` auto-deploys. `/review` names the
+target as a constant and passes it explicitly on every call; it never relies
+on glab's default. The git/glab classifier is the single refuser of an absent
+or protected target, and `glab mr merge` is blocked unconditionally. The MR
+body is built from recorded evidence (PROGRESS.md), not from the model's
+account of its own work, and carries a disclosure line.
+
+**Why the drift check is computed.** Scope drift is the difference between
+`git diff --name-only <base>..HEAD` and the union of SPEC's expected files and
+PLAN's files-touched, in both directions: drifted (changed, not declared) and
+undelivered (declared, not changed). The reviewer cannot supply it, and a
+review artifact that carries a model-supplied drift field is rejected. An
+empty declaration makes every change drift. `/review` diffs from
+`git merge-base HEAD staging`, because no base SHA is persisted. It reads the
+committed diff only; uncommitted and untracked work is not covered. A pure
+rename shows the new path as changed and the old path, if declared, as
+undelivered.
+
+**Why `/execute` appends only after two checks.** The PROGRESS.md append
+happens only when the unmodified `gateCompletion` accepts and `driftAbort`
+allows every path git reports as changed. Output in PROGRESS.md is captured
+tool output bound to a harness-read commit SHA. If the shared workflows
+handler consumes the run first, `/execute` finds no verdict and writes
+nothing.
+
+**Why the handoff probe reports `UNAVAILABLE`.** `pi-subagents` is pinned
+and not installed. The probe checks for the minimum tools a handoff needs and
+never reads the settings file, so on a machine without them `/execute`
+degrades to the ordinary prompt loop and says so. A "delegated" label on that
+path would be a false claim.
+
+**What these do and do not prove.** The offline tests prove the gates, the
+renderers, the argv classification and the packet arithmetic against scripted
+input and temp git repositories. They do not prove that a model drives the
+four commands well, that GitLab accepts the MR, that the `--description-file`
+flag exists in the installed glab, or that a subagent spawns. The packet-size
+figure of -447 estimated tokens (134 against 581, `Math.ceil(chars / 4)`, not
+a tokenizer) is one fixture's estimate, and the tests assert its arithmetic,
+never its sign.
+
+## 11. Status
+
+OUTSTANDING: `RB-09-01` (one real feature end to end on the work laptop),
+`RB-09-02` (a real `glab mr create --target-branch staging`) and `RB-09-03`
+(a real `pi-subagents` handoff and the live token delta). No feature has
+shipped end to end through this workflow, and no subagent has ever spawned.
+Requirements FLOW-08 and FLOW-09 are therefore partial.
