@@ -535,7 +535,7 @@ Plans:
 
 **Wave 15** *(blocked on Wave 14 completion)*
 
-- [ ] 09-16-PLAN.md — FLOW-10: the artifact set capped at four with named consumers; text budgets closed
+- [x] 09-16-PLAN.md — FLOW-10: the artifact set capped at four with named consumers; text budgets closed
 
 **Wave 16** *(blocked on Wave 15 completion)*
 
@@ -617,7 +617,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
-| 9. Ceremonial Workflows | 15/17 | In Progress|  |
+| 9. Ceremonial Workflows | 16/17 | In Progress|  |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
 | 11. Terminal UI | 0/TBD | Not started | - |
 
