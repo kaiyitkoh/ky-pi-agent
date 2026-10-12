@@ -175,7 +175,7 @@ jobs:
       # test is a green run that verified nothing, so CI must supply the binary
       # at the same pin the harness targets.
       - name: Install the pinned Pi globally
-        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.1
+        run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.1.0
 
       - name: Run the full suite (unit + integration)
         run: npx vitest run

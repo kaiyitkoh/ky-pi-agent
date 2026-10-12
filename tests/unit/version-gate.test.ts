@@ -13,7 +13,7 @@
  * Both failure shapes exit non-zero, so the exit code carries no information
  * about which one happened [VERIFIED: executed 2026-08-13, npm 11.13.0]:
  *
- *   npm view <pkg>@0.84.1 version --json  -> exit 0, stdout `"0.84.1"`
+ *   npm view <pkg>@1.1.0 version --json  -> exit 0, stdout `"1.1.0"`
  *   npm view <pkg>@0.73.0 version --json  -> exit 1, stdout
  *       {"error":{"code":"E404","summary":"No match found for version 0.73.0"}}
  *   registry unreachable                  -> exit 1, no E404 anywhere
@@ -80,15 +80,15 @@ function runCheckVersion(opts: { pinned?: string; env?: NodeJS.ProcessEnv } = {}
 
 describe("BOOT-04 -- the pinned Pi version gate", () => {
 	it("case 1: a published pin passes", () => {
-		// 0.84.1 is `latest` and is the pin the harness actually ships
-		// [VERIFIED: npm dist-tags, 2026-08-13]. If this goes red, either the
+		// 1.1.0 is `latest` and is the pin the harness actually ships
+		// [VERIFIED: npm dist-tags, 2026-10-13]. If this goes red, either the
 		// registry is down or Earendil has unpublished the version this project
 		// is built on -- both are things a human must look at, so it must not be
 		// downgraded to a skip.
-		const run = runCheckVersion({ pinned: "0.84.1" });
+		const run = runCheckVersion({ pinned: "1.1.0" });
 
 		expect(run.status, `stderr: ${run.stderr}`).toBe(0);
-		expect(run.stdout).toContain(`${PI_PKG}@0.84.1`);
+		expect(run.stdout).toContain(`${PI_PKG}@1.1.0`);
 		expect(run.stdout).toMatch(/published/i);
 	}, TIMEOUT_MS);
 

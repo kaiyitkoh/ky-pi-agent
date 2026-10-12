@@ -145,7 +145,7 @@ function npmStub(logTo: string): StubSpec {
 			// run proceed as far as the install step at all.
 			{ when: ["config", "get", "ignore-scripts"], stdout: "true\n" },
 			// `npm view <pkg>@<ver> version --json` -> a JSON string literal.
-			{ when: ["view"], stdout: '"0.84.1"\n' },
+			{ when: ["view"], stdout: '"1.1.0"\n' },
 			// `npm ls -g --depth=0 --json` -> an empty tree, so the pin does not
 			// match and `install_pi` genuinely proceeds. If this answered with the
 			// pinned version installed, the script would correctly no-op and the
@@ -391,7 +391,7 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 			// PRE-FLIGHT GUARD, not decoration. This case is the only one that
 			// lets the script reach `install_pi` for real, so if the stub were
 			// not the `npm` on PATH the script would run
-			// `npm install -g @earendil-works/pi-coding-agent@0.84.1` against
+			// `npm install -g @earendil-works/pi-coding-agent@1.1.0` against
 			// the developer's real global prefix. Fail before that can happen.
 			const which = spawnSync("sh", ["-c", "command -v npm"], {
 				env,

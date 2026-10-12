@@ -279,7 +279,7 @@ describe("writeAgentOverrides -- sibling-key preservation", () => {
 	it("preserves kyPiAgent and subagents.defaultModel byte-for-byte, replacing only agentOverrides", () => {
 		const settingsPath = freshSettingsPath();
 		const initial = {
-			kyPiAgent: { bootstrapVersion: "1.2.3", hardenedNpmRoot: "/x/npm", piPinned: "0.84.1" },
+			kyPiAgent: { bootstrapVersion: "1.2.3", hardenedNpmRoot: "/x/npm", piPinned: "1.1.0" },
 			subagents: { defaultModel: "dashscope/deepseek-v4-pro" },
 		};
 		writeFileSync(settingsPath, `${JSON.stringify(initial, null, 2)}\n`, "utf-8");

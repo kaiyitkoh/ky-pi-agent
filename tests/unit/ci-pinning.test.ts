@@ -397,7 +397,7 @@ describe("T-01-25 / T-01-28 -- the legs execute rather than merely build", () =>
 		// gate into a hard failure -- and moving it earlier is the fix, not
 		// weakening the helper.
 		const install = workflow.indexOf(
-			"npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.1",
+			"npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.1.0",
 		);
 		const suite = workflow.indexOf("npx vitest run");
 		expect(install, "the pinned global Pi install step is missing").toBeGreaterThan(-1);

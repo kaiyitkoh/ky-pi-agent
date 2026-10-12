@@ -98,10 +98,10 @@ export function requirePiOnPath(): string {
 				"This test verifies Pi's real extension-discovery behaviour and MUST NOT be",
 				"skipped -- a skipped load-path test is a vacuous pass. Install Pi with:",
 				"",
-				"  npm install -g --ignore-scripts @earendil-works/pi-coding-agent@0.84.1",
+				"  npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.1.0",
 				"",
 				"(`--ignore-scripts` is not optional: it is the BOOT-01 control, and Pi",
-				"installs itself the same way -- pi 0.84.1 src/config.ts:174.)",
+				"installs itself the same way -- pi 1.1.0 dist/config.js:99-132.)",
 			].join("\n"),
 		);
 	}

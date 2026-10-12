@@ -51,7 +51,7 @@
 set -eu
 
 PI_PKG="@earendil-works/pi-coding-agent"
-PI_PINNED="${KYPI_PI_PINNED:-0.84.1}"
+PI_PINNED="${KYPI_PI_PINNED:-1.1.0}"
 NODE_MIN="22.19.0"
 BOOTSTRAP_VERSION="1"
 

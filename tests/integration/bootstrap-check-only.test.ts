@@ -169,7 +169,7 @@ function npmStub(logTo: string): StubSpec {
 		logTo,
 		match: [
 			{ when: ["config", "get", "ignore-scripts"], stdout: "true\n" },
-			{ when: ["view"], stdout: '"0.84.1"\n' },
+			{ when: ["view"], stdout: '"1.1.0"\n' },
 			{ when: ["ls", "-g"], stdout: '{"dependencies":{}}\n' },
 		],
 	};

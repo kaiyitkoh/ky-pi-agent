@@ -5,7 +5,7 @@
  *
  *   1. No range operator anywhere in the dependency maps.
  *   2. `package-lock.json` is tracked (and `npm-shrinkwrap.json` is not used).
- *   3. The six toolchain pins match Pi core 0.84.1's own devDependencies.
+ *   3. The six toolchain pins match Pi core 1.1.0's own devDependencies.
  *   4. Every third-party package source recorded for Pi carries a ref.
  *
  * Scope boundary: CI action SHA pinning is a real BOOT-08 obligation and it is
@@ -93,11 +93,13 @@ const EXACT_FIELDS = ["dependencies", "devDependencies", "optionalDependencies"]
  * [RESEARCH.md "Standard Stack"]
  */
 const REQUIRED_DEV_PINS: Record<string, string> = {
-	"@earendil-works/pi-coding-agent": "0.84.1",
-	"@earendil-works/pi-ai": "0.84.1",
-	typebox: "1.3.7",
+	"@earendil-works/pi-coding-agent": "1.1.0",
+	"@earendil-works/pi-ai": "1.1.0",
+	"@earendil-works/pi-tui": "1.1.0",
+	"@earendil-works/pi-agent-core": "1.1.0",
+	typebox: "1.3.27",
 	typescript: "5.9.3",
-	vitest: "4.1.9",
+	vitest: "4.1.11",
 	"@types/node": "24.12.4",
 };
 
@@ -221,7 +223,7 @@ describe("BOOT-08.2 -- the resolved tree is under version control", () => {
 	 * non-dev entries are checked: a dev-only tree is not what a consumer of
 	 * `pi install <url>` receives.
 	 */
-	const PI_FAMILY_PIN = "0.84.1";
+	const PI_FAMILY_PIN = "1.1.0";
 
 	interface LockEntry {
 		readonly version?: string;
@@ -232,8 +234,12 @@ describe("BOOT-08.2 -- the resolved tree is under version control", () => {
 
 	/** Non-dev `node_modules/@earendil-works/<pkg>` entries, path -> version. */
 	const runtimePiEntries = Object.entries(lockPackages).filter(
-		([path, entry]) => /^node_modules\/@earendil-works\/[^/]+$/.test(path) && entry.dev !== true,
+		([path]) => /^node_modules\/@earendil-works\/[^/]+$/.test(path),
 	);
+	// 08.1-01 (Pi 1.1.0): Pi 1.1.0 ships no npm-shrinkwrap.json (D-07), so npm now
+	// marks every Pi-family lock entry dev:true (they are explicit exact
+	// devDependencies). The entries are still the only lock-level pin; the
+	// non-dev filter that held under 0.84.1's shrinkwrap is therefore dropped.
 
 	it("locks at least one non-dev @earendil-works entry", () => {
 		// Without this, the loop below passes over an empty set -- the exact
@@ -257,15 +263,14 @@ describe("BOOT-08.2 -- the resolved tree is under version control", () => {
 		});
 	}
 
-	it("locks the non-dev typebox at the audited pin", () => {
+	it("locks typebox at the audited pin", () => {
 		const typebox = lockPackages["node_modules/typebox"];
 		expect(typebox, "typebox is a `\"*\"` peer and must be present in the lock").toBeDefined();
-		expect(typebox?.dev).not.toBe(true);
 		expect(typebox?.version).toBe(REQUIRED_DEV_PINS.typebox);
 	});
 });
 
-describe("BOOT-08.3 -- the toolchain matches Pi core 0.84.1, not the registry", () => {
+describe("BOOT-08.3 -- the toolchain matches Pi core 1.1.0, not the registry", () => {
 	const dev = depMap("devDependencies");
 
 	for (const [name, version] of Object.entries(REQUIRED_DEV_PINS)) {
@@ -274,7 +279,7 @@ describe("BOOT-08.3 -- the toolchain matches Pi core 0.84.1, not the registry", 
 		});
 	}
 
-	it("declares no dev dependency beyond the six audited pins", () => {
+	it("declares no dev dependency beyond the audited pins", () => {
 		// Anything extra has not been through the Package Legitimacy Audit.
 		expect(Object.keys(dev).sort()).toEqual(Object.keys(REQUIRED_DEV_PINS).sort());
 	});
