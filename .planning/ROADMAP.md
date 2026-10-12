@@ -561,7 +561,7 @@ Plans:
 Plans:
 **Wave 1**
 
-- [ ] 10-01-PLAN.md — `/budget` floor line, composed-harness faux helper, BEFORE floor and per-extension attribution recorded *(Wave 1)*
+- [x] 10-01-PLAN.md — `/budget` floor line, composed-harness faux helper, BEFORE floor and per-extension attribution recorded *(Wave 1)*
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
