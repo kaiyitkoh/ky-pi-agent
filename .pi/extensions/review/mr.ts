@@ -68,15 +68,20 @@ function gitRead(cwd: string, args: string[]): { status: number | null; out: str
 	return { status: r.status, out: (r.stdout ?? "").trim() };
 }
 
-/** Why the recorded history does not match HEAD, or undefined: every task recorded, each record on HEAD's history, none after the last. */
-export function historyMismatch(cwd: string, taskIds: readonly string[], progress: string): string | undefined {
+/**
+ * Why the recorded history does not match HEAD, or undefined: every task recorded, each record on HEAD's history,
+ * none after the last. After a user re-pin, records made before it are exempt from the ancestry check and the
+ * re-pinned commit stands in for them as the last point verified.
+ */
+export function historyMismatch(cwd: string, taskIds: readonly string[], progress: string, repin?: { readonly sha: string; readonly before: ReadonlySet<string> }): string | undefined {
 	const entries = recordedEntries(progress);
 	const missing = taskIds.filter((id) => !entries.some((e) => e.taskId === id));
 	if (missing.length > 0) return `PLAN task(s) with no PROGRESS entry: ${missing.join(", ")} -- run /execute first`;
-	const offHistory = entries.filter((e) => gitRead(cwd, ["merge-base", "--is-ancestor", e.sha, "HEAD"]).status !== 0);
-	if (offHistory.length > 0) return `recorded commit(s) not on HEAD's history: ${offHistory.map((e) => `${e.taskId} @ ${e.sha}`).join(", ")}`;
+	const checked = entries.filter((e) => repin?.before.has(e.sha) !== true);
+	const offHistory = checked.filter((e) => gitRead(cwd, ["merge-base", "--is-ancestor", e.sha, "HEAD"]).status !== 0);
+	if (offHistory.length > 0) return `recorded commit(s) not on HEAD's history: ${offHistory.map((e) => `${e.taskId} @ ${e.sha}`).join(", ")} -- after a rebase, run /execute <slug> --rebase-base`;
 	const head = gitRead(cwd, ["rev-parse", "HEAD"]).out;
-	const last = entries.at(-1)?.sha;
+	const last = checked.at(-1)?.sha ?? repin?.sha;
 	if (last !== head) return `HEAD (${head}) carries commits after the last recorded entry (${last ?? "none"}) that no verification covers`;
 	return undefined;
 }

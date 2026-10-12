@@ -450,6 +450,29 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(bytes(progressFile(h)), "the second arm reuses the pinned base and appends nothing").toBe(before);
 	});
 
+	it("--rebase-base moves the drift base only with the user's approval, after showing what moved", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		commitIn(h.repo, "src/b.ts", "export const b = 1;\n");
+		verify(h);
+		await h.fire("agent_end", {});
+		expect(h.notes.at(-1)?.text).toContain("HALT");
+
+		await h.command(`${SLUG} --rebase-base`);
+		expect(h.confirms.at(-1)).toContain("src/b.ts");
+		expect(h.notes.at(-1)?.text).toContain("declined");
+		expect(h.sent.length, "a re-pin never prompts the model").toBe(1);
+
+		h.approve = true;
+		await h.command(`${SLUG} --rebase-base`);
+		expect(h.notes.at(-1)?.text).toContain("drift base is now");
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h);
+		await h.fire("agent_end", {});
+		expect(readFileSync(progressFile(h), "utf-8")).toContain(`## T001 @ ${headSha(h.repo)}`);
+	});
+
 	it("delegated dispatch names the executor-handoff agent and still requires the parent's own verification run", async () => {
 		const key = "__kypiQualityRegisteredToolNames";
 		const g = globalThis as Record<string, unknown>;

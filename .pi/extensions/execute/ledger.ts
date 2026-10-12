@@ -109,3 +109,12 @@ export function attemptState(rows: readonly LedgerRow[], taskId: string): { read
 export function allowanceOf(spec: readonly string[], plan: readonly string[]): readonly string[] {
 	return [...new Set([...spec, ...plan])].sort();
 }
+
+/** The latest user re-pin, if any, and the accepted commits recorded before it, which a rebase may have replaced. */
+export function latestRepin(rows: readonly LedgerRow[]): { readonly sha: string; readonly before: ReadonlySet<string> } | undefined {
+	const bases = rows.flatMap((r, i) => (r.kind === "base" ? [i] : []));
+	const at = bases.length > 1 ? bases.at(-1) : undefined;
+	const row = at === undefined ? undefined : rows[at];
+	if (at === undefined || row?.kind !== "base") return undefined;
+	return { sha: row.sha, before: new Set(acceptedEntries(rows.slice(0, at)).map((e) => e.sha)) };
+}

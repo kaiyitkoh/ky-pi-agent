@@ -18,7 +18,7 @@ import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, readLedger } from "./ledger.ts";
 import {
-	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureWorkIgnored,
+	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureWorkIgnored, normalisePathForDrift,
 	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, renderProgressAppend, uncommittedPaths, verificationRecord,
 } from "./progress.ts";
 
@@ -45,7 +45,7 @@ export default function (pi: ExtensionAPI): void {
 			try {
 				const tokens = args.trim().split(/\s+/).filter((t) => t !== "");
 				const reset = tokens.includes("--reset");
-				const arg = tokens.find((t) => t !== "--reset") ?? "";
+				const arg = tokens.find((t) => !t.startsWith("--")) ?? "";
 				const candidates = slugsWithPlan(ctx.cwd);
 				if (arg === "" && candidates.length !== 1) {
 					return fail(candidates.length === 0 ? "execute: no .pi/work/<slug>/PLAN.md found -- run /plan first" : `execute: several plans exist (${candidates.join(", ")}) -- pass one: /execute <slug>`);
@@ -70,8 +70,19 @@ export default function (pi: ExtensionAPI): void {
 				const rows = readLedger(ctx.cwd, slug);
 				const union = allowanceOf(allowance.spec, allowance.plan);
 				const pinnedUnion = pinnedAllowance(rows);
+				const from = ledgerBase(rows);
+				if (tokens.includes("--rebase-base")) {
+					// The only way past a rebase, a user's own commit or an intended allowance change: the user sees what moves.
+					if (from === undefined) return fail(`execute: ${slug} has no pinned base to move -- run /execute ${slug} first`);
+					const head = currentSha(ctx.cwd);
+					const undeclared = changedFiles(ctx.cwd, from, head).filter((p) => !union.includes(normalisePathForDrift(p)));
+					const shown = `Move ${slug}'s drift base from ${from} to HEAD ${head}.\nChanged since the base and not declared: ${undeclared.join(", ") || "none"}\nAllowance pinned: ${(pinnedUnion ?? []).join(", ")}\nAllowance now: ${union.join(", ")}`;
+					if (!(await ctx.ui.confirm("Re-pin the drift base?", shown))) return void ctx.ui.notify("execute: drift base not moved -- re-pin declined", "warning");
+					appendLedger(ctx.cwd, slug, { kind: "base", sha: head, allowance: union, reason: "re-pinned by the user with --rebase-base" });
+					return void ctx.ui.notify(`execute: ${slug}'s drift base is now ${head}; run /execute ${slug} to continue`, "info");
+				}
 				if (pinnedUnion !== undefined && pinnedUnion.join("\n") !== union.join("\n")) {
-					return fail(`execute: the SPEC/PLAN write allowance changed since ${slug}'s base was pinned (pinned: ${pinnedUnion.join(", ")}) -- restore it`);
+					return fail(`execute: the SPEC/PLAN write allowance changed since ${slug}'s base was pinned (pinned: ${pinnedUnion.join(", ")}) -- restore it, or accept it with /execute ${slug} --rebase-base`);
 				}
 				const recorded = new Set(acceptedEntries(rows).map((e) => e.taskId));
 				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !recorded.has(t.id));
@@ -106,10 +117,9 @@ export default function (pi: ExtensionAPI): void {
 				const ignoredNow = ensureWorkIgnored(ctx.cwd);
 				if (ignoredNow !== undefined) ctx.ui.notify(ignoredNow, "info");
 				const headSha = currentSha(ctx.cwd);
-				const pinned = ledgerBase(rows);
-				if (pinned === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, reason: "first /execute" });
+				if (from === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, reason: "first /execute" });
 				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
-				baseSha = pinned ?? headSha;
+				baseSha = from ?? headSha;
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
 				claimWorkflow("execute");
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });

@@ -430,6 +430,19 @@ empty declaration makes every change drift. `/execute` measures drift from
 the last accepted entry, or from the base it pins on a slug's first run,
 never from the HEAD of a fresh attempt: a rejected or halted commit stays in
 every later diff until it is reverted.
+
+A rebase onto `staging`, or a legitimate commit of the user's own to an
+undeclared file, would otherwise HALT every later `/execute` and refuse
+`/review`. The recovery is `/execute <slug> --rebase-base`, and only the user
+can approve it. It shows the paths changed since the base that SPEC and PLAN
+do not declare, and the pinned and current write allowance, through
+`ctx.ui.confirm`. On approval it records a new base at HEAD, with the current
+allowance, in the ledger. It never prompts the model. `/review` then exempts
+entries recorded before the re-pin from the "on HEAD's history" check, treats
+the re-pinned commit as the last verified point, and adds a line to the MR's
+Verification section saying the earlier entries were verified on commits a
+rebase may have replaced. An intended SPEC/PLAN allowance change is accepted
+the same way.
 `/review` diffs from `git merge-base HEAD staging`, and any drifted path needs
 explicit approval before the MR opens. It reads the
 committed diff only, and `/review` refuses to start while anything outside
