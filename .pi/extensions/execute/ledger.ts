@@ -1,8 +1,6 @@
 /**
- * The harness-owned record of each /execute slug: pinned drift base and write allowance, attempts, resets and
- * accepted entries. PROGRESS.md is only a copy, because the model can edit it. Rows live under the git common dir,
- * outside the work tree, each HMAC-signed with a key kept beside them; the safety path guard refuses tool reads and
- * writes through LEDGER_DIR, so forging a row needs a key the model is kept from reading. Unverifiable rows throw.
+ * The harness-owned, HMAC-signed record of each /execute slug, kept outside the work tree because the model can edit
+ * PROGRESS.md; the safety path guard keeps the key from tool reads. Unverifiable rows throw.
  */
 import { spawnSync } from "node:child_process";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";

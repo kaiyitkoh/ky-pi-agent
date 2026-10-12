@@ -1,6 +1,6 @@
 /**
- * Which workflow command armed last. /grill and /plan keep per-turn hooks alive across turns, so a later command
- * must be able to retire them; held on globalThis because each extension loads through its own jiti module graph.
+ * Which workflow command armed last. Per-turn hooks outlive the command that armed them, so a later command must be
+ * able to retire them; held on globalThis because each extension loads through its own jiti module graph.
  */
 const ACTIVE_WORKFLOW_KEY = "__kypiActiveWorkflow";
 

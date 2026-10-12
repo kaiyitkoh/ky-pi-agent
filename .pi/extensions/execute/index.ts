@@ -137,7 +137,7 @@ export default function (pi: ExtensionAPI): void {
 		if (executeRunContext() !== undefined) noteToolStart(event.toolCallId, event.toolName, event.args);
 	});
 
-	// The evidence record itself is taken by the workflows recorder on the shared run; this handler keeps only the verification run.
+	// Keeps only the verification run; the shared evidence run already records every tool execution once.
 	pi.on("tool_execution_end", (event) => {
 		const run = executeRunContext();
 		if (run === undefined) return;

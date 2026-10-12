@@ -106,7 +106,7 @@ export function upstreamMismatch(cwd: string): string | undefined {
 
 export interface MrInput {
 	readonly targetBranch: string;
-	/** The branch {@link upstreamMismatch} checked, so glab cannot open the MR from some other one. */
+	/** Passed to glab explicitly, so the MR never opens from whatever `@{u}` happens to track. */
 	readonly sourceBranch: string;
 	readonly title: string;
 	readonly body: string;

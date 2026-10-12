@@ -1,6 +1,6 @@
 /**
- * The one SPEC gate, applied by the /grill writer and again by every reader (/plan, /execute, /review): a SPEC.md
- * the model wrote with the ordinary write tool must never be trusted for passing a shape check alone. Pure.
+ * The one SPEC gate, applied when SPEC.md is written and again wherever it is read: a SPEC.md the model wrote with
+ * the ordinary write tool must never be trusted for passing a shape check alone. Pure.
  */
 import { extractSpecRequirementIds, requirementIdsWithoutEntry } from "../plan-ceremony/requirement-ids.ts";
 import { gateAmbiguity } from "./scorecard.ts";

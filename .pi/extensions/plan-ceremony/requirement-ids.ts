@@ -1,5 +1,5 @@
 /**
- * SPEC §3 requirement id extraction for validatePlan's coverage matrix.
+ * SPEC §3 requirement id extraction.
  * Spec §3 is free text, so every `R<digits>` token in its body is an id, deduplicated and sorted numerically. Pure.
  */
 

@@ -147,7 +147,7 @@ export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateRes
 	});
 }
 
-/** `tsc --noEmit` at `cwd`, alone; a baseline for {@link runChangeGateStage}. */
+/** `tsc --noEmit` at `cwd`, alone. */
 export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus {
 	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
 }
