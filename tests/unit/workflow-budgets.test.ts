@@ -270,12 +270,12 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/grill/index.ts",
-		budget: 140,
+		budget: 110,
 		why: "plan 09-08 (FLOW-02/FLOW-03) -- the /grill command itself: two entry points (a description, or the " +
 			"literal --resume), the git pre-flight copied verbatim from workflows/index.ts, slug " +
 			"derivation/resolution via .pi/lib/work-artifacts.ts#workDir, and writeSpecIfGated -- the ONLY " +
 			"function in this subsystem that writes SPEC.md, running gateRequirementsAuthorship then " +
-			"validateSpec then gateAmbiguity before any write. Measured 135 raw lines 2026-08-15 with " +
+			"validateSpec then gateAmbiguity before any write. Measured 110 raw lines 2026-08-15 with " +
 			"countRawLines, rounded up to the next ten",
 	},
 	{
@@ -289,7 +289,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/plan-ceremony/index.ts",
-		budget: 140,
+		budget: 120,
 		why: "plan 09-10 (FLOW-06) -- the /plan command itself: one entry point, no flags, the git pre-flight " +
 			"copied verbatim from workflows/index.ts, slug resolution via candidateSlugsWithSpec/resolveSlug " +
 			"(refusing rather than picking on ambiguity), the SPEC pre-flight (existence then validateSpec, " +
@@ -577,7 +577,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/grill",
-		budget: 1870,
+		budget: 1070,
 		why: "plan 09-05 (FLOW-03): the first file of the /grill subsystem, spec-schema.ts -- the SPEC section " +
 			"parser and the §2 evidence gate (gateRequirementsAuthorship). This directory holds no " +
 			"registerCommand( call yet (plan 09-08 wires the /grill command itself) and is not YET reachable " +
@@ -609,12 +609,12 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"declared-ahead-of-time allowance) and scorecard-parse.ts (a small pure §8 table parser feeding " +
 			"gateAmbiguity, kept out of index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 250-line grill " +
 			"ceiling headroom for the skill body -- see that registry's own entry for this file). Measured " +
-			"135 (index.ts) + 33 (scorecard-parse.ts) + 532 (scorecard.ts) + 1161 (spec-schema.ts) = 1861 raw " +
+			"110 (index.ts) + 21 (scorecard-parse.ts) + 246 (scorecard.ts) + 689 (spec-schema.ts) = 1066 raw " +
 			"lines across 4 files 2026-08-15, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/plan-ceremony",
-		budget: 760,
+		budget: 430,
 		why: "plan 09-09 (FLOW-06) -- the first file of the /plan subsystem, plan-schema.ts: the task-line " +
 			"parser (TASK_LINE_PATTERN, VERIFICATION_SEPARATOR, parseTaskLine), the whole-document scanner " +
 			"(parsePlanTasks, malformed lines returned never dropped), the files-touched union " +
@@ -638,8 +638,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"(a small pure §3 requirement-id extractor feeding validatePlan's coverage argument, kept out of " +
 			"index.ts specifically to leave WORKFLOW_TEXT_BUDGETS' 200-line plan ceiling headroom for the " +
 			"skill body -- the same reason grill/scorecard-parse.ts was kept out of grill/index.ts). Measured " +
-			"578 (plan-schema.ts) + 140 (index.ts) + 42 (requirement-ids.ts) = 760 raw lines across 3 files " +
-			"2026-08-15, already an exact multiple of ten",
+			"291 (plan-schema.ts) + 113 (index.ts) + 20 (requirement-ids.ts) = 424 raw lines across 3 files " +
+			"2026-08-15, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/execute",

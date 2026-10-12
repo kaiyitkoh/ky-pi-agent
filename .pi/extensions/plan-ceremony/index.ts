@@ -1,20 +1,6 @@
 /**
- * FLOW-06 -- the /plan command. One entry point, no flags, SPEC-gated. The
- * task-form grammar, the coverage-matrix rule and the three PLAN.md parts
- * live in the "plan-ceremony" skill (.pi/skills/plan-ceremony/SKILL.md,
- * loaded on demand) and docs/WORKFLOWS.md (plan 09-17). Terseness here IS
- * the WORKFLOW_TEXT_BUDGETS ceiling being honoured -- 200 raw lines total
- * (this file plus the skill body), the tightest of the four ceremonial
- * ceilings, matching grill/index.ts's own header discipline.
- *
- * CHOKEPOINT HYGIENE (DIAG-03 / QUAL-02): this file never reaches a model
- * directly -- planning is handed to the ordinary prompt loop via
- * pi.sendUserMessage, never a nested model call. It does not spell, even in
- * a comment, any of the bypass routes tests/unit/chokepoint-lint.test.ts
- * enumerates for DIAG-03.
- *
- * BOUNDARY RULE (BOOT-10): registers exactly one command, zero tools. Does
- * not spell the tool-registration call, in code or in prose.
+ * /plan command: one entry point, no flags, SPEC-gated. Grammar and coverage rules live in the "plan-ceremony" skill and docs/WORKFLOWS.md.
+ * Registers one command, zero tools; planning goes through pi.sendUserMessage, never a nested model call.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
@@ -43,12 +29,7 @@ function candidateSlugsWithSpec(cwd: string): readonly { readonly name: string; 
 		.sort((a, b) => b.mtime - a.mtime);
 }
 
-/**
- * Derives the active slug when none was passed as an argument: exactly one
- * `.pi/work/` subdirectory carrying a SPEC.md resolves silently; zero or
- * more than one REFUSES, naming every candidate -- a silent pick among
- * several is how a plan gets written against the wrong spec [T-09-10-02].
- */
+/** Derives the active slug when none was passed: exactly one `.pi/work/` dir with a SPEC.md resolves; zero or several refuse, naming candidates, so a plan is never written against the wrong spec. */
 function resolveSlug(cwd: string): string {
 	const candidates = candidateSlugsWithSpec(cwd);
 	if (candidates.length === 0) {
@@ -68,18 +49,10 @@ function resolveSlug(cwd: string): string {
 	return only.name;
 }
 
-/** Mirrors grill/index.ts's SpecGateVerdict: deliberately two arms, never three. */
+/** Mirrors grill/index.ts's SpecGateVerdict: two arms, never three. */
 export type PlanGateVerdict = { readonly ok: true } | { readonly ok: false; readonly reason: string };
 
-/**
- * The ONLY function in this subsystem that writes PLAN.md. Re-reads and
- * re-validates the on-disk SPEC.md rather than trusting a prior verdict --
- * the same discipline grill/index.ts's writeSpecIfGated documents for
- * SPEC.md [T-09-10-01] -- derives the SPEC's own requirement ids from its §3
- * body, then runs validatePlan before ever writing. Only
- * renderPlanMarkdown's re-rendering of the VALIDATED artifact ever reaches
- * writeFileSync, never the raw `markdown` parameter.
- */
+/** The only function that writes PLAN.md. Re-validates the on-disk SPEC.md, derives its requirement ids from §3, runs validatePlan, and writes only the re-rendered validated artifact, never the raw `markdown`. */
 export function writePlanIfGated(cwd: string, slug: string, markdown: string): PlanGateVerdict {
 	const dir = workDir(cwd, slug);
 	const specPath = join(dir, SPEC_FILE_NAME);
@@ -103,7 +76,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.registerCommand("plan", {
 		description: "Turn a SPEC.md that has passed its own gate into a coverage-complete PLAN.md task list",
 		handler: async (args, ctx) => {
-			// Order is the whole claim: git guard -> resolve slug -> pre-flight -> idle guard -> hand off.
+			// Order is the claim: git guard -> resolve slug -> pre-flight -> idle guard -> hand off.
 			const verdict = classifyGitInvocation(
 				{ subcommand: "commit", args: [] },
 				{ currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES },

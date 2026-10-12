@@ -295,7 +295,7 @@ export interface ScopeExclusion {
 	readonly reason: string;
 }
 
-/** The parsed §5 Scope Pin. outOfScope and expectedFiles must be non-empty (FLOW-05), enforced by validateSpec; the parser returns what was written. */
+/** The parsed §5 Scope Pin. outOfScope and expectedFiles must be non-empty, enforced by validateSpec; the parser returns what was written. */
 export interface ScopePin {
 	readonly inScope: readonly string[];
 	readonly outOfScope: readonly ScopeExclusion[];
@@ -355,7 +355,7 @@ export function parseScopePin(sectionBody: string): ScopePin {
 
 
 /**
- * Tokens that make a SPEC "fix-framed" (QUAL-03), matched case-insensitively against the Goal.
+ * Tokens that make a SPEC "fix-framed", matched case-insensitively against the Goal.
  * Known imprecision: a fix whose Goal avoids all of them is not caught. A caller may pass `{ fixFramed: true }` to validateSpec to override.
  */
 export const FIX_FRAMING_MARKERS: readonly string[] = Object.freeze(["fix", "bug", "regression", "defect", "broken"]);
@@ -449,9 +449,9 @@ function findMalformedHeadingReason(headings: readonly ParsedHeading[]): string 
  * (3) §1 Goal absent or empty.
  * (4) §4 entry count below MIN_ERROR_BEHAVIOURS.
  * (5) any §4 entry failing IF_THEN_PATTERN, quoting it and its 1-based index.
- * (6) §5 out-of-scope empty, or an item with no reason (FLOW-05).
+ * (6) §5 out-of-scope empty, or an item with no reason.
  * (7) §5 expected-files empty, or an entry failing EXPECTED_FILE_PATTERN.
- * (8) QUAL-03 Root Cause, only when `options.fixFramed ?? isFixFramed(goal)`: absent section, empty cause, no file:line citation, empty or identical "why not the symptom".
+ * (8) Root Cause, only when `options.fixFramed ?? isFixFramed(goal)`: absent section, empty cause, no file:line citation, empty or identical "why not the symptom".
  * (9) accept, constructing SpecArtifact, the only place that does.
  * Proves shape only: not that §4 is right, §5 is complete, or a citation is real.
  */
