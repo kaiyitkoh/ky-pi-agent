@@ -29,8 +29,9 @@ function slugsWithProgress(cwd: string): string[] {
 		.map((e) => e.name);
 }
 
+const GIT_MAX_BUFFER_BYTES = 67_108_864;
 function git(cwd: string, args: string[]): string {
-	const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true, maxBuffer: 64 * 1024 * 1024 });
+	const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true, maxBuffer: GIT_MAX_BUFFER_BYTES });
 	if (r.status !== 0) throw new Error(`review: git ${args.join(" ")} failed (exit ${r.status}): ${r.stderr ?? ""}`);
 	return r.stdout ?? "";
 }

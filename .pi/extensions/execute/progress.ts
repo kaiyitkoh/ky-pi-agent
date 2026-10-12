@@ -111,6 +111,7 @@ interface TextBlock {
 	readonly text?: string;
 }
 
+const MAX_FALLBACK_CHARS = 4000;
 /** The text of a tool's `result`: joined text blocks when present, else a bounded JSON rendering. */
 export function renderToolResultText(result: unknown): string {
 	if (result !== null && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
@@ -124,9 +125,9 @@ export function renderToolResultText(result: unknown): string {
 		}
 	}
 	try {
-		return JSON.stringify(result).slice(0, 4000);
+		return JSON.stringify(result).slice(0, MAX_FALLBACK_CHARS);
 	} catch {
-		return String(result).slice(0, 4000);
+		return String(result).slice(0, MAX_FALLBACK_CHARS);
 	}
 }
 

@@ -308,7 +308,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{
 		file: ".pi/extensions/review/index.ts",
 		budget: 130,
-		why: "plan 09-15 (FLOW-08) -- the /review command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, the six-part reviewer contract, gate depth via gateDepthFor, refute-or-promote before the stop decision, REVIEW.md as the single write, and the MR step through openMr. Measured 123 raw lines 2026-10-13 with countRawLines, rounded up to the next ten",
+		why: "plan 09-15 (FLOW-08) -- the /review command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, the six-part reviewer contract, gate depth via gateDepthFor, refute-or-promote before the stop decision, REVIEW.md as the single write, and the MR step through openMr. Measured 124 raw lines 2026-10-13 (named git maxBuffer constant) with countRawLines, rounded up to the next ten",
 	},
 	{
 		file: ".pi/skills/review/SKILL.md",
@@ -1593,8 +1593,8 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		commandFile: ".pi/extensions/review/index.ts",
 		bodies: [".pi/skills/review/SKILL.md"],
 		budget: 250,
-		why: "FEATURES.md Part 2 line 206's ceiling -- FROZEN, may not move to absorb growth (D-13). Measured 123 raw lines " +
-			"(index.ts) + 50 raw lines (SKILL.md) = 173 raw lines 2026-10-13 with countRawLines, inside 250. mr.ts and " +
+		why: "FEATURES.md Part 2 line 206's ceiling -- FROZEN, may not move to absorb growth (D-13). Measured 124 raw lines " +
+			"(index.ts) + 50 raw lines (SKILL.md) = 174 raw lines 2026-10-13 with countRawLines, inside 250. mr.ts and " +
 			"scope-drift.ts are bound by the .pi/extensions/review DIRECTORY_BUDGETS ratchet",
 	},
 ];
