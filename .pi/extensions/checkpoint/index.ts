@@ -1,5 +1,5 @@
 /**
- * Hardened git-checkpoint extension. Re-authored from Pi's own bundled example: see PROVENANCE.md.
+ * Vendored, hardened git-checkpoint extension. Re-authored from Pi's own bundled example: see PROVENANCE.md.
  * Registers a command (/checkpoint-restore), never a tool; headless restore needs no UI or event.
  * git.ts owns the mechanism, store.ts the persistence under .pi/state/. No agent_end clear: checkpoints survive reload.
  */

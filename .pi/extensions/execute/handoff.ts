@@ -1,117 +1,23 @@
 /**
- * FLOW-09 — the `/execute` handoff packet: a pure builder, a real
- * measurement, and an honest, never-silent probe for the subagent layer that
- * would eventually carry it.
- *
- * BUILD IT OFFLINE AND MEASURE IT HONESTLY. Phase 7 installed nothing —
- * `pi-subagents@0.76.1` is pinned in this project's settings file's
- * `packages[]` list (line 6) and NOT INSTALLED (`RB-07-02`, OUTSTANDING).
- * This module builds the packet and its measurement now, unit-verified with no
- * extension installed, and degrades HONESTLY when asked whether a real
- * dispatch is possible: {@link probeSubagentAvailability} probes by
- * REGISTERED TOOL NAME and reports a distinct `unavailable`, never a silent
- * `pass`. An absent subagent layer that reports "delegated" is Phase 4's
- * headless-guard failure in a new costume.
- *
- * THE PACKET'S CONTRACT, VERBATIM (`.planning/research/FEATURES.md` Part 2,
- * line 202): "SPEC excerpt for its requirement IDs, the relevant §2 verified
- * facts, its file paths, its verification command. Not the whole SPEC, not
- * the conversation." {@link HandoffPacket} has exactly those four content
- * fields, plus the task id.
- *
- * "NEGATIVE TOKENS" IS A MEASUREMENT, NOT AN ASSERTION. Criterion 5 says
- * delegation *costs* negative tokens in the parent. {@link measurePacketDelta}
- * measures the packet against the parent-context text it would replace, with
- * Phase 2's existing estimator, and RECORDS the number. A positive delta is a
- * result to record, not a failure to tune away — nothing in this module or
- * its own test file may assert the SIGN of that number.
- *
- * ---------------------------------------------------------------------------
- * BOUNDARY RULE (BOOT-10)
- * ---------------------------------------------------------------------------
- * This module registers nothing. It does not spell the tool-registration
- * call, in code or in prose — `tests/unit/contributing-boundary.test.ts`
- * matches that call's name as a plain substring across every tracked source
- * under `.pi/extensions/`, comments included, and grants this directory no
- * exemption.
- *
- * ---------------------------------------------------------------------------
- * CHOKEPOINT HYGIENE (DIAG-03 / QUAL-02's structural claim)
- * ---------------------------------------------------------------------------
- * This file never reaches a model. It does not spell, even in a comment, the
- * documented direct-completion method on the model registry, its
- * simple-options or streaming siblings, the method that hands back a raw
- * provider object, the other route to a raw provider object, a deep import
- * under the pi-ai package's adapter path, or the model runtime class name —
- * the same six-plus-one bypass routes `tests/unit/chokepoint-lint.test.ts`
- * enumerates for DIAG-03. Describing them here in the abstract, rather than
- * naming them, is deliberate: `chokepoint-lint.test.ts` matches raw source
- * text, comments included, and grants this module no exemption.
- *
- * ---------------------------------------------------------------------------
- * PURITY
- * ---------------------------------------------------------------------------
- * Every export in this module is pure: plain data in, plain data out. No
- * `ctx`, no filesystem, no subprocess, nothing awaited. `probeSubagentAvailability`
- * takes the live registered-tool-name list as a plain parameter — the same
- * discipline `.pi/extensions/quality/gates.ts#probeLspAvailability` follows
- * and for the identical reason (see that module's own docstring): the caller
- * that actually holds Pi's `ExtensionAPI` supplies the list, this module
- * never derives it.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS DOES NOT, AND CANNOT, PROVE
- * ---------------------------------------------------------------------------
- * {@link probeSubagentAvailability} proves the required tool NAMES are absent
- * from a supplied list; it cannot prove a real spawn would work once they are
- * present — that live check is `RB-09-03`, OUTSTANDING (added by plan 09-17,
- * alongside `RB-07-02`, the install itself). {@link measurePacketDelta}
- * proves the packet's estimated size relative to a supplied parent-context
- * string; it cannot prove what a real `pi-subagents` child would actually be
- * sent over the wire — that live check is the same `RB-09-03`. Neither gap is
- * hidden: both are named here and in this module's own test file.
+ * The /execute handoff packet: a pure builder, a measurement, and an honest probe for the subagent layer.
+ * Pure: plain data in and out, no ctx, no I/O. Registers nothing and never reaches a model, so it names none of the
+ * bypass routes that tests/unit/chokepoint-lint.test.ts and contributing-boundary.test.ts scan for in raw source.
  */
 import type { LegStatus } from "../quality/gates.ts";
 import type { SpecArtifact, VerifiedFact } from "../grill/spec-schema.ts";
 import type { ParsedTask } from "../plan-ceremony/plan-schema.ts";
 import { estimateTokensFromChars } from "../diagnostics/budget.ts";
 
-// ---------------------------------------------------------------------------
-// probeSubagentAvailability — the honest-degradation probe
-// ---------------------------------------------------------------------------
-
 /**
- * The two tool names a real dispatch genuinely needs: `subagent` (spawn) and
- * `bg_wait` (block on the result). Re-derived from the pinned
- * `pi-subagents@0.76.1` compiled source (08.1-04): `subagent` is registered
- * at `src/extension/index.js:667,699`; `bg_wait` at
- * `src/runs/background/wait-tool.js:28,34` (0.49.0 named it `subagent_wait`;
- * the old name no longer exists, so a stale probe would report `unavailable`
- * forever). Both are registered into the parent session regardless of
- * dynamic tool activation: the `subagents_enable` loader
- * (`src/extension/tool-activation.js:78,114`) only toggles which are ACTIVE,
- * and this probe reads the registered list.
- *
- * Child-to-parent tools (`contact_supervisor`,
- * `src/intercom/native-supervisor-channel.js:183`) are deliberately NOT
- * probed: they only let an already-running child talk back to its supervisor;
- * neither is needed to spawn a task and wait for its result, which is the
- * whole of what `/execute`'s one-subagent-per-task shape requires.
+ * Tool names a real dispatch needs: `subagent` (spawn) and `bg_wait` (block on the result).
+ * pi-subagents@0.76.1 src/extension/index.js:667,699 and src/runs/background/wait-tool.js:28,34.
+ * Registered regardless of dynamic activation (tool-activation.js:78,114); child-to-parent tools are deliberately not probed.
  */
 export const SUBAGENT_TOOL_NAMES = ["subagent", "bg_wait"] as const;
 
 /**
- * The subagent-dispatch leg. Requires BOTH {@link SUBAGENT_TOOL_NAMES} to be
- * present in `registeredToolNames` — a partial registration is exactly the
- * shape a boolean check would get wrong, so the missing-name set is always
- * named explicitly, mirroring `probeLspAvailability`'s own contract
- * (`.pi/extensions/quality/gates.ts:163-175`).
- *
- * NEVER reads the project's settings file — that file reports what is
- * CONFIGURED, not what is LOADED (`gates.ts:17-33`'s own rule, carried
- * verbatim here). Reading it to decide availability would report "available"
- * for a dispatch that cannot possibly run, because `pi-subagents@0.76.1` is
- * pinned there and NOT installed.
+ * The subagent-dispatch leg: requires BOTH names in `registeredToolNames` and names the missing set.
+ * Never reads settings: that reports what is configured, not what is loaded.
  */
 export function probeSubagentAvailability(registeredToolNames: readonly string[]): LegStatus {
 	const missing = SUBAGENT_TOOL_NAMES.filter((name) => !registeredToolNames.includes(name));
@@ -127,20 +33,12 @@ export function probeSubagentAvailability(registeredToolNames: readonly string[]
 	return { status: "pass" };
 }
 
-// ---------------------------------------------------------------------------
-// HandoffPacket, buildHandoffPacket — the pure packet builder
-// ---------------------------------------------------------------------------
-
-/**
- * The whole handoff packet a child executor would receive: exactly the four
- * content fields `FEATURES.md` Part 2 line 202 names, plus the task id.
- * Nothing here carries the whole SPEC, the PLAN, or any conversation text.
- */
+/** What a child executor receives: the task id plus its requirement excerpts, facts, paths and verification command; no SPEC or conversation. */
 export interface HandoffPacket {
 	readonly taskId: string;
 	/** The §3 entry text for each of this task's `[R#]` ids, in citation order. */
 	readonly requirementExcerpts: readonly string[];
-	/** The §2 rows whose `claim` is referenced by those requirement excerpts — see {@link selectReferencedFacts}. */
+	/** The §2 rows referenced by those excerpts; see selectReferencedFacts. */
 	readonly verifiedFacts: readonly VerifiedFact[];
 	/** The task's own declared file path(s). */
 	readonly filePaths: readonly string[];
@@ -153,29 +51,10 @@ interface SpecRequirementEntry {
 	readonly text: string;
 }
 
-/**
- * Matches one `R<digits>: <body>` entry inside a §3 `requirementsBody`, per
- * this repository's own recorded convention
- * (`tests/integration/plan-command.test.ts:96`: `"R1: rotate refresh tokens
- * on use.\n\nR2: expire tokens after 30 days."`). The body is captured
- * lazily up to the next `R<digits>:` entry or the end of the text, so `m[0]`
- * (the whole match) is exactly one entry's text, already trimmed of trailing
- * whitespace by construction.
- *
- * BOUNDED FOR BACKTRACKING SAFETY, matching `spec-schema.ts`'s own
- * `IF_THEN_PATTERN` discipline: the body capture is `[\s\S]{0,2000}?`, a
- * bounded lazy quantifier, never `.+`/`.*` — no nested quantifier over an
- * unbounded group.
- */
+/** One `R<digits>: <body>` entry in a §3 body. Body is a bounded lazy quantifier (never `.+`) for backtracking safety. */
 const REQUIREMENT_ENTRY_PATTERN = /\bR(\d{1,4}):\s*(\S[\s\S]{0,2000}?)(?=\s*\bR\d{1,4}:|$)/g;
 
-/**
- * Every `R<id>: <text>` entry found in a §3 `requirementsBody`, keyed by its
- * own id. A body written without this repository's `"R<id>:"` convention
- * (e.g. a bare inline reference with no colon) yields no entry for that id —
- * see {@link buildHandoffPacket}'s own throw for what that means for a
- * caller.
- */
+/** Every `R<id>: <text>` entry in a §3 body; ids written without the colon convention yield no entry. */
 function parseRequirementEntries(requirementsBody: string): readonly SpecRequirementEntry[] {
 	const entries: SpecRequirementEntry[] = [];
 	for (const match of requirementsBody.matchAll(REQUIREMENT_ENTRY_PATTERN)) {
@@ -188,34 +67,15 @@ function parseRequirementEntries(requirementsBody: string): readonly SpecRequire
 	return entries;
 }
 
-/**
- * The DECLARED, DOCUMENTED selection rule for which §2 verified facts travel
- * with a packet: a fact is "referenced by" this task's requirement excerpts
- * when its `claim` text appears, case-insensitively, as a substring of the
- * concatenated excerpt text. This is a real, checkable rule — not "all of
- * them" (which would defeat the whole point of a self-contained, bounded
- * packet) and not an unstated heuristic a reader would have to reverse
- * engineer from the code alone.
- */
+/** A fact travels with the packet when its `claim` appears case-insensitively in the excerpt text; not "all of them", which would defeat the bounded packet. */
 function selectReferencedFacts(verifiedFacts: readonly VerifiedFact[], requirementExcerpts: readonly string[]): readonly VerifiedFact[] {
 	const haystack = requirementExcerpts.join("\n\n").toLowerCase();
 	return verifiedFacts.filter((fact) => haystack.includes(fact.claim.toLowerCase()));
 }
 
 /**
- * Build the packet for one task, pure: no `ctx`, no I/O, no model call.
- *
- * THROWS when `task.requirementIds` cites an id with no matching §3 entry in
- * `spec` — a packet built on a missing requirement is a silently
- * under-specified child, and `validatePlan`'s coverage direction two
- * (`plan-schema.ts:477-487`) should already have prevented a task from
- * citing an id the SPEC never declared at all; reaching here means either
- * that invariant broke, or the §3 body names the id without this
- * repository's own `"R<id>:"` entry convention (see
- * {@link parseRequirementEntries}'s own docstring). THROWS, for the
- * identical "this should already be impossible" reason, when the task
- * carries no file path or no verification command — `validatePlan`'s
- * branches (4)/(5) already require both before a `PlanArtifact` can exist.
+ * Build the packet for one task. THROWS when a cited requirement id has no §3 entry, or the task lacks a
+ * file path or verification command: validatePlan should already make each impossible.
  */
 export function buildHandoffPacket(input: { readonly spec: SpecArtifact; readonly task: ParsedTask }): HandoffPacket {
 	const { spec, task } = input;
@@ -250,16 +110,7 @@ export function buildHandoffPacket(input: { readonly spec: SpecArtifact; readonl
 	};
 }
 
-// ---------------------------------------------------------------------------
-// renderHandoffPacket — the text a child would actually receive
-// ---------------------------------------------------------------------------
-
-/**
- * Render a {@link HandoffPacket} as the text a real child executor would
- * receive, accumulator-style (`renderReviewMarkdown`'s shape,
- * `review-schema.ts:526-579`): a `string[]` pushed to per section, joined
- * with `"\n"`. This is what {@link measurePacketDelta} measures.
- */
+/** Render a packet as the text a child would receive; this is what measurePacketDelta measures. */
 export function renderHandoffPacket(packet: HandoffPacket): string {
 	const lines: string[] = [];
 
@@ -293,10 +144,6 @@ export function renderHandoffPacket(packet: HandoffPacket): string {
 	return lines.join("\n");
 }
 
-// ---------------------------------------------------------------------------
-// measurePacketDelta — the real measurement, never an assertion
-// ---------------------------------------------------------------------------
-
 /** {@link measurePacketDelta}'s return shape. */
 export interface PacketDeltaMeasurement {
 	readonly packetTokens: number;
@@ -306,18 +153,8 @@ export interface PacketDeltaMeasurement {
 }
 
 /**
- * Measure a rendered packet against the parent-context text it would
- * replace, using Phase 2's own char-based estimator
- * (`estimateTokensFromChars`, `.pi/extensions/diagnostics/budget.ts:223-225`
- * -- `Math.ceil(chars/4)`, Pi's own heuristic, not a tokenizer; no tokenizer
- * dependency exists or may be added, per that file's own docstring).
- *
- * THIS FUNCTION MEASURES. IT DOES NOT ASSERT. `deltaTokens` is
- * `packetTokens - parentTokens`; a negative result means the packet is
- * SMALLER than the parent context it replaces (criterion 5's claimed
- * "negative tokens"), a positive result means it is larger. Both are real,
- * recordable outcomes -- neither this function nor its own caller may treat
- * either sign as a target to tune the fixture toward.
+ * Measure a packet against the parent-context text it replaces with estimateTokensFromChars (diagnostics/budget.ts:223-225,
+ * chars/4, not a tokenizer). Measures, never asserts: neither sign of `deltaTokens` is a target.
  */
 export function measurePacketDelta(input: { readonly packetText: string; readonly parentContextText: string }): PacketDeltaMeasurement {
 	const packetTokens = estimateTokensFromChars(input.packetText.length);

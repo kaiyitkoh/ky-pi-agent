@@ -139,7 +139,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/workflows/index.ts",
-		budget: 100,
+		budget: 90,
 		why: "FLOW-01 -- the ROADMAP's /quick raw-line ceiling. RAISED 80 -> 100 by plan 08-11 (GATE-01): /quick now " +
 			"calls quality/index.ts#runQuickGateStage after the git pre-flight and before startRun, blocks with " +
 			"gate.report on a failing leg, and drains-and-discards takeQualityCost() on that branch with its own " +
@@ -161,12 +161,12 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"96 raw lines 2026-08-15, rounded up to the next ten. Still well under the ROADMAP's own " +
 			"\"above 100 it has FAILED\" line. CORRECTED by plan 09-02 (09-RESEARCH.md Pitfall 2): that " +
 			"96 figure was already three lines stale by the time it was written -- re-measured with " +
-			"countRawLines and confirmed 99 raw lines 2026-08-15, still rounding up to the same 100, so " +
-			"the declared budget was never wrong, only the narrative",
+			"countRawLines and confirmed 99 raw lines 2026-08-15, still rounding up to the same 100. Re-measured 84 raw lines 2026-10-13 after " +
+			"the comment cleanup, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
-		budget: 390,
+		budget: 250,
 		why: "CR-01 iteration 3 fix: recordCaptureFailure() so a tool_execution_end capture that throws " +
 			"rejects instead of vanishing, plus the tool_execution_end docstring rewrite -- measured 336 " +
 			"raw lines 2026-08-15 (up from 328), rounded up to the next ten. RAISED 340 -> 390 by plan 08-12 " +
@@ -174,7 +174,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"branches (2) and (3), with the docstring explaining why), startRun/endRun now thread baseTree/headTree " +
 			"through RunState, and the WHAT THIS PREDICATE DOES NOT PROVE paragraph was rewritten to state the " +
 			"narrower, still-true unrelated-content limit rather than the now-closed empty-commit one. Measured " +
-			"381 raw lines 2026-08-15, rounded up to the next ten",
+			"381 raw lines 2026-08-15. Re-measured 242 raw lines 2026-10-13 after the comment cleanup, rounded up to the next ten",
 	},
 	// WR-05: these three are NOT under workflows/ -- discovered because they contain
 	// COMMAND_MARKER (isCommandSource). Declared here so the completeness check
@@ -187,8 +187,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/harness/index.ts",
-		budget: 120,
-		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 116 raw lines 2026-08-14, rounded up to the next ten",
+		budget: 70,
+		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 63 raw lines 2026-10-13, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/diagnostics/budget.ts",
@@ -197,7 +197,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/checkpoint/index.ts",
-		budget: 250,
+		budget: 130,
 		why: "Phase 7 plan 03 (EXT-07)'s /checkpoint-restore command -- WR-05 widened discovery to catch " +
 			"command surfaces outside workflows/; measured 161 raw lines 2026-08-15, rounded up to the next ten. " +
 			"RAISED 170 -> 240 by the Phase 7 code-review fix pass, for four findings that all land in this " +
@@ -211,7 +211,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"Re-measured 229 raw lines 2026-08-15, rounded up to the next ten. RAISED 240 -> 250 by the " +
 			"iteration-3 fix pass for CR2-03: both restore call sites now name the undo sha and the count of " +
 			"files removed, because a restore that deletes post-checkpoint work silently is the failure mode " +
-			"that finding IS. Re-measured 244 raw lines 2026-08-15",
+			"that finding IS. Re-measured 244 raw lines 2026-08-15. Re-measured 130 raw lines 2026-10-13 after the comment cleanup",
 	},
 	{
 		file: ".pi/extensions/loop-police/loop-police.ts",
@@ -325,7 +325,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: WORKFLOWS_DIR,
-		budget: 480,
+		budget: 330,
 		why: "D-11's original ratchet -- /quick's own directory; measured 415 raw lines 2026-08-15 " +
 			"(index.ts 79 + evidence.ts 336) after iteration 3's CR-01/WR-02, rounded up to the next ten. " +
 			"RAISED 420 -> 430 by plan 08-11 (GATE-01 wiring) -- see the per-file entry above for what grew. " +
@@ -333,7 +333,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"of ten. RAISED 430 -> 480 by plan 08-12 (GATE-01's tree-comparison branch) -- see both per-file " +
 			"entries above for what grew. Re-measured 476 raw lines 2026-08-15 (index.ts 95 + evidence.ts 381), " +
 			"rounded up to the next ten. Code-review fix pass WR-06 (see the per-file entry above): re-measured " +
-			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381), still rounding up to the same 480",
+			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381). Re-measured 326 raw lines 2026-10-13 (index.ts 84 + evidence.ts 242), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/routing",
@@ -343,8 +343,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/harness",
-		budget: 140,
-		why: "WR-03; measured 133 raw lines across 2 files 2026-08-15, rounded up to the next ten",
+		budget: 80,
+		why: "WR-03; measured 80 raw lines across 2 files 2026-10-13, rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
@@ -358,7 +358,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
-		budget: 1100,
+		budget: 550,
 		why: "Phase 7 plan 03 (EXT-07)'s vendored checkpoint extension -- git.ts and store.ts never spell " +
 			"registerCommand( themselves but count toward this total per WR-03; measured 521 raw lines across " +
 			"3 files 2026-08-15 (index.ts 161 + git.ts 183 + store.ts 177), rounded up to the next ten. " +
@@ -406,8 +406,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"up after the staleness breaker has had a full window to clear a dead lock. The added lines are " +
 			"the new docstrings explaining why the old trade did not hold and what replaced it -- exactly the " +
 			"kind of reasoning a budget must not pressure out of a concurrency-correctness fix. Re-measured " +
-			"1098 raw lines across 3 files 2026-08-15 (index.ts 244 + git.ts 489 + store.ts 365), rounded up " +
-			"to the next ten",
+			"1098 raw lines across 3 files 2026-08-15 (index.ts 244 + git.ts 489 + store.ts 365). Re-measured 548 raw " +
+			"lines across 3 files 2026-10-13 (index.ts 130 + git.ts 204 + store.ts 214), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/loop-police",
@@ -643,7 +643,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/execute",
-		budget: 340,
+		budget: 170,
 		why: "plan 09-11 (FLOW-09) -- the first file of the /execute subsystem, handoff.ts: the honest-degradation " +
 			"probeSubagentAvailability (probing the minimum genuinely-needed subagent/bg_wait pair, never " +
 			"reading the settings file), the pure buildHandoffPacket/renderHandoffPacket, and the real " +
@@ -652,7 +652,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"call yet (a later plan wires the /execute command itself) and is not YET reachable by commandDirs' " +
 			"present-but-undeclared check for that reason -- declared here anyway, ahead of that check requiring " +
 			"it, per plan 09-05's identical precedent for .pi/extensions/grill and plan 09-09's for " +
-			".pi/extensions/plan-ceremony. Measured 332 raw lines across 1 file 2026-08-16 (handoff.ts), rounded " +
+			".pi/extensions/plan-ceremony. Measured 169 raw lines across 1 file 2026-10-13 (handoff.ts), rounded " +
 			"up to the next ten",
 	},
 	{
