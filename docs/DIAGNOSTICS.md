@@ -583,7 +583,7 @@ calibration grader, so a trial is "caught" only when a finding names the right f
 shuffled, so provider drift lands on every arm alike. First stage R=10 repeats (6 defects x 10 x 4 arms = 240 trials); a second
 stage of R=20 only if the first is inconclusive. The seed is `KY_EXP_SEED` (default 20261013).
 
-**Metrics.** Catch rate per arm, malformed-output count, prose-tool-call rate, unmatched findings, input and cache-read tokens.
+**Metrics.** Catch rate per arm, excluded-trial count, malformed-output count, prose-tool-call rate, unmatched findings, input and cache-read tokens.
 
 **Pre-registered decision rule.** Pinned by `scripts/ctx-experiment-core.ts` and its tests, so changing it after seeing data
 shows up as a test edit. With d = catch(F) - catch(A) and a 90% Newcombe interval (z = 1.6449):
@@ -591,6 +591,12 @@ shows up as a test edit. With d = catch(F) - catch(A) and a 90% Newcombe interva
 - `DEGRADES` when d <= -0.15 (`DEGRADE_POINTS`) and the interval's upper bound is below zero.
 - `NO_DETECTABLE_EFFECT` when the interval's lower bound is above -0.15.
 - `INCONCLUSIVE` otherwise.
+
+**Exclusions.** A trial that exits non-zero (it is listed in `failures.tsv`), produces no assistant message, or ends with
+`stopReason` `error` or `aborted` measured the infrastructure, not the model. It is excluded: neither a catch nor a miss, and
+counted per arm as `excluded` in `summary.json` and on stdout. Failures are not arm-neutral (the largest prompt draws the most
+rate-limit and schema rejections), so any comparison involving an arm with more than 5% of its planned trials excluded
+(`MAX_EXCLUDED_SHARE`) is `INCONCLUSIVE`, and so is the discrimination that depends on it.
 
 **Discrimination.**
 

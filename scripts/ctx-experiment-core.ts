@@ -30,6 +30,12 @@ export const PROSE_CONCENTRATION = 0.5;
 /** Below this catch rate an arm is "low", so a null A-vs-F result points at neither arm differing. */
 export const LOW_CATCH_RATE = 0.5;
 
+/**
+ * Largest share of an arm's planned trials that may be excluded as infrastructure failures before any comparison using
+ * that arm is refused; failures are not arm-neutral (the biggest prompt draws the most rejections).
+ */
+export const MAX_EXCLUDED_SHARE = 0.05;
+
 export const FIRST_STAGE_REPEATS = 10;
 export const SECOND_STAGE_REPEATS = 20;
 
@@ -150,7 +156,10 @@ export function decide(first: Proportion, second: Proportion): Decision {
 
 export interface ArmSummary {
 	readonly arm: ArmId;
+	/** Scored trials; excluded ones are not in this count. */
 	readonly trials: number;
+	/** Trials that never produced a usable answer for infrastructure reasons, so they are neither catches nor misses. */
+	readonly excluded: number;
 	readonly caught: number;
 	readonly malformed: number;
 	readonly assistantMessages: number;
@@ -178,6 +187,20 @@ function proportion(summary: ArmSummary): Proportion {
 	return { caught: summary.caught, n: summary.trials };
 }
 
+/** False when too many of the arm's planned trials were excluded for any comparison using it to be trusted. */
+export function exclusionsAcceptable(summary: ArmSummary): boolean {
+	const planned = summary.trials + summary.excluded;
+	return planned > 0 && summary.excluded / planned <= MAX_EXCLUDED_SHARE + EPSILON;
+}
+
+/** `decide`, refusing with INCONCLUSIVE when either arm exceeds the exclusion ceiling. */
+export function decideArms(first: ArmSummary, second: ArmSummary): Decision {
+	if (!exclusionsAcceptable(first) || !exclusionsAcceptable(second)) {
+		return "INCONCLUSIVE";
+	}
+	return decide(proportion(first), proportion(second));
+}
+
 function proseBlamed(summary: ArmSummary): boolean {
 	const rate = summary.assistantMessages === 0 ? 0 : summary.proseMessages / summary.assistantMessages;
 	return (
@@ -202,13 +225,13 @@ export function discriminate(summary: ExperimentSummary, secondRouteMinimal?: Ar
 	if (minimal === undefined || full === undefined || minimal.trials === 0 || full.trials === 0) {
 		return "inconclusive";
 	}
-	const primary = decide(proportion(full), proportion(minimal));
+	const primary = decideArms(full, minimal);
 	if (primary === "DEGRADES") {
 		const padded = summary.C;
 		if (padded === undefined || padded.trials === 0) {
 			return "inconclusive";
 		}
-		const paddedVsMinimal = decide(proportion(padded), proportion(minimal));
+		const paddedVsMinimal = decideArms(padded, minimal);
 		if (paddedVsMinimal === "NO_DETECTABLE_EFFECT") {
 			return "harness-behaviour";
 		}
@@ -221,7 +244,7 @@ export function discriminate(summary: ExperimentSummary, secondRouteMinimal?: Ar
 		if (
 			secondRouteMinimal !== undefined &&
 			secondRouteMinimal.trials > 0 &&
-			decide(proportion(minimal), proportion(secondRouteMinimal)) === "DEGRADES"
+			decideArms(minimal, secondRouteMinimal) === "DEGRADES"
 		) {
 			return "provider-misconfiguration";
 		}
@@ -369,6 +392,19 @@ export interface ScoredTrial {
 	readonly repeat: number;
 	readonly score: TrialScore;
 	readonly output: ParsedOutput;
+	/** Set by `isInfrastructureFailure`; an excluded trial counts only toward `excluded`. */
+	readonly excluded?: boolean;
+}
+
+/** A trial whose process failed, or whose run ended with no answer from the model, measures the infrastructure. */
+export function isInfrastructureFailure(output: ParsedOutput, exitStatus: number | undefined): boolean {
+	if (exitStatus !== undefined && exitStatus !== 0) {
+		return true;
+	}
+	if (output.assistantMessages.length === 0) {
+		return true;
+	}
+	return output.stopReason === "error" || output.stopReason === "aborted";
 }
 
 type MutableArmSummary = { -readonly [K in keyof ArmSummary]: ArmSummary[K] };
@@ -385,6 +421,7 @@ export function summarise(
 		const row: MutableArmSummary = totals.get(trial.arm) ?? {
 			arm: trial.arm,
 			trials: 0,
+			excluded: 0,
 			caught: 0,
 			malformed: 0,
 			assistantMessages: 0,
@@ -396,6 +433,11 @@ export function summarise(
 			inputTokens: 0,
 			cacheReadTokens: 0,
 		};
+		if (trial.excluded === true) {
+			row.excluded += 1;
+			totals.set(trial.arm, row);
+			continue;
+		}
 		row.trials += 1;
 		row.caught += trial.score.caught ? 1 : 0;
 		row.malformed += trial.score.malformed ? 1 : 0;

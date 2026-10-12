@@ -22,13 +22,16 @@ import {
 	DEGRADE_POINTS,
 	FIRST_STAGE_REPEATS,
 	LOW_CATCH_RATE,
+	MAX_EXCLUDED_SHARE,
 	PROSE_RATE_THRESHOLD,
 	SECOND_STAGE_REPEATS,
 	Z_90,
 	buildRunPlan,
 	decide,
+	decideArms,
 	diffInterval,
 	discriminate,
+	isInfrastructureFailure,
 	type ArmId,
 	type ArmSummary,
 	type ExperimentSummary,
@@ -44,6 +47,7 @@ describe("pre-registered constants", () => {
 		expect(PROSE_RATE_THRESHOLD).toBe(0.1);
 		expect(FIRST_STAGE_REPEATS).toBe(10);
 		expect(SECOND_STAGE_REPEATS).toBe(20);
+		expect(MAX_EXCLUDED_SHARE).toBe(0.05);
 		expect(ARM_IDS).toEqual(["A", "B", "F", "C"]);
 	});
 });
@@ -133,6 +137,7 @@ function arm(id: ArmId, caught: number, extra: Partial<ArmSummary> = {}): ArmSum
 	return {
 		arm: id,
 		trials: 60,
+		excluded: 0,
 		caught,
 		malformed: 0,
 		assistantMessages: 60,
@@ -186,6 +191,49 @@ describe("discriminate", () => {
 	it("provider-misconfiguration: low catch on the primary route, healthy on a second route", () => {
 		const second = arm("A", 54);
 		expect(discriminate(summary(6, 6, 6, 6), second)).toBe("provider-misconfiguration");
+	});
+
+	it("inconclusive when an arm's exclusions exceed the ceiling; at the ceiling the reading stands", () => {
+		expect(discriminate(summary(50, 48, 20, 50, { F: { excluded: 3 } }))).toBe("harness-behaviour");
+		expect(discriminate(summary(50, 48, 20, 50, { F: { excluded: 4 } }))).toBe("inconclusive");
+		expect(discriminate(summary(50, 48, 20, 50, { C: { excluded: 10 } }))).toBe("inconclusive");
+	});
+});
+
+describe("exclusions", () => {
+	const done = parseJsonModeOutput(
+		`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [{ type: "text", text: "x" }], stopReason: "stop" } })}\n`,
+	);
+	const failed = (stopReason: string) =>
+		parseJsonModeOutput(
+			`${JSON.stringify({ type: "message_end", message: { role: "assistant", content: [], stopReason } })}\n`,
+		);
+
+	it("a non-zero exit, no assistant message, or an error/aborted stop is an infrastructure failure", () => {
+		expect(isInfrastructureFailure(done, undefined)).toBe(false);
+		expect(isInfrastructureFailure(done, 0)).toBe(false);
+		expect(isInfrastructureFailure(done, 1)).toBe(true);
+		expect(isInfrastructureFailure(parseJsonModeOutput(""), undefined)).toBe(true);
+		expect(isInfrastructureFailure(failed("error"), undefined)).toBe(true);
+		expect(isInfrastructureFailure(failed("aborted"), undefined)).toBe(true);
+		expect(isInfrastructureFailure(failed("length"), undefined)).toBe(false);
+	});
+
+	it("an excluded trial is neither a catch nor a miss", () => {
+		const result = summarise(
+			[
+				{ arm: "F", defect: "d1", repeat: 0, score: { caught: true, malformed: false, unmatchedFindings: 0 }, output: done },
+				{ arm: "F", defect: "d2", repeat: 0, score: { caught: false, malformed: true, unmatchedFindings: 0 }, output: parseJsonModeOutput(""), excluded: true },
+			],
+			{ A: [], B: [], F: [], C: [] },
+		);
+		expect(result.F).toMatchObject({ trials: 1, excluded: 1, caught: 1, misses: 0, malformed: 0 });
+	});
+
+	it("decideArms refuses over the ceiling", () => {
+		expect(decideArms(arm("F", 20), arm("A", 50))).toBe("DEGRADES");
+		expect(decideArms(arm("F", 20, { excluded: 4 }), arm("A", 50))).toBe("INCONCLUSIVE");
+		expect(decideArms(arm("F", 20), arm("A", 50, { excluded: 4 }))).toBe("INCONCLUSIVE");
 	});
 });
 

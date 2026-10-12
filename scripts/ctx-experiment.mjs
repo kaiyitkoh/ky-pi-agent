@@ -156,32 +156,45 @@ async function main(argv) {
 		const out = rest[0];
 		const expectations = SEEDED_DEFECTS.map((d) => ({ id: d.id, ...d.expected }));
 		const rows = readFileSync(join(out, "trials.tsv"), "utf-8").split("\n").filter((l) => l !== "");
+		const failuresFile = join(out, "failures.tsv");
+		const exitStatus = new Map(
+			(existsSync(failuresFile) ? readFileSync(failuresFile, "utf-8") : "")
+				.split("\n")
+				.filter((l) => l !== "")
+				.map((l) => {
+					const [id, status] = l.split("\t");
+					return [id, Number(status) || 1];
+				}),
+		);
 		const scored = rows.map((line) => {
 			const [id, arm, defect, repeat] = line.split("\t");
 			const file = join(out, `${fileId(id)}.jsonl`);
 			const output = core.parseJsonModeOutput(existsSync(file) ? readFileSync(file, "utf-8") : "");
-			return { arm, defect, repeat: Number(repeat), score: core.scoreTrial(output.finalText, defect, expectations), output };
+			const excluded = core.isInfrastructureFailure(output, exitStatus.get(id));
+			return { arm, defect, repeat: Number(repeat), score: core.scoreTrial(output.finalText, defect, expectations), output, excluded };
 		});
 		const tools = { A: ACTIVE_TOOLS, B: ACTIVE_TOOLS, F: ACTIVE_TOOLS, C: ACTIVE_TOOLS };
 		const arms = core.summarise(scored, tools);
-		const prop = (a) => (arms[a] === undefined ? undefined : { caught: arms[a].caught, n: arms[a].trials });
 		const compare = (a, b) => {
-			const first = prop(a);
-			const second = prop(b);
-			if (first === undefined || second === undefined) {
+			const first = arms[a];
+			const second = arms[b];
+			if (first === undefined || second === undefined || first.trials === 0 || second.trials === 0) {
 				return { decision: "INCONCLUSIVE" };
 			}
-			const [lower, upper] = core.diffInterval(first, second, core.Z_90);
+			const p1 = { caught: first.caught, n: first.trials };
+			const p2 = { caught: second.caught, n: second.trials };
+			const [lower, upper] = core.diffInterval(p1, p2, core.Z_90);
 			return {
-				delta: first.caught / first.n - second.caught / second.n,
+				delta: p1.caught / p1.n - p2.caught / p2.n,
 				interval: [lower, upper],
-				decision: core.decide(first, second),
+				decision: core.decideArms(first, second),
 			};
 		};
 		const messages = Object.values(arms).reduce((s, a) => s + a.assistantMessages, 0);
 		const prose = Object.values(arms).reduce((s, a) => s + a.proseMessages, 0);
 		const summary = {
 			trials: scored.length,
+			excluded: scored.filter((t) => t.excluded).length,
 			arms,
 			decision: compare("F", "A"),
 			comparisons: { "F-vs-A": compare("F", "A"), "B-vs-A": compare("B", "A"), "C-vs-A": compare("C", "A") },
@@ -190,8 +203,14 @@ async function main(argv) {
 			malformed: Object.values(arms).reduce((s, a) => s + a.malformed, 0),
 		};
 		writeFileSync(join(out, "summary.json"), `${JSON.stringify(summary, null, 2)}\n`, "utf-8");
-		const pct = (a) => (a === undefined ? "n/a" : `${a.caught}/${a.trials} (${((100 * a.caught) / a.trials).toFixed(1)}%)`);
-		const lines = ["Context-pollution experiment summary", `trials: ${summary.trials}`];
+		const pct = (a) => {
+			if (a === undefined) {
+				return "n/a";
+			}
+			const rate = a.trials === 0 ? "n/a" : `${((100 * a.caught) / a.trials).toFixed(1)}%`;
+			return `${a.caught}/${a.trials} (${rate}), excluded ${a.excluded}`;
+		};
+		const lines = ["Context-pollution experiment summary", `trials: ${summary.trials}, excluded: ${summary.excluded}`];
 		for (const id of ["A", "B", "F", "C"]) {
 			lines.push(`arm ${id}: catch ${pct(arms[id])}`);
 		}

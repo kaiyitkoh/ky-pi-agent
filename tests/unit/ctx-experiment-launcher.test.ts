@@ -201,6 +201,24 @@ describe("ctx-experiment summarise", () => {
 		expect(summary.decision.delta).toBe(-1);
 	});
 
+	it("excludes a failed or empty trial instead of scoring it as a miss, and reports the count", () => {
+		const out = tempDir("ctx-sum-fail-");
+		const id = defect.id;
+		const rows = ["A", "F", "C"].map((a) => `${id}:r0:${a}\t${a}\t${id}\t0`).join("\n");
+		writeFileSync(join(out, "trials.tsv"), `${rows}\n`, "utf-8");
+		writeFileSync(join(out, `${id}_r0_A.jsonl`), streamOf(reviewText([catching(id)])), "utf-8");
+		writeFileSync(join(out, `${id}_r0_F.jsonl`), streamOf(reviewText([catching(id)])), "utf-8");
+		writeFileSync(join(out, "failures.tsv"), `${id}:r0:F\t137\n`, "utf-8");
+		const result = spawnSync(process.execPath, [CLI, "summarise", out], { encoding: "utf-8", windowsHide: true });
+		expect(result.status, result.stderr).toBe(0);
+		const summary = JSON.parse(readFileSync(join(out, "summary.json"), "utf-8"));
+		expect(summary.excluded).toBe(2);
+		expect(summary.arms.F).toMatchObject({ trials: 0, excluded: 1, misses: 0 });
+		expect(summary.arms.C).toMatchObject({ trials: 0, excluded: 1, misses: 0 });
+		expect(summary.decision.decision).toBe("INCONCLUSIVE");
+		expect(result.stdout).toContain("excluded: 2");
+	});
+
 	it("exits 2 with usage for an unknown subcommand", () => {
 		const result = spawnSync(process.execPath, [CLI, "bogus"], { encoding: "utf-8", windowsHide: true });
 		expect(result.status).toBe(2);
