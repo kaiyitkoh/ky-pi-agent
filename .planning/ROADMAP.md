@@ -429,7 +429,7 @@ Plans:
 **Goal:** Code comments in this repo — and code written by the harness's models in the user's other projects — state only non-obvious WHY in one or two lines, and the rule is enforced rather than hoped for.
 **Requirements**: CMT-01..05 (inserted 2026-10-12, see 08.2-CONTEXT.md)
 **Depends on:** Phase 08.1
-**Plans:** 2/13 plans executed
+**Plans:** 3/13 plans executed
 
 **Success Criteria:**
 
@@ -442,7 +442,7 @@ Plans:
 
 - [x] 08.2-01-PLAN.md — comment-rules constant + harness before_agent_start section, AGENTS.md, CLAUDE.md @AGENTS.md, CMT reqs, RB-08-04
 - [x] 08.2-02-PLAN.md — AST comment scanner, ID gate with PENDING_CLEANUP ratchet, ratio report, comment-only transpile verifier
-- [ ] 08.2-03-PLAN.md — cleanup: diagnostics index/budget/call-model/wire
+- [x] 08.2-03-PLAN.md — cleanup: diagnostics index/budget/call-model/wire
 - [ ] 08.2-04-PLAN.md — cleanup: diagnostics remaining six files
 - [ ] 08.2-05-PLAN.md — cleanup: routing
 - [ ] 08.2-06-PLAN.md — cleanup: checkpoint, harness header, workflows, execute/handoff
