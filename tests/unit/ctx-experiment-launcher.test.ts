@@ -7,7 +7,7 @@
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterAll, describe, expect, it } from "vitest";
 
@@ -73,10 +73,14 @@ function streamOf(text: string): string {
 	return `${JSON.stringify({ type: "message_end", message })}\n`;
 }
 
-function runLauncher(env: Record<string, string>) {
+function runLauncher(env: Record<string, string>, prependPath?: string) {
 	const merged: NodeJS.ProcessEnv = { ...process.env, ...env };
 	for (const key of Object.keys(merged)) {
 		if (!(key in env) && key.startsWith("KY_EXP_")) delete merged[key];
+	}
+	if (prependPath !== undefined) {
+		const pathKey = Object.keys(merged).find((k) => k.toUpperCase() === "PATH") ?? "PATH";
+		merged[pathKey] = `${prependPath}${delimiter}${merged[pathKey] ?? ""}`;
 	}
 	return spawnSync(SH, [LAUNCHER], { env: merged, encoding: "utf-8", timeout: TIMEOUT_MS, windowsHide: true });
 }
@@ -101,6 +105,16 @@ describe("ctx-experiment launcher with a fake pi", () => {
 		{ encoding: "utf-8", mode: 0o755 },
 	);
 
+	// A key on any command line would pass through one of these; each shim logs its argv, then runs the real program.
+	const shimDir = tempDir("ctx-shims-");
+	for (const [name, real] of [["node", fwd(process.execPath)], ["env", "/usr/bin/env"]] as const) {
+		writeFileSync(
+			join(shimDir, name),
+			["#!/bin/sh", `printf '%s\\n' "$@" >>"${fwd(evidence)}/shim-argv.log"`, `exec "${real}" "$@"`, ""].join("\n"),
+			{ encoding: "utf-8", mode: 0o755 },
+		);
+	}
+
 	const base = {
 		KY_EXP_PI: fwd(fakePi),
 		KY_EXP_DEFECTS: defect.id,
@@ -114,7 +128,7 @@ describe("ctx-experiment launcher with a fake pi", () => {
 	};
 
 	it("runs every arm in a scrubbed environment and writes a summary", () => {
-		const result = runLauncher(base);
+		const result = runLauncher(base, shimDir);
 		expect(result.status, `${result.stderr}\n${result.stdout}`).toBe(0);
 
 		const jsonl = readdirSync(out).filter((f) => f.endsWith(".jsonl"));
@@ -140,6 +154,11 @@ describe("ctx-experiment launcher with a fake pi", () => {
 		}
 
 		const argLists = argvs.map((f) => readFileSync(join(evidence, f), "utf-8").split("\n"));
+		const shimLog = readFileSync(join(evidence, "shim-argv.log"), "utf-8");
+		expect(shimLog, "the node shim must have been on PATH").toContain("summarise");
+		for (const text of [shimLog, ...argLists.map((a) => a.join("\n"))]) {
+			expect(text).not.toContain("dummy-key-value");
+		}
 		const full = argLists.filter((a) => a.includes("--ky-profile") && a.includes("full"));
 		const minimal = argLists.filter((a) => a.includes("-ne") && a.includes("-nc") && !a.includes("--append-system-prompt"));
 		const padded = argLists.filter((a) => a.includes("-ne") && a.includes("--append-system-prompt"));

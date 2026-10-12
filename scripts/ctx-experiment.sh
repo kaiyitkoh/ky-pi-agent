@@ -3,9 +3,10 @@
 # Runs the pre-registered minimal-vs-full context experiment end to end.
 #
 # SAFETY: the minimal arm gives a model bash and no safety layer, so every trial
-# runs in a disposable repo under a scrubbed environment (env -i with an explicit
-# allowlist). Nothing from the operator's environment crosses except PATH, the
-# Windows system root, and the single provider key variable named by KY_EXP_KEY_VAR.
+# runs in a disposable repo under a scrubbed environment that `ctx-experiment.mjs run`
+# builds as an explicit allowlist. No environment variable crosses except PATH, the
+# Windows system root, and the single provider key variable named by KY_EXP_KEY_VAR,
+# which is handed over in the child's environment, never on a command line.
 # HOME, USERPROFILE, TMP/TEMP and the Pi agent dir all point into the per-trial root.
 #
 # Required env: KY_EXP_MODEL (provider/model id), KY_EXP_KEY_VAR (NAME of the variable
@@ -26,8 +27,8 @@ die() {
 case "$KY_EXP_KEY_VAR" in
 	*[!A-Za-z0-9_]* | [0-9]* | [Aa][Ww][Ss]_*) die "KY_EXP_KEY_VAR is not an acceptable variable name: $KY_EXP_KEY_VAR" ;;
 esac
-key_value=$(printenv "$KY_EXP_KEY_VAR" 2>/dev/null || true)
-[ -n "$key_value" ] || die "environment variable $KY_EXP_KEY_VAR is not set"
+[ -n "$(printenv "$KY_EXP_KEY_VAR" 2>/dev/null || true)" ] || die "environment variable $KY_EXP_KEY_VAR is not set"
+export KY_EXP_KEY_VAR
 
 seed=${KY_EXP_SEED:-20261013}
 pi_bin=${KY_EXP_PI:-pi}
@@ -53,6 +54,7 @@ native() {
 		printf '%s\n' "$1"
 	fi
 }
+sh_bin=$(native "$(command -v sh)")
 
 tab=$(printf '\t')
 newline='
@@ -73,7 +75,6 @@ while IFS="$tab" read -r trial_id arm defect repeat <&3; do
 		pad_arg=$(native "$pad_file")
 	fi
 	arm_args=$(node "$cli" args "$arm" $pad_arg)
-	prompt=$(cat "$trial_root/prompt.md")
 
 	root_native=$(native "$trial_root")
 	old_ifs=$IFS
@@ -86,15 +87,8 @@ while IFS="$tab" read -r trial_id arm defect repeat <&3; do
 
 	printf '%s\n' "[$count/$total] $trial_id" >&2
 	status=0
-	(
-		cd "$trial_root/repo"
-		env -i PATH="$PATH" HOME="$root_native/home" USERPROFILE="$root_native/home" \
-			TMP="$root_native/tmp" TEMP="$root_native/tmp" TMPDIR="$root_native/tmp" \
-			PI_CODING_AGENT_DIR="$root_native/agent" ${SYSTEMROOT:+SYSTEMROOT="$SYSTEMROOT"} \
-			"$KY_EXP_KEY_VAR=$key_value" \
-			"$pi_bin" --model "$KY_EXP_MODEL" "$@" "$prompt" \
-			</dev/null >"$out/$file_id.jsonl" 2>"$out/$file_id.stderr.log"
-	) || status=$?
+	node "$cli" run "$root_native" "$(native "$out/$file_id.jsonl")" "$(native "$out/$file_id.stderr.log")" \
+		"$sh_bin" "$pi_bin" --model "$KY_EXP_MODEL" "$@" </dev/null || status=$?
 	if [ "$status" -ne 0 ]; then
 		printf '%s\t%s\n' "$trial_id" "$status" >>"$out/failures.tsv"
 	fi

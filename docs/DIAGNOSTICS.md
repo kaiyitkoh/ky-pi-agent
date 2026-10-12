@@ -619,9 +619,11 @@ key; only that one variable is passed to pi. Optional: `KY_EXP_SEED`, `KY_EXP_RE
 Cost: 240 model calls with a few thousand input tokens each; budget it as a few dollars at cheap-model prices.
 
 **Safety envelope.** The minimal arm has bash and no safety layer, and the laptop holds live AWS credentials. Each trial therefore
-runs in a disposable temp repo under `env -i` with an allowlist (PATH, Windows `SYSTEMROOT`, the one key variable); HOME,
-USERPROFILE, TMP and `PI_CODING_AGENT_DIR` point into a per-trial temp root; the prompt is review-only; there is no `eval`. No
-`AWS_*` variable can cross, and `tests/unit/ctx-experiment-launcher.test.ts` proves it against a fake pi. Arms B and F load this
+runs in a disposable temp repo with an environment that `ctx-experiment.mjs run` builds from an allowlist (PATH, Windows
+`SYSTEMROOT`, the one key variable); HOME, USERPROFILE, TMP and `PI_CODING_AGENT_DIR` point into a per-trial temp root; the prompt
+is review-only; there is no `eval`. The key is passed in the child's environment object, never as a command-line argument, so it
+does not appear in process listings or process-creation audit logs. No `AWS_*` variable can cross, and
+`tests/unit/ctx-experiment-launcher.test.ts` proves both against a fake pi and argv-recording `node`/`env` shims. Arms B and F load this
 checkout as a local package, so nothing is fetched from a registry.
 
 **Status.** The live run is `RB-10-01` in `docs/RUNBOOK.md`: **OUTSTANDING**. Everything above was verified offline against a

@@ -1,8 +1,9 @@
 // Typed logic stays in ctx-experiment-core.ts; this CLI only does the I/O the shell launcher cannot do safely.
 // Node strips the types on import (>= 22.19). If a 22.x build rejects the import, run with --experimental-strip-types.
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { closeSync, existsSync, mkdirSync, openSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+import { join as joinSlash } from "node:path/posix";
 import { fileURLToPath, pathToFileURL } from "node:url";
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -15,6 +16,7 @@ const USAGE = [
 	"  settings <agentDir> <arm>",
 	"  pad <file>",
 	"  args <arm> [padFile]",
+	"  run <trialRoot> <stdoutFile> <stderrFile> <sh> <pi> [piArgs...]",
 	"  summarise <outDir>",
 ].join("\n");
 
@@ -103,6 +105,51 @@ async function main(argv) {
 		const [arm, padFile] = rest;
 		process.stdout.write(`${core.armArgs(arm, { padFile }).join("\n")}\n`);
 		return 0;
+	}
+
+	if (cmd === "run") {
+		// The key travels in the child's env object, never on any argv (process listings and audit logs record argv).
+		const [trialRoot, stdoutFile, stderrFile, shBin, piBin, ...piArgs] = rest;
+		const keyVar = process.env.KY_EXP_KEY_VAR ?? "";
+		const key = process.env[keyVar];
+		if (key === undefined || key === "") {
+			throw new Error("run: the variable named by KY_EXP_KEY_VAR is not set");
+		}
+		const home = joinSlash(trialRoot, "home");
+		const tmp = joinSlash(trialRoot, "tmp");
+		const env = {
+			[keyVar]: key,
+			PATH: process.env.PATH ?? "",
+			HOME: home,
+			USERPROFILE: home,
+			TMP: tmp,
+			TEMP: tmp,
+			TMPDIR: tmp,
+			PI_CODING_AGENT_DIR: joinSlash(trialRoot, "agent"),
+		};
+		if (process.env.SYSTEMROOT !== undefined) {
+			env.SYSTEMROOT = process.env.SYSTEMROOT;
+		}
+		const prompt = readFileSync(join(trialRoot, "prompt.md"), "utf-8");
+		const outFd = openSync(stdoutFile, "w");
+		const errFd = openSync(stderrFile, "w");
+		try {
+			// Through sh so a shebang fake or npm's sh shim for pi runs on Windows as it does on macOS.
+			const r = spawnSync(shBin, ["-c", 'exec "$0" "$@"', piBin, ...piArgs, prompt], {
+				cwd: join(trialRoot, "repo"),
+				env,
+				stdio: ["ignore", outFd, errFd],
+				shell: false,
+				windowsHide: true,
+			});
+			if (r.error) {
+				throw r.error;
+			}
+			return r.status ?? 1;
+		} finally {
+			closeSync(outFd);
+			closeSync(errFd);
+		}
 	}
 
 	if (cmd === "summarise") {
