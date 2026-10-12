@@ -738,3 +738,18 @@ do-not-install list. It proves **nothing** about what `pi install` actually
 does on this machine, because that command was never run. `RB-07-02`
 (OUTSTANDING, plan 07-13) is what will close that gap, alongside the
 already-outstanding `RB-07-01` end-to-end smoke ritual.
+
+## Pi 1.x capabilities not adopted - inputs for Phases 10/11
+
+Notes only. Nothing here was built in Phase 08.1. Source: pi-coding-agent / pi-ai 1.1.0 types and CHANGELOG.
+
+- Tool `exposure` (`direct` / `codemode` / `deferred` / `hidden`) and `namespace`; `prepareLoadout()`. Candidate replacement for hand-rolled `setActiveTools` progressive disclosure.
+- Built-in `tool_search` and `defaultTools` +/- adjustments.
+- Codemode: nested tool calls were proven guarded by the safety layer in 08.1-03.
+- `pi.registerVirtualModel` (a router could present as one model).
+- `compaction.modelOverrides` (cheap model for compaction) and the `session_compact_failed` event.
+- `ctx.modelRegistry.stream()` and the `provider_stream_event` event.
+- `durationMs` on `tool_execution_end` (free latency telemetry for the wire inspector).
+- Tool-renderer registry.
+- `agent_settled` now carries `aborted`; upstream git-checkpoint moved from `agent_end` to it.
+- Third-party loaders (`subagents_enable`, `web_enable`) and the `promptSnippet` cost they add per turn; measure before adopting.

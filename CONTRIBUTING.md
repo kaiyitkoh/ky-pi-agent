@@ -87,11 +87,11 @@ stated reason for tolerating `"*"`.
 The correct reason is narrower and it is a lockfile obligation, not a
 convenience: **`package-lock.json` is the only thing pinning those `"*"` peers.**
 The lock has non-dev entries for all 101 and pins each exactly, so a clone today
-gets `0.84.1` and `typebox@1.3.7`. Regenerate the lock without re-pinning and
+gets `1.1.0` and `typebox@1.3.27`. Regenerate the lock without re-pinning and
 the `"*"` peers resolve to whatever is latest, on a laptop holding live AWS
 credentials. That is why the committed lockfile is a BOOT-08 obligation, and why
 `tests/unit/pinning.test.ts` asserts every non-dev `@earendil-works/*` entry in
-the lock is `0.84.1`. The exact pin *also* lives in `devDependencies`, which is
+the lock is `1.1.0`. The exact pin *also* lives in `devDependencies`, which is
 what the development machine builds against.
 
 Use unscoped `typebox`. Never `@sinclair/typebox` — that is the legacy scoped
@@ -110,6 +110,36 @@ encodes the lint and that one exemption.
 Match Pi's own toolchain pins rather than registry latest. TypeScript `5.9.3`
 and vitest `4.1.9` are Pi core's own devDependencies; type-only compatibility
 with Pi's shipped `.d.ts` is the thing that matters.
+
+### Pi 1.0.1 removed npm-shrinkwrap.json
+
+Up to 0.84.1 Pi shipped an `npm-shrinkwrap.json`, which pinned its whole
+transitive tree for anyone installing it. The 1.1.0 CHANGELOG records that
+1.0.1 removed it; the installed 1.1.0 package contains no such file (verified in
+Phase 08.1). Still pinned: Pi's direct non-family dependencies are exact.
+Floating: the family packages
+(`@earendil-works/{chord,pi-ai,pi-agent-core,pi-codemode,pi-mcp,pi-tui}`) are
+caret ranges, and every transitive dependency resolves to whatever is newest.
+
+Mitigations, in order of importance:
+
+1. **Primary:** the committed `package-lock.json` with integrity hashes. The CI
+   test job installs with `npm ci --ignore-scripts`, so CI cannot drift from
+   the lock.
+2. `ignore-scripts=true` stays (see below).
+3. `--before=<timestamp>` for the global install is NOT adopted. A dry run in
+   Phase 08.1 worked only when the timestamp carried milliseconds
+   (`2026-10-07T22:16:26.802Z`; truncating to seconds failed with ETARGET),
+   which is too fragile for bootstrap. It is not recommended.
+4. The pi.dev managed installer is rejected: an unreviewed `curl | sh` trust
+   edge and a hosted service, against the zero-hosted-services constraint.
+
+### Citation policy
+
+Source citations name the Pi version they were verified against and are not
+retroactively re-stamped. Re-verify and re-stamp a citation only when the cited
+logic is touched or the claim changes. A line citing 0.84.1 is a statement about
+0.84.1, not an error awaiting a bump.
 
 ## Supply chain
 

@@ -1482,3 +1482,27 @@ non-rounded ratio from real input, against a `fauxProvider` this repository
 scripted itself. Both prove the pipeline is sound end to end. Neither has
 ever seen a real model's judgement or a real `pi-subagents` spawn topology,
 which is this entry and cannot be substituted.
+
+## Phase 08.1 - Pi 1.x Upgrade
+
+Dated install log, not an outstanding check (no RB id).
+
+### Global install log (2026-10-13, local; 2026-10-12T16:27Z)
+
+- Pre-state: `pi --version` 0.84.1; `kyPiAgent` `{"bootstrapVersion":"1","hardenedNpmRoot":"~/.pi/agent/npm","piPinned":"0.84.1"}`
+- Command: `sh bin/bootstrap.sh` (internally `npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.1.0`)
+- Post-state: `pi --version` 1.1.0; `npm ls -g --depth=0` shows `%APPDATA%\npm` with `@earendil-works/pi-coding-agent@1.1.0`; `kyPiAgent` `{"bootstrapVersion":"1","hardenedNpmRoot":"~/.pi/agent/npm","piPinned":"1.1.0"}`
+- Bootstrap also rewrote the user-scope `ky-safety/index.ts` stub (old re-export format); post-install `sh bin/bootstrap.sh --check-only` exits 0.
+
+### Operator steps for another machine
+
+1. Close all Pi sessions first (Windows EBUSY on the global package otherwise).
+2. Run `sh bin/bootstrap.sh`.
+3. Expect `pi --version` to print 1.1.0.
+
+### Notes
+
+- `powershell` must never be added to `defaultTools`; the safety guard is bash-AST based.
+- Pi 1.x defaults to a fullscreen TUI; `tuiMode: "regular"` restores scrollback if that is unwanted (user preference).
+- `RB-07-01` and `RB-07-02` remain OUTSTANDING, now against the re-pinned specs in `.pi/settings.json`.
+- Supply-chain posture after Pi dropped its shrinkwrap: see CONTRIBUTING.md.
