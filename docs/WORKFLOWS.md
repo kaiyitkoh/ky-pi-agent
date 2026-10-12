@@ -447,9 +447,13 @@ harness-read commit SHA; no other tool output is kept. The verification run
 and the settle gate both run on the working tree, so both require
 `git status` to be clean apart from the harness's own `.pi/work/` and
 `.pi/logs/`: a file the model forgot to `git add` would otherwise let a check
-pass that the commit cannot. Each rejection is logged; once a task passes
-`REVISION_CAP` rejections, or two in a row fail to lower the error count,
-`/execute` refuses it until the user runs `/execute <slug> --reset`. The
+pass that the commit cannot. Each rejection is logged. Once a task passes
+`REVISION_CAP` rejections, or two deterministic-gate rejections in a row fail
+to lower the gate's finding count, `/execute` refuses it until the user runs
+`/execute <slug> --reset`. Any other rejection has no count, so it never
+reads as a stall. `gateCompletion` rejects a run with any failed tool result,
+so a red-then-green test loop inside one attempt is rejected; the brief tells
+the model not to run a check it expects to fail. The
 shared workflows
 settle handler stands aside while an `/execute` run is armed, so the result
 does not depend on extension load order, which Pi takes from an unsorted

@@ -36,7 +36,6 @@ export default function (pi: ExtensionAPI): void {
 	// Reset at each arm; the settle handler reads them after the run ends.
 	let baseSha = "";
 	let allowance: { spec: readonly string[]; plan: readonly string[] } = { spec: [], plan: [] };
-	let errorCount = 0;
 	let baseTypecheckFailed = false;
 
 	pi.registerCommand("execute", {
@@ -82,7 +81,7 @@ export default function (pi: ExtensionAPI): void {
 
 				const prior = reset ? { attempts: 0, stalled: false } : attemptState(rows, task.id);
 				if (prior.attempts > REVISION_CAP || prior.stalled) {
-					return fail(`execute: ${task.id} is escalated (${prior.attempts} rejected attempts${prior.stalled ? ", errors not dropping" : ""}) -- inspect it, then run /execute ${slug} --reset to allow another attempt`);
+					return fail(`execute: ${task.id} is escalated (${prior.attempts} rejected attempts${prior.stalled ? ", gate findings not dropping" : ""}) -- inspect it, then run /execute ${slug} --reset to allow another attempt`);
 				}
 
 				// A typecheck that already fails on the base tree cannot blame the change, so the settle gate skips that leg.
@@ -112,10 +111,9 @@ export default function (pi: ExtensionAPI): void {
 				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
 				baseSha = pinned ?? headSha;
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
-				errorCount = 0;
 				claimWorkflow("execute");
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });
-				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nTouch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
+				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nAny failed tool call rejects this attempt, so do not run a check you expect to fail. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
 			}
@@ -134,7 +132,6 @@ export default function (pi: ExtensionAPI): void {
 		const run = executeRunContext();
 		if (run === undefined) return;
 		noteToolEnd(event.toolCallId, event.isError, event.result, () => ({ sha: headShaOrEmpty(run.cwd), dirty: uncommittedPaths(run.cwd) }));
-		if (event.isError) errorCount += 1;
 	});
 
 	pi.on("agent_end", async (_event, ctx) => {
@@ -150,8 +147,9 @@ export default function (pi: ExtensionAPI): void {
 			const verdict = ended?.ok === true && checked?.ok === false ? { ok: false as const, reason: checked.reason } : ended;
 			// Unarmed means another settle handler consumed the run; no verdict, so nothing is written.
 			if (verdict === undefined) return void ctx.ui.notify(`execute: ${run.taskId} had no evidence verdict -- nothing written`, "error");
-			const reject = (reason: string) => {
-				appendLedger(cwd, run.slug, { kind: "rejected", taskId: run.taskId, count: errorCount });
+			// Only a gate rejection has a count that can show progress; any other is unknown and never reads as a stall.
+			const reject = (reason: string, findings: number | null = null) => {
+				appendLedger(cwd, run.slug, { kind: "rejected", taskId: run.taskId, count: findings });
 				const state = attemptState(readLedger(cwd, run.slug), run.taskId);
 				const next = state.attempts > REVISION_CAP || state.stalled ? "escalated: further attempts are refused until /execute --reset" : "fix and run /execute again";
 				ctx.ui.notify(`execute: ${run.taskId} rejected -- ${reason}; ${next}`, "error");
@@ -165,7 +163,8 @@ export default function (pi: ExtensionAPI): void {
 			let gateLine = "outside this workflow's gate depth";
 			if (gateDepthFor("execute").mechanisms.includes("deterministic")) {
 				const gate = runChangeGateStage({ cwd, projectTrusted: ctx.isProjectTrusted(), baseSha, changed, baseTypecheckFailed });
-				if (gate.typecheck.status === "fail" || gate.antiPattern.status === "fail") return reject(`the deterministic gate fails on the committed change:\n${gate.report}`);
+				const failed = [gate.typecheck, gate.antiPattern].flatMap((leg) => (leg.status === "fail" ? [Math.max(1, leg.findings.length)] : []));
+				if (failed.length > 0) return reject(`the deterministic gate fails on the committed change:\n${gate.report}`, failed.reduce((a, b) => a + b, 0));
 				// Awaited only when nothing ran, so an ordinary settle stays synchronous.
 				if (!gate.ranAny && !(await ctx.ui.confirm("Record with no deterministic check?", `No deterministic check applies to ${run.taskId}:\n${gate.report}`))) {
 					return void ctx.ui.notify(`execute: ${run.taskId} not recorded -- no deterministic check ran and recording without one was not approved`, "error");

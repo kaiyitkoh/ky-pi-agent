@@ -357,14 +357,30 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		endRun("", "");
 	});
 
-	it("two rejections whose error count does not drop escalate before the cap", async () => {
+	it("two gate rejections whose finding count does not drop escalate before the cap", async () => {
+		const bad = "src/bad.ts";
+		const spec = renderSpecMarkdown({ ...SPEC, scopePin: { ...SPEC.scopePin, expectedFiles: [bad] } });
+		const h = harness({ spec, plan: `- [ ] T001 [R1] Add the guard to ${bad} | verify: npm test\n` });
+		for (let i = 0; i < 2; i++) {
+			await h.command(SLUG);
+			commitIn(h.repo, bad, `export function f${i}(): void {\n\ttry {\n\t\tJSON.parse("x");\n\t} catch {}\n}\n`);
+			verify(h);
+			await h.fire("agent_end", {});
+			expect(h.notes.at(-1)?.text).toContain("deterministic gate fails");
+		}
+		expect(h.notes.at(-1)?.text).toContain("escalated");
+	});
+
+	it("rejections with no gate finding count never read as a stall, so the cap alone escalates", async () => {
 		const h = harness();
 		for (let i = 0; i < 2; i++) {
 			await h.command(SLUG);
 			h.fire("tool_execution_end", toolEnd("boom", true));
-			h.fire("agent_end", {});
+			await h.fire("agent_end", {});
 		}
-		expect(h.notes.at(-1)?.text).toContain("escalated");
+		expect(h.notes.at(-1)?.text).toContain("rejected");
+		expect(h.notes.at(-1)?.text).not.toContain("escalated");
+		endRun("", "");
 	});
 
 	it("fabrication: a commit with narrated output and no structured tool result is rejected, file unchanged", async () => {
