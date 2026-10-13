@@ -67,6 +67,13 @@ const SECRET_SAMPLES: readonly Sample[] = [
 		label: "aws_secret_access_key assignment",
 		value: `${["aws", "secret", "access", "key"].join("_")} = wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLE`,
 	},
+	{ label: "JWT", value: [["ey", "JhbGciOiJIUzI1NiJ9"].join(""), "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "c2lnbmF0dXJl"].join(".") },
+	{
+		label: "camelCase credential key in JSON",
+		value: `{"${["access", "Token"].join("")}":"${["abc", "def", "123456"].join("")}"}`,
+	},
+	{ label: "curl user:password", value: "curl -u deploy:" + ["hunter", "2"].join("") + " https://example.com" },
+	{ label: "mysql attached password", value: "mysql -h db -u root -p" + ["hunter", "2"].join("") + " app" },
 ];
 
 /**
@@ -127,6 +134,28 @@ describe("DIAG-07 — every credential shape is redacted", () => {
 			expect(out, `${sample.label} was removed but left no placeholder behind`).toContain("[redacted:");
 			expect(out, "the surrounding prose must survive; only the credential goes").toContain("payload fragment:");
 		});
+	});
+});
+
+describe("DIAG-07 — further credential shapes", () => {
+	const cases: readonly (readonly [string, string, string])[] = [
+		["secretAccessKey colon form", "secretAccessKey: " + ["wJalr", "XUtnFEMI"].join(""), "wJalrXUtnFEMI"],
+		["sessionToken in JSON", `{"sessionToken":"${["Fwo", "GZXIvYXdz"].join("")}"}`, "FwoGZXIvYXdz"],
+		["aws_session_token assignment", "aws_session_token = " + ["Fwo", "GZXIvYXdz"].join(""), "FwoGZXIvYXdz"],
+		["lowercase bearer", "authorization: bearer " + ["abcdefghij", "klmnopqrstuv"].join(""), "abcdefghijklmnopqrstuv"],
+		["long user option", "curl --user admin:" + ["s3cr", "etpw"].join(""), "s3cretpw"],
+	];
+	for (const [label, input, secret] of cases) {
+		it(`masks ${label}`, () => {
+			const out = redactString(`x ${input} y`);
+			expect(out).not.toContain(secret);
+			expect(out).toContain("[redacted:");
+		});
+	}
+
+	it("leaves mkdir -p and find -path alone", () => {
+		const text = "mkdir -p build/out && find . -path ./node_modules -prune";
+		expect(redactString(text)).toBe(text);
 	});
 });
 

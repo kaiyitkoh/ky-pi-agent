@@ -87,16 +87,14 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { TURNS_LOG_BASE, type RowKind } from "../../.pi/extensions/diagnostics/schema.ts";
 import { callWithFallback, classifyFailure } from "../../.pi/extensions/providers/fallback.ts";
+import { CHAIN, QUOTA_PATTERN, type FailureClass } from "../../.pi/extensions/providers/schema.ts";
 import {
-	CHAIN,
 	CLASS_FIXTURES,
 	DASHSCOPE_QUOTA_FIXTURES,
 	NON_QUOTA_BILLING_FIXTURES,
 	QUOTA_ALTERNATIVE_FIXTURES,
-	QUOTA_PATTERN,
 	SSO_FIXTURES,
-	type FailureClass,
-} from "../../.pi/extensions/providers/schema.ts";
+} from "../fixtures/provider-errors.ts";
 import { wrapFauxWithPayload, wrapFauxWithStatus } from "../helpers/faux.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readTornSafe } from "../helpers/logs.ts";
@@ -273,6 +271,8 @@ interface Fixture {
 	rejectFatal: RejectionRun;
 	/** A rejection whose text is transient-shaped: must reach both hops. */
 	rejectTransient: RejectionRun;
+	/** First hop fails with a transient 429 while the second hop has no configured auth. */
+	authSkip: ChainRun | undefined;
 }
 
 /** A scripted provider failure carrying exactly the text under test. */
@@ -368,6 +368,9 @@ function withShadowedRegistry(
 		modelRegistry: {
 			value: {
 				find: (provider: string, id: string) => ctx.modelRegistry.find(provider, id),
+				hasConfiguredAuth: () => true,
+				complete: (...args: Parameters<ExtensionContext["modelRegistry"]["complete"]>) =>
+					ctx.modelRegistry.complete(...args),
 				...registry,
 			},
 		},
@@ -419,9 +422,11 @@ async function runFixture(): Promise<Fixture> {
 		async ({ cwd, session, modelRuntime }) => {
 			await session.prompt("warm up");
 
-			const ctx = (globalThis as Record<string, unknown>)[CTX_KEY] as
+			const parkedCtx = (globalThis as Record<string, unknown>)[CTX_KEY] as
 				| ExtensionContext
 				| undefined;
+			// Faux providers carry no credential, so the registry would report no configured auth for every hop.
+			const ctx = parkedCtx === undefined ? undefined : withShadowedRegistry(parkedCtx, {});
 
 			const turnsFile = logPath(cwd, TURNS_LOG_BASE);
 			const runs: Record<string, ChainRun> = {};
@@ -439,6 +444,7 @@ async function runFixture(): Promise<Fixture> {
 					unresolved: { threw: false, message: "" },
 					rejectFatal: noRun,
 					rejectTransient: noRun,
+					authSkip: undefined,
 				};
 			}
 
@@ -486,6 +492,17 @@ async function runFixture(): Promise<Fixture> {
 			);
 			const rejectTransient = await walkRejecting(ctx, "fetch failed while dialling the provider");
 
+			const secondHop = CHAIN[1];
+			const noSecondAuth = withShadowedRegistry(ctx, {
+				hasConfiguredAuth: (model: { provider: string }) => model.provider !== secondHop?.provider,
+			});
+			const authSkip = await walkChain(noSecondAuth, modelRuntime, {
+				role: "chain-auth-skip",
+				firstResponse: failure(CLASS_FIXTURES.transient.text),
+				secondResponse: fauxAssistantMessage(SECOND_PROVIDER_REPLY, { stopReason: "stop" }),
+				status: CLASS_STATUS.transient,
+			});
+
 			const turnsFileExisted = existsSync(turnsFile);
 			const { records, unparseable } = turnsFileExisted
 				? readTornSafe(turnsFile)
@@ -504,6 +521,7 @@ async function runFixture(): Promise<Fixture> {
 				unresolved,
 				rejectFatal,
 				rejectTransient,
+				authSkip,
 			};
 		},
 	);
@@ -898,6 +916,17 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 					"second hop serves the same model id) is the thing that just expired",
 			).toEqual([]);
 		});
+	});
+
+	it("case 6a — a hop without configured auth is skipped and the first real failure surfaces", () => {
+		const walk = fixture.authSkip;
+		expect(walk, "the auth-skip walk was not recorded").toBeDefined();
+		expect(walk?.second, "a hop with no configured auth must not be called").toBe(0);
+		expect(walk?.first, "the first hop is the only one attempted").toBe(1);
+		expect(
+			walk?.message.errorMessage,
+			"the surfaced error must be the first hop's own failure, not a later hop's auth error",
+		).toContain(CLASS_FIXTURES.transient.text.slice(0, 30));
 	});
 
 	it("case 6b — an unresolved chain entry throws with the remedy, and is never skipped", () => {

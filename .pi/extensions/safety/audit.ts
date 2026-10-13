@@ -31,6 +31,9 @@ const SECRET_PATTERNS: readonly [RegExp, string][] = [
 	[/\bsk-[A-Za-z0-9_-]{16,}/g, "[REDACTED]"],
 	[/\b(gh[pousr]_|glpat-|xox[abprs]-)[A-Za-z0-9_-]{10,}/g, "[REDACTED]"],
 	[/Bearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [REDACTED]"],
+	[/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g, "[REDACTED]"],
+	[/(?<![\w-])(?:-u|--user)[ =]+[^\s:'"]+:[^\s'"]+/g, "-u [REDACTED]"],
+	[/(?<=\bmysql(?:dump|admin)?\b[^\n|;&]{0,200}\s)-p\S+/g, "-p[REDACTED]"],
 	[
 		/((?:password|passwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential)[A-Za-z0-9_-]*["']?\s*[=:]\s*)("[^"]*"|'[^']*'|[^\s"'&;]+)/gi,
 		"$1[REDACTED]",

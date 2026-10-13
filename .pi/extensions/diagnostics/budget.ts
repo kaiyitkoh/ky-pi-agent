@@ -77,7 +77,7 @@ export const DECOMPOSITION_DOES_NOT_SUM_WARNING =
 
 export const SKILLS_DIVERGENCE_WARNING =
 	"the skills block recomputed with formatSkillsForPrompt does not match the region sliced " +
-	"out of the system prompt -- RESEARCH §7.3 says a divergence means Pi changed the format, " +
+	"out of the system prompt -- a divergence means Pi changed the format, " +
 	"and this report must say so loudly rather than silently mis-report";
 
 

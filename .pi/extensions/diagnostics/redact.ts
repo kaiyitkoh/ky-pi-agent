@@ -55,8 +55,16 @@ export const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
 	// PEM private key header; `{0,40}` bounds backtracking.
 	/-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----/g,
 	// Any bearer credential; `\s` and the token class are disjoint.
-	/Bearer\s+[A-Za-z0-9._-]{20,}/g,
+	/bearer\s+[A-Za-z0-9._-]{20,}/gi,
 	/aws_secret_access_key\s*=\s*\S+/gi,
+	// JWT: three base64url segments, the first starting with the encoded `{"`.
+	/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g,
+	// Credential-named assignment in env, YAML or JSON form, snake or camel case.
+	/(?:access[_-]?token|refresh[_-]?token|session[_-]?token|secret[_-]?access[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?[^\s"',;]+/gi,
+	// `curl -u user:pass` and `--user user:pass`.
+	/(?<![\w-])(?:-u|--user)[ =]+[^\s:'"]+:[^\s'"]+/g,
+	// `mysql -pPASSWORD`: the attached form only, scoped to the mysql family so `mkdir -p` and `find -path` survive.
+	/(?<=\bmysql(?:dump|admin)?\b[^\n|;&]{0,200}\s)-p\S+/g,
 ];
 
 function isRedactedHeaderKey(key: string): boolean {

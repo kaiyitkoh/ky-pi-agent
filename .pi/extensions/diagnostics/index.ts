@@ -47,12 +47,6 @@ export const TURN_NO_MESSAGE_WHERE = "turn_end.no_message";
 export const MODEL_UNAVAILABLE_EVENT = "diagnostics.model_unavailable";
 
 /**
- * Whether the prose retry forces `tool_choice: "required"`. Must stay `false` until the
- * effect on DeepSeek is measured; no handler is registered while it is off.
- */
-export const PROSE_RETRY_FORCES_TOOL_CHOICE = false;
-
-/**
  * Process-wide slot for the rows-written counter: jiti can load this module twice, so a
  * module-level `let` would undercount (same reason as `wire.ts` COUNTER_KEY).
  */

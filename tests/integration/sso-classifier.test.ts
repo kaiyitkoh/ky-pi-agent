@@ -80,15 +80,13 @@ import {
 	AWS_PROFILE_ENV,
 	AWS_SSO_LOGIN_PREFIX,
 	BEDROCK_PROVIDER_ID,
-	NON_SSO_FIXTURES,
 	PROFILE_PLACEHOLDER,
 	PROFILE_TEMPLATE_SENTINEL,
-	RETRYABLE_CONTROL_FIXTURE,
 	SAFE_PROFILE_NAME,
 	SSO_DIAGNOSTIC_ORIGINAL_KEY,
 	SSO_DIAGNOSTIC_TYPE,
-	SSO_FIXTURES,
 } from "../../.pi/extensions/providers/schema.ts";
+import { NON_SSO_FIXTURES, RETRYABLE_CONTROL_FIXTURE, SSO_FIXTURES } from "../fixtures/provider-errors.ts";
 import { SSO_PATTERNS } from "../../.pi/extensions/providers/sso.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { withFauxSession } from "../helpers/session.ts";

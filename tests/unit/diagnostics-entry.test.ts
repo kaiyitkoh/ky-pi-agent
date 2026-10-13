@@ -309,8 +309,7 @@ describe("the extension entry point registers session_start and prunes there", (
 					"the WIRE dump only: no field of a turns row may be derived from it, because it " +
 					"never fires on a provider error (RESEARCH §3.2, Pitfall 3). A NINTH entry named " +
 					"`before_provider_request` appearing twice would mean the `tool_choice: \"required\"` " +
-					"lever has been switched on — PROSE_RETRY_FORCES_TOOL_CHOICE is `false` and its " +
-					"effect is UNVERIFIED, so that is Phase 10's experiment, not a Phase 2 default",
+					"lever has been switched on, which is unmeasured on DeepSeek",
 			).toEqual([
 				"session_start",
 				"before_provider_headers",

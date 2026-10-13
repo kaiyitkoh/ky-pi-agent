@@ -177,6 +177,18 @@ describe("PROV-07 — the R1 unclamp (offline; the answer is RB-03-04, OUTSTANDI
 					"comparison would be between a request and itself",
 			).toBe(LOW);
 		});
+
+		const marker = "override-marker";
+		await withModelsConfig(
+			{ models: { providers: { [PROVIDER]: { modelOverrides: { [MODEL]: { thinkingLevelMap: { low: marker } } } } } } },
+			(handle) => {
+				expect(
+					levelMap(handle.requireModel(PROVIDER, MODEL)).low,
+					"the built-in map already carries `low` on this Pi version, so only a value the " +
+						"catalogue cannot produce proves the override entry is what composed the model",
+				).toBe(marker);
+			},
+		);
 	});
 
 	it("case 3 — the merge is a merge: high, max, compat and cost all survive", async () => {

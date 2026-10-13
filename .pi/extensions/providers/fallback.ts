@@ -45,44 +45,64 @@ export function classifyFailure(errorText: string): FailureClass {
 	return UNAVAILABLE_PATTERN.test(errorText) ? "unavailable" : "transient";
 }
 
-/** A missing chain entry throws, never skips: a skipped hop would report a chain failure for a chain never walked. */
+/** Thrown for an entry that does not resolve before any hop was attempted: a silent skip would report a chain failure for a chain never walked. */
 function unresolvedEntryError(entry: ChainEntry): Error {
 	return new Error(
 		`callWithFallback: the chain entry ${entry.provider}/${entry.id} does not resolve in this ` +
 			"session's registry, so that hop would be skipped in silence and a chain failure would be " +
 			"reported for a chain that was never walked. Either the provider is not configured (add it " +
 			"to ~/.pi/agent/models.json from .pi/templates/models-template.json) or the model id has " +
-			"been renamed upstream (Assumption A7) — in which case fix CHAIN in " +
+			"been renamed upstream — in which case fix CHAIN in " +
 			".pi/extensions/providers/schema.ts, do not delete the hop",
 	);
 }
 
+function allHopsSkippedError(skipped: readonly string[]): Error {
+	return new Error(
+		`callWithFallback: no chain hop has configured auth, so nothing was attempted (${skipped.join(", ")}). ` +
+			"Add a credential for the first hop in ~/.pi/agent/auth.json",
+	);
+}
+
 /**
- * First hop that answers wins; `fatal` stops the chain and the last failing message is returned if every hop fails.
+ * First hop that answers wins; `fatal` stops the chain and the first failing message is returned if every attempted hop fails.
  * A rejection uses the same classification and is rethrown, not converted: the chokepoint already wrote its turns row.
  */
 export async function callWithFallback(
 	ctx: ExtensionContext,
 	opts: CallWithFallbackOptions,
 ): Promise<AssistantMessage> {
-	let lastFailure: AssistantMessage | undefined;
+	let firstFailure: AssistantMessage | undefined;
+	let firstRejection: unknown;
+	let attempted = false;
+	const skipped: string[] = [];
 
-	for (const [index, entry] of CHAIN.entries()) {
-		const isLast = index === CHAIN.length - 1;
-
+	for (const entry of CHAIN) {
 		// Registry lookup only; the chokepoint lint does not ban it.
 		const model = ctx.modelRegistry.find(entry.provider, entry.id);
 		if (!model) {
-			throw unresolvedEntryError(entry);
+			if (!attempted) {
+				throw unresolvedEntryError(entry);
+			}
+			skipped.push(`${entry.provider}/${entry.id} (does not resolve)`);
+			continue;
+		}
+		if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
+			skipped.push(`${entry.provider}/${entry.id} (no configured auth)`);
+			continue;
 		}
 
 		let message: AssistantMessage;
+		attempted = true;
 		try {
 			// The sanctioned path outside diagnostics/: each hop gets its own turns row.
 			message = await callModel(ctx, { ...opts, model });
 		} catch (error) {
-			if (isLast || classifyFailure(String(error)) === "fatal") {
+			if (classifyFailure(String(error)) === "fatal") {
 				throw error;
+			}
+			if (firstFailure === undefined && firstRejection === undefined) {
+				firstRejection = error;
 			}
 			continue;
 		}
@@ -91,7 +111,7 @@ export async function callWithFallback(
 			return message;
 		}
 
-		lastFailure = message;
+		firstFailure ??= message;
 
 		if (classifyFailure(message.errorMessage ?? "") === "fatal") {
 			// A 400, 401 or expired credential fails at every vendor; advancing would disclose the prompt for nothing.
@@ -99,13 +119,18 @@ export async function callWithFallback(
 		}
 	}
 
-	// Every hop failed with an advancing class; return the last real message.
-	if (lastFailure === undefined) {
-		// Unreachable unless CHAIN is empty; an error beats returning undefined as a message.
-		throw new Error(
-			"callWithFallback: CHAIN is empty, so no provider was attempted. A chain with no " +
-				"entries is not a fallback policy; restore CHAIN in .pi/extensions/providers/schema.ts",
-		);
+	// Every attempted hop failed with an advancing class; the first real failure is the one worth reading.
+	if (firstFailure !== undefined) {
+		return firstFailure;
 	}
-	return lastFailure;
+	if (firstRejection !== undefined) {
+		throw firstRejection;
+	}
+	if (skipped.length > 0) {
+		throw allHopsSkippedError(skipped);
+	}
+	throw new Error(
+		"callWithFallback: CHAIN is empty, so no provider was attempted. A chain with no " +
+			"entries is not a fallback policy; restore CHAIN in .pi/extensions/providers/schema.ts",
+	);
 }

@@ -19,6 +19,7 @@ import { describe, expect, it } from "vitest";
 import { logDir, logPath } from "../../.pi/lib/jsonl.ts";
 import {
 	pruneAuditLogs,
+	redactSecrets,
 	writeAuditRow,
 	type AuditRowInput,
 } from "../../.pi/extensions/safety/audit.ts";
@@ -229,5 +230,28 @@ describe("SAFE-14 / T-04-14 — retention is ownership-scoped in both directions
 					"may delete the other's logs",
 			).toContain(basename(agedAudit));
 		});
+	});
+});
+
+describe("SAFE-14 — redactSecrets masks the credential shapes a command can carry", () => {
+	const pw = ["hunter", "2"].join("");
+	const jwt = [["ey", "JhbGciOiJIUzI1NiJ9"].join(""), "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "c2lnbmF0dXJl"].join(".");
+	const cases: readonly (readonly [string, string, string])[] = [
+		["camelCase accessToken", `{"accessToken":"${pw}abc"}`, `${pw}abc`],
+		["secretAccessKey", `secretAccessKey: ${pw}abc`, `${pw}abc`],
+		["aws_session_token", `aws_session_token = ${pw}abc`, `${pw}abc`],
+		["JWT", `curl -H 'X-Auth: ${jwt}'`, jwt],
+		["lowercase bearer", `authorization: bearer ${pw}abcdefgh`, `${pw}abcdefgh`],
+		["curl -u", `curl -u deploy:${pw} https://example.com`, `deploy:${pw}`],
+		["mysql -p", `mysql -u root -p${pw} app`, `-p${pw}`],
+	];
+	for (const [label, input, secret] of cases) {
+		it(`masks ${label}`, () => {
+			expect(redactSecrets(input)).not.toContain(secret);
+		});
+	}
+
+	it("leaves mkdir -p alone", () => {
+		expect(redactSecrets("mkdir -p build/out")).toBe("mkdir -p build/out");
 	});
 });
