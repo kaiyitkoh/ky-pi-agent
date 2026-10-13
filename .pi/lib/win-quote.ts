@@ -1,66 +1,22 @@
 /**
- * One Windows argument quoter, for the one Windows hazard.
+ * The one Windows argument quoter; `tests/helpers/win-quote.ts` re-exports it so tests and production share it.
  *
- * Lives in `.pi/lib/` because production code under `.pi/extensions/` must not import from `tests/`;
- * `tests/helpers/win-quote.ts` re-exports it so there is one implementation, not two that can drift.
- *
- * ---------------------------------------------------------------------------
- * Why any of this exists
- * ---------------------------------------------------------------------------
- * `npm` and `pi` ship as `.cmd` shims on Windows, and since the CVE-2024-27980
- * fix Node refuses to execute a `.cmd` without a shell -- so `shell: true` is
- * unavoidable on that path. But `shell: true` alongside an args array is
- * *unescaped concatenation*, which is exactly what Node's DEP0190 deprecation
- * warns about: an argument containing a space, a quote or a shell metacharacter
- * is re-split or re-interpreted by `cmd.exe`. The safe shape is to quote every
- * argument here, fold them into a single command string, and pass an empty args
- * array.
- *
- * ---------------------------------------------------------------------------
- * The rules the escaping implements
- * ---------------------------------------------------------------------------
- * From the MSVC/CRT argv parser that `cmd.exe` hands off to:
- *
- *   * A backslash is literal UNLESS it precedes a double quote.
- *   * `2n` backslashes before a `"` produce `n` backslashes and the `"` is a
- *     delimiter; `2n+1` produce `n` backslashes and a literal `"`.
- *
- * So an embedded `"` needs its run of preceding backslashes doubled and itself
- * escaped, and a run of backslashes at the very end of the argument must be
- * doubled -- otherwise it would be sitting immediately before the closing
- * delimiter and would escape it.
+ * `npm` and `pi` are `.cmd` shims on Windows, and since CVE-2024-27980 Node runs a `.cmd` only with `shell: true`,
+ * where an args array is unescaped concatenation (DEP0190). So every argument is quoted here and folded into one
+ * command string. MSVC argv rules: backslashes are literal unless they precede `"`; `2n` of them before a `"` give
+ * `n` and a delimiter, `2n+1` give `n` and a literal `"`. Hence the doubled runs before an embedded quote and at the end.
  */
 
 /** Characters that need no quoting at all: no space, quote or metacharacter. */
 const PLAIN = /^[A-Za-z0-9_.:@/\\=-]+$/;
 
-/**
- * Quote one argument for `cmd.exe` concatenation under `shell: true`.
- *
- * Plainly safe arguments are returned unchanged, which keeps command strings
- * readable in test failure output.
- */
+/** Quote one argument for `cmd.exe` concatenation; plainly safe arguments are returned unchanged. */
 export function quoteForWindows(arg: string): string {
-	if (PLAIN.test(arg)) {
-		return arg;
-	}
+	if (PLAIN.test(arg)) return arg;
 	return `"${arg.replace(/(\\*)"/g, '$1$1\\"').replace(/(\\+)$/, "$1$1")}"`;
 }
 
-/**
- * Build the `(file, args)` pair for `spawnSync`.
- *
- * On POSIX: `(cmd, args)` with no shell. On Windows: everything quoted and
- * folded into the command string, args array empty -- the only shape
- * `shell: true` is safe in.
- */
-export function commandFor(
-	cmd: string,
-	args: string[],
-	isWindows: boolean,
-): [string, string[]] {
-	if (!isWindows) {
-		return [cmd, args];
-	}
-	return [[cmd, ...args].map(quoteForWindows).join(" "), []];
+/** The `(file, args)` pair for `spawnSync`: unchanged on POSIX, one quoted command string with no args on Windows. */
+export function commandFor(cmd: string, args: string[], isWindows: boolean): [string, string[]] {
+	return isWindows ? [[cmd, ...args].map(quoteForWindows).join(" "), []] : [cmd, args];
 }

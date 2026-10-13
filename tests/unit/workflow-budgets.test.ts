@@ -193,7 +193,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	{
 		file: ".pi/extensions/harness/index.ts",
 		budget: 70,
-		why: "boot-phase harness commands -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 63 raw lines 2026-10-13, rounded up to the next ten. Re-measured 61 on 2026-10-13 after the 08.2 review fix WR-06 (forced-prompt branch also sets the section). Re-measured 65 on 2026-10-13 with the OpenSpec opt-out env, rounded up to the next ten",
+		why: "boot-phase harness commands outside workflows/. Unchanged at 70 (2026-10-14) after the sentinel header was condensed; 62 raw lines.",
 	},
 	{
 		file: ".pi/extensions/diagnostics/budget.ts",
@@ -367,12 +367,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	{
 		dir: ".pi/extensions/harness",
 		budget: 90,
-		why:
-			"WR-03; measured 80 raw lines across 2 files 2026-10-13, rounded up to the next ten. RAISED 80 -> 90 " +
-			"by the 08.2 review fix WR-05: comment-rules.ts gained hasCommentRulesHeading (heading-line match " +
-			"outside fenced code). Re-measured 88 raw lines on 2026-10-13 (index.ts 63, comment-rules.ts 25), " +
-			"rounded up to the next ten. Re-measured 86 on 2026-10-13 after WR-06 (index.ts 61). Re-measured 90 on " +
-			"2026-10-13 after the OpenSpec opt-out env became one assignment (index.ts 65, comment-rules.ts 25), rounded up to the next ten",
+		why: "The load-path sentinel and comment-rules delivery. Unchanged at 90 (2026-10-14) after the sentinel header was condensed; 84 raw lines (index.ts 62, comment-rules.ts 22).",
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
@@ -587,27 +582,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/lib",
-		budget: 790,
-		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs no longer filters to `.pi/extensions/` " +
-			"only -- `.pi/lib/jsonl.ts` is imported (via `../../lib/jsonl.ts`) by quality/index.ts (indirectly, " +
-			"through .pi/lib/win-quote.ts's own CR2-01 wiring), routing/index.ts, safety/audit.ts and " +
-			"workflows/evidence.ts, and was a live, unbudgeted shared-library import target with no " +
-			"DIRECTORY_BUDGETS entry at all before this fix -- exactly the residual the finding named. A hit " +
-			"outside `.pi/extensions/` maps to its own immediate directory (dirname), never a subsystem-root " +
-			"slice, since `.pi/lib` is shallow by construction. Grandfathered in at its CURRENT measured total, " +
-			"same precedent as routing/harness/diagnostics/quality/safety/providers -- this entry did not " +
-			"exist before WR2-04, so there is no prior committed number to raise from. Measured 687 raw lines " +
-			"across 2 files 2026-08-15 (jsonl.ts 606, win-quote.ts 81 -- win-quote.ts itself landed this same " +
-			"iteration, moved here from tests/helpers/ by CR2-01), rounded up to the next ten. RAISED " +
-			"690 -> 840 by plan 09-03 (FLOW-10): a third file, work-artifacts.ts, is the ARTIFACT_FILES " +
-			"registry and the two-layer-confined workDir() every one of the four ceremonial commands built " +
-			"in this phase's later plans will import -- it counts toward this total per WR-03's whole-directory " +
-			"discipline even though it is imported by test files only today (its production consumers do not " +
-			"exist until plans 09-08/10/13/15). Measured 839 raw lines across 3 files 2026-08-15 (jsonl.ts 606, " +
-			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten. LOWERED 840 -> 660 by the " +
-			"08.2 review fix WR-07: .pi/lib joined the comment-discipline gate and its history/ID comments were " +
-			"condensed. Re-measured 655 raw lines on 2026-10-13 (jsonl.ts 497, win-quote.ts 67, " +
-			"work-artifacts.ts 91), rounded up to the next ten. Re-measured 670 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 715 raw lines 2026-10-13 after the signed-ledger and JSONL hardening in jsonl.ts (active-workflow.ts 15, jsonl.ts 542, win-quote.ts 67, work-artifacts.ts 91), rounded up to the next ten. RAISED 720 -> 770: secret-patterns.ts is the one credential-shape table shared by the wire redactor and the safety audit, so the wire log is never redacted more weakly than the audit; 765 raw lines (secret-patterns.ts 50). RAISED 770 -> 780: jsonl.ts re-stats the live file before rotating and never renames onto an existing rotated file; 779 raw lines (jsonl.ts 556). RAISED 780 -> 800: secret-patterns.ts splits the table into shape rules for model inputs and name rules for logs only, with length-bounded name rules; 792 raw lines (secret-patterns.ts 67) RAISED 800 -> 820 (2026-10-13): settings.ts is the shared settings-file key reader; 818 raw lines. RAISED 820 -> 830 (2026-10-14): rotate re-checks the cap before moving any file, so a stale writer does not rotate a sibling's near-empty successor; 829 raw lines. LOWERED 830 -> 810 (2026-10-14): jsonl.ts creates the log directory only on ENOENT and its constant docs are condensed; 810 raw lines. LOWERED 810 -> 790 (2026-10-14): work-artifacts.ts gained workSlugs, the one .pi/work slug lister, and its comments were shortened; 783 raw lines (work-artifacts.ts 64).",
+		budget: 490,
+		why: "The shared library every subsystem imports, budgeted as one directory. LOWERED 790 -> 490 (2026-10-14): jsonl.ts shares one globalThis slot helper, reads a size with one lstat and folds prune into one pass, win-quote.ts and work-artifacts.ts lost their narration; 488 raw lines (jsonl.ts 298, work-artifacts.ts 59, win-quote.ts 23).",
 	},
 	{
 		dir: ".pi/extensions/grill",
