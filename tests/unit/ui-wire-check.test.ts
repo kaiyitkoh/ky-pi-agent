@@ -208,6 +208,12 @@ describe("verdict", () => {
 		expect(v.status).toBe("PASS");
 		expect(v.reasons.join(" ")).toContain("tool list truncated by redaction");
 	});
+	it("keeps the truncation caveat on an insufficient verdict", () => {
+		const one = analyseWire([req("s1", "a", undefined, "[redacted:truncated]")], { probes: [] });
+		expect(verdict(one, [{ corr: "c", ratio: 0.9 }], 0.5).reasons.join(" ")).toContain("truncated by redaction");
+		const two = analyseWire([req("s1", "a", undefined, "[redacted:truncated]"), req("s1", "a", undefined, "[redacted:truncated]")], { probes: [] });
+		expect(verdict(two, [], 0.5).reasons.join(" ")).toContain("truncated by redaction");
+	});
 	it("is insufficient with no turn-2 ratio", () => {
 		expect(verdict(good, [], 0.5).status).toBe("INSUFFICIENT");
 	});

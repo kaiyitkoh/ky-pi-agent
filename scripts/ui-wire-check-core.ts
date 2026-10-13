@@ -204,10 +204,10 @@ export function verdict(
 		return { status: "INSUFFICIENT", reasons: [`${wire.ambiguousSessions.length} sessions in this log (${ids}); pass --session <id>`] };
 	}
 	if (wire.requests < 2) {
-		return { status: "INSUFFICIENT", reasons: ["fewer than two main requests in this session"] };
+		return { status: "INSUFFICIENT", reasons: [...reasons, "fewer than two main requests in this session"] };
 	}
 	if (ratios.length === 0) {
-		return { status: "INSUFFICIENT", reasons: ["no turn-2+ cache ratio available"] };
+		return { status: "INSUFFICIENT", reasons: [...reasons, "no turn-2+ cache ratio available"] };
 	}
 	// Without system text there is nothing to compare, so a clean result proves nothing.
 	if (wire.missing > 0) {
