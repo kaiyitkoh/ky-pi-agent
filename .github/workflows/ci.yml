@@ -1,7 +1,8 @@
 # Cross-platform proof for the harness.
 #
 # posix-lint is its own Ubuntu job: executing a script under Git-for-Windows sh or macOS /bin/sh only
-# proves bash-in-POSIX-mode accepted it, and ShellCheck is preinstalled on ubuntu runners only.
+# proves bash-in-POSIX-mode accepted it, and ShellCheck is preinstalled on ubuntu runners only. That job
+# pins its image so a runner-image move cannot change the ShellCheck version under a green lint.
 # The CR scan runs inside the matrix because line endings must be asserted on the platform that can
 # break them. fail-fast is off so one failing leg cannot cancel the others; macOS is verified nowhere else.
 #
@@ -26,14 +27,20 @@ on:
 permissions:
   contents: read
 
+# A newer push to the same PR makes the older run moot. main groups by SHA, because a group holds only
+# one pending run and would otherwise drop an untested commit.
+concurrency:
+  group: ci-${{ github.event_name == 'pull_request' && github.ref || github.sha }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 defaults:
   run:
     shell: bash
 
 jobs:
   posix-lint:
-    name: posix-lint (ubuntu-latest)
-    runs-on: ubuntu-latest
+    name: posix-lint (ubuntu-24.04)
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
@@ -100,6 +107,7 @@ jobs:
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: ${{ matrix.node }}
+          cache: npm
 
       # node rather than `grep -P` or `file`, which behave differently across the three platforms.
       - name: Assert every tracked shell script checked out with LF
@@ -131,7 +139,7 @@ jobs:
         run: npx vitest run
 
       - name: Syntax-check the bootstrap under sh
-        run: sh -n bin/bootstrap.sh
+        run: sh -n bin/bootstrap.sh && node --check bin/bootstrap.mjs
 
       # --check-only runs every probe and repo-side assertion and mutates nothing.
       - name: Execute the bootstrap in check-only mode

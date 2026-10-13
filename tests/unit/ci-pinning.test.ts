@@ -322,8 +322,8 @@ describe("BOOT-07 -- both matrix legs run, and neither can mask the other", () =
 		expect(workflow).toContain("macos-latest");
 	});
 
-	it("runs the lint on ubuntu-latest, the only runner with shellcheck", () => {
-		expect(workflow).toContain("ubuntu-latest");
+	it("runs the lint on a pinned ubuntu image, the only runner with shellcheck", () => {
+		expect(workflow).toMatch(/\n {2}posix-lint:\n(?: {4}.*\n)*? {4}runs-on: ubuntu-\d+\.\d+\n/);
 		expect(workflow).toMatch(/shellcheck\s+--shell=sh/);
 	});
 
