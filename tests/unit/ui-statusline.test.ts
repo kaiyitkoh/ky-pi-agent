@@ -153,6 +153,15 @@ describe("agent tracker", () => {
     expect(t.running()).toBe(0);
   });
 
+  it("counts an async workflow through its children, not its in-process envelope", () => {
+    const t = createAgentTracker();
+    expect(t.onBusEvent("subagent:async-started", { id: "w", mode: "workflow" })).toBe(false);
+    expect(t.running()).toBe(0);
+    t.onBusEvent("subagent:async-started", { id: "child-1", mode: "single" });
+    t.onBusEvent("subagent:async-started", { id: "child-2", mode: "single" });
+    expect(t.running()).toBe(2);
+  });
+
   it("dedupes starts and ignores unknown completes", () => {
     const t = createAgentTracker();
     t.onBusEvent("subagent:async-started", { id: "r1" });

@@ -1,5 +1,5 @@
-// pi-subagents@0.76.1 emits async-complete only after delivery to the owning session
-// (src/runs/background/result-watcher.js:528); process-terminal fires whenever the runner exits.
+// pi-subagents@0.76.1 emits async-complete only after delivery to the owning session (result-watcher.js:528);
+// process-terminal follows a runner exit once its proof is persisted (async-execution.js:517).
 export const SUBAGENT_BUS_TOPICS = [
   "subagent:async-started",
   "subagent:async-complete",
@@ -24,7 +24,7 @@ function isForegroundLaunch(args: unknown): boolean {
 /**
  * Child-status and foreground-complete bus events are deliberately not counted:
  * children belong to a run already counted, and foreground runs are already
- * tracked through their tool call. Management actions and async launches are not
+ * tracked through their tool call. An async workflow is counted through its children. Management actions and async launches are not
  * foreground runs; an async launch is counted through its bus event instead.
  */
 export function createAgentTracker() {
@@ -36,6 +36,8 @@ export function createAgentTracker() {
       const id = idOf(payload);
       if (id === undefined) return false;
       if (topic === "subagent:async-started") {
+        // A workflow runs in-process, so it never gets process-terminal; its children are counted instead.
+        if ((payload as { mode?: unknown }).mode === "workflow") return false;
         if (asyncIds.has(id)) return false;
         asyncIds.add(id);
         return true;
