@@ -361,8 +361,15 @@ describe("QUAL-01 Group C — dead-rule guard", () => {
  * diagnostics/budget.ts x2, diagnostics/call-model.ts x1, diagnostics/index.ts
  * x1, loop-police/loop-police.ts x1, workflows/index.ts x1, workflows/settle.ts
  * x1; magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
+ *
+ * RE-MEASURE (2026-10-14): 61 -> 57. The diagnostics pass routed its error rows
+ * through one NEVER THROWS writeErrorRow and documented the call-model and
+ * /budget containment contracts. Remaining: 45 vendored plus 12 authored
+ * (swallowed-exception 7: checkpoint/git.ts x3, checkpoint/index.ts x1,
+ * loop-police/loop-police.ts x1, workflows/index.ts x1, workflows/settle.ts x1;
+ * magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
  */
-const ERROR_BUDGET_ON_OWN_SOURCE = 61;
+const ERROR_BUDGET_ON_OWN_SOURCE = 57;
 
 function realExtensionSources(): QualitySource[] {
 	return trackedFiles(".pi/extensions")

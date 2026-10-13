@@ -201,7 +201,7 @@ export type WireRecord =
 			payload: unknown;
 			/** Length of the full `messages` array before it was cut to the tail. */
 			messageCount?: number;
-			/** Truncated SHA-256 of the full redacted `messages` array. */
+			/** Truncated SHA-256 of the full `messages` array, taken before redaction. */
 			messagesHash?: string;
 			headers?: never;
 			status?: never;

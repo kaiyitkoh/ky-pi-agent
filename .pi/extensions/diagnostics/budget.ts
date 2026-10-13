@@ -6,15 +6,8 @@
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { formatSkillsForPrompt, getLastAssistantUsage } from "@earendil-works/pi-coding-agent";
 
-import { appendJsonl } from "./jsonl.ts";
+import { rowsWrittenThisSession, writeErrorRow } from "./jsonl.ts";
 import { redactString } from "./redact.ts";
-import {
-	DIAGNOSTICS_ERROR_EVENT,
-	MAX_ROTATED_FILES,
-	TURNS_LOG_BASE,
-	TURNS_ROTATE_BYTES,
-} from "./schema.ts";
-
 
 export const BUDGET_COMMAND_NAME = "budget";
 
@@ -80,7 +73,6 @@ export const SKILLS_DIVERGENCE_WARNING =
 	"out of the system prompt -- a divergence means Pi changed the format, " +
 	"and this report must say so loudly rather than silently mis-report";
 
-
 /**
  * Characters to tokens: `Math.ceil(chars / 4)`, roughly +/-20%, the same formula as Pi's own
  * (src/core/compaction/compaction.ts#estimateTokens). No tokenizer dependency may be added; pinning.test.ts enforces it.
@@ -88,7 +80,6 @@ export const SKILLS_DIVERGENCE_WARNING =
 export function estimateTokensFromChars(chars: number): number {
 	return Math.ceil(chars / 4);
 }
-
 
 export interface SystemPromptSlices {
 	total: number;
@@ -151,7 +142,6 @@ export function sliceSystemPrompt(prompt: string): SystemPromptSlices {
 		skillsFound: skillsRegion !== undefined,
 	};
 }
-
 
 export interface SectionSize {
 	chars: number;
@@ -281,7 +271,6 @@ export function computeBudget(input: BudgetInput): BudgetReport {
 	return report;
 }
 
-
 const LABEL_WIDTH = 30;
 const CHARS_WIDTH = 10;
 
@@ -364,16 +353,19 @@ export function formatBudgetReport(report: BudgetReport): string {
 	return lines.join("\n");
 }
 
+/** Report a failed run in the UI. NEVER THROWS: a dead UI must not hide the error row already written. */
+function notifyFailure(ctx: ExtensionCommandContext, err: unknown): void {
+	try {
+		// `String(err)` can quote a `.env` the model just read.
+		ctx.ui.notify(`/${BUDGET_COMMAND_NAME} failed: ${redactString(String(err))}`, "error");
+	} catch {}
+}
 
 /**
- * Register `/budget`. Counters are passed in to avoid an import cycle with index.ts. The handler
- * is wrapped because Pi swallows command exceptions (core/extensions/runner.ts); failures go to the UI and a row.
+ * Register `/budget`. The handler is wrapped because Pi swallows command exceptions
+ * (core/extensions/runner.ts); failures go to the UI and a row. `rowsWritten` is injectable for tests.
  */
-export function registerBudgetCommand(
-	pi: ExtensionAPI,
-	rowsWritten: () => number,
-	noteRowWritten: () => void,
-): void {
+export function registerBudgetCommand(pi: ExtensionAPI, rowsWritten: () => number = rowsWrittenThisSession): void {
 	pi.registerCommand(BUDGET_COMMAND_NAME, {
 		description: BUDGET_COMMAND_DESCRIPTION,
 		handler: async (_args: string, ctx: ExtensionCommandContext): Promise<void> => {
@@ -412,28 +404,8 @@ export function registerBudgetCommand(
 
 				ctx.ui.notify(formatBudgetReport(report), "info");
 			} catch (err) {
-				// `String(err)` can quote a `.env` the model just read.
-				const message = redactString(String(err));
-				try {
-					ctx.ui.notify(`/${BUDGET_COMMAND_NAME} failed: ${message}`, "error");
-				} catch {
-				}
-				try {
-					appendJsonl(
-						ctx.cwd,
-						TURNS_LOG_BASE,
-						{
-							ts: Date.now(),
-							event: DIAGNOSTICS_ERROR_EVENT,
-							where: BUDGET_COMMAND_WHERE,
-							error: message,
-						},
-						{ rotateBytes: TURNS_ROTATE_BYTES, maxRotated: MAX_ROTATED_FILES },
-					);
-					noteRowWritten();
-				} catch {
-					// The instrument cannot instrument its own inability to write.
-				}
+				writeErrorRow(ctx.cwd, BUDGET_COMMAND_WHERE, err);
+				notifyFailure(ctx, err);
 			}
 		},
 	});

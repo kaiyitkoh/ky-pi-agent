@@ -60,7 +60,7 @@ import {
 	estimateTokensFromChars,
 	registerBudgetCommand,
 } from "../../.pi/extensions/diagnostics/budget.ts";
-import { logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
+import { logPath, rowsWrittenThisSession } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import {
 	DIAGNOSTICS_ERROR_EVENT,
 	TURNS_LOG_BASE,
@@ -135,7 +135,7 @@ interface InvokeOptions {
 async function invoke(opts: InvokeOptions = {}): Promise<Invocation & { cwd: string }> {
 	return await withTempLogCwd(async (cwd) => {
 		let handler: CommandHandler | undefined;
-		let rowsWritten = 0;
+		const rowsBefore = rowsWrittenThisSession();
 
 		const pi = {
 			registerCommand(name: string, spec: { handler: CommandHandler }) {
@@ -152,13 +152,7 @@ async function invoke(opts: InvokeOptions = {}): Promise<Invocation & { cwd: str
 			],
 		} as unknown as ExtensionAPI;
 
-		registerBudgetCommand(
-			pi,
-			() => 7,
-			() => {
-				rowsWritten += 1;
-			},
-		);
+		registerBudgetCommand(pi, () => 7);
 
 		expect(
 			handler,
@@ -217,12 +211,10 @@ async function invoke(opts: InvokeOptions = {}): Promise<Invocation & { cwd: str
 			? (readJsonl(turnsFile) as { event?: string; where?: string; error?: string }[])
 			: [];
 
-		// The counter is passed in for the same reason `registerWireHooks` takes it,
-		// so its movement is part of the contract: a row on disk that nothing counted
-		// makes `/budget`'s own figure disagree with the file it describes.
+		// A row on disk that nothing counted makes `/budget`'s own figure disagree with the file it describes.
 		expect(
-			rowsWritten,
-			"the injected noteRowWritten must be called exactly once per row the handler appended",
+			rowsWrittenThisSession() - rowsBefore,
+			"the rows-written counter must move exactly once per row the handler appended",
 		).toBe(rows.length);
 
 		return { notified, rows, cwd };

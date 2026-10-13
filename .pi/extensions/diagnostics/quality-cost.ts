@@ -31,7 +31,7 @@ interface QualityCostSlot {
 /** Narrow an unknown `globalThis` slot; anything unreadable, or cleared to `undefined`, means nothing to report. */
 function readSlot(): QualityCostSlot | undefined {
 	const raw = (globalThis as Record<string, unknown>)[QUALITY_COST_KEY];
-	if (raw === undefined || raw === null || typeof raw !== "object") {
+	if (typeof raw !== "object" || raw === null) {
 		return undefined;
 	}
 	const candidate = raw as Partial<QualityCostSlot>;
@@ -41,12 +41,18 @@ function readSlot(): QualityCostSlot | undefined {
 	return { ms: candidate.ms, tokens: candidate.tokens };
 }
 
-function writeSlot(slot: QualityCostSlot): void {
+function writeSlot(slot: QualityCostSlot | undefined): void {
 	(globalThis as Record<string, unknown>)[QUALITY_COST_KEY] = slot;
 }
 
-function clearSlot(): void {
-	(globalThis as Record<string, unknown>)[QUALITY_COST_KEY] = undefined;
+/** NEVER THROWS. */
+function readCost(): QualityCost | undefined {
+	try {
+		const slot = readSlot();
+		return slot === undefined ? undefined : { qualityMs: slot.ms, qualityTokens: slot.tokens };
+	} catch {
+		return undefined;
+	}
 }
 
 /** Add one contribution to the current turn's ledger; sums across the gate, reviewer and refute callers. NEVER THROWS. */
@@ -64,16 +70,11 @@ export function addQualityCost(input: QualityCostInput): void {
 
 /** Return and CLEAR the ledger; `undefined` when nothing was added. Only `turn_end` may call it. NEVER THROWS. */
 export function takeQualityCost(): QualityCost | undefined {
+	const cost = readCost();
 	try {
-		const slot = readSlot();
-		clearSlot();
-		if (slot === undefined) {
-			return undefined;
-		}
-		return { qualityMs: slot.ms, qualityTokens: slot.tokens };
-	} catch {
-		return undefined;
-	}
+		writeSlot(undefined);
+	} catch {}
+	return cost;
 }
 
 /**
@@ -90,11 +91,7 @@ export function refundQualityCost(input: QualityCostInput): void {
 		}
 		const ms = Math.max(0, current.ms - (input.ms ?? 0));
 		const tokens = Math.max(0, current.tokens - (input.tokens ?? 0));
-		if (ms === 0 && tokens === 0) {
-			clearSlot();
-			return;
-		}
-		writeSlot({ ms, tokens });
+		writeSlot(ms === 0 && tokens === 0 ? undefined : { ms, tokens });
 	} catch {
 		// Swallow: an accounting failure must never turn a passing gate result into an exception.
 	}
@@ -102,13 +99,5 @@ export function refundQualityCost(input: QualityCostInput): void {
 
 /** Read the ledger WITHOUT clearing it. For tests only: a peek mistaken for a take double-attributes cost. NEVER THROWS. */
 export function peekQualityCost(): QualityCost | undefined {
-	try {
-		const slot = readSlot();
-		if (slot === undefined) {
-			return undefined;
-		}
-		return { qualityMs: slot.ms, qualityTokens: slot.tokens };
-	} catch {
-		return undefined;
-	}
+	return readCost();
 }

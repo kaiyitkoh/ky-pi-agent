@@ -6,7 +6,7 @@
 import type { AssistantMessage } from "@earendil-works/pi-ai";
 
 import { scoreCalibration, type SeededDefectExpectation } from "../.pi/extensions/quality/calibration.ts";
-import { isProseToolCall } from "../.pi/extensions/diagnostics/prose.ts";
+import { collectText, isProseToolCall } from "../.pi/extensions/diagnostics/prose.ts";
 import { validateReview } from "../.pi/extensions/quality/review-schema.ts";
 import { applyProfile } from "../.pi/extensions/routing/profiles.ts";
 import {
@@ -307,13 +307,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function textOf(message: AssistantMessage): string {
-	return message.content
-		.filter((block) => block.type === "text")
-		.map((block) => block.text)
-		.join("\n");
-}
-
 /** Collects finalized assistant messages from the JSONL stream; blank, non-JSON and truncated lines are skipped. */
 export function parseJsonModeOutput(text: string): ParsedOutput {
 	const capped = text.length > MAX_OUTPUT_CHARS ? text.slice(0, MAX_OUTPUT_CHARS) : text;
@@ -344,7 +337,7 @@ export function parseJsonModeOutput(text: string): ParsedOutput {
 	const usage = isRecord(last.usage)
 		? { input: Number(last.usage.input) || 0, cacheRead: Number(last.usage.cacheRead) || 0 }
 		: undefined;
-	return { finalText: textOf(last), assistantMessages, usage, stopReason: last.stopReason };
+	return { finalText: collectText(last), assistantMessages, usage, stopReason: last.stopReason };
 }
 
 export interface TrialScore {

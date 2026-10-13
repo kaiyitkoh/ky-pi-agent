@@ -83,6 +83,13 @@ function costFor(model: Model<Api>, usage: Usage): TurnCost {
 	};
 }
 
+/** The omitted-key rule: an optional field gets a key only when it has a value. */
+function assignDefined<K extends keyof TurnRow>(row: TurnRow, key: K, value: TurnRow[K] | undefined): void {
+	if (value !== undefined) {
+		row[key] = value;
+	}
+}
+
 /** Compose one `turns-*.jsonl` row. Pure. */
 export function composeTurnRow(input: TurnRowInput): TurnRow {
 	const { message, model } = input;
@@ -110,60 +117,25 @@ export function composeTurnRow(input: TurnRowInput): TurnRow {
 	};
 
 	// Only when it differs from `model` (OpenRouter `auto` resolves elsewhere, pi-ai `types.ts` Model).
-	if (message.responseModel !== undefined && message.responseModel !== message.model) {
-		row.responseModel = message.responseModel;
+	if (message.responseModel !== message.model) {
+		assignDefined(row, "responseModel", message.responseModel);
 	}
-
 	// `fauxAssistantMessage` never sets it, so it must not be required.
-	if (message.rawStopReason !== undefined) {
-		row.rawStopReason = message.rawStopReason;
-	}
-
+	assignDefined(row, "rawStopReason", message.rawStopReason);
 	// A provider reporting zero gets the key; one reporting no breakdown gets none.
-	if (usage.reasoning !== undefined) {
-		row.reasoning = usage.reasoning;
-	}
-
+	assignDefined(row, "reasoning", usage.reasoning);
 	// `calculateCost` prices 1h cache writes at 2x the INPUT rate (pi-ai `dist/models.js` calculateCost); only Anthropic reports the split.
-	if (usage.cacheWrite1h !== undefined) {
-		row.cacheWrite1h = usage.cacheWrite1h;
-	}
-
-	const ratio = cacheReadRatio(usage);
-	if (ratio !== undefined) {
-		row.cacheReadRatio = ratio;
-	}
-
-	if (input.turnIndex !== undefined) {
-		row.turnIndex = input.turnIndex;
-	}
-
+	assignDefined(row, "cacheWrite1h", usage.cacheWrite1h);
+	assignDefined(row, "cacheReadRatio", cacheReadRatio(usage));
+	assignDefined(row, "turnIndex", input.turnIndex);
 	// Supplied only by the nested path; the one field a response callback may contribute.
-	if (input.httpStatus !== undefined) {
-		row.httpStatus = input.httpStatus;
-	}
-
-	if (input.toolResults !== undefined) {
-		row.toolResults = input.toolResults;
-	}
-
-	if (input.thinkingLevel !== undefined) {
-		row.thinkingLevel = input.thinkingLevel;
-	}
-
-	// Guards against turning an absent quality ledger into a fabricated zero.
-	if (input.qualityMs !== undefined) {
-		row.qualityMs = input.qualityMs;
-	}
-
-	if (input.qualityTokens !== undefined) {
-		row.qualityTokens = input.qualityTokens;
-	}
-
-	if (input.event !== undefined) {
-		row.event = input.event;
-	}
-
+	assignDefined(row, "httpStatus", input.httpStatus);
+	assignDefined(row, "toolResults", input.toolResults);
+	assignDefined(row, "thinkingLevel", input.thinkingLevel);
+	// An absent quality ledger must not become a fabricated zero.
+	assignDefined(row, "qualityMs", input.qualityMs);
+	assignDefined(row, "qualityTokens", input.qualityTokens);
+	assignDefined(row, "event", input.event);
 	// Provider error text may echo request content, so it is redacted first.
 	if (message.errorMessage !== undefined) {
 		row.errorMessage = redactString(message.errorMessage);

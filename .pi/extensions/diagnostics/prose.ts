@@ -22,7 +22,7 @@ export function escapeRegExpLiteral(value: string): string {
 
 /**
  * Build the tool-name-anchored matcher, or `undefined` for an empty list (a generic call pattern would match every
- * printed code block). No `g` flag: used with `.test()` and `.exec()`, so it must be stateless.
+ * printed code block). No `g` flag: used with `.exec()`, so it must be stateless.
  */
 export function buildProseToolCallPattern(activeToolNames: readonly string[]): RegExp | undefined {
 	if (activeToolNames.length === 0) {
@@ -34,40 +34,29 @@ export function buildProseToolCallPattern(activeToolNames: readonly string[]): R
 }
 
 /** The text a reader would see: every `text` block, joined, in order. */
-function collectText(message: AssistantMessage): string {
+export function collectText(message: AssistantMessage): string {
 	return message.content
 		.filter((block) => block.type === "text")
 		.map((block) => block.text)
 		.join("\n");
 }
 
-/** Did this finalized assistant message describe a tool call instead of making one? */
-export function isProseToolCall(message: AssistantMessage, activeToolNames: readonly string[]): boolean {
-	// Gate 1: only a clean stop can be a silently incomplete turn.
-	if (message.stopReason !== "stop") {
-		return false;
-	}
-	// Gate 2: a model that emitted the call and also narrated it did its job.
-	if (message.content.some((block) => block.type === "toolCall")) {
-		return false;
-	}
-	// Gate 3: with no active tool any hit is a false positive.
-	const pattern = buildProseToolCallPattern(activeToolNames);
-	if (pattern === undefined) {
-		return false;
-	}
-	// Gate 4: a bare mention, a mention with a paren and an unregistered name do not match.
-	return pattern.test(collectText(message));
-}
-
-/** Which tool was described, or `undefined` for exactly the messages {@link isProseToolCall} rejects. */
+/** Which tool was described in prose, or `undefined` when any gate fails. Builds the pattern and joins the text once. */
 export function proseToolCallName(
 	message: AssistantMessage,
 	activeToolNames: readonly string[],
 ): string | undefined {
-	if (!isProseToolCall(message, activeToolNames)) {
+	// Gate 1: only a clean stop can be a silently incomplete turn.
+	// Gate 2: a model that emitted the call and also narrated it did its job.
+	if (message.stopReason !== "stop" || message.content.some((block) => block.type === "toolCall")) {
 		return undefined;
 	}
-	const pattern = buildProseToolCallPattern(activeToolNames);
-	return pattern?.exec(collectText(message))?.[1];
+	// Gate 3: with no active tool any hit is a false positive.
+	// Gate 4: a bare mention, a mention with a paren and an unregistered name do not match.
+	return buildProseToolCallPattern(activeToolNames)?.exec(collectText(message))?.[1];
+}
+
+/** Did this finalized assistant message describe a tool call instead of making one? */
+export function isProseToolCall(message: AssistantMessage, activeToolNames: readonly string[]): boolean {
+	return proseToolCallName(message, activeToolNames) !== undefined;
 }

@@ -197,8 +197,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/diagnostics/budget.ts",
-		budget: 450,
-		why: "Phase 2's /budget command -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 435 raw lines 2026-08-14, rounded up to the next ten. Re-measured 441 on 2026-10-13 after the per-turn floor field and row (FLOOR_LABEL, floor, one computed value, one rendered row)",
+		budget: 420,
+		why: "Phase 2's /budget command -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 435 raw lines 2026-08-14, rounded up to the next ten. Re-measured 441 on 2026-10-13 after the per-turn floor field and row (FLOOR_LABEL, floor, one computed value, one rendered row). LOWERED 450 -> 420 (2026-10-14): error rows go through the shared writeErrorRow and the counter is the writer's own; 413 raw lines",
 	},
 	{
 		file: ".pi/extensions/checkpoint/index.ts",
@@ -376,13 +376,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
-		budget: 1960,
+		budget: 1820,
 		why: "WR-03; measured 3913 raw lines across 10 files 2026-08-15 (08-04 added quality-cost.ts; not " +
 			"re-reviewed for tightness), rounded up to the next ten. Code-review fix pass WR-06 added " +
 			"refundQualityCost() to quality-cost.ts (see workflows/index.ts's own budget entry for the finding). " +
 			"Re-measured 1930 raw lines across 10 files 2026-08-15 (budget.ts 435, call-model.ts 217, index.ts " +
 			"305, jsonl.ts 73, prose.ts 74, quality-cost.ts 115, redact.ts 159, schema.ts 208, turns.ts 176, " +
-			"wire.ts 168), rounded up to the next ten. Re-measured 1936 raw lines across 10 files 2026-10-13 (budget.ts 441 after the per-turn floor). Re-measured 1973 raw lines 2026-10-13 after provider error redaction, the fixtures move and wire capture changes (budget.ts 441, call-model.ts 217, index.ts 299, jsonl.ts 74, prose.ts 74, quality-cost.ts 115, redact.ts 167, schema.ts 219, turns.ts 176, wire.ts 191), rounded up to the next ten. LOWERED 1980 -> 1950: redact.ts takes its value shapes from .pi/lib/secret-patterns.ts; 1944 raw lines (redact.ts 138). RAISED 1950 -> 1960: redact.ts adds redactForModel, the shape-only redactor for reviewer, design-review and MR text; 1952 raw lines (redact.ts 142)",
+			"wire.ts 168), rounded up to the next ten. Re-measured 1936 raw lines across 10 files 2026-10-13 (budget.ts 441 after the per-turn floor). Re-measured 1973 raw lines 2026-10-13 after provider error redaction, the fixtures move and wire capture changes (budget.ts 441, call-model.ts 217, index.ts 299, jsonl.ts 74, prose.ts 74, quality-cost.ts 115, redact.ts 167, schema.ts 219, turns.ts 176, wire.ts 191), rounded up to the next ten. LOWERED 1980 -> 1950: redact.ts takes its value shapes from .pi/lib/secret-patterns.ts; 1944 raw lines (redact.ts 138). RAISED 1950 -> 1960: redact.ts adds redactForModel, the shape-only redactor for reviewer, design-review and MR text; 1952 raw lines (redact.ts 142). LOWERED 1960 -> 1820 (2026-10-14): one counted append path, a single prose pass and one error-row writer; 1811 raw lines",
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
@@ -587,7 +587,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/lib",
-		budget: 830,
+		budget: 810,
 		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs no longer filters to `.pi/extensions/` " +
 			"only -- `.pi/lib/jsonl.ts` is imported (via `../../lib/jsonl.ts`) by quality/index.ts (indirectly, " +
 			"through .pi/lib/win-quote.ts's own CR2-01 wiring), routing/index.ts, safety/audit.ts and " +
@@ -607,7 +607,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten. LOWERED 840 -> 660 by the " +
 			"08.2 review fix WR-07: .pi/lib joined the comment-discipline gate and its history/ID comments were " +
 			"condensed. Re-measured 655 raw lines on 2026-10-13 (jsonl.ts 497, win-quote.ts 67, " +
-			"work-artifacts.ts 91), rounded up to the next ten. Re-measured 670 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 715 raw lines 2026-10-13 after the signed-ledger and JSONL hardening in jsonl.ts (active-workflow.ts 15, jsonl.ts 542, win-quote.ts 67, work-artifacts.ts 91), rounded up to the next ten. RAISED 720 -> 770: secret-patterns.ts is the one credential-shape table shared by the wire redactor and the safety audit, so the wire log is never redacted more weakly than the audit; 765 raw lines (secret-patterns.ts 50). RAISED 770 -> 780: jsonl.ts re-stats the live file before rotating and never renames onto an existing rotated file; 779 raw lines (jsonl.ts 556). RAISED 780 -> 800: secret-patterns.ts splits the table into shape rules for model inputs and name rules for logs only, with length-bounded name rules; 792 raw lines (secret-patterns.ts 67) RAISED 800 -> 820 (2026-10-13): settings.ts is the shared settings-file key reader; 818 raw lines. RAISED 820 -> 830 (2026-10-14): rotate re-checks the cap before moving any file, so a stale writer does not rotate a sibling's near-empty successor; 829 raw lines.",
+			"work-artifacts.ts 91), rounded up to the next ten. Re-measured 670 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 715 raw lines 2026-10-13 after the signed-ledger and JSONL hardening in jsonl.ts (active-workflow.ts 15, jsonl.ts 542, win-quote.ts 67, work-artifacts.ts 91), rounded up to the next ten. RAISED 720 -> 770: secret-patterns.ts is the one credential-shape table shared by the wire redactor and the safety audit, so the wire log is never redacted more weakly than the audit; 765 raw lines (secret-patterns.ts 50). RAISED 770 -> 780: jsonl.ts re-stats the live file before rotating and never renames onto an existing rotated file; 779 raw lines (jsonl.ts 556). RAISED 780 -> 800: secret-patterns.ts splits the table into shape rules for model inputs and name rules for logs only, with length-bounded name rules; 792 raw lines (secret-patterns.ts 67) RAISED 800 -> 820 (2026-10-13): settings.ts is the shared settings-file key reader; 818 raw lines. RAISED 820 -> 830 (2026-10-14): rotate re-checks the cap before moving any file, so a stale writer does not rotate a sibling's near-empty successor; 829 raw lines. LOWERED 830 -> 810 (2026-10-14): jsonl.ts creates the log directory only on ENOENT and its constant docs are condensed; 810 raw lines.",
 	},
 	{
 		dir: ".pi/extensions/grill",

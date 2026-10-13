@@ -15,7 +15,7 @@
  * never renamed or unlinked. {@link pruneLogs} takes owned base names from the caller with no default, so one
  * binding can never delete another's logs.
  * Mutable state lives on `globalThis` because jiti can load this file twice through different import graphs
- * (same hazard as `diagnostics/index.ts#ROWS_WRITTEN_KEY`).
+ * (same hazard as `diagnostics/jsonl.ts#ROWS_WRITTEN_KEY`).
  */
 import {
 	appendFileSync,
@@ -32,13 +32,8 @@ import { join, resolve, sep } from "node:path";
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
 
 /**
- * Directory segment under Pi's config dir that holds every dated JSONL log,
- * diagnostics and safety alike.
- *
- * The full directory is `<cwd>/<CONFIG_DIR_NAME>/<LOG_DIR_SEGMENT>` — never a
- * hardcoded `.pi`, because a rebranded Pi distribution uses a different name.
- * `.gitignore:79` (`.pi/logs/`) and `.gitignore:30` (`*.jsonl`) already cover
- * it twice over.
+ * Directory segment under `<cwd>/<CONFIG_DIR_NAME>/` holding every dated JSONL log; never a hardcoded `.pi`,
+ * since a rebranded Pi uses a different name. `.gitignore` covers it twice (`.pi/logs/` and `*.jsonl`).
  */
 export const LOG_DIR_SEGMENT = "logs";
 
@@ -62,23 +57,10 @@ const ROTATE_BACKOFF_KEY = "__kypiJsonlRotateBackoff";
 /** File extension of every log this module writes. */
 const EXT = ".jsonl";
 
-/**
- * Rotated files kept per stream, per day, when a caller does not override it.
- *
- * Matches the production value (`diagnostics/schema.ts`'s
- * `MAX_ROTATED_FILES`): 10 x a stream's own cap bounds a bad day at a fixed
- * multiple of the per-file size. A binding that wants a different bound passes
- * its own `maxRotated`.
- */
+/** Rotated files kept per stream per day, matching `diagnostics/schema.ts` MAX_ROTATED_FILES: a bad day is bounded at 10x the cap. */
 const DEFAULT_MAX_ROTATED_FILES = 10;
 
-/**
- * Days of history kept, when a caller does not override it.
- *
- * Matches the production value (`diagnostics/schema.ts`'s `RETENTION_DAYS`):
- * long enough to answer "was last week different?", short enough that a
- * working tree in a public repo never accumulates months of log bodies.
- */
+/** Days of history kept, matching `diagnostics/schema.ts` RETENTION_DAYS: enough for "was last week different?", never months. */
 const DEFAULT_RETENTION_DAYS = 14;
 
 /**
@@ -112,16 +94,10 @@ const SIZE_RECHECK_MS = 1000;
  */
 const BASE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
-/**
- * `globalThis` key for the cached live-file-size map. See the module docstring
- * section on the jiti duplicate-module-instance hazard.
- */
+/** `globalThis` key for the cached live-file-size map (jiti duplicate-module hazard, see the module docstring). */
 const SIZE_CACHE_KEY = "__kypiJsonlSizeCache";
 
-/**
- * `globalThis` key for the produced-paths set. See the module docstring
- * section on the jiti duplicate-module-instance hazard.
- */
+/** `globalThis` key for the produced-paths set (same hazard). */
 const PRODUCED_KEY = "__kypiJsonlProducedPaths";
 
 /** The process-wide cached-size map, created on first use. */
@@ -378,8 +354,6 @@ export function appendJsonl(
 	const cap = opts.rotateBytes ?? DEFAULT_ROTATE_BYTES;
 	const maxRotated = opts.maxRotated ?? DEFAULT_MAX_ROTATED_FILES;
 
-	mkdirSync(logDir(cwd), { recursive: true });
-
 	const text = `${JSON.stringify(record)}\n`;
 	const bytes = Buffer.byteLength(text, "utf8");
 
@@ -415,7 +389,14 @@ export function appendJsonl(
 		}
 	}
 
-	appendFileSync(file, text, "utf8");
+	try {
+		appendFileSync(file, text, "utf8");
+	} catch (error) {
+		// The directory is created on first need only, keeping a `mkdir` syscall off every append.
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+		mkdirSync(logDir(cwd), { recursive: true });
+		appendFileSync(file, text, "utf8");
+	}
 	const cache = sizeCacheSlot();
 	cache.set(file, { size: size + bytes, checkedAt: cache.get(file)?.checkedAt ?? nowMs });
 	producedSlot().add(file);

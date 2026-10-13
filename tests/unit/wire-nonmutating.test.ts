@@ -29,7 +29,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 
 import { describe, expect, it } from "vitest";
 
-import { safeHandler } from "../../.pi/extensions/diagnostics/index.ts";
+import { rowsWrittenThisSession, safeHandler } from "../../.pi/extensions/diagnostics/index.ts";
 import { logDir } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { registerWireHooks } from "../../.pi/extensions/diagnostics/wire.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
@@ -53,7 +53,7 @@ const EXPECTED_EVENTS = [
 /** Register the wire hooks against a recording stub and hand back the handlers. */
 function registerAgainstStub(): { handlers: Map<string, Handler>; rows: () => number } {
 	const handlers = new Map<string, Handler>();
-	let rows = 0;
+	const before = rowsWrittenThisSession();
 
 	const pi = {
 		on(event: string, handler: Handler) {
@@ -61,11 +61,9 @@ function registerAgainstStub(): { handlers: Map<string, Handler>; rows: () => nu
 		},
 	} as unknown as ExtensionAPI;
 
-	registerWireHooks(pi, safeHandler, () => {
-		rows += 1;
-	});
+	registerWireHooks(pi, safeHandler);
 
-	return { handlers, rows: () => rows };
+	return { handlers, rows: () => rowsWrittenThisSession() - before };
 }
 
 /** A context carrying only what the wire handlers actually read. */
@@ -234,7 +232,7 @@ describe("a failing append is swallowed, not propagated", () => {
 
 			expect(
 				rows(),
-				"the append SUCCEEDED, so this test proved nothing: `noteRow` runs only after " +
+				"the append SUCCEEDED, so this test proved nothing: the counter moves only after " +
 					"`appendJsonl` returns, and a moved counter means the sabotage above no longer makes " +
 					"the write fail. Fix the fixture rather than deleting the assertion",
 			).toBe(0);

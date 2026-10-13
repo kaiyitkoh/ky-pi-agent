@@ -23,7 +23,7 @@ const MAX_DEPTH = 24;
 const MAX_NODES = 200_000;
 
 /** Header keys whose value is a credential, lower-cased. Pi's attribution headers are deliberately absent. */
-export const REDACTED_HEADER_KEYS: readonly string[] = [
+export const REDACTED_HEADER_KEYS: readonly string[] = Object.freeze([
 	"authorization",
 	"x-api-key",
 	"api-key",
@@ -32,7 +32,7 @@ export const REDACTED_HEADER_KEYS: readonly string[] = [
 	"proxy-authorization",
 	"cookie",
 	"set-cookie",
-];
+]);
 
 /** Open half of the header rule: any key that NAMES a credential, so unpredicted headers are caught. */
 export const REDACTED_HEADER_KEY_RE = /(^|[-_])(api[-_]?key|token|secret|credential|password)([-_]|$)/i;
@@ -40,11 +40,25 @@ export const REDACTED_HEADER_KEY_RE = /(^|[-_])(api[-_]?key|token|secret|credent
 /** Credential shapes matched inside a value; see `.pi/lib/secret-patterns.ts`. */
 export const SECRET_VALUE_PATTERNS: readonly RegExp[] = SECRET_PATTERNS;
 
-/** camelCase keys (`apiKey`, `secretAccessKey`) are split to snake case first, so the delimiter in the key rule finds them. */
+/** Payload walks test the same few dozen keys thousands of times; the memo is cleared at this size so it stays bounded. */
+const MAX_MEMOISED_KEYS = 4096;
+const keyVerdicts = new Map<string, boolean>();
+
+/** camelCase keys (`apiKey`, `secretAccessKey`) are split to snake case too, so the delimiter in the key rule finds them. */
 function isRedactedHeaderKey(key: string): boolean {
+	const memoised = keyVerdicts.get(key);
+	if (memoised !== undefined) {
+		return memoised;
+	}
 	const lower = key.toLowerCase();
 	const snake = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
-	return REDACTED_HEADER_KEYS.includes(lower) || REDACTED_HEADER_KEY_RE.test(lower) || REDACTED_HEADER_KEY_RE.test(snake);
+	const verdict =
+		REDACTED_HEADER_KEYS.includes(lower) || REDACTED_HEADER_KEY_RE.test(lower) || REDACTED_HEADER_KEY_RE.test(snake);
+	if (keyVerdicts.size >= MAX_MEMOISED_KEYS) {
+		keyVerdicts.clear();
+	}
+	keyVerdicts.set(key, verdict);
+	return verdict;
 }
 
 /** Replace every credential-shaped run, leaving everything else byte-identical. */
@@ -61,15 +75,11 @@ export function redactForModel(value: string): string {
 export function redactHeaders(headers: Record<string, string | null>): Record<string, string | null> {
 	const out: Record<string, string | null> = {};
 	for (const [key, value] of Object.entries(headers)) {
-		if (typeof value !== "string" && value !== null) {
-			// Normalise a loose `undefined` to `null`; otherwise `value.length` throws and the whole wire record is lost.
+		if (typeof value !== "string") {
+			// A loose `undefined` is normalised to `null` too; otherwise `value.length` throws and the whole wire record is lost.
 			out[key] = null;
-		} else if (value === null) {
-			out[key] = null;
-		} else if (isRedactedHeaderKey(key)) {
-			out[key] = redactionPlaceholder(value.length);
 		} else {
-			out[key] = redactString(value);
+			out[key] = isRedactedHeaderKey(key) ? redactionPlaceholder(value.length) : redactString(value);
 		}
 	}
 	return out;

@@ -37,6 +37,7 @@
  * `false` headless with no UI to answer the prompt, and a silently absent
  * extension is another green run over nothing (RESEARCH §8.4).
  */
+import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import { join, relative, sep } from "node:path";
 
@@ -338,6 +339,12 @@ describe("wire request rows stay bounded as history grows", () => {
 		expect(bounded.messagesHash).toMatch(/^[0-9a-f]{16}$/);
 		expect(boundRequestPayload(payloadWith(50)).messagesHash).toBe(bounded.messagesHash);
 		expect(boundRequestPayload(payloadWith(49)).messagesHash).not.toBe(bounded.messagesHash);
+	});
+
+	it("hashes the same bytes as JSON.stringify(messages), so digests join across versions", () => {
+		const payload = { messages: [{ role: "user", content: "a" }, undefined, () => 1, "b"] };
+		const expected = createHash("sha256").update(JSON.stringify(payload.messages)).digest("hex").slice(0, 16);
+		expect(boundRequestPayload(payload).messagesHash).toBe(expected);
 	});
 
 	it("row size is flat between 10 and 50 turns", () => {

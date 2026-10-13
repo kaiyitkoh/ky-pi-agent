@@ -13,26 +13,24 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 
 import { registerBudgetCommand } from "./budget.ts";
-import { appendJsonl, pruneLogs } from "./jsonl.ts";
-import { isProseToolCall, proseToolCallName } from "./prose.ts";
+import { appendJsonl, pruneLogs, writeErrorRow } from "./jsonl.ts";
+import { proseToolCallName } from "./prose.ts";
 import { takeQualityCost } from "./quality-cost.ts";
-import { redactString } from "./redact.ts";
 import {
 	DIAGNOSTICS_ERROR_EVENT,
 	MAX_PROSE_RETRIES,
-	MAX_ROTATED_FILES,
 	PROSE_EVENT,
 	PROSE_EXHAUSTED_EVENT,
 	PROSE_RETRY_PROMPT,
 	TURNS_LOG_BASE,
-	TURNS_ROTATE_BYTES,
 	type Api,
 	type AssistantMessage,
 	type Model,
-	type TurnRow,
 } from "./schema.ts";
 import { composeTurnRow } from "./turns.ts";
 import { currentCorrelationId, registerWireHooks, UNCORRELATED } from "./wire.ts";
+
+export { noteRowWritten, ROWS_WRITTEN_KEY, rowsWrittenThisSession } from "./jsonl.ts";
 
 /** `event` on the row written once per session start. */
 export const SESSION_START_EVENT = "diagnostics.session_start";
@@ -46,34 +44,8 @@ export const TURN_NO_MESSAGE_WHERE = "turn_end.no_message";
 /** `event` on a row costed from a degraded model shape; lets spend totals exclude it. */
 export const MODEL_UNAVAILABLE_EVENT = "diagnostics.model_unavailable";
 
-/**
- * Process-wide slot for the rows-written counter: jiti can load this module twice, so a
- * module-level `let` would undercount (same reason as `wire.ts` COUNTER_KEY).
- */
-export const ROWS_WRITTEN_KEY = "__kypiDiagnosticsRowsWritten";
-
 /** Prose-tool-call retries spent in the current agent run (per run, not per turn); reset on `agent_start`. */
 let proseRetriesThisRun = 0;
-
-/** Rows written by this process, so `/budget` can show "0 rows" instead of leaving it to inference. */
-export function rowsWrittenThisSession(): number {
-	const value = (globalThis as Record<string, unknown>)[ROWS_WRITTEN_KEY];
-	return typeof value === "number" ? value : 0;
-}
-
-/** Record that one row reached disk; every append path must call this. */
-export function noteRowWritten(): void {
-	(globalThis as Record<string, unknown>)[ROWS_WRITTEN_KEY] = rowsWrittenThisSession() + 1;
-}
-
-/** Append one row to the turns stream and count it. */
-function writeTurnsRow(cwd: string, record: TurnRow | Record<string, unknown>): void {
-	appendJsonl(cwd, TURNS_LOG_BASE, record, {
-		rotateBytes: TURNS_ROTATE_BYTES,
-		maxRotated: MAX_ROTATED_FILES,
-	});
-	noteRowWritten();
-}
 
 /** State accumulated between `turn_start` and `turn_end`; one record, because the loop is serial. */
 interface TurnAccumulator {
@@ -112,7 +84,7 @@ function degradedModel(message: AssistantMessage): Model<Api> {
 /**
  * Wrap a handler so a throw leaves an error row instead of vanishing. Never rethrows and
  * returns `undefined` on failure: several Pi hooks treat any other return as a replacement
- * (pi 1.1.0 runner.js:1077-1078). The error text is redacted before logging.
+ * (pi 1.1.0 runner.js:1077-1078).
  */
 export function safeHandler<E, R = undefined>(
 	where: string,
@@ -120,33 +92,22 @@ export function safeHandler<E, R = undefined>(
 ): (event: E, ctx: ExtensionContext) => Promise<R | undefined> {
 	return async (event: E, ctx: ExtensionContext): Promise<R | undefined> => {
 		try {
-			const result = await fn(event, ctx);
-			// `null` becomes `undefined`: a `null` from before_provider_request would replace the request body
-						// (dist/core/extensions/runner.js).
-			return (result ?? undefined) as R | undefined;
+			// `null` becomes `undefined`: a `null` from before_provider_request would replace the request body.
+			return ((await fn(event, ctx)) ?? undefined) as R | undefined;
 		} catch (err) {
-			try {
-				writeTurnsRow(ctx.cwd, {
-					ts: Date.now(),
-					event: DIAGNOSTICS_ERROR_EVENT,
-					where,
-					error: redactString(String(err)),
-				});
-			} catch {
-				// The instrument cannot instrument its own inability to write.
-			}
+			writeErrorRow(ctx.cwd, where, err);
 			return undefined;
 		}
 	};
 }
 
 export default function (pi: ExtensionAPI): void {
-	// Retention runs at session start, off the hot path.
 	pi.on(
 		"session_start",
 		safeHandler<SessionStartEvent>("session_start", (_event, ctx) => {
+			// Retention runs here, off the hot path.
 			const pruned = pruneLogs(ctx.cwd);
-			writeTurnsRow(ctx.cwd, {
+			appendJsonl(ctx.cwd, TURNS_LOG_BASE, {
 				ts: Date.now(),
 				event: SESSION_START_EVENT,
 				prunedFiles: pruned.length,
@@ -154,8 +115,8 @@ export default function (pi: ExtensionAPI): void {
 		}),
 	);
 
-	// `safeHandler` and `noteRowWritten` are passed in because an import back from wire.ts would be a cycle.
-	registerWireHooks(pi, safeHandler, noteRowWritten);
+	// `safeHandler` is passed in because an import back from wire.ts would be a cycle.
+	registerWireHooks(pi, safeHandler);
 
 	// Turn rows come from these hooks, never from `after_provider_response` (it does not fire on errors).
 
@@ -185,48 +146,41 @@ export default function (pi: ExtensionAPI): void {
 			turn.corr = captureCorrelationId();
 			inFlight = turn;
 
-			// The active-tool list is live, never hardcoded: `isProseToolCall` refuses an empty list.
-			const activeTools = pi.getActiveTools();
-			if (!isProseToolCall(event.message, activeTools)) {
+			// Read live, never hardcoded: the active-tool list may differ by the time anyone reads the log.
+			const tool = proseToolCallName(event.message, pi.getActiveTools());
+			if (tool === undefined) {
 				return;
 			}
 
 			// Verdict sits alongside `stopReason`, never instead of it, so the provider's word stays readable.
 			turn.event = PROSE_EVENT;
+			// Capped: an uncapped detector against a prose-prone model is unbounded spend.
+			const exhausted = proseRetriesThisRun >= MAX_PROSE_RETRIES;
 
-			const sessionId = ctx.sessionManager.getSessionId();
-			// Read now: the active-tool list may differ by the time anyone reads the log.
-			const tool = proseToolCallName(event.message, activeTools);
-
-			if (proseRetriesThisRun >= MAX_PROSE_RETRIES) {
-				// Capped: an uncapped detector against a prose-prone model is unbounded spend.
-				writeTurnsRow(ctx.cwd, {
+			// Immediate record that survives if `turn_end` throws (core/extensions/runner.ts). No `kind`, so it is not counted as a turn.
+			// Contained so a failed write cannot cancel the retry.
+			try {
+				appendJsonl(ctx.cwd, TURNS_LOG_BASE, {
 					ts: Date.now(),
-					event: PROSE_EXHAUSTED_EVENT,
+					event: exhausted ? PROSE_EXHAUSTED_EVENT : PROSE_EVENT,
 					tool,
-					sessionId,
+					sessionId: ctx.sessionManager.getSessionId(),
 					corr: turn.corr,
 				});
+			} catch (err) {
+				writeErrorRow(ctx.cwd, "message_end.prose_row", err);
+			}
+			if (exhausted) {
 				return;
 			}
 
 			proseRetriesThisRun += 1;
-
-			// Immediate record that survives if `turn_end` throws (core/extensions/runner.ts). No `kind`, so it is not counted as a turn.
-			writeTurnsRow(ctx.cwd, {
-				ts: Date.now(),
-				event: PROSE_EVENT,
-				tool,
-				sessionId,
-				corr: turn.corr,
-			});
-
 			// `deliverAs` is mandatory: `prompt` throws mid-stream (core/agent-session.ts#prompt).
-						// `followUp` resumes the same run (pi-agent-core agent-loop.ts).
+			// `followUp` resumes the same run (pi-agent-core agent-loop.ts).
 			pi.sendUserMessage(PROSE_RETRY_PROMPT, { deliverAs: "followUp" });
 
 			// Returns nothing by contract: a returned `{ message }` replaces the finalized message
-						// (core/extensions/types.ts), which is how scraped prose would become an executed call.
+			// (core/extensions/types.ts), which is how scraped prose would become an executed call.
 		}),
 	);
 
@@ -238,54 +192,53 @@ export default function (pi: ExtensionAPI): void {
 			inFlight = undefined;
 
 			const sessionId = ctx.sessionManager.getSessionId();
+			const corr = turn?.corr ?? captureCorrelationId();
 			const message = turn?.message;
 
 			if (message === undefined) {
 				// A visible hole, not a skipped append: zero rows looks like a dead instrument.
-				writeTurnsRow(ctx.cwd, {
+				appendJsonl(ctx.cwd, TURNS_LOG_BASE, {
 					ts: Date.now(),
 					event: DIAGNOSTICS_ERROR_EVENT,
 					where: TURN_NO_MESSAGE_WHERE,
 					sessionId,
-					corr: turn?.corr ?? captureCorrelationId(),
+					corr,
 					turnIndex: event.turnIndex,
 					toolResults: event.toolResults.length,
 				});
-			} else {
-				// A missing model still writes a row, with zero rates and a marker.
-				const model = ctx.model as Model<Api> | undefined;
-
-				// Drained only here: nested `recordTurn` sites must not empty the quality ledger before this row.
-				const qualityCost = takeQualityCost();
-
-				writeTurnsRow(
-					ctx.cwd,
-					composeTurnRow({
-						kind: "turn",
-						role: SESSION_TURN_ROLE,
-						sessionId,
-						corr: turn?.corr ?? captureCorrelationId(),
-						message,
-						model: model ?? degradedModel(message),
-						// Falls back to now only if `turn_start` never ran, giving 0 rather than a fabricated duration.
-						latencyMs: Date.now() - (turn?.startedAt ?? Date.now()),
-						turnIndex: event.turnIndex,
-						toolResults: event.toolResults.length,
-						thinkingLevel: turn?.thinkingLevel,
-						qualityMs: qualityCost?.qualityMs,
-						qualityTokens: qualityCost?.qualityTokens,
-						// The degraded-cost marker wins over the prose verdict: losing it would hide a fabricated zero cost.
-												// The prose verdict is still recorded by the standalone `message_end` record.
-						event: model === undefined ? MODEL_UNAVAILABLE_EVENT : turn?.event,
-					}),
-				);
+				return;
 			}
-			// No `return` in these handlers; wire-nonmutating.test.ts asserts it.
+
+			// A missing model still writes a row, with zero rates and a marker.
+			const model = ctx.model as Model<Api> | undefined;
+			// Drained only here: nested `recordTurn` sites must not empty the quality ledger before this row.
+			const qualityCost = takeQualityCost();
+
+			appendJsonl(
+				ctx.cwd,
+				TURNS_LOG_BASE,
+				composeTurnRow({
+					kind: "turn",
+					role: SESSION_TURN_ROLE,
+					sessionId,
+					corr,
+					message,
+					model: model ?? degradedModel(message),
+					// `turn_start` never ran only for synthetic events; 0 beats a fabricated duration.
+					latencyMs: Date.now() - (turn?.startedAt ?? Date.now()),
+					turnIndex: event.turnIndex,
+					toolResults: event.toolResults.length,
+					thinkingLevel: turn?.thinkingLevel,
+					qualityMs: qualityCost?.qualityMs,
+					qualityTokens: qualityCost?.qualityTokens,
+					// The degraded-cost marker wins over the prose verdict, which the `message_end` record keeps.
+					event: model === undefined ? MODEL_UNAVAILABLE_EVENT : turn?.event,
+				}),
+			);
 		}),
 	);
 
-	// Retry budget is per agent run, so it resets here. Goes through `safeHandler`: a silent
-		// failure would leave the counter at its cap forever.
+	// Retry budget is per agent run. Goes through `safeHandler`: a silent failure would leave the counter at its cap forever.
 	pi.on(
 		"agent_start",
 		safeHandler<AgentStartEvent>("agent_start", () => {
@@ -293,6 +246,5 @@ export default function (pi: ExtensionAPI): void {
 		}),
 	);
 
-	// `/budget` is the only non-hook registration. Counters are passed in to avoid an import cycle.
-	registerBudgetCommand(pi, rowsWrittenThisSession, noteRowWritten);
+	registerBudgetCommand(pi);
 }

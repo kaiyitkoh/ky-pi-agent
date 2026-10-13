@@ -14,19 +14,9 @@ import type {
 } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { noteRowWritten } from "./index.ts";
 import { appendJsonl } from "./jsonl.ts";
 import { redactHeaders, redactString } from "./redact.ts";
-import {
-	MAX_ROTATED_FILES,
-	TURNS_LOG_BASE,
-	TURNS_ROTATE_BYTES,
-	WIRE_LOG_BASE,
-	WIRE_ROTATE_BYTES,
-	type TurnRow,
-	type WireKind,
-	type WireRecord,
-} from "./schema.ts";
+import { TURNS_LOG_BASE, WIRE_LOG_BASE, type WireKind } from "./schema.ts";
 import { composeTurnRow } from "./turns.ts";
 import { captureRequestPayload, nextCorrelationId, wireRecord, type WireFieldsFor } from "./wire.ts";
 
@@ -84,17 +74,9 @@ function errorMessageFor<TApi extends Api>(model: Model<TApi>, error: unknown): 
 	};
 }
 
-function appendWire(cwd: string, record: WireRecord): void {
-	appendJsonl(cwd, WIRE_LOG_BASE, record, {
-		rotateBytes: WIRE_ROTATE_BYTES,
-		maxRotated: MAX_ROTATED_FILES,
-	});
-	noteRowWritten();
-}
-
 /**
- * Run one capture with total failure containment: the callbacks run inside a call the provider
- * is waiting on, so a throw would fail or alter the measured request. Same role as `safeHandler`.
+ * Run one capture with total failure containment. NEVER THROWS: the callbacks run inside a call the
+ * provider is waiting on, so a throw would fail or alter the measured request. Same role as `safeHandler`.
  */
 function contained(fn: () => void): void {
 	try {
@@ -102,21 +84,6 @@ function contained(fn: () => void): void {
 	} catch {
 		// A capture that cannot reach disk must not fail the request it is capturing.
 	}
-}
-
-/**
- * Compose and append one nested turns row, and count it. NEVER THROWS: this runs after the
- * provider has billed, so a disk error must not replace the returned message.
- */
-function recordTurn(cwd: string, input: Parameters<typeof composeTurnRow>[0]): void {
-	contained(() => {
-		const row: TurnRow = composeTurnRow(input);
-		appendJsonl(cwd, TURNS_LOG_BASE, row, {
-			rotateBytes: TURNS_ROTATE_BYTES,
-			maxRotated: MAX_ROTATED_FILES,
-		});
-		noteRowWritten();
-	});
 }
 
 /**
@@ -135,12 +102,27 @@ export async function callModel<TApi extends Api>(
 	const corr = nextCorrelationId(sessionId);
 	const role = opts.role;
 
-	/** Generic in `K` so `WireFieldsFor<K>` narrows to the arm the `kind` literal selects. */
-	function record<K extends WireKind>(kind: K, fields: WireFieldsFor<K>): void {
-		appendWire(cwd, wireRecord(kind, { corr, sessionId, role, ...fields }));
+	/** Generic in `K` so `WireFieldsFor<K>` narrows to the arm the `kind` literal selects. Fields are built inside the containment. */
+	function record<K extends WireKind>(kind: K, fields: () => WireFieldsFor<K>): void {
+		contained(() => {
+			appendJsonl(cwd, WIRE_LOG_BASE, wireRecord(kind, { corr, sessionId, role, ...fields() }));
+		});
 	}
 
 	let httpStatus: number | undefined;
+
+	/**
+	 * Append the nested turns row. NEVER THROWS: the provider has billed, so a disk error must not replace the message.
+	 * The message is built inside the containment, since `String(error)` can throw and would mask the provider error.
+	 */
+	function recordNested(message: () => AssistantMessage): void {
+		// `httpStatus` stays omitted when `onResponse` never fired; a defaulted 200 would claim an unobserved success.
+		const latencyMs = Date.now() - started;
+		contained(() => {
+			const row = { kind: "nested", role, sessionId, corr, message: message(), model: opts.model, latencyMs, httpStatus } as const;
+			appendJsonl(cwd, TURNS_LOG_BASE, composeTurnRow(row));
+		});
+	}
 
 	// Spread order is the enforcement: captures come last so a caller-supplied callback cannot suppress them.
 	const options = {
@@ -149,35 +131,26 @@ export async function callModel<TApi extends Api>(
 		sessionId,
 		transformHeaders: (headers: Record<string, string | null>) => {
 			// Contained: a throw here escapes `prepareRequest` and fails the completion.
-			contained(() => {
-				record("nested.headers", { headers: redactHeaders(headers) });
-			});
+			record("nested.headers", () => ({ headers: redactHeaders(headers) }));
 			// Returned unchanged and outside the containment: `prepareRequest` sends what comes back
 			// (core/model-runtime.ts), so the redacted map must never be returned.
 			return headers;
 		},
 		onPayload: (payload: unknown) => {
 			// Bounding and `redactDeep` both copy, so the live payload stays byte-identical. Contained: a throw kills the request.
-			contained(() => {
-				record("nested.request", captureRequestPayload(payload));
-			});
+			record("nested.request", () => captureRequestPayload(payload));
 			// Returns nothing: a non-`undefined` return replaces the payload (pi 1.1.0 runner.js:1077-1078).
 			return undefined;
 		},
 		onResponse: (response: { status: number; headers: Record<string, string> }) => {
 			// Assigned before the capture so the row keeps the status even if the wire record fails.
 			httpStatus = response.status;
-			contained(() => {
-				record("nested.response", {
-					status: response.status,
-					headers: redactHeaders(response.headers),
-				});
-			});
+			record("nested.response", () => ({ status: response.status, headers: redactHeaders(response.headers) }));
 		},
 		// Double cast: `ApiStreamOptions<TApi>` does not resolve for an unbound `TApi` (pi-ai src/types.ts#ApiStreamOptions).
 	} as unknown as ModelsApiStreamOptions<TApi>;
 
-	// No `finally`: it would append on both paths and double-write, and both `recordTurn` calls are total.
+	// No `finally`: it would append on both paths and double-write, and `recordNested` is total.
 	let message: AssistantMessage;
 	try {
 		message = await ctx.modelRegistry.complete(
@@ -186,31 +159,10 @@ export async function callModel<TApi extends Api>(
 			options,
 		);
 	} catch (error) {
-		recordTurn(cwd, {
-			kind: "nested",
-			role,
-			sessionId,
-			corr,
-			message: errorMessageFor(opts.model, error),
-			model: opts.model,
-			latencyMs: Date.now() - started,
-			httpStatus,
-		});
+		recordNested(() => errorMessageFor(opts.model, error));
 		// Rethrown: the caller owns the fallback decision.
 		throw error;
 	}
-
-	recordTurn(cwd, {
-		kind: "nested",
-		role,
-		sessionId,
-		corr,
-		message,
-		model: opts.model,
-		latencyMs: Date.now() - started,
-		// Omitted when `onResponse` never fired; a defaulted 200 would claim an unobserved success.
-		httpStatus,
-	});
-
+	recordNested(() => message);
 	return message;
 }

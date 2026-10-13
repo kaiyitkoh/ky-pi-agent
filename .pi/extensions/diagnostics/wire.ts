@@ -16,14 +16,7 @@ import type {
 
 import { appendJsonl } from "./jsonl.ts";
 import { redactDeep, redactHeaders } from "./redact.ts";
-import {
-	MAX_ROTATED_FILES,
-	WIRE_LOG_BASE,
-	WIRE_ROTATE_BYTES,
-	WIRE_TAIL_MESSAGES,
-	type WireKind,
-	type WireRecord,
-} from "./schema.ts";
+import { WIRE_LOG_BASE, WIRE_TAIL_MESSAGES, type WireKind, type WireRecord } from "./schema.ts";
 
 /**
  * The `after_provider_response` event, recovered from the `ExtensionEvent` union because the
@@ -71,13 +64,20 @@ export function currentCorrelationId(): string | undefined {
 	return lastCorrelationId;
 }
 
+/** A request payload as recorded: its `messages` cut to the tail, with the full count and hash beside it. */
+export interface CapturedRequest {
+	payload: unknown;
+	messageCount?: number;
+	messagesHash?: string;
+}
+
 /**
  * The payload fields a given {@link WireKind} may carry. Selecting the arm from the `kind` literal
  * makes each arm's own field required and rejects mixed bags at the call site
  * (tests/unit/wire-record-typing.test.ts).
  */
 export type WireFieldsFor<K extends WireKind> = K extends `${string}.request`
-	? { payload: unknown; messageCount?: number; messagesHash?: string }
+	? CapturedRequest
 	: K extends `${string}.headers`
 		? { headers: Record<string, string | null> }
 		: { status: number; headers?: Record<string, string | null> };
@@ -103,10 +103,23 @@ export function wireRecord<K extends WireKind>(
 }
 
 /**
+ * Truncated SHA-256 of `JSON.stringify(messages)`, fed one message at a time so the whole history is never held as
+ * one string; the bytes match, so digests join with older rows. 64 bits over the whole array reveal no secret in it.
+ */
+function hashMessages(messages: readonly unknown[]): string {
+	const hash = createHash("sha256").update("[");
+	messages.forEach((message, i) => {
+		// Array JSON renders an unserialisable element as `null`.
+		hash.update(`${i > 0 ? "," : ""}${JSON.stringify(message) ?? "null"}`);
+	});
+	return hash.update("]").digest("hex").slice(0, 16);
+}
+
+/**
  * Cut `messages` in a request payload to the last {@link WIRE_TAIL_MESSAGES}, returning the full count and a hash of the
  * full array beside it. A payload without a `messages` array is returned unchanged. Never mutates its argument.
  */
-export function boundRequestPayload(raw: unknown): { payload: unknown; messageCount?: number; messagesHash?: string } {
+export function boundRequestPayload(raw: unknown): CapturedRequest {
 	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
 		return { payload: raw };
 	}
@@ -114,44 +127,28 @@ export function boundRequestPayload(raw: unknown): { payload: unknown; messageCo
 	if (!Array.isArray(messages)) {
 		return { payload: raw };
 	}
-	const messagesHash = createHash("sha256").update(JSON.stringify(messages)).digest("hex").slice(0, 16);
 	const payload = messages.length > WIRE_TAIL_MESSAGES ? { ...raw, messages: messages.slice(-WIRE_TAIL_MESSAGES) } : raw;
-	return { payload, messageCount: messages.length, messagesHash };
+	return { payload, messageCount: messages.length, messagesHash: hashMessages(messages) };
 }
 
 /** Bounds, then redacts, so the redactor's node budget is spent on the tail that is kept, never on history that is dropped. */
-export function captureRequestPayload(raw: unknown): { payload: unknown; messageCount?: number; messagesHash?: string } {
+export function captureRequestPayload(raw: unknown): CapturedRequest {
 	const bounded = boundRequestPayload(raw);
 	return { ...bounded, payload: redactDeep(bounded.payload) };
 }
 
-/** Register the three main-loop provider hooks. `safeHandler` and `noteRow` are injected to avoid an import cycle. */
-export function registerWireHooks(
-	pi: ExtensionAPI,
-	safeHandler: SafeHandlerFactory,
-	noteRow: () => void,
-): void {
-	function append(cwd: string, record: WireRecord): void {
-		appendJsonl(cwd, WIRE_LOG_BASE, record, {
-			rotateBytes: WIRE_ROTATE_BYTES,
-			maxRotated: MAX_ROTATED_FILES,
-		});
-		noteRow();
-	}
-
+/** Register the three main-loop provider hooks. `safeHandler` is injected to avoid an import cycle. */
+export function registerWireHooks(pi: ExtensionAPI, safeHandler: SafeHandlerFactory): void {
 	pi.on(
 		"before_provider_headers",
 		safeHandler<BeforeProviderHeadersEvent>("before_provider_headers", (event, ctx) => {
 			// First hook of the triple, so the id is issued here.
 			const sessionId = ctx.sessionManager.getSessionId();
 			const corr = nextCorrelationId(sessionId);
-			append(
+			appendJsonl(
 				ctx.cwd,
-				wireRecord("main.headers", {
-					corr,
-					sessionId,
-					headers: redactHeaders(event.headers),
-				}),
+				WIRE_LOG_BASE,
+				wireRecord("main.headers", { corr, sessionId, headers: redactHeaders(event.headers) }),
 			);
 			// Pi ignores this hook's return value (core/extensions/runner.ts); shape kept identical to the others.
 		}),
@@ -160,11 +157,10 @@ export function registerWireHooks(
 	pi.on(
 		"before_provider_request",
 		safeHandler<BeforeProviderRequestEvent>("before_provider_request", (event, ctx) => {
-			append(
+			appendJsonl(
 				ctx.cwd,
+				WIRE_LOG_BASE,
 				wireRecord("main.request", {
-					// Passed explicitly so the join key is visible at the call site.
-					corr: currentCorrelationId() ?? UNCORRELATED,
 					sessionId: ctx.sessionManager.getSessionId(),
 					// Bounding and `redactDeep` both copy; the live payload stays byte-identical.
 					...captureRequestPayload(event.payload),
@@ -177,11 +173,10 @@ export function registerWireHooks(
 	pi.on(
 		"after_provider_response",
 		safeHandler<AfterProviderResponseEvent>("after_provider_response", (event, ctx) => {
-			append(
+			appendJsonl(
 				ctx.cwd,
+				WIRE_LOG_BASE,
 				wireRecord("main.response", {
-					// Explicit, for the reason given above.
-					corr: currentCorrelationId() ?? UNCORRELATED,
 					sessionId: ctx.sessionManager.getSessionId(),
 					status: event.status,
 					headers: redactHeaders(event.headers),
