@@ -18,12 +18,12 @@ const BEFORE_FULL_FLOOR = 4179;
 /**
  * Ceilings in `/budget`-formula tokens (Math.ceil(chars / 4)) on normalised text, each the value measured
  * on 2026-10-13 plus under 3% headroom.
- * recon: measured 1773. review: measured 1900. implement: measured 4179 (was 2344 before questionnaire and bg_* joined it). full: measured 4179.
+ * recon: measured 1699. review: measured 1827. implement: measured 2342, with `bg_enable` loading questionnaire and bg_* on demand. full: measured 4177.
  */
 const FLOOR_CEILINGS = {
-	recon: 1820,
-	review: 1950,
-	implement: 4300,
+	recon: 1740,
+	review: 1880,
+	implement: 2410,
 	full: 4300,
 } as const;
 
@@ -77,15 +77,16 @@ describe("per-profile floors", () => {
 		console.info(
 			`REDUCTION implement ${BEFORE_FULL_FLOOR - impl} tokens (${(((BEFORE_FULL_FLOOR - impl) / BEFORE_FULL_FLOOR) * 100).toFixed(1)}%)`,
 		);
-		expect(impl).toBeLessThanOrEqual(full);
+		expect(impl, "implement must stay well below full").toBeLessThan(full);
 		expect(full).toBeLessThanOrEqual(BEFORE_FULL_FLOOR);
 		const recon = floors.recon.budget.floor.estimatedTokens;
 		for (const p of ["review", "implement", "full"] as const) {
 			expect(recon, `recon must be below ${p}`).toBeLessThan(floors[p].budget.floor.estimatedTokens);
 		}
 		expect(floors.full.systemPrompt, "non-vacuity: full carries the section").toContain(SHELL_POLICY_SECTION_NAME);
-		expect(floors.implement.systemPrompt, "implement keeps bg_run, so it carries the section").toContain(SHELL_POLICY_SECTION_NAME);
-		for (const p of ["recon", "review"] as const) {
+		expect(floors.implement.toolNames, "implement carries the loader instead of the tools").toContain("bg_enable");
+		expect(floors.implement.toolNames, "implement carries the loader instead of the tools").not.toContain("bg_run");
+		for (const p of ["recon", "review", "implement"] as const) {
 			expect(floors[p].systemPrompt, `${p} must not carry the shell policy`).not.toContain(SHELL_POLICY_SECTION_NAME);
 		}
 	}, 120_000);

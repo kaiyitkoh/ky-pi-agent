@@ -265,6 +265,12 @@ const TOOL_REGISTRATION_ALLOWLIST: readonly string[] = [
 	// by tests/unit/tool-count-baseline.test.ts (all four carry promptSnippet/promptGuidelines); (c) a skill
 	// cannot hold a live process handle. The 7 delegate/fusion tools of the npm package are NOT vendored.
 	".pi/extensions/background-tasks/src/extension.ts",
+	// bg_enable loader. (a) the model decides mid-turn that it needs a background command or a structured question,
+	// and the loader makes those tools appear on its next request; a user command cannot act inside the model's turn.
+	// (b) measured: the serialised {type:"function",function:{name,description,parameters}} is 358 bytes, 90 tokens;
+	// it replaces bg_run, bg_status, bg_logs, bg_kill and questionnaire in the implement floor (4177 -> 2342 tokens).
+	// (c) a skill cannot change the active tool set; only pi.setActiveTools can, and only from extension code.
+	".pi/extensions/routing/loader.ts",
 ];
 
 /** Tracked text sources under `.pi/extensions/`, read from the index's view. */

@@ -34,6 +34,7 @@ function load(opts: { setModel?: () => Promise<boolean>; settings?: Record<strin
 	const calls = { setModel: 0, thinking: [] as string[] };
 	const pi = {
 		registerCommand: () => undefined,
+		registerTool: () => undefined,
 		registerFlag: () => undefined,
 		getFlag: () => undefined,
 		on: (name: string, handler: Handler) => handlers.set(name, [...(handlers.get(name) ?? []), handler]),

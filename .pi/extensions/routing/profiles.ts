@@ -32,11 +32,13 @@ export const TOOL_PROFILES: Readonly<Record<string, readonly ProfileName[]>> = {
 	fetch_content: ["recon", "full"],
 	get_search_content: ["recon", "full"],
 	source_check: ["recon", "full"],
-	questionnaire: WRITERS,
-	bg_run: WRITERS,
-	bg_status: WRITERS,
-	bg_logs: WRITERS,
-	bg_kill: WRITERS,
+	// Out of `implement` so it does not carry their schemas and the shell-policy section every turn; `bg_enable` loads them.
+	bg_enable: WRITERS,
+	questionnaire: ["full"],
+	bg_run: ["full"],
+	bg_status: ["full"],
+	bg_logs: ["full"],
+	bg_kill: ["full"],
 	qoder_delegate: ["full"],
 };
 

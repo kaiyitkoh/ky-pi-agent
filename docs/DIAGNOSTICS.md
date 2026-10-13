@@ -451,7 +451,8 @@ AGENTS.md; zero rows are real measurements):
 | safety/index.ts | 248 | 62 | approve_ky_command | keep |
 | todo.ts | 310 | 78 | todo | profile-gate |
 | skills index | 1283 | 321 | none | budgeted |
-| checkpoint, diagnostics, execute, grill, harness, loop-police, plan-ceremony, plan-mode, providers, qoder, review, routing, workflows | 0 | 0 | none | keep |
+| routing (`bg_enable` loader) | 358 | 90 | bg_enable | keep in implement and full |
+| checkpoint, diagnostics, execute, grill, harness, loop-police, plan-ceremony, plan-mode, providers, qoder, review, workflows | 0 | 0 | none | keep |
 
 Sum check: bare + AGENTS.md plus all deltas equals the composed floor with a residual
 of 0 chars (tolerance 32).
@@ -462,13 +463,17 @@ against the BEFORE full composed floor of 4,179 tokens.
 
 | Profile | system chars | tool chars | floor tokens | delta vs BEFORE | tools |
 |---|---|---|---|---|---|
-| recon | 4982 | 2107 | 1773 | -2406 (-57.6%) | 3 |
-| review | 4982 | 2618 | 1900 | -2279 (-54.5%) | 4 |
-| implement (default) | 4982 | 4391 | 2344 | -1835 (-43.9%) | 7 |
-| full | 8264 | 8450 | 4179 | 0 | 12 |
+| recon | 4689 | 2107 | 1699 | -2480 (-59.3%) | 3 |
+| review | 4689 | 2618 | 1827 | -2352 (-56.3%) | 4 |
+| implement (default) | 4689 | 4676 | 2342 | -1837 (-44.0%) | 8 |
+| full | 7971 | 8735 | 4177 | -2 | 13 |
+
+Re-measured 2026-10-13 after `bg_enable` took `questionnaire` and the `bg_*` tools out
+of `implement`: the loader costs 90 tokens and loads them on demand, so `implement`
+stays at the 2,342-token floor instead of matching `full`.
 
 Wire estimate (`toToolDeclaration` JSON), reported separately and never compared with
-the table above: recon 2359, review 2912, implement 4937, full 9206 tool chars.
+the table above: recon 2359, review 2912, implement 5264, full 9533 tool chars.
 
 The shell-policy section (about 119 tokens) is now absent from recon, review and
 implement and present in full, unchanged. Per-profile CI ceilings in

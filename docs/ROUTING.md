@@ -142,16 +142,16 @@ downgrade path anywhere in this subsystem.
 | Tool(s) | recon | review | implement | full |
 |---------|-------|--------|-----------|------|
 | read, bash, approve_ky_command | yes | yes | yes | yes |
-| edit, write, todo | no | no | yes | yes |
+| edit, write, todo, bg_enable | no | no | yes | yes |
 | consult_advisor, lsp_diagnostics | no | yes | yes | yes |
 | lsp_fix | no | no | no | yes |
 | subagent, bg_wait, subagent_supervisor, subagents_enable | no | yes | yes | yes |
 | web_enable | yes | yes | yes | yes |
 | web_search, fetch_content, get_search_content, source_check | yes | no | no | yes |
-| questionnaire, bg_run, bg_status, bg_logs, bg_kill | no | no | yes | yes |
+| questionnaire, bg_run, bg_status, bg_logs, bg_kill | no | no | on demand | yes |
 | qoder_delegate | no | no | no | yes |
 
-Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,773 tok, review 1,900, implement 4,179, full 4,179. Putting `questionnaire` and the `bg_*` tools in `implement` raised its floor from 2,344 to 4,179 tokens (+1,835, +78%); in the offline measurement harness that equals the `full` floor because the LSP, Qoder and web tools are not loaded there, so on a real install `full` stays above `implement`. This is a deliberate trade: background shell tasks and structured questions are available by default, at the price of a weaker cost control.
+Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,699 tok, review 1,827, implement 2,342, full 4,177. Under `implement`, `questionnaire` and the `bg_*` tools are loaded on demand by the `bg_enable` loader (`routing/loader.ts`, 90 tokens): the model calls it, and the tools, plus background-tasks' shell-policy prompt section, appear on its next request. Carrying them by default would cost about 1,835 tokens on every turn, the same as `full`. The loader has no prompt metadata of its own; activating the bg tools rebuilds the system prompt once, as any lazily loaded tool with prompt metadata does.
 
 Two rules keep this safe. Pi's registered-but-inactive built-ins (`grep`, `find`, `ls`) are neutral and never removed, because if they are active something chose them. A loadout with neither `edit` nor `write` was already chosen read-only (plan mode, a read-only subagent), so the profile leaves it alone.
 
@@ -300,8 +300,8 @@ keep a stale pin alive until that process exits.
 - **Turns started with `triggerTurn` are not narrowed by tool profiles**,
   because Pi emits no `input` for them (see §3). Accepted as a limitation.
 - **Tool profiles.** `lsp_fix` is only in `full`; `questionnaire` and the
-  `bg_*` tools are in `implement` at the measured cost shown in §3 (+1,835
-  tokens per turn); `qoder_delegate` is only in `full` because it is a paid,
+  `bg_*` tools are loaded on demand in `implement` through `bg_enable`
+  (§3); `qoder_delegate` is only in `full` because it is a paid,
   confirm-gated remote delegate.
 
 ---

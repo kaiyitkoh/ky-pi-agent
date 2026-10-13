@@ -802,8 +802,8 @@ Numbers are from `docs/DIAGNOSTICS.md`; the verdict is what this phase decided.
 
 | Entry point | tokens | verdict |
 |---|---|---|
-| background-tasks | 1539 | profile-gate (full only) |
-| questionnaire | 297 | profile-gate (full only; plan mode re-adds it) |
+| background-tasks | 1539 | profile-gate (full; `bg_enable` loads it in implement) |
+| questionnaire | 297 | profile-gate (full; `bg_enable` loads it in implement; plan mode re-adds it) |
 | todo | 78 | profile-gate (implement and full) |
 | quality (`consult_advisor`) | 128 | budgeted |
 | safety (`approve_ky_command`) | 62 | keep, in every profile |

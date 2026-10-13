@@ -1,7 +1,7 @@
 /**
  * Routing entry point: `/cheap`, `/balanced`, `/max`, `/escalate` and `/mode`.
- * The only routing file that touches a live session; registers commands and a flag and narrows the active tool set to
- * the profile without ever removing a declared tool (never registers a tool, never a direct model call).
+ * The only routing file that touches a live session; registers commands, a flag and the `bg_enable` loader, and narrows
+ * the active tool set to the profile without ever removing a declared tool (never a direct model call).
  */
 import type {
 	CustomEntry,
@@ -14,6 +14,7 @@ import { getCurrentTools } from "@earendil-works/pi-ai";
 import { appendJsonl, ESCALATION_LOG_BASE } from "../../lib/jsonl.ts";
 import { agentOverridesFor, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { deriveNeed, guardRoute } from "./guard.ts";
+import { registerBgLoader } from "./loader.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
@@ -370,6 +371,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			return;
 		}
 	});
+	registerBgLoader(pi);
 	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
 	// Pi gives extensions no view of a `--tools` allowlist, so read argv; the user's named tools must never be narrowed.
 	const profile = () => (hasExplicitToolAllowlist(process.argv) ? "full" : resolveProfile(pi.getFlag("ky-profile")));

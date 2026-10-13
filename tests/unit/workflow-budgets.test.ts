@@ -355,14 +355,14 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/routing",
-		budget: 1470,
+		budget: 1510,
 		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 1019 " +
 			"raw lines across 5 files 2026-10-13, rounded up to the next ten. RAISED 1020 -> 1110: profiles.ts (78 lines, " +
 			"the tool-profile table and resolver) plus 5 lines of wiring in index.ts. Re-measured 1102 raw lines across 6 files 2026-10-13. " +
 			"RAISED 1110 -> 1120: index.ts grew by the transcript-loadout guard and the pre-prompt pass (see its per-file entry); " +
 			"measured 1120 raw lines across 6 files 2026-10-13. RAISED 1120 -> 1130: an explicit --tools allowlist now bypasses " +
 			"narrowing (hasExplicitToolAllowlist in profiles.ts plus 2 lines in index.ts); measured 1121 raw lines across 6 files " +
-			"2026-10-13, rounded up to the next ten. Re-measured 1341 raw lines 2026-10-13 after the model guard, per-mode agent overrides and enforcement of the routing profile (agent-overrides.ts 283, guard.ts 130, index.ts 389, modes.ts 321, profiles.ts 83, schema.ts 135), rounded up to the next ten. RAISED 1350 -> 1440: agent-overrides.ts records per-key pins with owner pids and restores only when every owner has ended, and both it and pickConfiguredCandidate apply the Bedrock prefix through resolveBedrockRef; nestedNeed sizes a nested call from its own request; 1434 raw lines (agent-overrides.ts 356, guard.ts 138, index.ts 392, modes.ts 330). RAISED 1440 -> 1470 for the same model_select and input changes in index.ts; 1464 raw lines",
+			"2026-10-13, rounded up to the next ten. Re-measured 1341 raw lines 2026-10-13 after the model guard, per-mode agent overrides and enforcement of the routing profile (agent-overrides.ts 283, guard.ts 130, index.ts 389, modes.ts 321, profiles.ts 83, schema.ts 135), rounded up to the next ten. RAISED 1350 -> 1440: agent-overrides.ts records per-key pins with owner pids and restores only when every owner has ended, and both it and pickConfiguredCandidate apply the Bedrock prefix through resolveBedrockRef; nestedNeed sizes a nested call from its own request; 1434 raw lines (agent-overrides.ts 356, guard.ts 138, index.ts 392, modes.ts 330). RAISED 1440 -> 1470 for the same model_select and input changes in index.ts; 1464 raw lines. RAISED 1470 -> 1510: loader.ts registers bg_enable, which loads questionnaire and the bg_* tools on demand so the implement floor stays at 2342 tokens; 1508 raw lines (index.ts 424, loader.ts 40, profiles.ts 85)",
 	},
 	{
 		dir: ".pi/extensions/harness",

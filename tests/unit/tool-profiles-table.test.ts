@@ -14,12 +14,11 @@ import {
 
 const rows: Array<[string[], ProfileName[]]> = [
 	[["read", "bash", "approve_ky_command", "web_enable"], ["recon", "review", "implement", "full"]],
-	[["edit", "write", "todo"], ["implement", "full"]],
+	[["edit", "write", "todo", "bg_enable"], ["implement", "full"]],
 	[["consult_advisor", "lsp_diagnostics"], ["review", "implement", "full"]],
 	[["subagent", "bg_wait", "subagent_supervisor", "subagents_enable"], ["review", "implement", "full"]],
 	[["web_search", "fetch_content", "get_search_content", "source_check"], ["recon", "full"]],
-	[["questionnaire", "bg_run", "bg_status", "bg_logs", "bg_kill"], ["implement", "full"]],
-	[["lsp_fix", "qoder_delegate"], ["full"]],
+	[["lsp_fix", "qoder_delegate", "questionnaire", "bg_run", "bg_status", "bg_logs", "bg_kill"], ["full"]],
 ];
 
 describe("profile table", () => {
@@ -68,7 +67,7 @@ describe("applyProfile", () => {
 	});
 	it("narrows implement in input order", () => {
 		expect(applyProfile(active, "implement")).toEqual([
-			"read", "bash", "edit", "write", "questionnaire", "todo", "consult_advisor", "approve_ky_command",
+			"read", "bash", "edit", "write", "todo", "consult_advisor", "approve_ky_command",
 		]);
 	});
 	it("leaves a read-only loadout alone", () => {

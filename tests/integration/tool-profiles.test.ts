@@ -7,6 +7,7 @@
 import type { FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
 import {
 	fauxAssistantMessage,
+	fauxToolCall,
 	getCurrentTools,
 	hasNonAdditiveToolChanges,
 	resolveTranscriptTools,
@@ -64,7 +65,7 @@ describe("T1: narrowing happens before the first request", () => {
 	const expectations: Record<string, { has: string[]; lacks: string[] }> = {
 		recon: { has: ["read", "bash", "approve_ky_command"], lacks: ["edit", "write", "todo", "bg_run", "questionnaire", "subagent"] },
 		review: { has: ["read", "bash", "consult_advisor", "approve_ky_command"], lacks: ["edit", "write", "todo", "bg_run", "questionnaire"] },
-		implement: { has: ["read", "bash", "edit", "write", "todo", "consult_advisor", "approve_ky_command", "questionnaire", "bg_run", "bg_status"], lacks: ["qoder_delegate", "lsp_fix", "web_search"] },
+		implement: { has: ["read", "bash", "edit", "write", "todo", "consult_advisor", "approve_ky_command", "bg_enable"], lacks: ["qoder_delegate", "lsp_fix", "web_search", "questionnaire", "bg_run", "bg_status"] },
 	};
 
 	for (const [profile, want] of Object.entries(expectations)) {
@@ -97,7 +98,26 @@ describe("T1: narrowing happens before the first request", () => {
 
 	it("full applies no narrowing at all", async () => {
 		const withoutRouting = listEntryPoints().filter((e) => !e.includes("/routing/"));
-		expect((await declared({ profile: "full" })).sort()).toEqual((await declared({ entryPoints: withoutRouting })).sort());
+		expect((await declared({ profile: "full" })).sort()).toEqual([...(await declared({ entryPoints: withoutRouting })), "bg_enable"].sort());
+	});
+
+	it("implement: calling bg_enable declares the background tools and questionnaire on the next request, removing nothing", async () => {
+		const sink: TranscriptContext[] = [];
+		const responses: FauxResponseStep[] = [
+			(context: TranscriptContext) => {
+				sink.push(context);
+				return fauxAssistantMessage([fauxToolCall("bg_enable", {})]);
+			},
+			...steps(1, sink),
+		];
+		await withHarnessSession({ profile: "implement", responses }, async (h) => {
+			await h.session.prompt("start a dev server");
+			const before = getCurrentTools(sink[0]!.messages).map((t) => t.name);
+			const after = getCurrentTools(sink[1]!.messages).map((t) => t.name);
+			expect(before).not.toContain("bg_run");
+			for (const n of ["bg_run", "bg_status", "bg_logs", "bg_kill", "questionnaire"]) expect(after, n).toContain(n);
+			expect(hasNonAdditiveToolChanges(sink[1]!.messages)).toBe(false);
+		});
 	});
 });
 

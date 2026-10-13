@@ -13,6 +13,7 @@ function startWith(flag: unknown, hasUI: boolean): { notes: [string, string][]; 
 	let active = ["read", "bash", "edit", "write", "qoder_delegate"];
 	const pi = {
 		registerCommand: () => {},
+		registerTool: () => {},
 		registerFlag: () => {},
 		on: (name: string, handler: Handler) => handlers.set(name, handler),
 		getFlag: () => flag,
