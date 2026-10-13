@@ -31,7 +31,7 @@ Status: Ready to plan
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
-Last activity: 2026-10-13
+Last activity: 2026-10-13 - Completed quick task 261013-grs: git push confirm policy
 
 Progress: [██████████] 100%
 
@@ -498,6 +498,12 @@ None yet.
 - **Moving platform**: Pi ships every 2–3 days; the composed extension ecosystem ships 13–16 releases/month. Every pin must be re-verified at Phase 7 planning time, not inherited from research.
 - **Two Phase 7 checks are OUTSTANDING and machine-enforced as such**: `RB-07-01` (EXT-09, the composed smoke ritual -- one turn per provider, one subagent spawn, one blocked command, one wire dump) and `RB-07-02` (install the five pinned specs with a human physically present for the package-legitimacy gate, then reconcile `pi list` against `.pi/settings.json`). `RB-07-02` must run first -- `RB-07-01`'s subagent-spawn and blocked-command legs presuppose the packages are actually installed. EXT-01, EXT-03, EXT-04 and EXT-09 are `[~]` partial in REQUIREMENTS.md with `RB-07-01` named inline; EXT-05 is `[~]` partial with `RB-07-02` named inline.
 - RB-08-02 (plan 08-06) and RB-08-03 (plan 08-07, now also cited by 08-10) are named in code/doc comments across Phase 8 but neither id has an actual entry in docs/RUNBOOK.md yet, and docs-policy.test.ts's ALL_IDS has no PHASE_EIGHT_IDS array -- verified via grep, returns nothing. Out of 08-10's own file scope (SCOPE BOUNDARY); belongs to this phase's closing plan, matching the Phase 7 precedent where 07-13 added RB-07-01/02/03 together.
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 261013-grs | git push policy: block protected/force, confirm feature-branch pushes in TUI, refuse headless | 2026-10-13 | a109822 | [261013-grs-safety-guard-git-push-confirm-policy](./quick/261013-grs-safety-guard-git-push-confirm-policy/) |
 
 ## Deferred Items
 
