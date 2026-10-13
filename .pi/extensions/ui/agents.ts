@@ -1,5 +1,5 @@
-// pi-subagents@0.76.1 emits async-complete only after delivery to the owning session (result-watcher.js:528);
-// process-terminal follows a runner exit once its proof is persisted (async-execution.js:517).
+// async-complete fires only after delivery to the owning session (pi-subagents@0.76.1 result-watcher.js:528);
+// process-terminal follows a runner exit once its proof is persisted (pi-subagents@0.76.1 async-execution.js:517).
 export const SUBAGENT_BUS_TOPICS = [
   "subagent:async-started",
   "subagent:async-complete",
@@ -15,12 +15,12 @@ function idOf(payload: unknown): string | undefined {
   return undefined;
 }
 
-// asyncByDefault defaults to true (config.js:233), so only clarify or an explicit async:false blocks the
-// parent (subagent-executor.js:7424); a plain call is an async launch counted through its bus event.
+// asyncByDefault is true (pi-subagents@0.76.1 config.js:233), so only clarify or async:false blocks the parent
+// (pi-subagents@0.76.1 subagent-executor.js:7424); a plain call is an async launch counted by its bus event.
 function isForegroundLaunch(args: unknown): boolean {
   if (typeof args !== "object" || args === null) return false;
   const a = args as { action?: unknown; async?: unknown; clarify?: unknown; workflow?: unknown; workflowScript?: unknown };
-  // Workflow children launch as async runners even under a blocking call (subagent-executor.js:4435).
+  // Workflow children launch as async runners even under a blocking call (pi-subagents@0.76.1 subagent-executor.js:4435).
   if (a.workflow !== undefined || a.workflowScript !== undefined) return false;
   return a.action === undefined && (a.async === false || a.clarify === true);
 }

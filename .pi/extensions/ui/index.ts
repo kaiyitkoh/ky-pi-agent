@@ -15,6 +15,7 @@ import { formatStatusline, type StatuslineState } from "./statusline.ts";
 const STATUS_KEY = "ky-statusline";
 const DEFAULT_ROUTE = "cheap";
 
+// NEVER THROWS: a missing or malformed package.json only drops the version from the header.
 function readHarnessVersion(): string | undefined {
 	try {
 		const path = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "package.json");
@@ -40,7 +41,7 @@ function restoreRoute(ctx: ExtensionContext): { mode: string; escalated: boolean
 	return { mode, escalated };
 }
 
-// Chrome must never break a turn: a stale context after /reload throws, and so may a malformed event.
+// NEVER THROWS: chrome must not break a turn, yet a stale context after /reload throws, as may a malformed event.
 function guard(fn: () => void): void {
 	try {
 		fn();
@@ -93,11 +94,10 @@ export default function (pi: ExtensionAPI): void {
 			: undefined;
 		if (ctx.mode === "tui" && ctx.hasUI) {
 			let interruptKey = "esc";
+			// NEVER THROWS: an unknown keybinding falls back to the default key name.
 			try {
 				interruptKey = keyText("app.interrupt");
-			} catch {
-				// The hint falls back to the default key name.
-			}
+			} catch {}
 			ctx.ui.setHeader((_tui, theme) =>
 				createHeaderComponent(
 					() => ({ harnessVersion, piVersion: VERSION, mode: state.mode, escalated: state.escalated, interruptKey }),
