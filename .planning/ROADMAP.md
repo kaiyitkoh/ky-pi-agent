@@ -664,7 +664,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 4. Bootstrap/runbook documents install + upgrade; third-party wrapper `openspec-pi` evaluated and rejected or vendored with justification.
 
 **Depends on:** Phase 9 (runs before Phase 11, which awaits a user decision on terminal vs GUI front-end)
-**Plans:** 2/4 plans executed
+**Plans:** 3/4 plans executed
 
 Plans:
 **Wave 1**
@@ -674,7 +674,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 12-03-PLAN.md — `scripts/openspec-setup.sh` (single 1.13.2 pin, --install-cli with --ignore-scripts, isolated generation, frontmatter patch, user-level copy, --check, --uninstall) proven against a fake CLI
+- [x] 12-03-PLAN.md — `scripts/openspec-setup.sh` (single 1.13.2 pin, --install-cli with --ignore-scripts, isolated generation, frontmatter patch, user-level copy, --check, --uninstall) proven against a fake CLI
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
