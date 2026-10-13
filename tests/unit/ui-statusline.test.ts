@@ -124,9 +124,9 @@ describe("agent tracker", () => {
 
   it("counts foreground subagent tool calls only", () => {
     const t = createAgentTracker();
-    expect(t.onToolStart("subagent", "c1")).toBe(true);
+    expect(t.onToolStart("subagent", "c1", { agent: "scout", task: "x", async: false })).toBe(true);
     expect(t.running()).toBe(1);
-    expect(t.onToolStart("read", "c2")).toBe(false);
+    expect(t.onToolStart("read", "c2", { async: false })).toBe(false);
     expect(t.running()).toBe(1);
     expect(t.onToolEnd("subagent", "c1")).toBe(true);
     expect(t.running()).toBe(0);
@@ -140,7 +140,17 @@ describe("agent tracker", () => {
     expect(t.running()).toBe(0);
     t.onBusEvent("subagent:async-started", { id: "r1" });
     expect(t.running()).toBe(1);
-    expect(t.onToolStart("subagent", "c4", { agent: "scout", task: "x" })).toBe(true);
+    expect(t.onToolStart("subagent", "c4", { agent: "scout", task: "x", async: false })).toBe(true);
+    expect(t.running()).toBe(2);
+  });
+
+  it("counts a default-async launch once, through its bus event", () => {
+    const t = createAgentTracker();
+    expect(t.onToolStart("subagent", "c1", { agent: "scout", task: "x" })).toBe(false);
+    expect(t.onToolStart("subagent", "c2")).toBe(false);
+    t.onBusEvent("subagent:async-started", { id: "r1" });
+    expect(t.running()).toBe(1);
+    expect(t.onToolStart("subagent", "c3", { agent: "scout", task: "x", clarify: true })).toBe(true);
     expect(t.running()).toBe(2);
   });
 
@@ -186,7 +196,7 @@ describe("agent tracker", () => {
   it("reset returns to zero", () => {
     const t = createAgentTracker();
     t.onBusEvent("subagent:async-started", { id: "r1" });
-    t.onToolStart("subagent", "c1");
+    t.onToolStart("subagent", "c1", { async: false });
     t.reset();
     expect(t.running()).toBe(0);
   });

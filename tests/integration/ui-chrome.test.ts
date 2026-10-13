@@ -198,10 +198,10 @@ describe("ui extension in a session", () => {
 		expect(rec.statuses("ky-statusline")).toHaveLength(before);
 	});
 
-	it("shows a foreground subagent tool call while it runs", async () => {
+	it("shows an explicitly foreground subagent tool call while it runs", async () => {
 		const { rec, handle } = await open("tui", {
 			responses: [
-				fauxAssistantMessage(fauxToolCall("subagent", {}, { id: "call-1" }), { stopReason: "toolUse" }),
+				fauxAssistantMessage(fauxToolCall("subagent", { async: false }, { id: "call-1" }), { stopReason: "toolUse" }),
 				fauxAssistantMessage("ok"),
 			],
 		});
@@ -209,6 +209,17 @@ describe("ui extension in a session", () => {
 		const seen = rec.statuses("ky-statusline");
 		expect(seen.some((s) => s?.includes("1 agent"))).toBe(true);
 		expect(last(seen)).not.toContain("agent");
+	});
+
+	it("does not count a default-async subagent call before its bus event", async () => {
+		const { rec, handle } = await open("tui", {
+			responses: [
+				fauxAssistantMessage(fauxToolCall("subagent", { agent: "scout", task: "x" }, { id: "call-1" }), { stopReason: "toolUse" }),
+				fauxAssistantMessage("ok"),
+			],
+		});
+		await handle.session.prompt("go");
+		expect(rec.statuses("ky-statusline").some((s) => s?.includes("agent"))).toBe(false);
 	});
 
 	it("does not count a subagent management call as a running agent", async () => {

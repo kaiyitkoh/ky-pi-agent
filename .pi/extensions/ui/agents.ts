@@ -15,10 +15,12 @@ function idOf(payload: unknown): string | undefined {
   return undefined;
 }
 
+// asyncByDefault defaults to true (config.js:233), so only clarify or an explicit async:false blocks the
+// parent (subagent-executor.js:7424); a plain call is an async launch counted through its bus event.
 function isForegroundLaunch(args: unknown): boolean {
-  if (typeof args !== "object" || args === null) return true;
-  const a = args as { action?: unknown; async?: unknown };
-  return a.action === undefined && a.async !== true;
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as { action?: unknown; async?: unknown; clarify?: unknown };
+  return a.action === undefined && (a.async === false || a.clarify === true);
 }
 
 /**
