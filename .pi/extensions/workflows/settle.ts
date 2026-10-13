@@ -23,7 +23,7 @@ export function clearQuickSettle(): void {
 	(globalThis as Record<string, unknown>)[SETTLE_KEY] = undefined;
 }
 
-/** Shared by /quick and /execute; a run whose prompt never started stays armed until another prompt starts or /reload. */
+/** A run whose prompt never started stays armed until another prompt starts or /reload. */
 export const IN_FLIGHT = "a turn is already in flight -- wait for it to finish; if an earlier /quick or /execute prompt never started (for example, expired auth), run /reload to clear it";
 
 /** At `input` and `before_agent_start`: a different prompt starting first disarms the pending run and both workflow slots. */

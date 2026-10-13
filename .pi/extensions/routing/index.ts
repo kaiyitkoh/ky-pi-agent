@@ -253,7 +253,7 @@ function isModeName(value: unknown): value is ModeName {
  * Deliberately never calls `setModel`: Pi already restores the executor from its native `model_change` entry
  * (pi 1.1.0 `dist/core/session-manager.js:146-161`); a second source of truth could disagree.
  * NEVER THROWS on a malformed payload: an invalid mode falls back to {@link DEFAULT_MODE}, an invalid `escalatedFrom` is dropped.
- * `session_start` does not fire in a headless `createAgentSession` (see `tests/integration/call-model.test.ts`), so tests call this directly.
+ * `session_start` does not fire in a headless `createAgentSession`, so tests call this directly.
  */
 export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
 	const modeEntries = branch.filter(
