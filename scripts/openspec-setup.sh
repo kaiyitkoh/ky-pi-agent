@@ -59,6 +59,11 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd -P)
 
 PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
+# Pi expands a leading ~ in PI_CODING_AGENT_DIR (config.js expandTildePath), so match it.
+case "$PI_AGENT_DIR" in
+"~") PI_AGENT_DIR="$HOME" ;;
+"~/"*) PI_AGENT_DIR="$HOME/${PI_AGENT_DIR#"~/"}" ;;
+esac
 # A Windows-style value arrives with backslashes; MSYS tools accept C:/x only.
 case "$PI_AGENT_DIR" in
 [A-Za-z]:* | '\\'*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
@@ -70,15 +75,47 @@ case "$PI_AGENT_DIR" in
 	;;
 esac
 
+case "$PI_AGENT_DIR" in
+/* | [A-Za-z]:*) ;;
+*) PI_AGENT_DIR="$PWD/$PI_AGENT_DIR" ;;
+esac
+
+# Physical path of the nearest existing ancestor plus the not-yet-created rest.
+resolve_physical() {
+	rp_dir=$1
+	rp_rest=""
+	while [ ! -d "$rp_dir" ]; do
+		rp_rest="/$(basename "$rp_dir")$rp_rest"
+		rp_dir=$(dirname "$rp_dir")
+	done
+	rp_abs=$(CDPATH='' cd -- "$rp_dir" && pwd -P) || return 1
+	printf '%s%s\n' "$rp_abs" "$rp_rest"
+}
+
+# Lower-cased and drive-letter form, because Windows and macOS paths compare case-insensitively.
+comparable_path() {
+	cp_path=$1
+	if command -v cygpath >/dev/null 2>&1; then
+		cp_path=$(cygpath -m "$cp_path")
+	fi
+	printf '%s\n' "$cp_path" | tr '[:upper:]' '[:lower:]'
+}
+
 # Skills committed into the repo would count against the per-turn budget tests.
-agent_cmp="$PI_AGENT_DIR"
-if [ -d "$PI_AGENT_DIR" ]; then
-	agent_cmp=$(cd "$PI_AGENT_DIR" && pwd -P)
-elif command -v cygpath >/dev/null 2>&1; then
-	agent_cmp=$(cygpath -u "$PI_AGENT_DIR")
+if ! agent_physical=$(resolve_physical "$PI_AGENT_DIR"); then
+	printf 'FATAL: cannot resolve %s to check it is outside this repository.\n' "$PI_AGENT_DIR" >&2
+	exit 2
 fi
+case "$agent_physical" in
+*/.. | */../*)
+	printf 'FATAL: refusing %s: ".." below a directory that does not exist yet cannot be checked.\n' "$PI_AGENT_DIR" >&2
+	exit 2
+	;;
+esac
+agent_cmp=$(comparable_path "$agent_physical")
+repo_cmp=$(comparable_path "$REPO_ROOT")
 case "$agent_cmp" in
-"$REPO_ROOT" | "$REPO_ROOT"/*)
+"$repo_cmp" | "$repo_cmp"/*)
 	printf 'FATAL: refusing to install into %s: it is inside this repository.\n' "$PI_AGENT_DIR" >&2
 	exit 2
 	;;

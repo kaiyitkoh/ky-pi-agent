@@ -17,7 +17,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, join, relative } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -327,6 +327,67 @@ describe("scripts/openspec-setup.sh", () => {
 		} finally {
 			rmSync(inside, { recursive: true, force: true });
 		}
+	});
+
+	it("refuses a relative agent dir that lands inside the repository", () => {
+		const fake = makeFake();
+		const name = ".kypi-ospec-rel-agent-" + process.pid;
+		const inside = join(repoRoot(), name);
+		try {
+			const r = spawnSync("sh", [SCRIPT], {
+				cwd: repoRoot(),
+				env: { ...fake.env, PI_CODING_AGENT_DIR: "./" + name },
+				encoding: "utf-8",
+				timeout: 60_000,
+				windowsHide: true,
+			});
+			expect(r.status, r.stderr).toBe(2);
+			expect(existsSync(inside)).toBe(false);
+			expect(logLines(fake)).toEqual([]);
+		} finally {
+			rmSync(inside, { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a case-variant spelling of a path inside the repository", () => {
+		const fake = makeFake();
+		const root = repoRoot().replace(/\\/g, "/");
+		const swapped = root.replace(/[A-Za-z]/g, (c) => (c === c.toLowerCase() ? c.toUpperCase() : c.toLowerCase()));
+		const name = ".kypi-ospec-case-agent-" + process.pid;
+		const env = { ...fake.env, PI_CODING_AGENT_DIR: swapped + "/" + name };
+		try {
+			const r = run(fake, [], env);
+			expect(r.status, r.stderr).toBe(2);
+			expect(existsSync(join(repoRoot(), name))).toBe(false);
+			expect(logLines(fake)).toEqual([]);
+		} finally {
+			rmSync(join(repoRoot(), name), { recursive: true, force: true });
+		}
+	});
+
+	it("refuses a .. path through a missing directory that climbs into the repository", () => {
+		const fake = makeFake();
+		const name = ".kypi-ospec-dotdot-agent-" + process.pid;
+		const climb = relative(fake.cwd, repoRoot()).replace(/\\/g, "/");
+		const env = { ...fake.env, PI_CODING_AGENT_DIR: `${fake.cwd.replace(/\\/g, "/")}/missing/../${climb}/${name}` };
+		try {
+			const r = run(fake, [], env);
+			expect(r.status, r.stderr).toBe(2);
+			expect(existsSync(join(repoRoot(), name))).toBe(false);
+			expect(logLines(fake)).toEqual([]);
+		} finally {
+			rmSync(join(repoRoot(), name), { recursive: true, force: true });
+		}
+	});
+
+	it("expands a leading ~ the way Pi does", () => {
+		const fake = makeFake();
+		const home = tempDir("kypi-ospec-home-");
+		const env = { ...fake.env, HOME: home, PI_CODING_AGENT_DIR: "~/agent" };
+		const r = run(fake, [], env);
+		expect(r.status, r.stderr).toBe(0);
+		expect(existsSync(join(home, "agent", "skills", "openspec-explore", "SKILL.md"))).toBe(true);
+		expect(existsSync(join(fake.cwd, "~"))).toBe(false);
 	});
 
 	it("--install-cli runs npm with the exact pinned, script-free argv", () => {
