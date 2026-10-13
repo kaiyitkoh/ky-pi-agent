@@ -432,3 +432,25 @@ describe("localBin never resolves a binary above the git top level", () => {
 		rmSync(outer, { recursive: true, force: true });
 	});
 });
+
+describe("a solution-style tsconfig never yields a vacuous typecheck PASS", () => {
+	it("files: [] plus references is UNAVAILABLE naming the config, even with a passing tsc installed", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const repo = makeTempRepo("kypi-solution-tsconfig-");
+		writeFileSync(join(repo, "tsconfig.json"), JSON.stringify({ files: [], references: [{ path: "./app" }] }), "utf-8");
+		mkdirSync(join(repo, "app"));
+		writeFileSync(join(repo, "app", "a.ts"), "export const a: number = 'x';\n", "utf-8");
+		stubTsc(repo, { exitCode: 0 });
+		const leg = runTypecheckAt(repo, true);
+		expect(leg).toEqual({ status: "unavailable", reason: expect.stringContaining("solution-style") });
+	});
+
+	it("paired positive: a tsconfig that includes the files still runs tsc", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const repo = makeTempRepo("kypi-plain-tsconfig-");
+		writeFileSync(join(repo, "tsconfig.json"), "{}\n", "utf-8");
+		writeFileSync(join(repo, "a.ts"), "export const a = 1;\n", "utf-8");
+		stubTsc(repo, { exitCode: 0 });
+		expect(runTypecheckAt(repo, true)).toEqual({ status: "pass" });
+	});
+});

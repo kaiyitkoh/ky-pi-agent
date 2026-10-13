@@ -6,6 +6,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
+import * as ts from "typescript";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 
@@ -132,11 +133,28 @@ function findUp(cwd: string, holds: (dir: string) => boolean): string | undefine
 	}
 }
 
-/** `tsc --noEmit` at `cwd`, alone; unavailable when no tsconfig.json exists from `cwd` up to the git top level. */
+/**
+ * A reason when a solution-style tsconfig (only `references`, or an explicit empty `files`) gives `tsc --noEmit` no file
+ * to check, so its exit 0 would be a vacuous pass. Other configs with no input are left to tsc, which fails them itself.
+ */
+function tsconfigChecksNothing(file: string): string | undefined {
+	const read = ts.readConfigFile(file, ts.sys.readFile);
+	if (read.error !== undefined) return undefined;
+	const parsed = ts.parseJsonConfigFileContent(read.config, ts.sys, dirname(file));
+	const refs = parsed.projectReferences?.length ?? 0;
+	const emptyFiles = Array.isArray((read.config as { files?: unknown }).files) && (read.config as { files: unknown[] }).files.length === 0;
+	if (parsed.fileNames.length > 0 || (refs === 0 && !emptyFiles)) return undefined;
+	return `${file} gives tsc no file to check (a solution-style config with ${refs} project reference(s)), so tsc --noEmit would pass having checked nothing`;
+}
+
+/** `tsc --noEmit` at `cwd`, alone; unavailable when no tsconfig.json exists from `cwd` up to the git top level, or it checks nothing. */
 export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus {
-	if (findUp(cwd, (d) => existsSync(join(d, "tsconfig.json"))) === undefined) {
+	const dir = findUp(cwd, (d) => existsSync(join(d, "tsconfig.json")));
+	if (dir === undefined) {
 		return { status: "unavailable", reason: `no tsconfig.json at or above ${cwd} (up to the git top level), so tsc has no project to check` };
 	}
+	const vacuous = tsconfigChecksNothing(join(dir, "tsconfig.json"));
+	if (vacuous !== undefined) return { status: "unavailable", reason: vacuous };
 	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
 }
 
