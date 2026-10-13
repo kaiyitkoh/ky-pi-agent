@@ -197,6 +197,8 @@ export type ShellVerdict =
 			readonly redirectWriteTargets: readonly string[];
 			/** Every `Command` node, including assignment-only statements (`HOME=x`) that yield no invocation. */
 			readonly commandCount: number;
+			/** `NAME=value` words of assignment-only statements (`GIT_DIR=x;`), which change an already exported variable. */
+			readonly scriptAssignments: readonly string[];
 	  };
 
 /** Basename, lower-cased, Windows extension stripped; every bare-verb gate must use it or `git.exe push` classifies as allow. */
@@ -724,5 +726,6 @@ export function canonicalise(command: string): ShellVerdict {
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
 	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
 	const redirectTargets = { redirectReadTargets: scan.compoundReads, redirectWriteTargets: scan.compoundWrites };
-	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], commandCount: scan.commands.length, ...redirectTargets };
+	const scriptAssignments = scan.commands.filter((c) => c.name === undefined).flatMap((c) => c.prefix.map((a) => a.text));
+	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], commandCount: scan.commands.length, scriptAssignments, ...redirectTargets };
 }

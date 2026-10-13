@@ -293,7 +293,10 @@ only for `core.quotepath` and `color.ui`. `--config-env`, `--exec-path`,
 `--super-prefix` and any unknown global option mark the invocation unparsed, and
 it blocks on every branch. Any `GIT_*` assignment in front of a git command
 (`GIT_SSH_COMMAND=x git fetch`, `env GIT_DIR=x git ...`) blocks, except
-`GIT_PAGER=cat` and `GIT_TERMINAL_PROMPT=0`. The protected-branch write table
+`GIT_PAGER=cat` and `GIT_TERMINAL_PROMPT=0`. In a script that runs git, a
+`GIT_*` variable exported (`export`, `declare -x`, `typeset`, `readonly`,
+`local`) or assigned on its own (`GIT_DIR=x;`, which also updates an already
+exported variable, or after `set -a`) blocks the same way. The protected-branch write table
 still applies on top when `HEAD` is protected.
 
 ### Reads that do not arrive as a plain argument

@@ -201,8 +201,19 @@ function asGitSubcommandInvocation(invocation: CanonicalInvocation): CanonicalIn
 	return match === null ? undefined : { ...invocation, executable: "git", args: [match[1], ...invocation.args] };
 }
 
-const nonFormattingGitAssignment = (invocation: CanonicalInvocation): string | undefined =>
-	(invocation.assignmentWords ?? []).find((w) => /^GIT_/i.test(w) && !GIT_ALLOWED_ASSIGNMENTS.has(w));
+const isRiskyGitWord = (w: string): boolean => /^GIT_\w*(=|$)/i.test(w) && !GIT_ALLOWED_ASSIGNMENTS.has(w);
+
+const nonFormattingGitAssignment = (invocation: CanonicalInvocation): string | undefined => (invocation.assignmentWords ?? []).find(isRiskyGitWord);
+
+const EXPORTING_BUILTINS = wordSet("export declare typeset readonly local");
+
+/** A `GIT_*` variable set or exported anywhere in a script that runs git reaches that git through the environment. */
+function scriptGitVariable(invocations: readonly CanonicalInvocation[], scriptAssignments: readonly string[]): string | undefined {
+	const runsGit = invocations.some((inv) => /^git(-|$)/.test(normaliseExecutable(inv.executable)));
+	if (!runsGit) return undefined;
+	const exported = invocations.filter((inv) => EXPORTING_BUILTINS.has(normaliseExecutable(inv.executable))).flatMap((inv) => inv.args);
+	return [...scriptAssignments, ...exported].find(isRiskyGitWord);
+}
 
 const GLOB_CHARS = /[*?[]/;
 const LEADING_WILDCARD = /^[*?[{]/;
@@ -379,6 +390,10 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	}
 
 	const requestKey = computeRequestKey("bash", { command }, facts.cwd);
+	const gitVariable = scriptGitVariable(shellVerdict.invocations, shellVerdict.scriptAssignments);
+	if (gitVariable !== undefined) {
+		return { kind: "block", reason: `"${gitVariable.split("=")[0]}" is set in a script that runs git, which can make git run a program or use another repository` };
+	}
 
 	let strongest: Verdict = { kind: "allow" };
 	for (const invocation of shellVerdict.invocations) {

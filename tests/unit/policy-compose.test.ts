@@ -631,6 +631,11 @@ const ROWS: readonly Row[] = [
 		facts: { gitConfigFor: () => { throw new Error("no git"); } },
 		expected: "allow",
 	},
+	{ name: "export GIT_DIR before git -- block", toolName: "bash", input: { command: "export GIT_DIR=/x; git status" }, expected: "block", reasonIncludes: "GIT_DIR" },
+	{ name: "a plain GIT_* assignment before git -- block", toolName: "bash", input: { command: "GIT_DIR=x; git status" }, expected: "block" },
+	{ name: "export GIT_PAGER=cat before git -- allow, a formatting variable", toolName: "bash", input: { command: "export GIT_PAGER=cat; git log" }, expected: "allow" },
+	{ name: "export of a non-git variable before git -- allow", toolName: "bash", input: { command: "export FOO=1; git status" }, expected: "allow" },
+	{ name: "export GIT_DIR with no git in the script -- allow, each call is a fresh shell", toolName: "bash", input: { command: "export GIT_DIR=x" }, expected: "allow" },
 	{
 		name: "cd into a project directory, then a relative read -- allow (negative control)",
 		toolName: "bash",
