@@ -121,6 +121,7 @@ const BYPASSES: readonly Row[] = [
 	{ id: "PM-76", cmd: "bat --paging=always README.md", why: "bat runs its pager, an interactive program that can run commands" },
 	{ id: "PM-77", cmd: "bat --pager sh README.md", why: "bat runs the named pager" },
 	{ id: "PM-78", cmd: "bat --pager=sh README.md", why: "the = spelling of --pager" },
+	{ id: "PM-79", cmd: "bat --paging always README.md", why: "the separated spelling of --paging=always" },
 	{ id: "PM-62", cmd: "tree -o out.txt", why: "`tree -o` writes a file" },
 	{ id: "PM-63", cmd: "uniq a b", why: "`uniq INPUT OUTPUT` writes the second file" },
 	{ id: "PM-64", cmd: "curl -c jar https://x", why: "`curl -c` writes a cookie jar" },

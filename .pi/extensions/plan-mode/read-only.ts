@@ -173,7 +173,7 @@ const ARGUMENT_RULES: Record<string, (args: readonly string[]) => string | undef
 		return bad === undefined ? undefined : `\`sort ${bad}\` writes a file`;
 	},
 	date: (args) => (hasBundledFlag(args, ["-s", "--set"]) === undefined ? undefined : "`date -s` sets the system clock"),
-	bat: (args) => (args.some((a) => a === "--pager" || a.startsWith("--pager=") || a === "--paging=always") ? "`bat` runs a pager, which can run commands" : undefined),
+	bat: (args) => (args.some((a, i) => a === "--pager" || a.startsWith("--pager=") || a === "--paging=always" || (a === "--paging" && args[i + 1] === "always")) ? "`bat` runs a pager, which can run commands" : undefined),
 };
 
 /** Every verb plan mode will consider at all. */
