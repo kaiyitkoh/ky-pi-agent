@@ -1,7 +1,12 @@
+import { spawnSync } from "node:child_process";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { createHash } from "node:crypto";
 
-import { describe, expect, it } from "vitest";
+import { afterAll, describe, expect, it } from "vitest";
 
+import { repoRoot } from "../helpers/git.ts";
 import { analyseWire, extractSystemText, turnRatios, verdict } from "../../scripts/ui-wire-check-core.ts";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -113,5 +118,62 @@ describe("verdict", () => {
 	});
 	it("is insufficient with no turn-2 ratio", () => {
 		expect(verdict(good, [], 0.5).status).toBe("INSUFFICIENT");
+	});
+});
+
+describe("launcher", () => {
+	const sh = (() => {
+		const finder = process.platform === "win32" ? "where" : "which";
+		const found = spawnSync(finder, ["sh"], { encoding: "utf-8", windowsHide: true });
+		return (found.stdout ?? "").split(/\r?\n/).find((l) => l.trim().length > 0)!.trim();
+	})();
+	const fwd = (p: string) => p.split("\\").join("/");
+	const launcher = fwd(join(repoRoot(), "scripts", "ui-wire-check.sh"));
+	const dirs: string[] = [];
+	afterAll(() => {
+		for (const d of dirs) rmSync(d, { recursive: true, force: true });
+	});
+
+	function fixture(systems: string[], turnRows: string[] = [row("s1", "s1#1", 100, 0), row("s1", "s1#2", 10, 90)]): string {
+		const dir = mkdtempSync(join(tmpdir(), "ui-wire-"));
+		dirs.push(dir);
+		writeFileSync(join(dir, "wire-2026-10-13.jsonl"), `${systems.map((s) => req("s1", s)).join("\n")}\n`);
+		writeFileSync(join(dir, "turns-2026-10-13.jsonl"), `${turnRows.join("\n")}\n`);
+		return dir;
+	}
+	const run = (args: string[]) => spawnSync(sh, [launcher, ...args], { encoding: "utf-8", windowsHide: true });
+	const base = (dir: string) => ["--logs", fwd(dir), "--date", "2026-10-13"];
+
+	it("passes on stable prompts and high ratios", () => {
+		const r = run(base(fixture(["same", "same"])));
+		expect(r.status).toBe(0);
+		expect(r.stdout).toContain("PASS");
+	});
+	it("fails when a prompt differs", () => {
+		const r = run(base(fixture(["a", "b"])));
+		expect(r.status).toBe(1);
+		expect(r.stdout).toContain("FAIL");
+		expect(r.stdout).toContain("system prompt differs");
+	});
+	it("fails on a probe hit and names it", () => {
+		const r = run([...base(fixture(["has ky-leak", "has ky-leak"])), "--probe", "ky-leak"]);
+		expect(r.status).toBe(1);
+		expect(r.stdout).toContain("ky-leak");
+	});
+	it("never prints the system text", () => {
+		const r = run(base(fixture(["secret-sentence-xyz", "secret-sentence-xyz"])));
+		expect(r.stdout).not.toContain("secret-sentence-xyz");
+	});
+	it("exits 2 naming the missing file", () => {
+		const dir = mkdtempSync(join(tmpdir(), "ui-wire-"));
+		dirs.push(dir);
+		const r = run(base(dir));
+		expect(r.status).toBe(2);
+		expect(r.stdout).toContain("wire-2026-10-13.jsonl");
+	});
+	it("rejects an unknown flag with usage", () => {
+		const r = run(["--bogus", "1"]);
+		expect(r.status).not.toBe(0);
+		expect(r.stderr).toContain("usage");
 	});
 });
