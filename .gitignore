@@ -171,6 +171,16 @@ scratch/
 .pi/work/
 
 # ---------------------------------------------------------------------------
+# OpenSpec planning trees (never committed -- public repo)
+#
+# `openspec/` is the planning tree OpenSpec scaffolds into a project. It
+# belongs to the user's other repos; this repo is PUBLIC, so an accidental
+# `openspec init` here must never be committable. Rooted on purpose: an
+# unrooted pattern would also swallow a docs/openspec/ directory.
+# ---------------------------------------------------------------------------
+/openspec/
+
+# ---------------------------------------------------------------------------
 # Vendored-extension runtime state (never committed, machine/session-local)
 #
 # pi-loop-police (07-06, EXT-05/EXT-10) auto-creates loop-police.json next to

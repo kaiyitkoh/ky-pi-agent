@@ -71,6 +71,11 @@ const MUST_BE_IGNORED = [
 	// --- Registry auth: every npmrc EXCEPT the two rooted controls ----------
 	"sub/.npmrc",
 	"packages/a/.npmrc",
+	// --- OpenSpec scaffold from an accidental init ---
+	"openspec/config.yaml",
+	"openspec/changes/x/proposal.md",
+	"openspec/specs/y/spec.md",
+	"openspec/changes/archive/z/tasks.md",
 	// --- Dependencies --------------------------------------------------------
 	"node_modules/x",
 ] as const;
@@ -110,6 +115,9 @@ const MUST_BE_COMMITTABLE = [
 	// --- Tests ------------------------------------------------------------------
 	"tests/unit/gitignore-policy.test.ts",
 	"tests/fixtures/evil-postinstall/package.json",
+	// --- Rooted openspec rule must not swallow same-named siblings elsewhere ---
+	"docs/openspec-notes.md",
+	"scripts/openspec-setup.sh",
 ] as const;
 
 /** Registry auth patterns. `_auth\b` deliberately excludes `_authToken`, which
@@ -134,8 +142,8 @@ function walkFiles(dir: string): string[] {
 
 describe("BOOT-09: credential and runtime-state paths are not committable", () => {
 	it("asserts a meaningful number of paths in both directions", () => {
-		expect(MUST_BE_IGNORED.length).toBeGreaterThanOrEqual(20);
-		expect(MUST_BE_COMMITTABLE.length).toBeGreaterThanOrEqual(17);
+		expect(MUST_BE_IGNORED.length).toBeGreaterThanOrEqual(24);
+		expect(MUST_BE_COMMITTABLE.length).toBeGreaterThanOrEqual(19);
 	});
 
 	it.each(MUST_BE_IGNORED)("ignores %s", (path) => {
@@ -172,6 +180,13 @@ describe("committed npmrc files carry no registry credential", () => {
 		// a nested or vendored npmrc is the likely carrier of a leaked token.
 		const committedNpmrc = trackedFiles(".").filter((p) => p.endsWith(".npmrc"));
 		expect(committedNpmrc.sort()).toEqual([".npmrc", ".pi/npm/.npmrc"]);
+	});
+});
+
+describe("openspec/ is never tracked", () => {
+	it("tracks nothing under openspec/", () => {
+		// `git add -f` bypasses ignore rules, so the ignore oracle alone cannot prove this.
+		expect(trackedFiles("openspec")).toEqual([]);
 	});
 });
 
