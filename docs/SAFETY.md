@@ -145,14 +145,21 @@ docstring for the structural argument). Concretely, it catches:
   `aws sts get-caller-identity`, `aws s3 ls`, `kubectl get`, and `terraform
   plan` stay allowed so ordinary orientation does not train reflexive
   approval.
-- **OpenSpec CLI** — `openspec list|view|show|validate|status|instructions` and the other read-only verbs are allowed, and so is `openspec archive`: it writes only inside `openspec/`, and it is a named allow row rather than a path exemption because bash writes are not path-classified. `init` and `update` (they write agent config directories, and `update` can offer an unpinned global self-upgrade), `completion` (edits shell rc files), `feedback` (posts to GitHub), `context --code-workspace` (writes a workspace file at an arbitrary path), the state-changing second words of `config`, `store` and `workset`, a bare `openspec`, and any unknown subcommand require confirmation.
-- **Deferred-detonation writes**, not only bash — a `write`/`edit` into
+- **OpenSpec CLI** — `openspec list|view|show|validate|status|instructions` and the other read-only verbs are allowed, and so is `openspec archive`: it writes only inside `openspec/`, and it is a named allow row rather than a path exemption. `init` and `update` (they write agent config directories, and `update` can offer an unpinned global self-upgrade), `completion` (edits shell rc files), `feedback` (posts to GitHub), `context --code-workspace` (writes a workspace file at an arbitrary path), the state-changing second words of `config`, `store` and `workset`, a bare `openspec`, and any unknown subcommand require confirmation.
+- **Deferred-detonation writes** — a `write`/`edit` into
   `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.bash_profile`, `~/.profile`,
   `~/.gitconfig`, a `.github/workflows/*.yml`, or `.gitlab-ci.yml` blocks
   regardless of project-root containment, because a later, entirely benign
   command is what actually executes the payload.
-- **Writes outside the project root** — blocked by default; nothing is
-  carved out as an allowed-outside destination.
+- **Writes outside the project root** — blocked by default.
+- **Bash writes** go through the same write classifier, in the session
+  directory and the `cd` target: output redirects (`>`, `>>`, `>|`, `&>`,
+  `<>`, `>&file`), and the write operands of `tee`, `cp`/`mv`/`install`/`ln`
+  (the destination, or `-t DIR`), `dd of=`, `sed -i`, `rm`, `rmdir`, `touch`,
+  `truncate`, `shred`, `curl -o` and `wget -O`. Bash alone may also write
+  device files (`/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty`,
+  `/dev/fd/N`), `/tmp` and the OS temp directory. A file written by any other
+  program (a build script, `npm install`) is not classified.
 - Enforcement happens **twice** — at the `tool_call` hook and again inside
   each wrapped tool's own `execute()` — so a later extension mutating
   `event.input` after the hook already approved a call is still caught by the

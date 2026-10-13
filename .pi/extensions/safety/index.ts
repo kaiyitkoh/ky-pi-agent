@@ -3,7 +3,7 @@
  * Two layers because Pi never re-validates event.input after a later handler mutates it (core/extensions/types.d.ts ToolCallEvent).
  * Tools register before the hook: tool-name collisions resolve first-registration-wins (pi 1.1.0 runner.js:410-417).
  */
-import { homedir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
 import { StringEnum } from "@earendil-works/pi-ai";
@@ -79,6 +79,7 @@ function buildFacts(ctx: ExtensionContext): PolicyFacts {
 		gitConfigFor: (dir: string, key: string) => gitConfigValues(dir, key),
 		gitBranchFor: (dir: string, rev: string) => resolveLocalBranch(dir, rev),
 		kubeconfigEnv: process.env.KUBECONFIG,
+		tempDir: toCanonicalRoot(tmpdir()),
 	};
 }
 

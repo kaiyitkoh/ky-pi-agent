@@ -4,7 +4,7 @@
  * Pure: no ctx, process.env, node:fs or default export; the one impure fact (current branch) arrives via PolicyFacts.
  */
 import type { CanonicalInvocation } from "./shell.ts";
-import { canonicalise, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable } from "./shell.ts";
+import { canonicalise, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable, writeOperands } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
 import { canonicalisePathArg, classifyPathRead, classifyPathWrite, classifyReadGlob, isSensitiveSearchRoot } from "./paths.ts";
 import type { PathVerdict } from "./paths.ts";
@@ -38,6 +38,8 @@ export interface PolicyFacts {
 	/** Lazy `git rev-parse --symbolic-full-name` to a local branch name in a directory; required with gitConfigFor. */
 	readonly gitBranchFor?: (cwd: string, rev: string) => string | undefined;
 	readonly kubeconfigEnv?: string;
+	/** The OS temp directory, canonical; bash may write there and under `/tmp`. */
+	readonly tempDir?: string;
 }
 
 const VERDICT_RANK: Record<Verdict["kind"], number> = { allow: 0, ask: 1, confirm: 2, block: 3 };
@@ -303,6 +305,22 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 			if (isSensitiveSearchRoot(canonical, pathFacts)) return { kind: "block", reason: sensitiveRootReason(canonical) };
 		}
 	}
+	return classifyShellWrites([...writeOperands(invocation), ...(invocation.redirectWrites ?? [])], dirs, facts);
+}
+
+const DEVICE_FILE = /^\/dev\/(null|stdout|stderr|tty|fd\/\d+)$/i;
+
+/** Bash writes go through the write tool's classifier in every candidate directory; device files, `/tmp` and the temp dir are scratch. */
+function classifyShellWrites(targets: readonly string[], dirs: Iterable<string>, facts: PolicyFacts): Verdict {
+	const scratch = ["/tmp", ...(facts.tempDir !== undefined ? [facts.tempDir] : [])];
+	for (const cwd of dirs) {
+		for (const target of targets) {
+			const canonical = canonicalOf(target, facts, cwd);
+			if (DEVICE_FILE.test(canonical)) continue;
+			const verdict = classifyPathWrite(canonical, pathFactsOf(facts), scratch);
+			if (verdict.kind === "block") return { kind: "block", reason: `bash write: ${verdict.reason}` };
+		}
+	}
 	return { kind: "allow" };
 }
 
@@ -328,6 +346,7 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	}
 	// A compound statement's redirect may run in any directory its commands reach.
 	const dirs = new Set([facts.cwd, ...shellVerdict.invocations.map((inv) => invocationDir(inv, facts))]);
+	strongest = strongerOf(strongest, classifyShellWrites(shellVerdict.redirectWriteTargets, dirs, facts));
 	for (const cwd of dirs) {
 		for (const target of shellVerdict.redirectReadTargets) {
 			const verdict = classifyPathRead(canonicalOf(target, facts, cwd), pathFactsOf(facts));

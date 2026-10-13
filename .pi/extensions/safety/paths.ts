@@ -369,7 +369,7 @@ function hasSegmentPair(parts: readonly string[], first: string, second: string)
 	return -1;
 }
 
-/** Write/delete targets that are deferred detonation: a later benign command (git hook, new shell, CI run) executes the payload, so no bash matcher sees it. Applies to bash and the `write`/`edit` tools. */
+/** Write/delete targets that are deferred detonation: a later benign command (git hook, new shell, CI run) executes the payload. Applies to the `write`/`edit` tools and to bash redirects and write operands. */
 export const DETONATION_TARGETS: readonly PathPattern[] = [
 	{
 		id: "git-hooks",
@@ -563,8 +563,8 @@ export function isSensitiveSearchRoot(canonicalPath: string, facts: PathPolicyFa
 	return isWithinRoot(facts.home, canonicalPath);
 }
 
-/** Detonation targets block regardless of project containment, then out-of-root writes block. No allowed-outside root exists; add one explicitly rather than default open. */
-export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFacts): PathVerdict {
+/** Detonation targets block regardless of project containment, then writes outside the project and the caller's explicit `scratchRoots` block. */
+export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFacts, scratchRoots: readonly string[] = []): PathVerdict {
 	const canonicalPath = stripStreamSuffix(rawCanonicalPath);
 	for (const target of DETONATION_TARGETS) {
 		if (target.match(canonicalPath, facts)) {
@@ -575,7 +575,7 @@ export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFac
 		const pattern = SENSITIVE_READ_PATTERNS.find((p) => p.id === id);
 		if (pattern?.match(canonicalPath, facts) === true) return { kind: "block", reason: pattern.reason(canonicalPath) };
 	}
-	if (!isWithinRoot(canonicalPath, facts.projectRoot)) {
+	if (![facts.projectRoot, ...scratchRoots].some((root) => isWithinRoot(canonicalPath, root))) {
 		return {
 			kind: "block",
 			reason: `"${canonicalPath}" resolves outside the project root "${facts.projectRoot}"`,
