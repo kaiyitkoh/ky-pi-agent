@@ -67,6 +67,9 @@ if (argv[0] === "--version") {
 	writeFileSync(join(process.cwd(), "openspec", "config.yaml"), "schema: spec-driven\\n");
 } else if (argv[0] === "config" && argv[1] === "set") {
 	log({ kind: "config-set", argv, xdg: process.env.XDG_CONFIG_HOME ?? null, env: { OPENSPEC_NO_AUTO_CONFIG: process.env.OPENSPEC_NO_AUTO_CONFIG ?? null } });
+} else if (argv[0] === "config" && argv[1] === "get" && argv[2] === "telemetry.enabled") {
+	log({ kind: "config-get", argv, xdg: process.env.XDG_CONFIG_HOME ?? null });
+	process.stdout.write((control.telemetryGet ?? "false") + "\\n");
 } else {
 	process.exitCode = 1;
 }
@@ -104,6 +107,7 @@ interface FakeOpts {
 	version?: string;
 	skills?: Record<string, string>;
 	prompts?: Record<string, string>;
+	telemetryGet?: string;
 }
 
 function defaultSkills(): Record<string, string> {
@@ -132,6 +136,7 @@ function makeFake(opts: FakeOpts = {}): Fake {
 			version: opts.version ?? "1.13.2",
 			skills: opts.skills ?? defaultSkills(),
 			prompts: opts.prompts ?? defaultPrompts(),
+			telemetryGet: opts.telemetryGet,
 			log,
 		}),
 	);
@@ -277,6 +282,19 @@ describe("scripts/openspec-setup.sh", () => {
 		expect(set!.argv).toEqual(["config", "set", "telemetry.enabled", "false"]);
 		expect(norm(set!.xdg)).toBe(norm(fake.realXdg));
 		expect(set!.env.OPENSPEC_NO_AUTO_CONFIG).toBe("1");
+		const get = logLines(fake).find((l) => l.kind === "config-get");
+		expect(get, "the script must read the value back, not trust the set").toBeDefined();
+		expect(norm(get!.xdg)).toBe(norm(fake.realXdg));
+	});
+
+	it("warns when telemetry.enabled does not read back as false", () => {
+		const ok = run(makeFake());
+		expect(ok.status).toBe(0);
+		expect(ok.stderr).not.toContain("telemetry.enabled reads back");
+
+		const bad = run(makeFake({ telemetryGet: "true" }));
+		expect(bad.status).toBe(0);
+		expect(bad.stderr).toContain('telemetry.enabled reads back as "true"');
 	});
 
 	it("is byte-identical on a second run", () => {

@@ -1746,7 +1746,7 @@ Phase 12 added opt-in OpenSpec skills at user level at zero per-turn cost, prove
 
 **Expected output.** `false` and zero requests.
 
-**Offline proxy:** `tests/unit/openspec-env.test.ts` proves the harness sets the four opt-out variables on CLI calls.
+**Offline proxy:** `tests/unit/openspec-env.test.ts` proves the harness sets the four opt-out variables in Pi's `process.env`, which spawned commands inherit. `tests/integration/openspec-setup.test.ts` proves the setup script reads `telemetry.enabled` back and warns unless it is `false`. Neither observes the network.
 
 ### RB-12-04 — OSPEC-4: upgrade drill
 

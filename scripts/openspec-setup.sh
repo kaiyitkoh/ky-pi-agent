@@ -281,9 +281,12 @@ run_install() {
 	done
 
 	# Terminal use of the CLI must not phone home either; deliberately the user's own config.
-	if ! env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_NO_AUTO_CONFIG=1 \
-		openspec config set telemetry.enabled false >/dev/null 2>&1; then
-		printf 'WARN: could not set telemetry.enabled=false; run: openspec config set telemetry.enabled false\n' >&2
+	env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_NO_AUTO_CONFIG=1 \
+		openspec config set telemetry.enabled false >/dev/null 2>&1 || :
+	telemetry=$(env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_NO_AUTO_CONFIG=1 \
+		openspec config get telemetry.enabled 2>/dev/null | tr -d '\r') || telemetry=""
+	if [ "$telemetry" != "false" ]; then
+		printf 'WARN: telemetry.enabled reads back as "%s", not false; run: openspec config set telemetry.enabled false\n' "$telemetry" >&2
 	fi
 
 	printf 'openspec %s: installed 12 skills and 12 prompts into %s\n' "$OPENSPEC_VERSION" "$PI_AGENT_DIR"

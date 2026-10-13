@@ -50,7 +50,7 @@ The skills are `openspec-propose`, `openspec-explore`, `openspec-new-change`, `o
 
 ## Telemetry and update check
 
-The harness extension sets four environment variables for every CLI call it makes: `OPENSPEC_TELEMETRY=0`, `DO_NOT_TRACK=1`, `OPENSPEC_NO_UPDATE_CHECK=1` and `OPENSPEC_NO_AUTO_CONFIG=1`. The setup script writes `telemetry.enabled=false` into the real OpenSpec config and verifies it. Check with `openspec config get telemetry.enabled`.
+The harness extension makes no CLI calls of its own. At load it sets four variables in Pi's own `process.env`: `OPENSPEC_TELEMETRY=0`, `DO_NOT_TRACK=1`, `OPENSPEC_NO_UPDATE_CHECK=1` and `OPENSPEC_NO_AUTO_CONFIG=1`. Every command Pi spawns inherits them, including `openspec` run through bash, and so does any other child tool that honours `DO_NOT_TRACK`. The setup script writes `telemetry.enabled=false` into the real OpenSpec config, reads it back with `openspec config get telemetry.enabled`, and warns unless it prints `false`. Check by hand with the same command.
 
 For your own terminal use you may `export OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1`. No script writes to shell rc files.
 
