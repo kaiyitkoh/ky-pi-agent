@@ -19,7 +19,7 @@ import {
 import { tmpdir } from "node:os";
 import { delimiter, join, relative } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { OPENSPEC_SKILL_NAMES, OPENSPEC_WORKFLOWS, openspecPromptMd, openspecSkillMd } from "../fixtures/openspec-skills.ts";
 import { repoRoot } from "../helpers/git.ts";
@@ -227,7 +227,16 @@ function openspecDirs(fake: Fake): string[] {
 	return existsSync(skills) ? readdirSync(skills).filter((n) => n.startsWith("openspec-")) : [];
 }
 
+const repoPiStatus = () =>
+	spawnSync("git", ["status", "--porcelain", ".pi"], { cwd: repoRoot(), encoding: "utf-8" }).stdout;
+
 describe("scripts/openspec-setup.sh", () => {
+	// Compared against a pre-run snapshot, not an empty porcelain, so in-progress edits under .pi do not fail this file.
+	let piStatusBefore = "";
+	beforeAll(() => {
+		piStatusBefore = repoPiStatus();
+	});
+
 	it("installs 12 flagged skills and 12 prompts", () => {
 		const fake = makeFake();
 		const r = run(fake);
@@ -455,7 +464,6 @@ describe("scripts/openspec-setup.sh", () => {
 		expect(m![1]).toMatch(/^[0-9]+\.[0-9]+\.[0-9]+$/);
 		expect(src.match(/^OPENSPEC_VERSION=/gm)).toHaveLength(1);
 
-		const g = spawnSync("git", ["status", "--porcelain", ".pi"], { cwd: repoRoot(), encoding: "utf-8" });
-		expect(g.stdout.trim()).toBe("");
+		expect(repoPiStatus()).toBe(piStatusBefore);
 	});
 });
