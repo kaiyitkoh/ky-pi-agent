@@ -4,7 +4,7 @@
  * Authored in this repo, not vendored; the "vendored" kind in the tool-count registry means in-repo source only.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
@@ -116,17 +116,29 @@ function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
 	return productionExec;
 }
 
-/** The git top level of `cwd`, or `cwd` outside a repository. `git diff` paths are relative to it, not to `cwd`. */
+/**
+ * `p` with symlinks, junctions and 8.3 names resolved, the form git prints; `p` itself when it is not on disk.
+ * A macOS temp dir under /var or a Windows RUNNER~1 cwd otherwise never compares equal to its own git top level.
+ */
+function realPath(p: string): string {
+	try {
+		return realpathSync.native(resolve(p));
+	} catch {
+		return resolve(p);
+	}
+}
+
+/** The real git top level of `cwd`, or `cwd` outside a repository. `git diff` paths are relative to it, not to `cwd`. */
 export function repoTop(cwd: string): string {
 	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	return resolve(top.status === 0 ? top.stdout.trim() : cwd);
+	return realPath(top.status === 0 ? top.stdout.trim() : cwd);
 }
 
 /** The nearest directory from `cwd` up to the git top level for which `holds` is true; never above the project. */
 function findUp(cwd: string, holds: (dir: string) => boolean): string | undefined {
 	const norm = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
 	const stop = norm(repoTop(cwd));
-	let dir = resolve(cwd);
+	let dir = realPath(cwd);
 	for (;;) {
 		if (holds(dir)) return dir;
 		const parent = dirname(dir);
@@ -187,7 +199,7 @@ export function typecheckAtCommit(cwd: string, sha: string, projectTrusted: bool
 		const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
 		const exec: ExecRunner =
 			typeof override === "function" || !projectTrusted ? resolveExec(cwd, projectTrusted) : (cmd, args, at) => execLocalBin(cwd, cmd, args, at);
-		const leg = runTypecheckLeg(join(dir, relative(top, cwd)), exec);
+		const leg = runTypecheckLeg(join(dir, relative(top, realPath(cwd))), exec);
 		return leg.status === "unavailable" ? { error: leg.reason } : leg.status === "fail" ? "fails" : "passes";
 	} catch (err) {
 		return { error: err instanceof Error ? err.message : String(err) };
