@@ -13,6 +13,7 @@ import { allowanceOf, appendLedger, ledgerFile, specDigest, tasksOf } from "../.
 import { validatePlan } from "../../.pi/extensions/plan-ceremony/plan-schema.ts";
 import { renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
+import { setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
 import { buildReviewerContext } from "../../.pi/extensions/quality/reviewer.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
 import { commitFile, makeTempRepo } from "../helpers/git.ts";
@@ -94,18 +95,20 @@ beforeEach(() => {
 	mocks.review = CLEAN;
 });
 afterEach(() => {
+	setQuickGateExecOverrideForTests(undefined);
 	for (const r of repos.splice(0)) rmSync(r, { recursive: true, force: true });
 });
 
 const git = (repo: string, args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
 
 /** A repo whose HEAD is one recorded, pushed task commit on top of `staging`; `extra` lands in the same commit. */
-function setup(extra?: string, aSource = "export const a = 1;\n", opts: { aName?: string; deleteOld?: boolean } = {}) {
+function setup(extra?: string, aSource = "export const a = 1;\n", opts: { aName?: string; deleteOld?: boolean; tsconfig?: boolean } = {}) {
 	const aName = opts.aName ?? "a.ts";
 	const extras = extra === undefined ? [] : extra.split(",");
 	const repo = makeTempRepo("kypi-review-");
 	repos.push(repo);
-	const baseSha = commitFile(repo, "README.md", "base\n", "base");
+	let baseSha = commitFile(repo, "README.md", "base\n", "base");
+	if (opts.tsconfig) baseSha = commitFile(repo, "tsconfig.json", '{"compilerOptions":{},"files":["src/a.ts"]}\n', "tsconfig");
 	mkdirSync(join(repo, "src"), { recursive: true });
 	if (opts.deleteOld) commitFile(repo, "src/old.ts", "old\n", "old");
 	git(repo, ["branch", "staging"]);
@@ -365,5 +368,54 @@ describe("/review -- the real handler", () => {
 		await h.run(SLUG);
 		expect(h.notes.at(-1)?.text).toContain("origin/work does not exist");
 		expect(mocks.calls).toHaveLength(0);
+	});
+
+	describe("the typecheck baseline", () => {
+		const fakeTsc = (opts: { baseFails: boolean }) => {
+			const cwds: string[] = [];
+			setQuickGateExecOverrideForTests((cmd, _args, cwd) => {
+				if (cmd !== "tsc") throw new Error("not installed");
+				cwds.push(cwd);
+				const atBase = cwd.includes("ky-review-base-");
+				return atBase && !opts.baseFails ? { code: 0, stdout: "", stderr: "" } : { code: 1, stdout: "src/a.ts(1,1): error TS2322: boom", stderr: "" };
+			});
+			return cwds;
+		};
+
+		it("refuses when the typecheck fails at HEAD but passes at the merge base", async () => {
+			const h = setup(undefined, undefined, { tsconfig: true });
+			const cwds = fakeTsc({ baseFails: false });
+			await h.run(SLUG);
+			expect(h.notes.at(-1)?.text).toContain("the change breaks the typecheck");
+			expect(existsSync(mocks.reviewPath)).toBe(false);
+			expect(cwds.filter((c) => c.includes("ky-review-base-"))).toHaveLength(1);
+		});
+
+		it("asks, saying the failure predates the change, when the merge base fails too", async () => {
+			const h = setup(undefined, undefined, { tsconfig: true });
+			fakeTsc({ baseFails: true });
+			await h.run(SLUG);
+			expect(h.confirms.join("\n")).toContain("already failed at the merge base");
+		});
+
+		it("never builds the base worktree when HEAD passes", async () => {
+			const h = setup(undefined, undefined, { tsconfig: true });
+			const calls: string[] = [];
+			setQuickGateExecOverrideForTests((cmd, _args, cwd) => {
+				if (cmd !== "tsc") throw new Error("not installed");
+				calls.push(cwd);
+				return { code: 0, stdout: "", stderr: "" };
+			});
+			await h.run(SLUG);
+			expect(calls).toHaveLength(1);
+		});
+
+		it("leaves no worktree behind", async () => {
+			const h = setup(undefined, undefined, { tsconfig: true });
+			fakeTsc({ baseFails: false });
+			await h.run(SLUG);
+			const listed = execFileSync("git", ["worktree", "list"], { cwd: h.repo, encoding: "utf-8" });
+			expect(listed).not.toContain("ky-review-base-");
+		});
 	});
 });

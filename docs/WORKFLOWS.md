@@ -46,7 +46,8 @@ the whole claim being tested:
 
 1. **Pre-flight the route.** Call `planRoleCall` for the `executor` role. A
    refusal is reported verbatim and the command returns — no turn is
-   triggered, no provider request is spent.
+   triggered, no provider request is spent. An overfull context is not a
+   refusal: `/quick`, `/execute` and the input backstop all warn instead.
 2. **Session-model match.** The session's own active model (`ctx.model`) must
    equal the routed executor `planRoleCall` just resolved. If the session is
    on a different model — most commonly because no `/cheap`, `/balanced` or

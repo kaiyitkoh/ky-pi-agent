@@ -299,9 +299,19 @@ during the session are kept. So:
 A session never runs on someone else's pin without saying so. At session
 start, while any session's pin is in the file, a session writes its own
 mode's pin, the default `cheap` included; with no pin in the file a `cheap`
-session writes nothing. `/mode` reads the planner the settings file actually
-pins and, when it differs from the mode's route, says which model subagents
-run and that re-running the mode command re-pins it.
+session writes nothing. A pin prefers the first candidate that resolves, has
+configured auth and passes the guard, and falls back to the first
+guard-passing candidate when none is configured. `/mode` reads the planner the
+settings file actually pins and, when it differs from the pin that re-running
+the mode command would write (the same picker), says which model subagents run
+and that re-running the mode command re-pins it.
+
+A fresh session and `/new` start in the default mode, unescalated, and apply
+its executor, unless a model was chosen explicitly: `--model`, `--provider` or
+`--models` on the command line, or a saved `defaultModel` or `defaultProvider`
+in the user or project settings. In that case the chosen model is kept, a
+notice names the source, and `/cheap` applies the default route. The switch is
+never persisted.
 
 The file is still shared: when two sessions are in different modes, the last
 writer's models apply to both until one switches again or a new session

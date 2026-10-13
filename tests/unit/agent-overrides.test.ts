@@ -703,3 +703,28 @@ describe("agentOverridesFor + writeAgentOverrides -- end to end against a real f
 		expect(written.subagents.agentOverrides).toEqual(derived.overrides);
 	});
 });
+
+describe("agentOverridesFor -- registry-aware pick", () => {
+	const [first, second] = ROLE_MAP.cheap.planner.candidates;
+	const stubModel = (ref: { provider: string; id: string }) => ({ provider: ref.provider, id: ref.id }) as never;
+	const registryWithAuth = (authed: readonly string[]) => ({
+		find: (provider: string, id: string) => stubModel({ provider, id }),
+		hasConfiguredAuth: (m: { provider: string; id: string }) => authed.includes(`${m.provider}/${m.id}`),
+	});
+	const planner = (registry?: ReturnType<typeof registryWithAuth>) => {
+		const r = agentOverridesFor({ mode: "cheap" }, { settingsPath: freshSettingsPath(), registry });
+		return r.ok ? r.overrides[AGENT_NAME_BY_ROLE.planner as string]?.model : undefined;
+	};
+
+	it("pins the first candidate that has configured auth", () => {
+		expect(planner(registryWithAuth([`${second.provider}/${second.id}`]))).toBe(`${second.provider}/${second.id}`);
+	});
+
+	it("falls back to the first guard-passing candidate when none is configured", () => {
+		expect(planner(registryWithAuth([]))).toBe(`${first.provider}/${first.id}`);
+	});
+
+	it("is unchanged without a registry", () => {
+		expect(planner()).toBe(`${first.provider}/${first.id}`);
+	});
+});

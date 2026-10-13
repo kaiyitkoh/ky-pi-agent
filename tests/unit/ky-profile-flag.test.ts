@@ -24,7 +24,11 @@ function startWith(flag: unknown, hasUI: boolean): { notes: [string, string][]; 
 	} as unknown as ExtensionAPI;
 	routing(pi);
 	const notes: [string, string][] = [];
+	const routed = { provider: "deepseek", id: "deepseek-flash" };
 	const ctx = {
+		cwd: process.cwd(),
+		model: routed,
+		modelRegistry: { find: () => routed, hasConfiguredAuth: () => true },
 		hasUI,
 		ui: { notify: (message: string, level: string) => notes.push([message, level]) },
 		sessionManager: { getBranch: () => [] },

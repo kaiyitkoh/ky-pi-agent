@@ -86,7 +86,7 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { TURNS_LOG_BASE, type RowKind } from "../../.pi/extensions/diagnostics/schema.ts";
-import { callWithFallback, classifyFailure } from "../../.pi/extensions/providers/fallback.ts";
+import { callWithFallback, classifyFailure, type HopGuard } from "../../.pi/extensions/providers/fallback.ts";
 import { CHAIN, QUOTA_PATTERN, type FailureClass } from "../../.pi/extensions/providers/schema.ts";
 import {
 	CLASS_FIXTURES,
@@ -273,6 +273,10 @@ interface Fixture {
 	rejectTransient: RejectionRun;
 	/** First hop fails with a transient 429 while the second hop has no configured auth. */
 	authSkip: ChainRun | undefined;
+	/** First hop fails transiently while the guard refuses the second hop. */
+	guardSkip: ChainRun | undefined;
+	/** What a guard that refuses every hop produced. */
+	guardAll: { calls: number; thrown: string | undefined };
 }
 
 /** A scripted provider failure carrying exactly the text under test. */
@@ -299,6 +303,7 @@ async function walkChain(
 		firstResponse: AssistantMessage;
 		secondResponse: AssistantMessage;
 		status: number;
+		guard?: HopGuard;
 	},
 ): Promise<ChainRun> {
 	const [firstEntry, secondEntry] = CHAIN;
@@ -332,7 +337,7 @@ async function walkChain(
 	const message = await callWithFallback(ctx, {
 		role: spec.role,
 		messages: [{ role: "user", content: `walk the chain: ${spec.role}`, timestamp: Date.now() }],
-	});
+	}, spec.guard);
 
 	return {
 		first: firstFaux.state.callCount,
@@ -445,6 +450,8 @@ async function runFixture(): Promise<Fixture> {
 					rejectFatal: noRun,
 					rejectTransient: noRun,
 					authSkip: undefined,
+					guardSkip: undefined,
+					guardAll: { calls: 0, thrown: undefined },
 				};
 			}
 
@@ -503,6 +510,27 @@ async function runFixture(): Promise<Fixture> {
 				status: CLASS_STATUS.transient,
 			});
 
+			const secondProvider = CHAIN[1]?.provider;
+			const guardSkip = await walkChain(ctx, modelRuntime, {
+				role: "chain-guard-skip",
+				firstResponse: failure(CLASS_FIXTURES.transient.text),
+				secondResponse: fauxAssistantMessage(SECOND_PROVIDER_REPLY, { stopReason: "stop" }),
+				status: CLASS_STATUS.transient,
+				guard: (m) => (m.provider === secondProvider ? { ok: false, reason: "context window too small" } : { ok: true }),
+			});
+			let guardAll: Fixture["guardAll"] = { calls: 0, thrown: undefined };
+			try {
+				await walkChain(ctx, modelRuntime, {
+					role: "chain-guard-all",
+					firstResponse: fauxAssistantMessage(FIRST_PROVIDER_REPLY, { stopReason: "stop" }),
+					secondResponse: fauxAssistantMessage(SECOND_PROVIDER_REPLY, { stopReason: "stop" }),
+					status: 200,
+					guard: (m) => ({ ok: false, reason: `refuses ${m.id}` }),
+				});
+			} catch (error) {
+				guardAll = { calls: 0, thrown: error instanceof Error ? error.message : String(error) };
+			}
+
 			const turnsFileExisted = existsSync(turnsFile);
 			const { records, unparseable } = turnsFileExisted
 				? readTornSafe(turnsFile)
@@ -522,6 +550,8 @@ async function runFixture(): Promise<Fixture> {
 				rejectFatal,
 				rejectTransient,
 				authSkip,
+				guardSkip,
+				guardAll,
 			};
 		},
 	);
@@ -927,6 +957,20 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 			walk?.message.errorMessage,
 			"the surfaced error must be the first hop's own failure, not a later hop's auth error",
 		).toContain(CLASS_FIXTURES.transient.text.slice(0, 30));
+	});
+
+	it("case 6a2 — a hop the capability guard refuses is never called and the first failure surfaces", () => {
+		const walk = fixture.guardSkip;
+		expect(walk, "the guard-skip walk was not recorded").toBeDefined();
+		expect(walk?.second, "a guard-refused hop must not receive the prompt").toBe(0);
+		expect(walk?.first).toBe(1);
+		expect(walk?.message.errorMessage).toContain(CLASS_FIXTURES.transient.text.slice(0, 30));
+	});
+
+	it("case 6a3 — a guard that refuses every hop throws an error listing each hop's reason", () => {
+		const thrown = fixture.guardAll.thrown;
+		expect(thrown, "refusing every hop must throw").toBeDefined();
+		for (const entry of CHAIN) expect(thrown).toContain(`${entry.provider}/${entry.id} (capability guard: refuses ${entry.id})`);
 	});
 
 	it("case 6b — an unresolved chain entry throws with the remedy, and is never skipped", () => {

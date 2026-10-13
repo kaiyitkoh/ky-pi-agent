@@ -23,7 +23,7 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify('quick: usage is "/quick <task>"', "error");
 				return;
 			}
-			const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: deriveNeed(ctx, { promptChars: task.length }) });
+			const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: { ...deriveNeed(ctx, { promptChars: task.length }), estimatedInputTokens: undefined } });
 			if (!plan.ok) {
 				ctx.ui.notify(plan.reason, "error");
 				return;

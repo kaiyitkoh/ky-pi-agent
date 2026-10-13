@@ -43,6 +43,7 @@ function load() {
 	routing(pi as never);
 	const notes: string[] = [];
 	const ctx = {
+		cwd: dir,
 		ui: { notify: (text: string) => notes.push(text) },
 		hasUI: false,
 		sessionManager: { getBranch: () => [] },
@@ -90,5 +91,14 @@ describe("a default-mode session and another session's planner pin", () => {
 		const { commands, notes, ctx } = load();
 		await commands.get("mode")?.("", ctx);
 		expect(notes.join("\n")).toContain(`subagents run ${OTHER}`);
+	});
+
+	it("/mode gives no re-pin advice when the pin is what re-running would write", async () => {
+		const expected = agentOverridesFor({ mode: "cheap" });
+		if (!expected.ok) throw new Error(expected.reason);
+		writeFileSync(settingsFile(), `${JSON.stringify({ subagents: { agentOverrides: { planner: { model: expected.overrides.planner?.model } } } }, null, 2)}\n`);
+		const { commands, notes, ctx } = load();
+		await commands.get("mode")?.("", ctx);
+		expect(notes.join("\n")).not.toContain("re-pin");
 	});
 });

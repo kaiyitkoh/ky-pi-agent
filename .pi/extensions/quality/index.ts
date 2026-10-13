@@ -3,7 +3,8 @@
  * and the live tool list, and registers `consult_advisor`. Rationale and the registration budget: docs/QUALITY.md.
  * Authored in this repo, not vendored; the "vendored" kind in the tool-count registry means in-repo source only.
  */
-import { existsSync, readFileSync } from "node:fs";
+import { randomBytes } from "node:crypto";
+import { existsSync, readFileSync, rmSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import * as ts from "typescript";
@@ -45,8 +46,11 @@ function localBin(cwd: string, name: string): string | undefined {
 const CMD_EXE_SPAWN_FAILURE = /is not recognized as an internal or external command/i;
 
 /** Production `ExecRunner`: the pinned local binary (or an ancestor's, up to the git top level) via {@link commandFor}, never `npx`. */
-export const productionExec: ExecRunner = (cmd, args, cwd) => {
-	const bin = localBin(cwd, cmd);
+export const productionExec: ExecRunner = (cmd, args, cwd) => execLocalBin(cwd, cmd, args, cwd);
+
+/** Runs `cmd` from the local binary found from `binFrom`, with `cwd` as its working directory. */
+function execLocalBin(binFrom: string, cmd: string, args: readonly string[], cwd: string): { code: number; stdout: string; stderr: string } {
+	const bin = localBin(binFrom, cmd);
 	if (bin === undefined) {
 		// Unavailable, naming the missing binary: never a network fetch, never a silent pass.
 		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin or any ancestor's up to the git top level -- the leg is unavailable, not skipped or passed`);
@@ -83,7 +87,7 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 		throw new Error(`${cmd} could not be spawned from ${bin} -- cmd.exe reported: ${(result.stderr ?? "").trim()}`);
 	}
 	return { code: result.status ?? 1, stdout: result.stdout ?? "", stderr: result.stderr ?? "" };
-};
+}
 
 const EXEC_OVERRIDE_KEY = "__kypiQualityExecOverride";
 
@@ -153,6 +157,43 @@ export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus 
 	const vacuous = tsconfigChecksNothing(join(dir, "tsconfig.json"));
 	if (vacuous !== undefined) return { status: "unavailable", reason: vacuous };
 	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
+}
+
+/**
+ * Whether `tsc --noEmit` fails on `sha`, checked in a detached worktree created inside the git dir so module and @types
+ * resolution walk up to the repository's own node_modules without a link. Any error answers false: the HEAD failure stays attributed to the change.
+ */
+export function typecheckFailsAtCommit(cwd: string, sha: string, projectTrusted: boolean): boolean {
+	const git = (args: string[], at: string) => spawnSync("git", args, { cwd: at, encoding: "utf-8", shell: false, windowsHide: true });
+	const top = repoTop(cwd);
+	let worktree: string | undefined;
+	try {
+		const common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], top);
+		if (common.status !== 0) return false;
+		const dir = join(resolve(common.stdout.trim()), `ky-review-base-${randomBytes(6).toString("hex")}`);
+		worktree = dir;
+		if (git(["worktree", "add", "--detach", dir, sha], top).status !== 0) return false;
+		const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
+		const exec: ExecRunner =
+			typeof override === "function" || !projectTrusted ? resolveExec(cwd, projectTrusted) : (cmd, args, at) => execLocalBin(cwd, cmd, args, at);
+		return runTypecheckLeg(join(dir, relative(top, cwd)), exec).status === "fail";
+	} catch {
+		return false;
+	} finally {
+		if (worktree !== undefined) {
+			git(["worktree", "remove", "--force", worktree], top);
+			git(["worktree", "prune"], top);
+			if (/ky-review-base-[0-9a-f]{12}$/.test(worktree)) rmSync(worktree, { recursive: true, force: true });
+		}
+	}
+}
+
+/** What a typecheck failure at HEAD means for /review: a refusal when the merge base passes, else the doubt to ask about. */
+export function typecheckBaseline(cwd: string, base: string, projectTrusted: boolean, report: string): { refusal?: string; doubt?: string } {
+	if (!typecheckFailsAtCommit(cwd, base, projectTrusted)) return { refusal: `review: the change breaks the typecheck (it passes at the merge base ${base}) -- not reviewing:
+${report}` };
+	return { doubt: `the typecheck fails at HEAD and already failed at the merge base, so this change did not introduce it:
+${report}` };
 }
 
 const ESLINT_CONFIGS = [

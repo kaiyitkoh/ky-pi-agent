@@ -95,7 +95,8 @@ import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import type { AgentOverrides } from "../../.pi/extensions/routing/agent-overrides.ts";
-import { MODE_ENTRY_TYPE, type KyModeData } from "../../.pi/extensions/routing/schema.ts";
+import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
+import { DEFAULT_MODE, MODE_ENTRY_TYPE, type KyModeData } from "../../.pi/extensions/routing/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
 
@@ -380,6 +381,22 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 			).toBeDefined();
 			expect(modeEntry?.data?.mode).toBe("balanced");
 			expect(modeEntry?.data?.escalated).toBe(false);
+		});
+	});
+
+	it("case 1b -- a new session starts in the default mode, unescalated, with the default executor", async () => {
+		resetOrderLog();
+		await withModeSwitchSession(async ({ session, modelRuntime }) => {
+			await modelRuntime.setRuntimeApiKey("deepseek", "kypi-fixture-not-a-real-key");
+			await waitForConfiguredAuth(modelRuntime, "deepseek");
+			// State left by the previous session in this process; the new branch has no ky:mode entry.
+			setMode("max");
+			setEscalated(true, "balanced");
+
+			await session.extensionRunner.emit({ type: "session_start", reason: "new" });
+
+			expect(getModeState()).toMatchObject({ mode: DEFAULT_MODE, escalated: false });
+			expect(session.model?.id, "the default mode's executor is applied").toBe("deepseek-flash");
 		});
 	});
 

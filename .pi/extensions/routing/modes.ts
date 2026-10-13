@@ -5,7 +5,7 @@
  * Named exports only: a default export would reclassify this file as an extension entry point.
  */
 import type { Api, AssistantMessage, Message, Model, ModelsApiStreamOptions, Tool } from "@earendil-works/pi-ai";
-import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { CONFIG_DIR_NAME, getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { join } from "node:path";
 
 import { readSettingValue } from "../../lib/settings.ts";
@@ -180,6 +180,39 @@ export function pickConfiguredCandidate(
 }
 
 
+export interface FreshSessionInput {
+	readonly reason: string;
+	readonly hasModeEntry: boolean;
+	readonly hasMessages: boolean;
+	readonly isChild: boolean;
+	readonly argv: readonly string[];
+	readonly settings: { readonly defaultModel?: string; readonly defaultProvider?: string };
+}
+
+const MODEL_FLAGS = ["--model", "--provider", "--models"];
+
+/** Whether a session start resets to the default mode and applies its executor; an executor chosen explicitly is never overridden. */
+export function freshSessionPlan(input: FreshSessionInput): { readonly reset: boolean; readonly applyExecutor: boolean; readonly explicit?: string } {
+	if (input.reason === "reload" || input.hasModeEntry) return { reset: false, applyExecutor: false };
+	const flag = MODEL_FLAGS.find((f) => input.argv.some((a) => a === f || a.startsWith(`${f}=`)));
+	const saved = input.settings.defaultModel !== undefined || input.settings.defaultProvider !== undefined;
+	const explicit = flag ?? (saved ? "the saved default model in settings" : undefined);
+	if (explicit !== undefined) return { reset: true, applyExecutor: false, explicit };
+	return { reset: true, applyExecutor: !input.hasMessages && !input.isChild };
+}
+
+/** `defaultModel` and `defaultProvider` from the user and project settings files; empty when they cannot be read. */
+export function savedDefaultModel(cwd: string, agentDir: string = getAgentDir()): { defaultModel?: string; defaultProvider?: string } {
+	try {
+		const files = [join(agentDir, "settings.json"), join(cwd, CONFIG_DIR_NAME, "settings.json")];
+		const read = (key: string): string | undefined =>
+			files.map((f) => readSettingValue(f, [key])).flatMap((r) => (r.ok && typeof r.value === "string" && r.value !== "" ? [r.value] : []))[0];
+		return { defaultModel: read("defaultModel"), defaultProvider: read("defaultProvider") };
+	} catch {
+		return {};
+	}
+}
+
 /** Whether `role` needs a tool loop; the one source for `GuardNeed.usesToolLoop`. */
 export function usesToolLoop(role: Role): boolean {
 	return ROLE_MECHANISM[role] !== "call-model";
@@ -307,7 +340,7 @@ export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleSh
 			messages: opts.messages,
 			tools: opts.tools,
 			api,
-		});
+		}, (m) => guardRoute(m, opts.role, { ...need, usesToolLoop: usesToolLoop(opts.role) }));
 	}
 
 	return callModel(ctx, {

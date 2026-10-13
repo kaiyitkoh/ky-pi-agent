@@ -7,6 +7,7 @@ import type {
 	CustomEntry,
 	ExtensionAPI,
 	ExtensionCommandContext,
+	ExtensionContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
 import { getCurrentTools } from "@earendil-works/pi-ai";
@@ -15,7 +16,7 @@ import { appendJsonl, ESCALATION_LOG_BASE } from "../../lib/jsonl.ts";
 import { agentOverridesFor, plannerPinHeld, readAgentOverride, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { deriveNeed, guardRoute } from "./guard.ts";
 import { registerBgLoader } from "./loader.ts";
-import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
+import { freshSessionPlan, getModeState, pickConfiguredCandidate, resolveRoute, savedDefaultModel, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
 import { AGENT_NAME_BY_ROLE, DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
@@ -97,7 +98,7 @@ async function applyMode(
 	}
 
 	let overridesNote = "";
-	const overridesResult = agentOverridesFor({ mode }, testOverrides?.agentOverridesFor);
+	const overridesResult = agentOverridesFor({ mode }, { ...testOverrides?.agentOverridesFor, registry: ctx.modelRegistry });
 	if (!overridesResult.ok) {
 		overridesNote = ` subagent pins unchanged because ${overridesResult.reason}`;
 	} else {
@@ -225,6 +226,7 @@ async function reportMode(ctx: ExtensionCommandContext): Promise<void> {
 		`executor: ${ctx.model !== undefined ? `${ctx.model.provider}/${ctx.model.id}` : "(no model selected)"}`,
 	];
 
+	const expectedPins = agentOverridesFor({ mode: state.mode }, { registry: ctx.modelRegistry });
 	for (const role of ROLES) {
 		if (role === "executor") {
 			// Executor is reported above from the real `ctx.model`.
@@ -236,7 +238,8 @@ async function reportMode(ctx: ExtensionCommandContext): Promise<void> {
 		const agent = AGENT_NAME_BY_ROLE[role];
 		// pi-subagents runs whatever the shared settings file pins, which another session may have written since.
 		const pinned = agent === undefined ? undefined : readAgentOverride(agent);
-		const runs = pinned !== undefined && pinned !== routed ? ` -- but subagents run ${pinned}, pinned in the user settings; re-run /${state.mode} to re-pin` : "";
+		const expected = agent === undefined || !expectedPins.ok ? routed : expectedPins.overrides[agent]?.model;
+		const runs = pinned !== undefined && pinned !== expected ? ` -- but subagents run ${pinned}, pinned in the user settings; re-run /${state.mode} to re-pin` : "";
 		lines.push(`${role}: ${candidate.ok ? routed : `unavailable (${candidate.reason})`}${runs}`);
 	}
 
@@ -273,6 +276,25 @@ export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
 
 	setMode(mode);
 	setEscalated(escalated, escalatedFrom);
+}
+
+/** Puts the default mode's executor on a fresh session; any refusal leaves the model alone and says why once. NEVER THROWS. */
+async function applyDefaultExecutor(pi: ExtensionAPI, ctx: ExtensionContext, explicit: string | undefined): Promise<void> {
+	const notify = (text: string): void => {
+		if (ctx.hasUI) ctx.ui.notify(text, "warning");
+	};
+	try {
+		const candidate = pickConfiguredCandidate(ctx.modelRegistry, resolveRoute("executor", { mode: DEFAULT_MODE, escalated: false }).candidates);
+		if (!candidate.ok) return notify(`default mode ${DEFAULT_MODE}: executor not applied: ${candidate.reason}`);
+		const { model } = candidate;
+		if (ctx.model?.provider === model.provider && ctx.model?.id === model.id) return;
+		if (explicit !== undefined) return notify(`executor chosen by ${explicit}; /${DEFAULT_MODE} applies the ${DEFAULT_MODE} route`);
+		const verdict = guardRoute(model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
+		if (!verdict.ok) return notify(`default mode ${DEFAULT_MODE}: executor not applied: ${verdict.reason}`);
+		if (!(await pi.setModel(model))) notify(`default mode ${DEFAULT_MODE}: executor not applied: setModel returned false for ${model.provider}/${model.id}`);
+	} catch (err) {
+		notify(`default mode ${DEFAULT_MODE}: executor not applied: ${String(err)}`);
+	}
 }
 
 /** `testOverrides` is the test-only seam; production calls this with one argument. */
@@ -378,18 +400,33 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
 	// Pi gives extensions no view of a `--tools` allowlist, so read argv; the user's named tools must never be narrowed.
 	const narrow = (active: readonly string[]) => (hasExplicitToolAllowlist(process.argv) ? undefined : applyProfile(active, resolveProfile(pi.getFlag("ky-profile"))));
-	pi.on("session_start", (event, ctx) => {
+	pi.on("session_start", async (event, ctx) => {
+		let applying: Promise<void> | undefined;
 		// NEVER THROWS: a bad payload must not stop session start.
 		try {
 			const branch = ctx.sessionManager.getBranch();
+			const plan = freshSessionPlan({
+				reason: event.reason,
+				hasModeEntry: branch.some((entry) => entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE),
+				hasMessages: branch.some((entry) => entry.type === "message"),
+				isChild: isSubagentChild(),
+				argv: process.argv,
+				settings: savedDefaultModel(ctx.cwd),
+			});
+			// A process outlives /new, so mode state from the previous session must not carry over.
+			if (plan.reset) {
+				setMode(DEFAULT_MODE);
+				setEscalated(false);
+			}
 			// Pins whose owners have all ended are undone; while another session's pin stands, this one writes its own mode's, default included.
 			const pinBookkeeping = event.reason !== "reload" && !isSubagentChild();
 			if (pinBookkeeping) restorePlannerPin();
 			restoreModeFromBranch(branch);
 			if (pinBookkeeping && (getModeState().mode !== DEFAULT_MODE || plannerPinHeld())) {
-				const pins = agentOverridesFor({ mode: getModeState().mode }, testOverrides?.agentOverridesFor);
+				const pins = agentOverridesFor({ mode: getModeState().mode }, { ...testOverrides?.agentOverridesFor, registry: ctx.modelRegistry });
 				if (pins.ok) writeAgentOverrides(pins.overrides);
 			}
+			if (plan.reset && (plan.applyExecutor || plan.explicit !== undefined)) applying = applyDefaultExecutor(pi, ctx, plan.explicit);
 			const flag = pi.getFlag("ky-profile");
 			if (typeof flag === "string" && resolveProfile(flag) !== flag && ctx.hasUI) ctx.ui.notify(`unknown --ky-profile "${flag}"; using ${DEFAULT_PROFILE}`, "warning");
 			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
@@ -398,6 +435,8 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			if (next !== undefined) pi.setActiveTools(next);
 		} catch {
 			// Swallowed deliberately.
+		} finally {
+			await applying;
 		}
 	});
 	// The pin lives in the user-level settings file shared by every repo, so it ends with the session.

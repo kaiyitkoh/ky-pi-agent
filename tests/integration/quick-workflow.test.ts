@@ -493,6 +493,37 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
+	it("an overfull context no longer refuses /quick: it reaches the next check instead", async () => {
+		const candidate = flashExecutorCandidate();
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				responses: [],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+			},
+			async ({ session, faux, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+				gitInit(cwd, "work");
+				writeFileSync(join(cwd, "user-wip.ts"), "export const wip = 1;", "utf-8");
+				const real = session.extensionRunner.createCommandContext();
+				const ctx = Object.create(real, { getContextUsage: { value: () => ({ tokens: 50_000_000, contextWindow: 1, percent: 100 }) } }) as ExtensionCommandContext;
+				const command = session.extensionRunner.getCommand("quick");
+				if (command === undefined) throw new Error('getCommand("quick") returned undefined');
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("fix the typo", ctx);
+					expect(notifications.at(-1)?.text, "past the context check, the dirty tree is what refuses").toContain("user-wip.ts");
+					expect(faux.state.callCount).toBe(0);
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
 	it("WR-02 regression -- two models registered, session on the NON-routed one: /quick refuses at zero provider requests", async () => {
 		const candidate = flashExecutorCandidate();
 		const DECOY_MODEL_ID = "kypi-wr-02-decoy-model";

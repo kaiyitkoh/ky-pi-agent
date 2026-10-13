@@ -15,7 +15,7 @@ import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
 import { computeDesignSignals, runDesignReview } from "../quality/design-review.ts";
 import { gateDepthFor, shouldRunDesignReview } from "../quality/gates.ts";
-import { runChangeGateStage } from "../quality/index.ts";
+import { runChangeGateStage, typecheckBaseline } from "../quality/index.ts";
 import { buildImportGraph, runReview, type ReviewerContractInput } from "../quality/reviewer.ts";
 import { renderReviewMarkdown, type ReviewArtifact } from "../quality/review-schema.ts";
 import { decideWorkflowStop, runRefuteOrPromote } from "../quality/verdict.ts";
@@ -101,8 +101,8 @@ export default function (pi: ExtensionAPI): void {
 				if (mechanisms.includes("deterministic")) {
 					const gate = runChangeGateStage({ cwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted(), baseSha: base, changed, baseTypecheckFailed: false });
 					if (gate.antiPattern.status === "fail") return fail(`review: the deterministic gate fails on the change -- not reviewing:\n${gate.report}`);
-					// No base-tree baseline exists here, so a typecheck failure may predate the change: the user decides.
-					if (gate.typecheck.status === "fail") gateDoubts.push(`the typecheck fails at HEAD:\n${gate.report}`);
+					const baseline = gate.typecheck.status === "fail" ? typecheckBaseline(ctx.cwd, base, ctx.isProjectTrusted(), gate.report) : {};
+					if (baseline.refusal !== undefined) return fail(baseline.refusal); else if (baseline.doubt !== undefined) gateDoubts.push(baseline.doubt);
 					if (gate.lint.status === "fail") gateDoubts.push(`the lint fails at HEAD:\n${gate.report}`);
 					if (!gate.ranAny) gateDoubts.push(`no deterministic check applies to this change:\n${gate.report}`);
 					gateReport = gate.report;

@@ -4,7 +4,7 @@
  * It is a function because the registry facade has no retry (compaction.ts) and a nested call fires no events (sdk.ts).
  * Advancing sends the prompt to another vendor, so CHAIN is a fixed table, `fatal` never advances, and no backoff is added (pi 1.1.0 docs/settings.md:125-133).
  */
-import type { Api, AssistantMessage } from "@earendil-works/pi-ai";
+import type { Api, AssistantMessage, Model } from "@earendil-works/pi-ai";
 import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -57,9 +57,12 @@ function unresolvedEntryError(entry: ChainEntry): Error {
 	);
 }
 
+/** Per-hop capability check, structural so this module does not import routing. */
+export type HopGuard = (model: Model<Api>) => { readonly ok: true } | { readonly ok: false; readonly reason: string };
+
 function allHopsSkippedError(skipped: readonly string[]): Error {
 	return new Error(
-		`callWithFallback: no chain hop has configured auth, so nothing was attempted (${skipped.join(", ")}). ` +
+		`callWithFallback: no chain hop was usable, so nothing was attempted (${skipped.join(", ")}). ` +
 			"Add a credential for the first hop in ~/.pi/agent/auth.json",
 	);
 }
@@ -67,10 +70,12 @@ function allHopsSkippedError(skipped: readonly string[]): Error {
 /**
  * First hop that answers wins; `fatal` stops the chain and the first failing message is returned if every attempted hop fails.
  * A rejection uses the same classification and is rethrown, not converted: the chokepoint already wrote its turns row.
+ * A hop the `guard` refuses is skipped with its reason, so a request that must fail is not sent to a second vendor.
  */
 export async function callWithFallback(
 	ctx: ExtensionContext,
 	opts: CallWithFallbackOptions,
+	guard?: HopGuard,
 ): Promise<AssistantMessage> {
 	let firstFailure: AssistantMessage | undefined;
 	let firstRejection: unknown;
@@ -89,6 +94,11 @@ export async function callWithFallback(
 		}
 		if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
 			skipped.push(`${entry.provider}/${entry.id} (no configured auth)`);
+			continue;
+		}
+		const verdict = guard?.(model);
+		if (verdict !== undefined && !verdict.ok) {
+			skipped.push(`${entry.provider}/${entry.id} (capability guard: ${verdict.reason})`);
 			continue;
 		}
 

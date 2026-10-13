@@ -11,7 +11,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 
 import { guardRoute } from "./guard.ts";
-import { resolveBedrockRef } from "./modes.ts";
+import { resolveBedrockRef, type ModelRegistryLike } from "./modes.ts";
 import { AGENT_NAME_BY_ROLE, type KyModeData, type ModelRef, ROLE_MAP, ROLE_MECHANISM, type Role } from "./schema.ts";
 
 /** Structural fixture for `guardRoute`, no registry lookup. Sound because only `usesToolLoop` is set, so only the tool-loop deny-list block can fire; inert fields keep any new block failing safe. */
@@ -51,12 +51,14 @@ export interface AgentOverridesForOptions {
 	readonly agentNameByRole?: typeof AGENT_NAME_BY_ROLE;
 	/** Settings file the Bedrock inference-profile prefix is read from. */
 	readonly settingsPath?: string;
+	/** When given, a candidate that resolves and has configured auth is preferred over the first guard-passing one. */
+	readonly registry?: ModelRegistryLike;
 }
 
 /**
  * Derives the override object for `state.mode`: the first candidate per subagent role that passes `guardRoute` (`usesToolLoop: true`).
  * Returns `ok:false` with the last guard refusal when every candidate is blocked; callers must not write on `ok:false`.
- * Auth is deliberately not checked: this stays pure (no `ctx`) and the pin is inert until read.
+ * Auth is checked only when a registry is passed, and only to prefer a usable candidate over an unusable one.
  */
 export function agentOverridesFor(
 	state: Pick<KyModeData, "mode">,
@@ -94,8 +96,13 @@ export function agentOverridesFor(
 			}
 			const verdict = guardRoute(candidateAsModelFixture(ref.ref), roleKey, { usesToolLoop: true });
 			if (verdict.ok) {
-				picked = `${ref.ref.provider}/${ref.ref.id}`;
-				break;
+				picked ??= `${ref.ref.provider}/${ref.ref.id}`;
+				const model = opts.registry?.find(ref.ref.provider, ref.ref.id);
+				if (opts.registry === undefined || (model !== undefined && opts.registry.hasConfiguredAuth(model))) {
+					picked = `${ref.ref.provider}/${ref.ref.id}`;
+					break;
+				}
+				continue;
 			}
 			lastReason = verdict.reason;
 		}
