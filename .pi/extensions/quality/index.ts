@@ -33,7 +33,7 @@ export function registeredToolNames(): readonly string[] {
  */
 function localBin(cwd: string, name: string): string | undefined {
 	const bin = join("node_modules", ".bin", `${name}${process.platform === "win32" ? ".cmd" : ""}`);
-	const dir = findUp(cwd, [bin]);
+	const dir = findUp(cwd, (d) => existsSync(join(d, bin)));
 	return dir === undefined ? undefined : join(dir, bin);
 }
 
@@ -119,13 +119,13 @@ export function repoTop(cwd: string): string {
 	return resolve(top.status === 0 ? top.stdout.trim() : cwd);
 }
 
-/** The nearest directory from `cwd` up to the git top level that holds one of `names`; never above the project. */
-function findUp(cwd: string, names: readonly string[]): string | undefined {
+/** The nearest directory from `cwd` up to the git top level for which `holds` is true; never above the project. */
+function findUp(cwd: string, holds: (dir: string) => boolean): string | undefined {
 	const norm = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
 	const stop = norm(repoTop(cwd));
 	let dir = resolve(cwd);
 	for (;;) {
-		if (names.some((name) => existsSync(join(dir, name)))) return dir;
+		if (holds(dir)) return dir;
 		const parent = dirname(dir);
 		if (norm(dir) === stop || parent === dir) return undefined;
 		dir = parent;
@@ -134,7 +134,7 @@ function findUp(cwd: string, names: readonly string[]): string | undefined {
 
 /** `tsc --noEmit` at `cwd`, alone; unavailable when no tsconfig.json exists from `cwd` up to the git top level. */
 export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus {
-	if (findUp(cwd, ["tsconfig.json"]) === undefined) {
+	if (findUp(cwd, (d) => existsSync(join(d, "tsconfig.json"))) === undefined) {
 		return { status: "unavailable", reason: `no tsconfig.json at or above ${cwd} (up to the git top level), so tsc has no project to check` };
 	}
 	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
@@ -145,6 +145,8 @@ const ESLINT_CONFIGS = [
 	"eslint.config.mjs",
 	"eslint.config.cjs",
 	"eslint.config.ts",
+	"eslint.config.mts",
+	"eslint.config.cts",
 	".eslintrc",
 	".eslintrc.js",
 	".eslintrc.cjs",
@@ -155,27 +157,63 @@ const ESLINT_CONFIGS = [
 
 const LINT_OUTPUT_MAX_LINES = 40;
 
+function hasEslintConfig(dir: string): boolean {
+	if (ESLINT_CONFIGS.some((name) => existsSync(join(dir, name)))) return true;
+	try {
+		return "eslintConfig" in (JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as object);
+	} catch {
+		return false;
+	}
+}
+
+interface EslintResult {
+	readonly filePath: string;
+	readonly messages: readonly { readonly ruleId?: string | null; readonly severity?: number; readonly fatal?: boolean; readonly message?: string; readonly line?: number }[];
+}
+
+/** ESLint's own per-file report; undefined when stdout is not one. */
+function parseEslintJson(stdout: string): readonly EslintResult[] | undefined {
+	try {
+		const parsed: unknown = JSON.parse(stdout);
+		return Array.isArray(parsed) && parsed.every((r) => typeof r?.filePath === "string" && Array.isArray(r?.messages)) ? (parsed as EslintResult[]) : undefined;
+	} catch {
+		return undefined;
+	}
+}
+
+// ESLint reports an ignored or unconfigured file as a warning ("File ignored because ...") and exits 0.
+const IGNORED_FILE = /^File ignored\b/;
+
 /**
  * Runs the target repo's own ESLint on the changed code files (paths relative to `top`), from the nearest directory between
  * `cwd` and `top` that holds a config; unavailable unless the repo configures it and is trusted.
  */
 function runLintAt(cwd: string, top: string, projectTrusted: boolean, files: readonly string[]): LegStatus {
 	if (files.length === 0) return { status: "unavailable", reason: "no changed TypeScript/JavaScript file for eslint to check" };
-	const configDir = findUp(cwd, ESLINT_CONFIGS);
+	const configDir = findUp(cwd, hasEslintConfig);
 	if (configDir === undefined) {
 		return { status: "unavailable", reason: `no ESLint config at or above ${cwd} (up to the git top level), so there is no lint rule set to apply` };
 	}
 	let result: { code: number; stdout: string; stderr: string };
 	try {
-		result = resolveExec(configDir, projectTrusted)("eslint", ["--", ...files.map((f) => relative(configDir, join(top, f)))], configDir);
+		result = resolveExec(configDir, projectTrusted)("eslint", ["--format", "json", "--", ...files.map((f) => relative(configDir, join(top, f)))], configDir);
 	} catch (err) {
 		return { status: "unavailable", reason: `eslint could not be run: ${err instanceof Error ? err.message : String(err)}` };
 	}
-	const lines = outputLines(result);
-	const bounded = lines.length > LINT_OUTPUT_MAX_LINES ? [...lines.slice(0, LINT_OUTPUT_MAX_LINES), `... ${lines.length - LINT_OUTPUT_MAX_LINES} more line(s)`] : lines;
-	if (result.code === 0) return { status: "pass" };
-	if (result.code === 1) return { status: "fail", findings: bounded };
-	return { status: "unavailable", reason: `eslint exited ${result.code} without a lint verdict: ${bounded.slice(0, 3).join(" | ")}` };
+	const bound = (lines: readonly string[]) => (lines.length > LINT_OUTPUT_MAX_LINES ? [...lines.slice(0, LINT_OUTPUT_MAX_LINES), `... ${lines.length - LINT_OUTPUT_MAX_LINES} more line(s)`] : [...lines]);
+	const raw = bound(outputLines(result));
+	if (result.code !== 0 && result.code !== 1) return { status: "unavailable", reason: `eslint exited ${result.code} without a lint verdict: ${raw.slice(0, 3).join(" | ")}` };
+	const report = parseEslintJson(result.stdout);
+	// Exit 1 is ESLint's own "errors found", so an unreadable report still fails; exit 0 without one proves nothing was linted.
+	if (report === undefined) return result.code === 1 ? { status: "fail", findings: raw } : { status: "unavailable", reason: "eslint printed no JSON report, so whether it linted any file is unknown" };
+	const linted = report.filter((r) => !r.messages.some((m) => (m.ruleId ?? null) === null && IGNORED_FILE.test(m.message ?? "")));
+	const errors = linted.flatMap((r) => r.messages.filter((m) => m.severity === 2 || m.fatal === true).map((m) => `${relative(top, r.filePath)}:${m.line ?? 0} ${m.ruleId ?? "fatal"}: ${m.message ?? ""}`));
+	if (errors.length > 0 || result.code === 1) return { status: "fail", findings: errors.length > 0 ? bound(errors) : raw };
+	if (linted.length === 0) {
+		const why = report.flatMap((r) => r.messages.map((m) => m.message ?? "")).find((m) => IGNORED_FILE.test(m)) ?? "no result";
+		return { status: "unavailable", reason: `eslint linted none of the changed files (${why})` };
+	}
+	return { status: "pass" };
 }
 
 const CODE_FILE = /\.[cm]?[tj]sx?$/;

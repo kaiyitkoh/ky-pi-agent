@@ -67,11 +67,14 @@ describe("a test-file target absent from cwd degrades honestly, never a false FA
 	});
 });
 
-/** A minimal real-executable stub binary -- `<name>.cmd` on Windows, a shell script elsewhere. `argsFile` receives the argv. */
-function stubBin(repo: string, name: string, opts: { exitCode: number; message?: string; argsFile?: string }): void {
+/** A minimal real-executable stub binary -- `<name>.cmd` on Windows, a shell script elsewhere. `argsFile` receives the argv; `json` is printed verbatim. */
+function stubBin(repo: string, name: string, opts: { exitCode: number; message?: string; argsFile?: string; json?: unknown }): void {
 	const binDir = join(repo, "node_modules", ".bin");
 	mkdirSync(binDir, { recursive: true });
-	const echo = opts.message ? `echo ${opts.message}` : "";
+	const out = join(binDir, `${name}.out.json`);
+	if (opts.json !== undefined) writeFileSync(out, JSON.stringify(opts.json), "utf-8");
+	const print = process.platform === "win32" ? `type "${out}"` : `cat "${out}"`;
+	const echo = opts.json !== undefined ? print : opts.message ? `echo ${opts.message}` : "";
 	if (process.platform === "win32") {
 		const record = opts.argsFile ? `echo %* > "${opts.argsFile}"\r\n` : "";
 		writeFileSync(join(binDir, `${name}.cmd`), `@echo off\r\n${record}${echo}\r\nexit /b ${opts.exitCode}\r\n`, { mode: 0o755 });
@@ -80,6 +83,9 @@ function stubBin(repo: string, name: string, opts: { exitCode: number; message?:
 		writeFileSync(join(binDir, name), `#!/bin/sh\n${record}${echo}\nexit ${opts.exitCode}\n`, { mode: 0o755 });
 	}
 }
+
+/** ESLint's JSON report for files it linted with no message. */
+const eslintClean = (...files: string[]) => files.map((filePath) => ({ filePath, messages: [], errorCount: 0, warningCount: 0 }));
 
 function stubTsc(repo: string, opts: { exitCode: number; message?: string }): void {
 	stubBin(repo, "tsc", opts);
@@ -232,7 +238,7 @@ describe("an untrusted project's cwd never reaches a real spawn, even when a rea
 		writeFileSync(join(repo, "tsconfig.json"), "{}\n", "utf-8");
 		writeFileSync(join(repo, "eslint.config.js"), "export default [];\n", "utf-8");
 		stubBin(repo, "tsc", { exitCode: 0 });
-		stubBin(repo, "eslint", { exitCode: 0 });
+		stubBin(repo, "eslint", { exitCode: 0, json: eslintClean(join(repo, "a.ts")) });
 		const base = commitFile(repo, "seed.txt", "seed\n", "seed");
 		writeFileSync(join(repo, "a.ts"), "export const a = 1;\n", "utf-8");
 		return { repo, base };
@@ -306,14 +312,53 @@ describe("the change gate's four legs report only what ran", () => {
 		expect(result.lint.status).toBe("fail");
 		expect(result.lint.status === "fail" && result.lint.findings.join("\n")).toContain("kypi-lint-finding");
 		const args = readFileSync(argsFile, "utf-8").trim().split(/\s+/);
-		expect(args.filter((a) => a !== "--")).toEqual(["a.ts"]);
+		expect(args).toEqual(["--format", "json", "--", "a.ts"]);
 		expect(result.failed).toBe(true);
 	});
 
 	it("lint: eslint exiting 0 is a PASS", () => {
 		setQuickGateExecOverrideForTests(undefined);
 		const { repo, base } = repoWith("kypi-lint-pass-", { eslintConfig: true });
+		stubBin(repo, "eslint", { exitCode: 0, json: eslintClean(join(repo, "a.ts")) });
+		expect(gate(repo, base).lint).toEqual({ status: "pass" });
+	});
+
+	it("lint: eslint exiting 0 having ignored every changed file is UNAVAILABLE, never a PASS", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-ignored-", { eslintConfig: true });
+		const ignored = "File ignored because no matching configuration was supplied.";
+		stubBin(repo, "eslint", { exitCode: 0, json: [{ filePath: join(repo, "a.ts"), messages: [{ ruleId: null, severity: 1, message: ignored }], errorCount: 0, warningCount: 1 }] });
+		expect(gate(repo, base).lint).toEqual({ status: "unavailable", reason: expect.stringContaining(ignored) });
+	});
+
+	it("lint: eslint exiting 0 with no JSON report is UNAVAILABLE", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-nojson-", { eslintConfig: true });
 		stubBin(repo, "eslint", { exitCode: 0 });
+		expect(gate(repo, base).lint.status).toBe("unavailable");
+	});
+
+	it("lint: a JSON report with an error-severity message is a FAIL naming the rule and line", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-json-fail-", { eslintConfig: true });
+		stubBin(repo, "eslint", { exitCode: 1, json: [{ filePath: join(repo, "a.ts"), messages: [{ ruleId: "no-var", severity: 2, message: "Unexpected var", line: 3 }], errorCount: 1, warningCount: 0 }] });
+		const lint = gate(repo, base).lint;
+		expect(lint.status === "fail" && lint.findings.join("\n")).toContain("a.ts:3 no-var: Unexpected var");
+	});
+
+	it.each(["eslint.config.mts", "eslint.config.cts"])("lint: %s counts as an ESLint config", (name) => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith(`kypi-lint-${name}-`, {});
+		writeFileSync(join(repo, name), "export default [];\n", "utf-8");
+		stubBin(repo, "eslint", { exitCode: 0, json: eslintClean(join(repo, "a.ts")) });
+		expect(gate(repo, base).lint).toEqual({ status: "pass" });
+	});
+
+	it("lint: package.json#eslintConfig counts as an ESLint config", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-pkg-", {});
+		writeFileSync(join(repo, "package.json"), JSON.stringify({ name: "x", eslintConfig: { rules: {} } }), "utf-8");
+		stubBin(repo, "eslint", { exitCode: 0, json: eslintClean(join(repo, "a.ts")) });
 		expect(gate(repo, base).lint).toEqual({ status: "pass" });
 	});
 
@@ -367,7 +412,7 @@ describe("a cwd below the git top level still gates the changed files git report
 		mkdirSync(join(sub, "src"), { recursive: true });
 		writeFileSync(join(repo, "eslint.config.js"), "export default [];\n", "utf-8");
 		const argsFile = join(repo, "eslint-args.txt");
-		stubBin(repo, "eslint", { exitCode: 0, argsFile });
+		stubBin(repo, "eslint", { exitCode: 0, argsFile, json: eslintClean(join(sub, "src", "x.ts")) });
 		writeFileSync(join(sub, "src", "x.ts"), "export function f(): void {\n  try {\n    JSON.parse('x');\n  } catch {}\n}\n", "utf-8");
 		const result = runChangeGateStage({ cwd: sub, projectTrusted: true, baseSha: base, changed: ["apps/web/src/x.ts"], baseTypecheckFailed: false });
 		expect(result.antiPattern.status, result.report).toBe("fail");

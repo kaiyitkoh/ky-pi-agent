@@ -40,7 +40,7 @@ The legs run on the work repo's change, not on this harness, and each has its ow
 | Leg | Runs when | Otherwise |
 |-----|-----------|-----------|
 | `typecheck` | a code file changed, a `tsconfig.json` exists at or above the cwd (up to the git top level), the project is trusted, the repo-local TypeScript is installed and the base tree did not already fail it | `unavailable` |
-| `lint` | the project is trusted, an ESLint config (`eslint.config.{js,mjs,cjs,ts}` or `.eslintrc{,.js,.cjs,.json,.yml,.yaml}`) exists at or above the cwd (up to the git top level), and a repo-local `eslint` binary; it runs from the directory holding that config; exit 1 is `fail` | `unavailable`; any other non-zero exit is also `unavailable` |
+| `lint` | the project is trusted, an ESLint config (`eslint.config.{js,mjs,cjs,ts,mts,cts}`, `.eslintrc{,.js,.cjs,.json,.yml,.yaml}` or `package.json#eslintConfig`) exists at or above the cwd (up to the git top level), and a repo-local `eslint` binary; it runs from the directory holding that config with `--format json`; an error-severity message (or exit 1) is `fail`; `pass` needs at least one changed file ESLint actually linted | `unavailable`, including when ESLint ignored every changed file ("File ignored because ...") or printed no JSON report; any other non-zero exit is also `unavailable` |
 | `lsp` | never | always `unavailable` |
 | `anti-pattern` | a changed code file exists; only error-tier findings the base did not already have count | `pass` with nothing found |
 
