@@ -604,13 +604,25 @@ Plans:
 **Plans**: 7 plans
 
 Plans:
+**Wave 1**
+
 - [ ] 11-01-PLAN.md — Recording UI context, harness uiContext/mode/fauxModels options, event-firing probe test
 - [ ] 11-02-PLAN.md — Authored `ky` theme validated against the installed schema and Pi's loader; `"theme": "ky"` in settings
 - [ ] 11-03-PLAN.md — Pure helpers: statusline formatter, subagent tracker, throttled git probe (TDD)
-- [ ] 11-04-PLAN.md — `ui` extension wiring: `ky-statusline` status, tui header, recording-UI integration tests
-- [ ] 11-05-PLAN.md — Prompt-surface/ACP lint and full-UI prompt-stability proof with negative controls
 - [ ] 11-06-PLAN.md — Live wire-dump check script (`scripts/ui-wire-check.sh`) with tested parser
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 11-04-PLAN.md — `ui` extension wiring: `ky-statusline` status, tui header, recording-UI integration tests
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 11-05-PLAN.md — Prompt-surface/ACP lint and full-UI prompt-stability proof with negative controls
+
+**Wave 4** *(blocked on Wave 3 completion)*
+
 - [ ] 11-07-PLAN.md — RB-11-01..03 runbook + docs-policy pins, docs/UI.md, requirements reconciliation, regression sweep
+
 **Research**: Not needed — the theme format is exact (53 tokens, 51 required, 4 value formats, hot-reload on edit).
 **UI hint**: yes
 
@@ -696,14 +708,17 @@ Plans:
 **Requirements**: TBD (user decision 2026-10-13: separate optional phase after Phase 11)
 
 **Success Criteria:**
+
 1. `pi-acp` pinned to an exact source-reviewed version (0.0.34 at research time); confirm it only translates protocol and tool calls still pass through the guard.
 2. Windows path-with-spaces session-file bug checked; workaround or documented limitation.
 3. Safety confirm/select prompts proven to surface in Zed; terminal-only features (widgets, status, slash commands) documented.
 4. Setup + upgrade documented in docs/; no repo dependency added.
+
 **Depends on:** Phase 11
 **Plans:** 0 plans
 
 Plans:
+
 - [ ] TBD (run /gsd-plan-phase 13 to break down)
 
 ---
