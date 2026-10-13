@@ -1308,6 +1308,18 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 		expect(run.stdout).toContain("delivered by the user-level git package");
 	}, TIMEOUT_MS);
 
+	it("case 4d -- a full run refuses a configured git package before it writes the stub", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const settings = { packages: ["git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0"] };
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify(settings), "utf-8");
+
+		const run = runFullBootstrap(agentDir);
+
+		expect(run.status).not.toBe(0);
+		expect(run.stderr).toContain("one delivery path only");
+		expect(existsSync(stubFile(agentDir))).toBe(false);
+	}, TIMEOUT_MS);
+
 	it("case 5 -- without KYPI_SKIP_INSTALL it runs pi install once per pin, after the hardening assertions", () => {
 		const agentDir = tempDir("kypi-agentdir-");
 		const repoCopy = bootstrapRepoCopy();

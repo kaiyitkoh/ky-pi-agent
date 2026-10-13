@@ -914,6 +914,7 @@ console.log("  " + stub + " -> " + m[1] + " (target exists)");
 # Exactly one safety delivery path per machine. The stub plus a git package of
 # this repo is two diverging copies and fails. A user-level git or local package
 # resolving to this checkout only warns: it double-loads inside this repo.
+# KYPI_DP_WILL_WRITE_STUB=1 counts the stub the caller is about to write.
 report_delivery_paths() {
 	_dp_settings="$PI_AGENT_DIR/settings.json"
 	_dp_stub="$PI_AGENT_DIR/extensions/ky-safety/index.ts"
@@ -921,7 +922,7 @@ report_delivery_paths() {
 		printf '  no user settings.json - nothing to compare\n'
 		return 0
 	fi
-	KYPI_DP_SETTINGS="$_dp_settings" KYPI_DP_STUB="$_dp_stub" KYPI_DP_REPO="$REPO_ROOT" node -e '
+	KYPI_DP_SETTINGS="$_dp_settings" KYPI_DP_STUB="$_dp_stub" KYPI_DP_REPO="$REPO_ROOT" KYPI_DP_WILL_WRITE_STUB="${KYPI_DP_WILL_WRITE_STUB:-}" node -e '
 const fs = require("node:fs");
 const path = require("node:path");
 const file = process.env.KYPI_DP_SETTINGS;
@@ -941,7 +942,7 @@ const local = sources.filter((s) => {
   const bare = s.replace(/^local:/i, "");
   return norm(path.resolve(path.dirname(file), bare)) === repo;
 });
-const stub = fs.existsSync(process.env.KYPI_DP_STUB);
+const stub = fs.existsSync(process.env.KYPI_DP_STUB) || process.env.KYPI_DP_WILL_WRITE_STUB === "1";
 for (const s of git.concat(local)) {
   console.log("  WARN user-level package " + s + " loads this checkout, so it double-loads inside this repo");
 }
@@ -1151,7 +1152,7 @@ run_full() {
 	merge_models_json
 	merge_auth_json
 	printf 'Safety delivery path:\n'
-	report_delivery_paths
+	KYPI_DP_WILL_WRITE_STUB=1 report_delivery_paths
 	install_safety_extension
 	merge_subagent_config
 	printf 'Composed packages:\n'
