@@ -664,11 +664,21 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 4. Bootstrap/runbook documents install + upgrade; third-party wrapper `openspec-pi` evaluated and rejected or vendored with justification.
 
 **Depends on:** Phase 9 (runs before Phase 11, which awaits a user decision on terminal vs GUI front-end)
-**Plans:** 0 plans
+**Plans:** 4 plans in 3 waves
 
 Plans:
+**Wave 1**
 
-- [ ] TBD (run /gsd-plan-phase 12 to break down)
+- [ ] 12-01-PLAN.md — `openspec` arm in the safety guard (archive/read-only allow, init/update/completion/feedback confirm, unknown confirm), rooted `/openspec/` ignore + untracked test, SAFETY.md
+- [ ] 12-02-PLAN.md — Zero per-turn cost proof via Pi's loader and a session byte-identity test (skills + opsx prompts), harness env opt-outs (telemetry, update check, auto-config)
+
+**Wave 2** *(blocked on Wave 1 completion)*
+
+- [ ] 12-03-PLAN.md — `scripts/openspec-setup.sh` (single 1.13.2 pin, --install-cli with --ignore-scripts, isolated generation, frontmatter patch, user-level copy, --check, --uninstall) proven against a fake CLI
+
+**Wave 3** *(blocked on Wave 2 completion)*
+
+- [ ] 12-04-PLAN.md — Pre-authorised real install + user-level setup on this machine, docs/OPENSPEC.md (upgrade, uninstall, openspec-pi rejection), RUNBOOK Phase 12 + RB-12-01..04
 
 ---
 *Roadmap created: 2026-08-13 · Granularity: fine · Coverage: 107/107 v1 requirements mapped*
