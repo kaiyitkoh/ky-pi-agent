@@ -55,6 +55,7 @@ export const SHELL_REFUSAL_CAUSES = [
 	"unresolved-expansion-in-command-position",
 	"non-literal-command-name",
 	"shell-runner",
+	"generated-script",
 	"unresolved-wrapper",
 	"parse-error",
 ] as const;
@@ -215,23 +216,33 @@ interface ScriptScan {
 	readonly types: Set<string>;
 	readonly redirects: Set<string>;
 	readonly readTargets: string[];
+	readonly writeTargets: string[];
 	readonly commands: Command[];
+	/** Commands whose stdin is a pipe from an earlier pipeline element. */
+	readonly piped: Set<Command>;
 	background: boolean;
 }
 
+const WRITE_REDIRECTS = new Set([">", ">>", ">|", "&>", "&>>", "<>"]);
+const DESCRIPTOR = /^(\d+-?|-)$/;
+
 function scanScript(script: ParsedScript): ScriptScan {
-	const scan: ScriptScan = { types: new Set(), redirects: new Set(), commands: [], background: false, readTargets: [] };
+	const scan: ScriptScan = { types: new Set(), redirects: new Set(), commands: [], piped: new Set(), background: false, readTargets: [], writeTargets: [] };
 	walk(script, (node) => {
 		if (typeof node.type === "string") scan.types.add(node.type);
 		if (node.type === "Statement" && node.background === true) scan.background = true;
 		if (node.type === "Command") scan.commands.push(node as unknown as Command);
+		if (node.type === "Pipeline") {
+			for (const stage of (node.commands as unknown[]).slice(1)) walk(stage, (n) => n.type === "Command" && scan.piped.add(n as unknown as Command));
+		}
 		if (!Array.isArray(node.redirects)) return;
 		for (const r of node.redirects as Record<string, unknown>[]) {
 			if (typeof r.operator !== "string") continue;
 			scan.redirects.add(r.operator);
 			const target = (r.target as Word | undefined)?.value;
 			if (target === undefined) continue;
-			if (r.operator === "<" || r.operator === "<>" || (r.operator === "<&" && !/^(\d+|-)$/.test(target))) scan.readTargets.push(target);
+			if (r.operator === "<" || r.operator === "<>" || (r.operator === "<&" && !DESCRIPTOR.test(target))) scan.readTargets.push(target);
+			if (WRITE_REDIRECTS.has(r.operator) || (r.operator === ">&" && !DESCRIPTOR.test(target))) scan.writeTargets.push(target);
 		}
 	});
 	return scan;
@@ -306,6 +317,8 @@ const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
 		`"${c}" names a command through a brace expansion, glob, tilde or embedded whitespace; spell the command literally`,
 	"shell-runner": (c) =>
 		`"${c}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`,
+	"generated-script": (c) =>
+		`"${c}" runs a script from a pipe or a redirect, or runs a file the same command writes, so the guard never sees the script's text; write the file in one command and run it in another`,
 	"unresolved-wrapper": (c) =>
 		`"${c}" puts a guarded verb behind a wrapper option, operand or assignment this guard cannot resolve to the real executable`,
 	"parse-error": (c) => `"${c}" did not parse cleanly; this catch-all denies rather than falls through to allow`,
@@ -445,6 +458,7 @@ interface ExtractedInvocation {
 	readonly invocation: CanonicalInvocation;
 	readonly confident: boolean;
 	readonly expansionInCommandPosition: boolean;
+	readonly node: Command;
 }
 
 function extractInvocations(script: ParsedScript, command: string, commands: readonly Command[]): ExtractedInvocation[] {
@@ -486,6 +500,7 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 				},
 				confident: resolved.confident,
 				expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
+				node,
 			},
 		];
 	});
@@ -541,6 +556,119 @@ const carriesVerbAcrossSegments = (invocations: readonly CanonicalInvocation[]):
 	invocations.some((inv) => COMMAND_TEXT_BUILTINS.has(normaliseExecutable(inv.executable))) &&
 	mentionsGuardedVerb(invocations.flatMap(segmentTexts));
 
+/** Per-command options that take a value, so the value is not mistaken for a file operand. */
+const WRITE_VALUE_OPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["cp", wordSet("-S --suffix")],
+	["mv", wordSet("-S --suffix")],
+	["install", wordSet("-m --mode -o --owner -g --group -S --suffix")],
+	["truncate", wordSet("-s --size -r --reference")],
+	["touch", wordSet("-d --date -t -r --reference")],
+	["sed", wordSet("-e --expression -f --file -l --line-length")],
+	["tee", wordSet("")],
+]);
+
+function positionalOperands(executable: string, args: readonly string[]): string[] {
+	const valued = WRITE_VALUE_OPTIONS.get(executable) ?? new Set<string>();
+	const out: string[] = [];
+	for (let i = 0; i < args.length; i += 1) {
+		if (args[i] === "--") return [...out, ...args.slice(i + 1)];
+		if (valued.has(args[i])) i += 1;
+		else if (!args[i].startsWith("-") || args[i] === "-") out.push(args[i]);
+	}
+	return out;
+}
+
+const optionValue = (args: readonly string[], names: readonly string[]): string | undefined => {
+	for (let i = 0; i < args.length; i += 1) {
+		const name = names.find((n) => args[i] === n || (n.startsWith("--") && args[i].startsWith(`${n}=`)));
+		if (name !== undefined) return args[i] === name ? args[i + 1] : args[i].slice(name.length + 1);
+	}
+	return undefined;
+};
+
+/** Files an invocation writes or deletes through its own operands (not redirects): tee, cp/mv/install/ln destinations, dd of=, sed -i, rm, touch, truncate, curl -o, wget -O. */
+export function writeOperands(inv: Pick<CanonicalInvocation, "executable" | "args">): string[] {
+	const executable = normaliseExecutable(inv.executable);
+	const args = inv.args;
+	const positionals = positionalOperands(executable, args);
+	switch (executable) {
+		case "tee":
+		case "rm":
+		case "rmdir":
+		case "touch":
+		case "truncate":
+		case "shred":
+			return positionals.filter((p) => p !== "-");
+		case "cp":
+		case "mv":
+		case "install":
+		case "ln": {
+			const dir = optionValue(args, ["-t", "--target-directory"]);
+			if (dir !== undefined) return [dir];
+			return positionals.length >= 2 ? [positionals[positionals.length - 1]] : [];
+		}
+		case "dd":
+			return args.filter((a) => a.startsWith("of=")).map((a) => a.slice(3));
+		case "sed": {
+			if (!args.some((a) => /^-[a-zA-Z]*i/.test(a) || a.startsWith("--in-place"))) return [];
+			const scripted = optionValue(args, ["-e", "--expression", "-f", "--file"]) !== undefined;
+			return scripted ? positionals : positionals.slice(1);
+		}
+		case "curl":
+		case "wget": {
+			const out = optionValue(args, executable === "curl" ? ["-o", "--output"] : ["-O", "--output-document"]);
+			return out === undefined || out === "-" ? [] : [out];
+		}
+		default:
+			return [];
+	}
+}
+
+const SHELL_INLINE: RegExp = /^-[a-zA-Z]*c$/;
+const SCRIPT_INLINE: RegExp = /^-[a-zA-Z]*[eE]$/;
+
+/** Interpreters that read their script from stdin when given no script operand, and the options that make the code an argument instead. */
+const STDIN_INTERPRETERS: ReadonlyMap<string, (arg: string) => boolean> = new Map([
+	..."sh bash zsh dash fish ksh mksh ash csh tcsh".split(" ").map((n) => [n, (a: string) => SHELL_INLINE.test(a)] as const),
+	...["python", "python3", "py"].map((n) => [n, (a: string) => a === "-c" || a === "-m"] as const),
+	...["node", "bun", "deno"].map((n) => [n, (a: string) => /^(-e|-p|--eval|--print|eval|run)$/.test(a)] as const),
+	...["perl", "ruby"].map((n) => [n, (a: string) => SCRIPT_INLINE.test(a)] as const),
+	["php", (a: string) => a === "-r"],
+	...["pwsh", "powershell"].map((n) => [n, (a: string) => /^-(c|command|f|file)$/i.test(a)] as const),
+	["cmd", (a: string) => /^\/{1,2}[ck]$/i.test(a)],
+]);
+
+const SHELLS = wordSet("sh bash zsh dash fish ksh mksh ash csh tcsh");
+
+/** The script an interpreter runs: `"-"` for stdin, a file operand, or undefined when the code is an inline argument. */
+function interpreterScript(inv: CanonicalInvocation): string | undefined {
+	const executable = normaliseExecutable(inv.executable);
+	const inline = STDIN_INTERPRETERS.get(executable);
+	if (inline === undefined || inv.args.some(inline)) return undefined;
+	if (SHELLS.has(executable) && inv.args.includes("-s")) return "-";
+	const operand = inv.args.find((a) => !a.startsWith("-") || a === "-");
+	// A bare word may be an option's value (`bash -o pipefail`), so only a path-shaped operand counts as a script file.
+	return operand === undefined || !/[./\\]/.test(operand) ? "-" : operand;
+}
+
+const baseOf = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop()?.toLowerCase() ?? "";
+
+/** A script read from a pipe or input redirect, or a file run by the same command that writes it; compared by basename because a `cd` may sit between. */
+function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: ScriptScan): boolean {
+	const written = new Set([...scan.writeTargets, ...extracted.flatMap((e) => writeOperands(e.invocation))].map(baseOf));
+	return extracted.some(({ invocation, node }) => {
+		const executable = normaliseExecutable(invocation.executable);
+		const stdinFile = node.redirects.find((r) => r.operator === "<")?.target?.value;
+		const script = interpreterScript(invocation);
+		const xargsInterpreter = (executable === "xargs" || executable === "parallel") && invocation.args.some((a) => STDIN_INTERPRETERS.has(normaliseExecutable(a)));
+		const fedByPipe = scan.piped.has(node) && (script === "-" || xargsInterpreter);
+		if (fedByPipe || (script === "-" && stdinFile !== undefined && written.has(baseOf(stdinFile)))) return true;
+		const sourced = executable === "source" || executable === "." ? invocation.args[0] : undefined;
+		const runs = [script, sourced, /[/\\]/.test(invocation.executable) ? invocation.executable : undefined];
+		return runs.some((path) => path !== undefined && path !== "-" && written.has(baseOf(path)));
+	});
+}
+
 /** Parse and fail closed on {@link SHELL_REFUSAL_CAUSES}; otherwise one canonical invocation per `Command` node. */
 export function canonicalise(command: string): ShellVerdict {
 	let script: ParsedScript;
@@ -558,6 +686,7 @@ export function canonicalise(command: string): ShellVerdict {
 	const invocations = extracted.map((e) => e.invocation);
 	if (extracted.some((e) => e.expansionInCommandPosition)) return refused("unresolved-expansion-in-command-position", command);
 	if (findShellRunnerDenial(invocations) !== undefined || carriesVerbAcrossSegments(invocations)) return refused("shell-runner", command);
+	if (runsGeneratedScript(extracted, scan)) return refused("generated-script", command);
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
 	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
 	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], redirectReadTargets: scan.readTargets, commandCount: scan.commands.length };
