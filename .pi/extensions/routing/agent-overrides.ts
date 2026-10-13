@@ -116,6 +116,10 @@ export function agentOverridesFor(
 export interface AgentOverridesPathOptions {
 	/** Injected path, for tests. */
 	settingsPath?: string;
+	/** The pin owner recorded in the marker; defaults to this process. */
+	pid?: number;
+	/** Liveness probe for recorded owners; defaults to `process.kill(pid, 0)`. */
+	isAlive?: (pid: number) => boolean;
 }
 
 /** Target settings path: `opts.settingsPath` if given, else the global agent `settings.json`. */
@@ -127,6 +131,31 @@ export function resolveSettingsPath(opts: AgentOverridesPathOptions = {}): strin
 }
 
 const PLANNER_PIN_MARKER = "plannerPinRestore";
+
+/** Per pinned agent key, its value before the first pin; `owners` are the pids whose sessions still hold the pin. */
+interface PinMarker {
+	readonly hadOverrides: boolean;
+	readonly keys: Record<string, { readonly had: boolean; readonly value?: unknown }>;
+	readonly owners: readonly number[];
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+	return value !== null && typeof value === "object" && !Array.isArray(value);
+}
+
+function ownersOf(marker: Record<string, unknown>): number[] {
+	return Array.isArray(marker.owners) ? marker.owners.filter((o): o is number => Number.isInteger(o)) : [];
+}
+
+/** EPERM means the process exists but belongs to someone else. */
+function processAlive(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (err) {
+		return (err as NodeJS.ErrnoException).code === "EPERM";
+	}
+}
 
 /** Temp file beside the target, then atomic rename: a direct write can truncate the user's settings on a crash. */
 function atomicWrite(path: string, text: string): void {
@@ -212,13 +241,27 @@ export function writeAgentOverrides(
 		}
 
 		const subagents: Record<string, unknown> = { ...(existingSubagents as Record<string, unknown> | undefined) };
-		const original = subagents.agentOverrides;
+		const current = subagents.agentOverrides;
+		if (current !== undefined && !isRecord(current)) {
+			return { ok: false, reason: `${path}'s "subagents.agentOverrides" key is not a JSON object. Refusing to touch it.`, path };
+		}
 		const ky: Record<string, unknown> = { ...(existingKy as Record<string, unknown> | undefined) };
-		if (ky[PLANNER_PIN_MARKER] === undefined && JSON.stringify(original) !== JSON.stringify(overrides)) {
-			ky[PLANNER_PIN_MARKER] = original === undefined ? { had: false } : { had: true, value: original };
+		const prior = ky[PLANNER_PIN_MARKER];
+		const marker: PinMarker =
+			isRecord(prior) && isRecord(prior.keys)
+				? { hadOverrides: prior.hadOverrides === true, keys: { ...(prior.keys as PinMarker["keys"]) }, owners: ownersOf(prior) }
+				: { hadOverrides: current !== undefined, keys: {}, owners: [] };
+		// Only keys this pin changes are recorded, each at its first pin, so a restore leaves every other override as the user left it.
+		for (const key of Object.keys(overrides)) {
+			if (key in marker.keys || JSON.stringify(current?.[key]) === JSON.stringify(overrides[key])) continue;
+			marker.keys[key] = current !== undefined && key in current ? { had: true, value: current[key] } : { had: false };
+		}
+		if (Object.keys(marker.keys).length > 0) {
+			const pid = opts.pid ?? process.pid;
+			ky[PLANNER_PIN_MARKER] = { ...marker, owners: marker.owners.includes(pid) ? marker.owners : [...marker.owners, pid] };
 			root.kyPiAgent = ky;
 		}
-		subagents.agentOverrides = overrides;
+		subagents.agentOverrides = { ...current, ...overrides };
 		root.subagents = subagents;
 
 		const nextText = `${JSON.stringify(root, null, 2)}\n`;
@@ -248,37 +291,59 @@ export type RestorePlannerPinResult =
 	| { readonly ok: false; readonly reason: string; readonly path: string };
 
 /**
- * Puts `subagents.agentOverrides` back to what it was before the first pin and removes the marker.
- * A no-op when no marker exists, so it is safe to call at every session start and shutdown.
+ * Ends this process's hold on the pin: drops its pid and every dead pid from the marker's owners, and only when none remain
+ * restores each pinned key to its value before the first pin. A subagent child or a second terminal therefore never undoes a
+ * live session's pin, and a crash-left marker is cleaned by the next process. A no-op without a marker.
  */
 export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): RestorePlannerPinResult {
 	const path = resolveSettingsPath(opts);
 	try {
 		if (!existsSync(path)) return { ok: true, restored: false, path };
-		const obj: unknown = JSON.parse(readFileSync(path, "utf-8"));
-		if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+		const root: unknown = JSON.parse(readFileSync(path, "utf-8"));
+		if (!isRecord(root)) {
 			return { ok: false, reason: `${path} is not a JSON object. Refusing to touch it.`, path };
 		}
-		const root = obj as Record<string, unknown>;
 		const ky = root.kyPiAgent;
-		if (ky === null || typeof ky !== "object" || Array.isArray(ky)) return { ok: true, restored: false, path };
-		const { [PLANNER_PIN_MARKER]: marker, ...restOfKy } = ky as Record<string, unknown>;
-		if (marker === null || typeof marker !== "object") return { ok: true, restored: false, path };
+		if (!isRecord(ky)) return { ok: true, restored: false, path };
+		const { [PLANNER_PIN_MARKER]: marker, ...restOfKy } = ky;
+		if (!isRecord(marker)) return { ok: true, restored: false, path };
+
+		const pid = opts.pid ?? process.pid;
+		const isAlive = opts.isAlive ?? processAlive;
+		const recorded = ownersOf(marker);
+		const owners = recorded.filter((o) => o !== pid && isAlive(o));
+		if (owners.length > 0) {
+			if (owners.length !== recorded.length) {
+				root.kyPiAgent = { ...ky, [PLANNER_PIN_MARKER]: { ...marker, owners } };
+				atomicWrite(path, `${JSON.stringify(root, null, 2)}\n`);
+			}
+			return { ok: true, restored: false, path };
+		}
 
 		const subagents = root.subagents;
-		if (subagents !== null && typeof subagents === "object" && !Array.isArray(subagents)) {
-			const next = { ...(subagents as Record<string, unknown>) };
-			const { had, value } = marker as { had?: unknown; value?: unknown };
-			if (had === true) next.agentOverrides = value;
-			else delete next.agentOverrides;
+		if (isRecord(subagents)) {
+			const next = { ...subagents };
+			if (isRecord(marker.keys)) {
+				const restoredOverrides: Record<string, unknown> = isRecord(next.agentOverrides) ? { ...next.agentOverrides } : {};
+				for (const [key, entry] of Object.entries(marker.keys)) {
+					if (isRecord(entry) && entry.had === true) restoredOverrides[key] = entry.value;
+					else delete restoredOverrides[key];
+				}
+				if (Object.keys(restoredOverrides).length === 0 && marker.hadOverrides !== true) delete next.agentOverrides;
+				else next.agentOverrides = restoredOverrides;
+			} else if (marker.had === true) {
+				// A marker written before per-key pins recorded the whole object.
+				next.agentOverrides = marker.value;
+			} else {
+				delete next.agentOverrides;
+			}
 			if (Object.keys(next).length === 0) delete root.subagents;
 			else root.subagents = next;
 		}
 		if (Object.keys(restOfKy).length === 0) delete root.kyPiAgent;
 		else root.kyPiAgent = restOfKy;
 
-		atomicWrite(path, `${JSON.stringify(root, null, 2)}
-`);
+		atomicWrite(path, `${JSON.stringify(root, null, 2)}\n`);
 		return { ok: true, restored: true, path };
 	} catch (err) {
 		return {

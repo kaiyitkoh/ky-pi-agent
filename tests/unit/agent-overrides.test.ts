@@ -301,7 +301,7 @@ describe("writeAgentOverrides -- creation", () => {
 		const written = JSON.parse(readFileSync(settingsPath, "utf-8"));
 		expect(written).toEqual({
 			subagents: { agentOverrides: overrides },
-			kyPiAgent: { plannerPinRestore: { had: false } },
+			kyPiAgent: { plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [process.pid] } },
 		});
 	});
 });
@@ -321,7 +321,10 @@ describe("writeAgentOverrides -- sibling-key preservation", () => {
 		expect(result.ok, `expected ok:true, got ${JSON.stringify(result)}`).toBe(true);
 
 		const written = JSON.parse(readFileSync(settingsPath, "utf-8"));
-		expect(written.kyPiAgent).toEqual({ ...initial.kyPiAgent, plannerPinRestore: { had: false } });
+		expect(written.kyPiAgent).toEqual({
+			...initial.kyPiAgent,
+			plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [process.pid] },
+		});
 		expect(written.subagents.defaultModel).toBe("dashscope/deepseek-v4-pro");
 		expect(written.subagents.agentOverrides).toEqual(overrides);
 	});
@@ -572,6 +575,57 @@ describe("restorePlannerPin", () => {
 		const { settingsPath, bytes } = seed({ subagents: { agentOverrides: pin } });
 		writeAgentOverrides(pin, { settingsPath });
 		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("merges per key and restores only the pinned key, keeping overrides added during the session", () => {
+		const reviewer = { model: "deepseek/deepseek-flash" };
+		const { settingsPath } = seed({ subagents: { agentOverrides: { reviewer } } });
+		writeAgentOverrides(pin, { settingsPath });
+		expect(JSON.parse(readFileSync(settingsPath, "utf-8")).subagents.agentOverrides).toEqual({ reviewer, ...pin });
+
+		const added = { model: "deepseek/deepseek-pro" };
+		const mid = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		mid.subagents.agentOverrides["executor-handoff"] = added;
+		writeFileSync(settingsPath, JSON.stringify(mid), "utf-8");
+
+		expect(restorePlannerPin({ settingsPath })).toMatchObject({ ok: true, restored: true });
+		const after = JSON.parse(readFileSync(settingsPath, "utf-8"));
+		expect(after.subagents.agentOverrides).toEqual({ reviewer, "executor-handoff": added });
+		expect(after.kyPiAgent).toBeUndefined();
+	});
+
+	it("another live process never undoes the pin; the owner, or the first process after the owner died, does", () => {
+		const { settingsPath, bytes } = seed({ theme: "ky" });
+		writeAgentOverrides(pin, { settingsPath, pid: 111 });
+		const pinned = readFileSync(settingsPath, "utf-8");
+
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true })).toMatchObject({ ok: true, restored: false });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(pinned);
+
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => false })).toMatchObject({ ok: true, restored: true });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+
+		writeAgentOverrides(pin, { settingsPath, pid: 111 });
+		expect(restorePlannerPin({ settingsPath, pid: 111, isAlive: () => true })).toMatchObject({ ok: true, restored: true });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("with two pinning sessions, the pin survives until the last one ends", () => {
+		const { settingsPath, bytes } = seed({ theme: "ky" });
+		writeAgentOverrides(pin, { settingsPath, pid: 111 });
+		writeAgentOverrides({ planner: { model: "dashscope/deepseek-v4-pro" } }, { settingsPath, pid: 222 });
+
+		expect(restorePlannerPin({ settingsPath, pid: 111, isAlive: () => true })).toMatchObject({ restored: false });
+		expect(JSON.parse(readFileSync(settingsPath, "utf-8")).kyPiAgent.plannerPinRestore.owners).toEqual([222]);
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true })).toMatchObject({ restored: true });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("restores a marker written before per-key pins", () => {
+		const original = { reviewer: { model: "deepseek/deepseek-flash" } };
+		const { settingsPath } = seed({ subagents: { agentOverrides: pin }, kyPiAgent: { plannerPinRestore: { had: true, value: original } } });
+		expect(restorePlannerPin({ settingsPath })).toMatchObject({ ok: true, restored: true });
+		expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).toEqual({ subagents: { agentOverrides: original } });
 	});
 
 	it("refuses invalid JSON without touching it", () => {

@@ -19,6 +19,8 @@ import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
 const REVERTING_KEY = "__kypiRoutingReverting";
+/** pi-subagents 0.76.1 sets this in every child it launches (`src/runs/shared/child-runtime-config.js:6`); a child never owns the parent's pin. */
+const isSubagentChild = (): boolean => process.env.PI_SUBAGENT_CHILD === "1";
 
 /** Test-only seam threaded to `agentOverridesFor` so integration tests can inject a guard-blocked planner. */
 export interface RoutingTestOptions {
@@ -345,10 +347,11 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.on("session_start", (event, ctx) => {
 		try {
 			const branch = ctx.sessionManager.getBranch();
-			// Pins written by an earlier process that never shut down cleanly are undone, then re-derived for this session's mode.
-			if (event.reason !== "reload") restorePlannerPin();
+			// Pins whose owning processes have all ended are undone, then re-derived for this session's mode.
+			const pinBookkeeping = event.reason !== "reload" && !isSubagentChild();
+			if (pinBookkeeping) restorePlannerPin();
 			restoreModeFromBranch(branch);
-			if (event.reason !== "reload" && getModeState().mode !== DEFAULT_MODE) {
+			if (pinBookkeeping && getModeState().mode !== DEFAULT_MODE) {
 				const pins = agentOverridesFor({ mode: getModeState().mode }, testOverrides?.agentOverridesFor);
 				if (pins.ok) writeAgentOverrides(pins.overrides);
 			}
@@ -364,7 +367,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	});
 	// The pin lives in the user-level settings file shared by every repo, so it ends with the session.
 	pi.on("session_shutdown", (event) => {
-		if (event.reason === "reload") return;
+		if (event.reason === "reload" || isSubagentChild()) return;
 		try {
 			restorePlannerPin();
 		} catch {

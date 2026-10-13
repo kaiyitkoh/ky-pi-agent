@@ -259,13 +259,24 @@ laptop, recorded in `docs/RUNBOOK.md` (RB-12-06).
 user-level settings file, which every repo shares. A Bedrock Claude pin gets
 the same inference-profile prefix as routing (`resolveBedrockRef` in
 `routing/modes.ts`), so `/max` pins the id Bedrock actually serves; an invalid
-prefix setting refuses the pin. Before the first write, the
-previous value (or its absence) is stored under
-`kyPiAgent.plannerPinRestore` in the same file. The pin is undone on session
-shutdown (not on `/reload`) and, if a crash left the marker behind, at the
-next session start, which then re-pins for the restored mode. Two sessions
-running at once share the file, so one session starting or ending removes the
-other's pin until its next mode switch.
+prefix setting refuses the pin.
+
+The pin is merged per agent key, so overrides the user set for other agents
+stay. The marker `kyPiAgent.plannerPinRestore` in the same file records, for
+each key a pin changed, its value before the first pin, plus `owners`: the
+pids of the sessions that pinned. When a session ends (not on `/reload`), and
+at every session start, the process removes its own pid and every pid that is
+no longer running. Only when no owner is left does it restore the pinned keys;
+overrides added during the session are kept. So:
+
+- a subagent child never touches the pin (it skips the bookkeeping when
+  `PI_SUBAGENT_CHILD=1`, and is never an owner anyway);
+- a second terminal starting or ending leaves a live session's pin alone;
+- a crash-left marker is cleaned by the next process that starts.
+
+The file is still shared: if two sessions pin different modes, the last
+writer's models apply to both until one switches again. A recycled pid can
+keep a stale pin alive until that process exits.
 
 ### Accepted decisions
 
