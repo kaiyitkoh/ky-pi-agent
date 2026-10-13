@@ -137,6 +137,15 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
+	pi.on("session_compact", (_event, ctx) => {
+		try {
+			lastCtx = ctx;
+			refresh();
+		} catch {
+			// Swallowed deliberately.
+		}
+	});
+
 	pi.on("tool_execution_start", (event, ctx) => {
 		try {
 			lastCtx = ctx;

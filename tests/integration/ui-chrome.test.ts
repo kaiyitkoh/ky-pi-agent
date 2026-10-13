@@ -222,6 +222,18 @@ describe("ui extension in a session", () => {
 		expect(rec.statuses("ky-statusline").some((s) => s?.includes("agent"))).toBe(false);
 	});
 
+	it("refreshes the tokens-left segment right after compaction", async () => {
+		const { rec, handle } = await open("tui", {
+			responses: [fauxAssistantMessage("first ".repeat(20000)), fauxAssistantMessage("second"), fauxAssistantMessage("summary")],
+		});
+		await handle.session.prompt("one");
+		await handle.session.prompt("two");
+		expect(last(rec.statuses("ky-statusline"))).toContain("left");
+		await handle.session.compact();
+		expect(handle.session.getContextUsage()?.tokens ?? null).toBeNull();
+		expect(last(rec.statuses("ky-statusline"))).not.toContain("left");
+	});
+
 	it("shows the changed-file count in a git checkout", async () => {
 		const { rec, handle } = await open("tui", { agentsMd: false, beforeBind: seedGit });
 		await handle.session.prompt("hi");
