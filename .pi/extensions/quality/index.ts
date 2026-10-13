@@ -159,40 +159,53 @@ export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus 
 	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
 }
 
+export type BaseTypecheck = "fails" | "passes" | { readonly error: string };
+
 /**
- * Whether `tsc --noEmit` fails on `sha`, checked in a detached worktree created inside the git dir so module and @types
- * resolution walk up to the repository's own node_modules without a link. Any error answers false: the HEAD failure stays attributed to the change.
+ * `tsc --noEmit` on `sha`, in a detached worktree created inside the git dir so module and @types resolution walk up to
+ * the repository's own node_modules without a link. NEVER THROWS: anything that stops the check is an `error`, not a verdict.
  */
-export function typecheckFailsAtCommit(cwd: string, sha: string, projectTrusted: boolean): boolean {
+export function typecheckAtCommit(cwd: string, sha: string, projectTrusted: boolean): BaseTypecheck {
 	const git = (args: string[], at: string) => spawnSync("git", args, { cwd: at, encoding: "utf-8", shell: false, windowsHide: true });
+	const failed = (what: string, r: ReturnType<typeof git>): BaseTypecheck => ({ error: `${what} failed: ${(r.stderr || r.error?.message || `exit ${r.status}`).trim()}` });
 	const top = repoTop(cwd);
 	let worktree: string | undefined;
 	try {
 		const common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], top);
-		if (common.status !== 0) return false;
+		if (common.status !== 0) return failed("git rev-parse --git-common-dir", common);
 		const dir = join(resolve(common.stdout.trim()), `ky-review-base-${randomBytes(6).toString("hex")}`);
 		worktree = dir;
-		if (git(["worktree", "add", "--detach", dir, sha], top).status !== 0) return false;
+		const added = git(["worktree", "add", "--detach", dir, sha], top);
+		if (added.status !== 0) return failed(`git worktree add ${sha}`, added);
 		const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
 		const exec: ExecRunner =
 			typeof override === "function" || !projectTrusted ? resolveExec(cwd, projectTrusted) : (cmd, args, at) => execLocalBin(cwd, cmd, args, at);
-		return runTypecheckLeg(join(dir, relative(top, cwd)), exec).status === "fail";
-	} catch {
-		return false;
+		const leg = runTypecheckLeg(join(dir, relative(top, cwd)), exec);
+		return leg.status === "unavailable" ? { error: leg.reason } : leg.status === "fail" ? "fails" : "passes";
+	} catch (err) {
+		return { error: err instanceof Error ? err.message : String(err) };
 	} finally {
-		if (worktree !== undefined) {
-			git(["worktree", "remove", "--force", worktree], top);
-			git(["worktree", "prune"], top);
-			if (/ky-review-base-[0-9a-f]{12}$/.test(worktree)) rmSync(worktree, { recursive: true, force: true });
+		// A locked file (antivirus, indexer) must not turn a finished check into a throw; a leftover dir is pruned next time.
+		try {
+			if (worktree !== undefined) {
+				git(["worktree", "remove", "--force", worktree], top);
+				git(["worktree", "prune"], top);
+				if (/ky-review-base-[0-9a-f]{12}$/.test(worktree)) rmSync(worktree, { recursive: true, force: true });
+			}
+		} catch {
+			// Swallowed deliberately.
 		}
 	}
 }
 
-/** What a typecheck failure at HEAD means for /review: a refusal when the merge base passes, else the doubt to ask about. */
+/** What a typecheck failure at HEAD means for /review: a refusal only when the merge base passes, else the doubt to ask about. */
 export function typecheckBaseline(cwd: string, base: string, projectTrusted: boolean, report: string): { refusal?: string; doubt?: string } {
-	if (!typecheckFailsAtCommit(cwd, base, projectTrusted)) return { refusal: `review: the change breaks the typecheck (it passes at the merge base ${base}) -- not reviewing:
+	const atBase = typecheckAtCommit(cwd, base, projectTrusted);
+	if (atBase === "passes") return { refusal: `review: the change breaks the typecheck (it passes at the merge base ${base}) -- not reviewing:
 ${report}` };
-	return { doubt: `the typecheck fails at HEAD and already failed at the merge base, so this change did not introduce it:
+	if (atBase === "fails") return { doubt: `the typecheck fails at HEAD and already failed at the merge base, so this change did not introduce it:
+${report}` };
+	return { doubt: `the typecheck fails at HEAD, and the merge base ${base} could not be checked (${atBase.error}), so whether this change introduced it is unknown:
 ${report}` };
 }
 

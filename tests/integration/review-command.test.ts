@@ -4,7 +4,7 @@
  * No model, no glab and no remote are contacted.
  */
 import { execFileSync } from "node:child_process";
-import { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { appendFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -13,7 +13,7 @@ import { allowanceOf, appendLedger, ledgerFile, specDigest, tasksOf } from "../.
 import { validatePlan } from "../../.pi/extensions/plan-ceremony/plan-schema.ts";
 import { renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
-import { setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
+import { setQuickGateExecOverrideForTests, typecheckAtCommit, typecheckBaseline } from "../../.pi/extensions/quality/index.ts";
 import { buildReviewerContext } from "../../.pi/extensions/quality/reviewer.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
 import { commitFile, makeTempRepo } from "../helpers/git.ts";
@@ -408,6 +408,30 @@ describe("/review -- the real handler", () => {
 			});
 			await h.run(SLUG);
 			expect(calls).toHaveLength(1);
+		});
+
+		it("asks, saying the merge base could not be checked, when tsc cannot run there", async () => {
+			const h = setup(undefined, undefined, { tsconfig: true });
+			setQuickGateExecOverrideForTests((cmd, _args, cwd) => {
+				if (cmd !== "tsc" || cwd.includes("ky-review-base-")) throw new Error("tsc not spawnable");
+				return { code: 1, stdout: "src/a.ts(1,1): error TS2322: boom", stderr: "" };
+			});
+			await h.run(SLUG);
+			expect(h.notes.map((n) => n.text).join("\n")).not.toContain("the change breaks the typecheck");
+			expect(h.confirms.join("\n")).toContain("could not be checked");
+			expect(h.confirms.join("\n")).toContain("tsc not spawnable");
+		});
+
+		it("a merge base the worktree cannot be built from is an error, never a pass", () => {
+			const h = setup(undefined, undefined, { tsconfig: true });
+			fakeTsc({ baseFails: false });
+			const missing = "0".repeat(40);
+			const atBase = typecheckAtCommit(h.repo, missing, false);
+			expect(typeof atBase === "object" && atBase.error).toContain("git worktree add");
+			const baseline = typecheckBaseline(h.repo, missing, false, "report");
+			expect(baseline.refusal).toBeUndefined();
+			expect(baseline.doubt).toContain("could not be checked");
+			expect(readdirSync(join(h.repo, ".git")).filter((n) => n.startsWith("ky-review-base-"))).toEqual([]);
 		});
 
 		it("leaves no worktree behind", async () => {
