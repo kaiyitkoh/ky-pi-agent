@@ -165,6 +165,18 @@ describe("verdict", () => {
 		const w = analyseWire([req("s1", "[redacted:truncated]"), req("s1", "[redacted:truncated]")], { probes: [] });
 		expect(verdict(w, [{ corr: "c", ratio: 0.9 }], 0.5).status).toBe("INSUFFICIENT");
 	});
+	it("fails on a probe hit even without any turn ratio", () => {
+		const w = analyseWire([req("s1", "a x"), req("s1", "a x")], { probes: ["x"] });
+		expect(verdict(w, [], 0.5).status).toBe("FAIL");
+	});
+	it("fails on a probe hit in a single request", () => {
+		const w = analyseWire([req("s1", "a x")], { probes: ["x"] });
+		expect(verdict(w, [], 0.5).status).toBe("FAIL");
+	});
+	it("fails on a changed system prompt even without any turn ratio", () => {
+		const w = analyseWire([req("s1", "a"), req("s1", "b")], { probes: [] });
+		expect(verdict(w, [], 0.5).status).toBe("FAIL");
+	});
 	it("is insufficient with no turn-2 ratio", () => {
 		expect(verdict(good, [], 0.5).status).toBe("INSUFFICIENT");
 	});

@@ -167,12 +167,6 @@ export function verdict(
 	ratios: readonly { corr: string; ratio: number }[],
 	minRatio: number,
 ): Verdict {
-	if (wire.requests < 2) {
-		return { status: "INSUFFICIENT", reasons: ["fewer than two main requests in this session"] };
-	}
-	if (ratios.length === 0) {
-		return { status: "INSUFFICIENT", reasons: ["no turn-2+ cache ratio available"] };
-	}
 	const reasons: string[] = [];
 	if (!wire.stable) {
 		reasons.push("system prompt differs between requests");
@@ -188,12 +182,18 @@ export function verdict(
 			reasons.push(`cacheRead ratio ${r.ratio.toFixed(2)} below ${minRatio} at ${r.corr}`);
 		}
 	}
+	const failed = reasons.length > 0;
 	if (wire.truncated) {
 		reasons.push("system text truncated by redaction; hash comparison is best-effort");
 	}
-	const failed = reasons.filter((r) => !r.startsWith("system text truncated"));
-	if (failed.length > 0) {
+	if (failed) {
 		return { status: "FAIL", reasons };
+	}
+	if (wire.requests < 2) {
+		return { status: "INSUFFICIENT", reasons: ["fewer than two main requests in this session"] };
+	}
+	if (ratios.length === 0) {
+		return { status: "INSUFFICIENT", reasons: ["no turn-2+ cache ratio available"] };
 	}
 	// Without system text there is nothing to compare, so a clean result proves nothing.
 	if (wire.missing > 0) {
