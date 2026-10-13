@@ -18,6 +18,7 @@ const classifyPushFailure = (stderr: string): "protected-branch-rejection" | "ot
 function configureIdentity(dir: string): void {
 	runGit(["config", "user.email", "kypi-fixture@example.invalid"], dir);
 	runGit(["config", "user.name", "kypi fixture"], dir);
+	runGit(["config", "commit.gpgsign", "false"], dir);
 }
 
 /**

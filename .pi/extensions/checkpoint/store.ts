@@ -125,8 +125,8 @@ function withLock<T>(file: string, body: () => T): T {
 			held = true;
 			break;
 		} catch (error) {
-			// A missing directory never heals; other codes retry (Windows reports a mid-delete lock as EPERM).
-			if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
+			// A missing or invalid directory never heals; other codes retry (Windows reports a mid-delete lock as EPERM).
+			if (["ENOENT", "ENOTDIR", "EISDIR", "EROFS"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
 			try {
 				if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
 					rmSync(lock, { force: true });

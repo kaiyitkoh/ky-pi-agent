@@ -76,7 +76,7 @@ async function runTurns(opts: { body?: string } = {}) {
 	(globalThis as Record<string, unknown>)[REC_KEY] = rec;
 	const bus = (globalThis as Record<string, unknown>)[STASH_KEY] as Bus;
 
-	gitInit(handle.cwd, "work", false);
+	gitInit(handle.cwd, "main", false);
 	commitFile(handle.cwd, TRACKED, "one\n", "init");
 
 	vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T12:00:00Z") });

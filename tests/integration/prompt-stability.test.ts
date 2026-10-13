@@ -50,7 +50,7 @@ async function runThreeTurns(opts: { profile?: string; extraExtensionSource?: st
 	const contexts: TranscriptContext[] = [];
 	const handle = await createHarnessSession({ ...opts, responses: capturing(contexts) });
 	sessions.push(handle);
-	gitInit(handle.cwd, "work", false);
+	gitInit(handle.cwd, "main", false);
 	commitFile(handle.cwd, TRACKED, "one\n", "init");
 
 	vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T12:00:00Z") });

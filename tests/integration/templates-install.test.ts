@@ -359,9 +359,9 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	}, TIMEOUT_MS);
 
 	it("case 2 -- a second run is byte-identical in both files", () => {
-		const agentDir = cleanDir;
+		const agentDir = tempDir("kypi-agentdir-");
 
-		const first = clean;
+		const first = runFullBootstrap(agentDir);
 		expectReachedTheScript(first);
 		expect(first.status, `first run stderr:\n${first.stderr}`).toBe(0);
 		const modelsA = readFileSync(join(agentDir, "models.json"), "utf-8");

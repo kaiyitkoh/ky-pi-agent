@@ -278,6 +278,7 @@ describe("scripts/openspec-setup.sh", () => {
 	});
 
 	it("warns when telemetry.enabled does not read back as false", () => {
+		expect(first.status, first.stderr).toBe(0);
 		expect(first.stderr).not.toContain("telemetry.enabled reads back");
 
 		const bad = run(makeFake({ telemetryGet: "true" }));
@@ -286,10 +287,12 @@ describe("scripts/openspec-setup.sh", () => {
 	});
 
 	it("is byte-identical on a second run", () => {
-		const installed = snapshot(fake.agent);
+		const own = makeFake();
+		expect(run(own).status).toBe(0);
+		const installed = snapshot(own.agent);
 		expect(Object.keys(installed)).toHaveLength(24);
-		expect(run(fake).status).toBe(0);
-		expect(snapshot(fake.agent)).toEqual(installed);
+		expect(run(own).status).toBe(0);
+		expect(snapshot(own.agent)).toEqual(installed);
 	});
 
 	it("does not duplicate an existing true flag and rewrites false to true", () => {

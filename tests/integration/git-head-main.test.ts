@@ -28,6 +28,7 @@ function makeCommittedRepo(dir: string): void {
 
 	runGit(["config", "user.email", "kypi-fixture@example.invalid"], dir);
 	runGit(["config", "user.name", "kypi fixture"], dir);
+	runGit(["config", "commit.gpgsign", "false"], dir);
 
 	writeFileSync(join(dir, "README.md"), "kypi-fixture\n", "utf-8");
 	runGit(["add", "README.md"], dir);
