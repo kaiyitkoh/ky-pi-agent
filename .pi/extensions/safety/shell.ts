@@ -410,18 +410,28 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 const VERB_NORMALISERS = [/['"]/g, /['"\\]/g, /['"\\^`]|\$(\{[^}]*\}|[@*#?!$0-9]|[A-Za-z_]\w*)/g];
 
 /** Tested as-is too, so a backslash path separator (`C:\Git\cmd\git.exe`) still bounds the verb. */
-function mentionsGuardedVerb(inv: CanonicalInvocation): boolean {
-	return [inv.rawSegment, inv.executable, ...inv.args].some((text) =>
-		[text, ...VERB_NORMALISERS.map((re) => text.replace(re, ""))].some((variant) =>
-			GUARDED_VERB_PATTERN.test(variant),
-		),
-	);
-}
+const variantsOf = (text: string): string[] => [text, ...VERB_NORMALISERS.map((re) => text.replace(re, ""))];
 
-function isShellRunner(inv: CanonicalInvocation): boolean {
+const mentionsGuardedVerb = (texts: readonly string[]): boolean =>
+	texts.some((text) => variantsOf(text).some((variant) => GUARDED_VERB_PATTERN.test(variant)));
+
+const segmentTexts = (inv: CanonicalInvocation): string[] => [inv.rawSegment, inv.executable, ...inv.args];
+
+/**
+ * What a runner runs, or undefined for a non-runner: `find -exec` runs only the words after its primary, and an interpreter's
+ * script file is opaque unless its name starts with a guarded verb (`openspec.js`, `openspec-setup.sh`, not `gen-openspec.mjs`).
+ */
+function runnerTexts(inv: CanonicalInvocation): string[] | undefined {
 	const executable = normaliseExecutable(inv.executable);
 	const execPrimaries = FIND_EXEC_PRIMARIES.get(executable);
-	return SHELL_RUNNERS.has(executable) || (execPrimaries !== undefined && inv.args.some((arg) => execPrimaries.has(arg)));
+	if (execPrimaries !== undefined) {
+		const at = inv.args.findIndex((arg) => execPrimaries.has(arg));
+		return at === -1 ? undefined : inv.args.slice(at + 1);
+	}
+	if (!SHELL_RUNNERS.has(executable)) return undefined;
+	const script = inv.args[0] ?? "-";
+	const namedForVerb = variantsOf(normaliseExecutable(script)).some((v) => v.search(GUARDED_VERB_PATTERN) === 0);
+	return script.startsWith("-") || namedForVerb ? segmentTexts(inv) : [inv.rawSegment.replace(script, " "), ...inv.args.slice(1)];
 }
 
 /** PowerShell's `-EncodedCommand` and every prefix it accepts (`-e`, `-enc`, `-ec`); `-ExecutionPolicy` does not match. */
@@ -435,7 +445,10 @@ function hidesItsScript(inv: CanonicalInvocation): boolean {
 
 /** Denied outright, never routed to approval, by a word match rather than a recursive re-parse. */
 const findShellRunnerDenial = (invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined =>
-	invocations.find((inv) => isShellRunner(inv) && (mentionsGuardedVerb(inv) || hidesItsScript(inv)));
+	invocations.find((inv) => {
+		const texts = runnerTexts(inv);
+		return texts !== undefined && (mentionsGuardedVerb(texts) || hidesItsScript(inv));
+	});
 
 /** Parse and fail closed on {@link SHELL_REFUSAL_CAUSES}; otherwise one canonical invocation per `Command` node. */
 export function canonicalise(command: string): ShellVerdict {
@@ -455,6 +468,6 @@ export function canonicalise(command: string): ShellVerdict {
 	if (extracted.some((e) => e.expansionInCommandPosition)) return refused("unresolved-expansion-in-command-position", command);
 	if (findShellRunnerDenial(invocations) !== undefined) return refused("shell-runner", command);
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
-	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(e.invocation))) return refused("unresolved-wrapper", command);
+	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
 	return { kind: "ok", invocations, redirectOperators: [...scan.redirects] };
 }

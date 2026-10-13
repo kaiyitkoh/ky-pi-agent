@@ -274,10 +274,7 @@ function evaluateGlobField(extraction: OptionalFieldExtraction, facts: PolicyFac
 /** grep returns file content, so only path and glob are checked; pattern is never inspected (the contract is which file is read). */
 function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 	if (input === null || typeof input !== "object" || Array.isArray(input)) {
-		return {
-			kind: "block",
-			reason: `grep input is malformed: input is not an object (received ${describeShape(input)})`,
-		};
+		return { kind: "block", reason: `grep input is malformed: input is not an object (received ${describeShape(input)})` };
 	}
 	const record = input as Record<string, unknown>;
 	const pathVerdict = evaluateSearchRootField(extractOptionalStringField(record, "path"), facts, `grep "path"`);
@@ -290,10 +287,7 @@ function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 /** find/ls leak names, not contents; a path is evaluated as a search root like grep's (defense in depth). */
 function evaluateFindOrLs(input: unknown, facts: PolicyFacts): Verdict {
 	if (input === null || typeof input !== "object" || Array.isArray(input)) {
-		return {
-			kind: "block",
-			reason: `find/ls input is malformed: input is not an object (received ${describeShape(input)})`,
-		};
+		return { kind: "block", reason: `find/ls input is malformed: input is not an object (received ${describeShape(input)})` };
 	}
 	return evaluateSearchRootField(extractOptionalStringField(input as Record<string, unknown>, "path"), facts, `find/ls "path"`);
 }
