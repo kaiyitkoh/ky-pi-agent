@@ -4,7 +4,7 @@
  */
 import { spawnSync } from "node:child_process";
 
-import { redactString } from "../diagnostics/redact.ts";
+import { redactForModel } from "../diagnostics/redact.ts";
 import { progressBlocks, recordedEntries } from "../execute/progress.ts";
 import type { SpecArtifact } from "../grill/spec-schema.ts";
 import type { PlanArtifact } from "../plan-ceremony/plan-schema.ts";
@@ -65,7 +65,7 @@ export function buildMrBody(input: MrBodyInput): string {
 
 	lines.push("## Disclosure", "", AI_AUTHORSHIP_DISCLOSURE, "");
 
-	return redactString(lines.join("\n"));
+	return redactForModel(lines.join("\n"));
 }
 
 function gitRead(cwd: string, args: string[]): { status: number | null; out: string } {

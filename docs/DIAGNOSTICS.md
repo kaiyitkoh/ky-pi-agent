@@ -254,6 +254,15 @@ Two independent rules, and the key rule is stronger than the shape rule:
    never carries it — but a `.env` or a `*.tfstate` the model read into
    `messages[]`.
 
+   The table has two halves. The **shape** half (every rule above except the
+   credential-named assignment and a `Bearer` value shorter than 16 characters)
+   is all that runs on text a model or a human must still read as code: the
+   reviewer contract, the design-review prompt and the MR description
+   (`redactForModel`). The **name** half also matches ordinary source such as
+   `const token = req.headers.authorization;`, so only logs use it: the wire
+   dump, the audit, provider errors and evidence rows (`redactString`). Every
+   rule is length-bounded, so the redactor stays linear on hostile input.
+
 **Two placeholders, and they mean different things.**
 
 `[redacted:<n> chars]` preserves the length, and is written for a **string** that

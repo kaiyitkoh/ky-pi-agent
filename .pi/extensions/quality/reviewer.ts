@@ -7,7 +7,7 @@ import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
-import { redactString } from "../diagnostics/redact.ts";
+import { redactForModel } from "../diagnostics/redact.ts";
 import { isProseToolCall } from "../diagnostics/prose.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 import {
@@ -106,7 +106,7 @@ function renderImportGraph(entries: readonly ImportGraphEntry[]): string {
 
 /**
  * Renders the six sections in contract order; throws when any other element is absent. An empty `importGraph`
- * is valid: a change with no JavaScript or TypeScript file has no edges. The whole string passes through `redactString`, since
+ * is valid: a change with no JavaScript or TypeScript file has no edges. The whole string passes through `redactForModel`, since
  * diffs and file contents can surface credentials read earlier in the session.
  */
 export function buildReviewerContext(input: ReviewerContractInput): string {
@@ -125,7 +125,7 @@ export function buildReviewerContext(input: ReviewerContractInput): string {
 		`# Import Graph (declared \`import ... from\` and \`export ... from\`, syntax-level only -- see buildImportGraph)\n\n${renderImportGraph(input.importGraph)}`,
 	];
 
-	return redactString(sections.join("\n\n"));
+	return redactForModel(sections.join("\n\n"));
 }
 
 /**

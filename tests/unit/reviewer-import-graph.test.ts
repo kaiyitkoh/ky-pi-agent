@@ -93,3 +93,36 @@ describe("buildReviewerContext -- an empty import graph", () => {
 		expect(() => buildReviewerContext({ ...base, importGraph: [], touchedFiles: [] })).toThrow(/touchedFiles/);
 	});
 });
+
+describe("buildReviewerContext -- source that names a credential reaches the reviewer intact", () => {
+	const lines = [
+		"const token = req.headers.authorization;",
+		"if (token === undefined) return;",
+		"interface Login { password: string; }",
+		"const cfg = { secret: process.env.JWT_SECRET };",
+		'password = var.db_password',
+		"// send the Bearer token upstream",
+	];
+	const source = `${lines.join("\n")}\n`;
+	const contract = {
+		diff: `diff --git a/src/auth.ts b/src/auth.ts\n${lines.map((l) => `+${l}`).join("\n")}\n`,
+		touchedFiles: [{ path: "src/auth.ts", contents: source }],
+		gateReport: "typecheck: PASS",
+		requirements: [{ id: "R1", text: "authenticate the request" }],
+		filesTouchedUnion: ["src/auth.ts"],
+		importGraph: [],
+	};
+
+	it("keeps every auth line byte-for-byte", () => {
+		const out = buildReviewerContext(contract);
+		for (const line of lines) expect(out).toContain(line);
+		expect(out).not.toContain("[redacted:");
+	});
+
+	it("still masks a credential by its shape", () => {
+		const key = ["AK", "IA"].join("") + "IOSFODNN7EXAMPLE";
+		const out = buildReviewerContext({ ...contract, touchedFiles: [{ path: "src/auth.ts", contents: `${source}const k = "${key}";\n` }] });
+		expect(out).not.toContain(key);
+		expect(out).toContain("const token = req.headers.authorization;");
+	});
+});

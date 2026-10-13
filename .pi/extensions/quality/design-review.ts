@@ -8,7 +8,7 @@ import { Type } from "typebox";
 import { StringEnum } from "@earendil-works/pi-ai";
 
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
-import { redactString } from "../diagnostics/redact.ts";
+import { redactForModel } from "../diagnostics/redact.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 import type { DesignReviewSignals } from "./gates.ts";
 import { isFileLine, type ReviewFinding } from "./review-schema.ts";
@@ -112,7 +112,7 @@ export async function runDesignReview(
 	ctx: ExtensionContext,
 	input: { readonly diffText: string; readonly changed: readonly string[]; readonly requirements: readonly ReviewRequirement[] },
 ): Promise<DesignReviewResult> {
-	const content = redactString(
+	const content = redactForModel(
 		[
 			"# Changed files",
 			input.changed.map((p) => `- ${p}`).join("\n"),

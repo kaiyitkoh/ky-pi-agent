@@ -6,7 +6,7 @@
  * The value shapes are `.pi/lib/secret-patterns.ts`, shared with the safety audit. No I/O; `redactDeep` never mutates,
  * since `before_provider_request` hands over the live payload.
  */
-import { maskSecrets, SECRET_PATTERNS } from "../../lib/secret-patterns.ts";
+import { maskSecrets, maskSecretShapes, SECRET_PATTERNS } from "../../lib/secret-patterns.ts";
 
 /** The masked form: the value is gone, its length survives. */
 export function redactionPlaceholder(length: number): string {
@@ -50,6 +50,11 @@ function isRedactedHeaderKey(key: string): boolean {
 /** Replace every credential-shaped run, leaving everything else byte-identical. */
 export function redactString(value: string): string {
 	return maskSecrets(value, (secret) => redactionPlaceholder(secret.length));
+}
+
+/** Like `redactString`, but by shape only, so source sent to a reviewer model or into an MR body stays readable code. */
+export function redactForModel(value: string): string {
+	return maskSecretShapes(value, (secret) => redactionPlaceholder(secret.length));
 }
 
 /** Redact a header map into a NEW map; `null` (delete this header, pi-ai `types.ts` ProviderHeaders) stays `null`. */

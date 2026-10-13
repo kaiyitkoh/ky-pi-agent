@@ -35,9 +35,11 @@ import {
 	TRUNCATION_PLACEHOLDER,
 	redactDeep,
 	redactHeaders,
+	redactForModel,
 	redactString,
 	redactionPlaceholder,
 } from "../../.pi/extensions/diagnostics/redact.ts";
+import { LOG_ONLY_PATTERNS, SHAPE_PATTERNS } from "../../.pi/lib/secret-patterns.ts";
 
 interface Sample {
 	readonly label: string;
@@ -64,11 +66,12 @@ const SECRET_SAMPLES: readonly Sample[] = [
 	{ label: "Qoder personal access token", value: ["pt", "abcdef0123456789"].join("-") },
 	{ label: "Bedrock API key", value: ["AB", "SK"].join("") + "QmVkcm9ja0FQSUtleS1leGFtcGxl" },
 	{ label: "PEM private key header", value: ["-----BEGIN ", "RSA ", "PRIVATE KEY", "-----"].join("") },
-	{ label: "short bearer credential", value: ["Bearer", "abc123"].join(" ") },
+	{ label: "token-length bearer credential", value: ["Bearer", ["abcdefgh", "ijklmnop", "1234"].join("")].join(" ") },
 	{ label: "JWT", value: [["ey", "JhbGciOiJIUzI1NiJ9"].join(""), "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "c2lnbmF0dXJl"].join(".") },
 	{ label: "URL userinfo password", value: "postgres://app:" + ["Pr0d", "pass"].join("") + "@db.internal:5432/app" },
 	{ label: "curl user:password", value: "curl -u deploy:" + ["hunter", "2"].join("") + " https://example.com" },
 	{ label: "mysql attached password", value: "mysql -h db -u root -p" + ["hunter", "2"].join("") + " app" },
+	{ label: "short bearer credential", value: ["Bearer", "abc123"].join(" ") },
 	{ label: "generic password assignment", value: "DATABASE_PASSWORD=" + ["Pr0d", "!pass"].join("") },
 ];
 
@@ -526,4 +529,50 @@ describe("DIAG-07 — camelCase credential keys", () => {
 		expect(JSON.stringify(out)).not.toContain(secret);
 		expect(out.maxTokens).toBe(5);
 	});
+});
+
+describe("the two consumers: logs mask by name, model inputs by shape only", () => {
+	const code = [
+		"const token = req.headers.authorization;",
+		"if (token === undefined) return;",
+		"password: string;",
+		"secret: process.env.JWT_SECRET",
+		"password = var.db_password",
+		"// the Bearer token is checked upstream",
+	].join("\n");
+
+	it("the shape rules come first in the log table and the name rules last", () => {
+		expect(SECRET_VALUE_PATTERNS).toEqual([...SHAPE_PATTERNS, ...LOG_ONLY_PATTERNS]);
+	});
+
+	it("redactForModel leaves code that names a credential byte-identical", () => {
+		expect(redactForModel(code)).toBe(code);
+	});
+
+	it("redactString still masks those names in a log", () => {
+		expect(redactString(code)).toContain("[redacted:");
+	});
+
+	it("redactForModel still masks every shape sample", () => {
+		for (const sample of SECRET_SAMPLES.slice(0, SHAPE_PATTERNS.length)) {
+			expect(redactForModel(`x ${sample.value} y`), sample.label).not.toContain(sample.value);
+		}
+	});
+});
+
+describe("the credential-name rule is linear-time", () => {
+	const hostile: readonly (readonly [string, string])[] = [
+		["a keyword run", "token".repeat(40_000)],
+		["a keyword run with separators", "token_".repeat(34_000)],
+		["unclosed quoted values", 'token="abc '.repeat(20_000)],
+		["a long spacing run", `token${" ".repeat(200_000)}`],
+	];
+	for (const [label, input] of hostile) {
+		it(`masks 200 KB of ${label} in under 100 ms`, () => {
+			expect(input.length).toBeGreaterThanOrEqual(200_000);
+			const start = performance.now();
+			redactString(input);
+			expect(performance.now() - start).toBeLessThan(100);
+		});
+	}
 });
