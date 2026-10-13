@@ -347,7 +347,7 @@ const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
 	"shell-runner": (c) =>
 		`"${c}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`,
 	"generated-script": (c) =>
-		`"${c}" runs a script from a pipe or a redirect, or runs a file the same command writes, so the guard never sees the script's text; write the file in one command and run it in another`,
+		`"${c}" gives a code runner its input through a pipe or a stdin alias, or runs a file the same command writes, so the guard never sees the code; pass input as a file argument or through jq, and write a script in one command and run it in another`,
 	"unresolved-wrapper": (c) =>
 		`"${c}" puts a guarded verb behind a wrapper option, operand or assignment this guard cannot resolve to the real executable`,
 	"parse-error": (c) => `"${c}" did not parse cleanly; this catch-all denies rather than falls through to allow`,
@@ -664,45 +664,42 @@ export function writeOperands(inv: Pick<CanonicalInvocation, "executable" | "arg
 const SHELL_INLINE: RegExp = /^-[a-zA-Z]*c$/;
 const SCRIPT_INLINE: RegExp = /^-[a-zA-Z]*[eE]$/;
 
-/** Interpreters that read their script from stdin when given no script operand, and the options that make the code an argument instead. */
-const STDIN_INTERPRETERS: ReadonlyMap<string, (arg: string) => boolean> = new Map([
+/** Interpreters' options that make the code an argument rather than a file or stdin. */
+const INLINE_CODE_FLAGS: ReadonlyMap<string, (arg: string) => boolean> = new Map([
 	..."sh bash zsh dash fish ksh mksh ash csh tcsh".split(" ").map((n) => [n, (a: string) => SHELL_INLINE.test(a)] as const),
-	...["python", "python3", "py"].map((n) => [n, (a: string) => a === "-c" || a === "-m"] as const),
-	...["node", "bun", "deno"].map((n) => [n, (a: string) => /^(-e|-p|--eval|--print|eval|run)$/.test(a)] as const),
+	...["python", "python3", "py"].map((n) => [n, (a: string) => a === "-c"] as const),
+	...["node", "bun", "deno"].map((n) => [n, (a: string) => /^(-e|-p|--eval|--print|eval)$/.test(a)] as const),
 	...["perl", "ruby"].map((n) => [n, (a: string) => SCRIPT_INLINE.test(a)] as const),
 	["php", (a: string) => a === "-r"],
-	...["pwsh", "powershell"].map((n) => [n, (a: string) => /^-(c|command|f|file)$/i.test(a)] as const),
+	...["pwsh", "powershell"].map((n) => [n, (a: string) => /^-(c|command)$/i.test(a)] as const),
 	["cmd", (a: string) => /^\/{1,2}[ck]$/i.test(a)],
 ]);
 
-const SHELLS = wordSet("sh bash zsh dash fish ksh mksh ash csh tcsh");
+const CODE_RUNNER_NAMES = wordSet("sh bash zsh dash ksh mksh ash csh tcsh fish busybox pwsh powershell cmd node deno bun perl ruby php lua rscript osascript parallel");
 
-/** The script an interpreter runs: `"-"` for stdin, a file operand, or undefined when the code is an inline argument. */
-function interpreterScript(inv: CanonicalInvocation): string | undefined {
-	const executable = normaliseExecutable(inv.executable);
-	const inline = STDIN_INTERPRETERS.get(executable);
-	if (inline === undefined || inv.args.some(inline)) return undefined;
-	if (SHELLS.has(executable) && inv.args.includes("-s")) return "-";
-	const operand = inv.args.find((a) => !a.startsWith("-") || a === "-");
-	// A bare word may be an option's value (`bash -o pipefail`), so only a path-shaped operand counts as a script file.
-	return operand === undefined || !/[./\\]/.test(operand) ? "-" : operand;
-}
+/** Programs that run code they read; their code must never come from a pipe, a stdin alias or a file the same command wrote. */
+const isCodeRunner = (executable: string): boolean =>
+	CODE_RUNNER_NAMES.has(executable) || /^(python[\d.]*|py|pypy[\d.]*|lua[\d.]*|perl[\d.]*|ruby[\d.]*|php[\d.]*)$/.test(executable);
+
+const STDIN_ALIAS = /^(-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/[^/]+\/fd\/\d+)$/;
 
 const baseOf = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop()?.toLowerCase() ?? "";
 
-/** A script read from a pipe or input redirect, or a file run by the same command that writes it; compared by basename because a `cd` may sit between. */
+/** Compared by basename because a `cd` may sit between the write and the run. */
 function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: ScriptScan): boolean {
 	const written = new Set([...scan.writeTargets, ...extracted.flatMap((e) => writeOperands(e.invocation))].map(baseOf));
+	const isWritten = (path: string): boolean => written.has(baseOf(path));
+	const runners = extracted.filter((e) => isCodeRunner(normaliseExecutable(e.invocation.executable)));
+	if (runners.length > 0 && scan.compoundReads.some(isWritten)) return true;
 	return extracted.some(({ invocation, node }) => {
 		const executable = normaliseExecutable(invocation.executable);
-		const stdinFile = node.redirects.find((r) => r.operator === "<")?.target?.value;
-		const script = interpreterScript(invocation);
-		const xargsInterpreter = (executable === "xargs" || executable === "parallel") && invocation.args.some((a) => STDIN_INTERPRETERS.has(normaliseExecutable(a)));
-		const fedByPipe = scan.piped.has(node) && (script === "-" || xargsInterpreter);
-		if (fedByPipe || (script === "-" && stdinFile !== undefined && written.has(baseOf(stdinFile)))) return true;
-		const sourced = executable === "source" || executable === "." ? invocation.args[0] : undefined;
-		const runs = [script, sourced, /[/\\]/.test(invocation.executable) ? invocation.executable : undefined];
-		return runs.some((path) => path !== undefined && path !== "-" && written.has(baseOf(path)));
+		const xargsInterpreter = (executable === "xargs" || executable === "parallel") && invocation.args.some((a) => INLINE_CODE_FLAGS.has(normaliseExecutable(a)));
+		if (scan.piped.has(node) && xargsInterpreter) return true;
+		const sourced = executable === "source" || executable === "." ? invocation.args : [];
+		if ([...sourced, ...(/[/\\]/.test(invocation.executable) ? [invocation.executable] : [])].some(isWritten)) return true;
+		if (!isCodeRunner(executable)) return false;
+		const stdinFiles = node.redirects.filter((r) => r.operator === "<" || r.operator === "<>").flatMap((r) => r.target?.value ?? []);
+		return scan.piped.has(node) || invocation.args.some((a) => STDIN_ALIAS.test(a)) || [...invocation.args, ...stdinFiles].some(isWritten);
 	});
 }
 

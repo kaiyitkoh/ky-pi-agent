@@ -43,16 +43,23 @@ docstring for the structural argument). Concretely, it catches:
   `powershell -Command`, `pwsh -c`), `su -c`, `script -c`, `ssh`, `chroot`,
   `strace`, `flock`, `parallel` and `find -exec`. `powershell -EncodedCommand`
   is refused whatever it holds, because the base64 script hides every verb.
-- **Scripts the guard cannot read** (cause `generated-script`) — an
-  interpreter (`sh`, `bash`, `zsh`, `python`, `node -`, `perl`, `ruby`,
-  `pwsh`, `cmd`, ...) that reads its script from a pipe (no script operand,
-  `-`, `sh -s`, or a bare word such as `bash -o pipefail`), `xargs`/`parallel`
-  running an interpreter on piped input, and a file that the same command
-  writes and then runs (`echo ... > x.sh; sh x.sh`, `./x.sh`, `source x.sh`,
-  `sh < x.sh`) are refused whatever the script holds, so
-  `echo 'git push ...' | sh`, `curl ... | sh` and `base64 -d | sh` all block.
-  Written and run files are matched by basename, because a `cd` may sit
-  between. A script written by an earlier, separate tool call stays opaque
+- **Scripts the guard cannot read** (cause `generated-script`) — a code
+  runner (`sh`, `bash`, `zsh`, `dash`, `ksh`, `fish`, `busybox`, `pwsh`,
+  `powershell`, `cmd`, `python*`, `node`, `deno`, `bun`, `perl`, `ruby`,
+  `php`, `lua`, `Rscript`, `osascript`, `parallel`) is refused whatever its
+  arguments when its stdin is a pipe (heredocs and here-strings are refused
+  everywhere), when any argument is a stdin alias (`-`, `/dev/stdin`,
+  `/dev/fd/N`, `/proc/<pid>/fd/N`), and when any argument or input redirect
+  names a file the same command writes, whatever the file is called
+  (`echo ... > p; sh p`, `tee p && sh p`, `cp p.sh q; sh q`). A file run by
+  path (`./x.sh`) or sourced (`source x.sh`) after the same command wrote it
+  is refused too. So `echo 'git push ...' | sh`, `| bash /dev/stdin`,
+  `| sh -c sh`, `curl ... | sh` and `base64 -d | sh` all block. Files are
+  matched by basename, because a `cd` may sit between. Known false
+  positives: `cat data.json | python script.py` and
+  `curl ... | python -m json.tool` are refused; pass the data as a file
+  argument, redirect it from a file (`python solve.py < input.txt`), or use
+  `jq`. A script written by an earlier, separate tool call stays opaque
   (EV-166).
 - **Wrapper indirection** (`env A=1 git push`, `env --`, `sudo --`, `exec`,
   `timeout 5`, `nice -n 5`, `doas`, `ionice`, `stdbuf`, `nohup`, ...) — each
