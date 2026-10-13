@@ -4,6 +4,7 @@
  * Parser quirks and the rules' rationale: docs/SAFETY.md "Implementation invariants".
  * Pure: no ctx, fs, child_process or default export (extension-layout.test.ts would treat it as an entry point).
  */
+import { posix } from "node:path";
 import { parse } from "unbash";
 import type { Command, ParsedScript, Word } from "unbash";
 
@@ -159,8 +160,10 @@ export interface CanonicalInvocation {
 	readonly wrappers: readonly string[];
 	/** The raw source slice for this one command segment. */
 	readonly rawSegment: string;
-	/** `git -C`/`--git-dir` wins (the only value a `HEAD == main` oracle can trust), else an `env -C` or `sudo -D` directory. */
+	/** Earlier `cd` targets, then `env -C`/`sudo -D`, then `git -C`/`--git-dir`, folded as git and env apply them. */
 	readonly cwdOverride?: string;
+	/** Set when a `cd`/`pushd`/`popd` ran earlier in the script; `"unknown"` when its target is not a literal directory. */
+	readonly afterCd?: "known" | "unknown";
 }
 
 export type ShellVerdict =
@@ -321,9 +324,9 @@ function locatePackageManagerRunner(
 }
 
 /** Consume recognised wrappers; `values[index]` is the real executable, and `confident` is false when a word fell outside a grammar. */
-function resolveWrappers(values: readonly string[]): { wrappers: string[]; cwdOverride?: string; index: number; confident: boolean } {
+function resolveWrappers(values: readonly string[]): { wrappers: string[]; dirs: string[]; index: number; confident: boolean } {
 	const wrappers: string[] = [];
-	let cwdOverride: string | undefined;
+	const dirs: string[] = [];
 	let i = 0;
 	let confident = true;
 	while (i < values.length) {
@@ -338,7 +341,7 @@ function resolveWrappers(values: readonly string[]): { wrappers: string[]; cwdOv
 			break;
 		}
 		const consumed = consumeWrapperOptions(values, runner !== undefined ? runner.subcommandIndex + 1 : i + 1, grammar, (option, value) => {
-			if ((verb === "env" && option === "-C") || (verb === "sudo" && option === "-D") || option === "--chdir") cwdOverride = value;
+			if ((verb === "env" && option === "-C") || (verb === "sudo" && option === "-D") || option === "--chdir") dirs.push(value);
 		});
 		if (consumed.query === true) {
 			// The wrapper itself is what runs, and it runs nothing.
@@ -354,18 +357,28 @@ function resolveWrappers(values: readonly string[]): { wrappers: string[]; cwdOv
 	// A wrapper that left an option or assignment in command position has not reached the real executable.
 	const next = values[i];
 	if (wrappers.length > 0 && next !== undefined && (next.startsWith("-") || ASSIGNMENT_WORD.test(next))) confident = false;
-	return { wrappers, cwdOverride, index: i, confident };
+	return { wrappers, dirs, index: i, confident };
 }
 
-/** `git -C <dir>` / `--git-dir[=]<dir>`; normalised so `git.exe -C /other push` keeps its override. */
-function extractGitCwdOverride(executable: string, args: readonly string[]): string | undefined {
-	if (normaliseExecutable(executable) !== "git") return undefined;
-	for (let i = 0; i < args.length; i += 1) {
-		if (args[i] === "-C" || args[i] === "--git-dir") return args[i + 1];
-		if (args[i].startsWith("--git-dir=")) return args[i].slice("--git-dir=".length);
+/** git global options that take a value as the next word. */
+export const GIT_GLOBAL_VALUE_OPTIONS = wordSet("-C -c --config-env --git-dir --work-tree --namespace");
+
+/** Every `-C`/`--git-dir` before the subcommand, in order; `git commit -C <commit>` names a commit, not a directory. */
+function gitDirectories(executable: string, args: readonly string[]): string[] {
+	const dirs: string[] = [];
+	for (let i = 0; normaliseExecutable(executable) === "git" && i < args.length && args[i].startsWith("-"); i += 1) {
+		if ((args[i] === "-C" || args[i] === "--git-dir") && i + 1 < args.length) dirs.push(args[i + 1]);
+		if (args[i].startsWith("--git-dir=")) dirs.push(args[i].slice("--git-dir=".length));
+		if (GIT_GLOBAL_VALUE_OPTIONS.has(args[i])) i += 1;
 	}
-	return undefined;
+	return dirs;
 }
+
+/** Each directory is relative to the one before, as git applies repeated `-C`; an absolute one starts over. */
+export const foldDirectories = (dirs: readonly string[]): string | undefined =>
+	dirs.reduce<string | undefined>((acc, dir) => (acc === undefined || /^([A-Za-z]:)?[\\/]/.test(dir) ? dir : posix.join(acc, dir)), undefined);
+
+const CD_COMMANDS = wordSet("cd pushd popd");
 
 /** Any expansion among wrapper words is refused too: word splitting can turn `timeout $T apply` into `timeout 5 terraform apply`. */
 function hasExpansionBehindWrappers(words: readonly Word[], index: number): boolean {
@@ -383,6 +396,7 @@ interface ExtractedInvocation {
 function extractInvocations(script: ParsedScript, command: string, commands: readonly Command[]): ExtractedInvocation[] {
 	// Backtick-decoded scripts index the decoded `ParsedScript.source`, not the caller's string.
 	const sourceText = script.source ?? command;
+	let cd: { readonly dirs: readonly string[]; readonly known: boolean } | undefined;
 	// An assignment-only statement (`g=push`) has no name and executes nothing.
 	return commands.flatMap((node) => {
 		if (node.name === undefined) return [];
@@ -394,11 +408,18 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 		const viaPackageRunner = resolved.wrappers.some((w) => PACKAGE_RUNNER_WRAPPERS.has(w));
 		const executable = viaPackageRunner ? word.replace(/(.)@[^@/]*$/, "$1") : word;
 		const args = values.slice(resolved.index + 1);
-		const cwdOverride = extractGitCwdOverride(executable, args) ?? resolved.cwdOverride;
+		const cwdOverride = foldDirectories([...(cd?.dirs ?? []), ...resolved.dirs, ...gitDirectories(executable, args)]);
 		const rawSegment = sourceText.slice(node.pos, node.end);
+		const afterCd = cd === undefined ? {} : { afterCd: cd.known ? ("known" as const) : ("unknown" as const) };
+		if (CD_COMMANDS.has(normaliseExecutable(executable))) {
+			// `popd`, a bare `cd`, `cd -`, `cd ~/x` and `cd "$D"` leave the directory unknowable here.
+			const target = normaliseExecutable(executable) === "popd" || args.length !== 1 || hasExpansionPart(words[resolved.index + 1]) ? "-" : args[0];
+			const literal = !/^[-~]/.test(target);
+			cd = { dirs: [...(cd?.dirs ?? []), ...(literal ? args : [])], known: (cd?.known ?? true) && literal };
+		}
 		return [
 			{
-				invocation: { executable, args, wrappers: resolved.wrappers, rawSegment, ...(cwdOverride !== undefined ? { cwdOverride } : {}) },
+				invocation: { executable, args, wrappers: resolved.wrappers, rawSegment, ...(cwdOverride !== undefined ? { cwdOverride } : {}), ...afterCd },
 				confident: resolved.confident,
 				expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
 			},

@@ -52,8 +52,14 @@ docstring for the structural argument). Concretely, it catches:
   word the table cannot account for (an unknown option, `env -S "..."`, an
   assignment after a wrapper that does not take one) in front of a guarded
   verb is refused rather than resolved to an unclassified executable. The
-  table only covers the wrappers it lists. `env -C` and `sudo -D` directories
-  feed the protected-branch check. `command -v X` is a lookup and runs
+  table only covers the wrappers it lists. The protected-branch check reads
+  the directory git would run in: an earlier `cd`/`pushd` target, then
+  `env -C`/`sudo -D`, then every `git -C`, each relative one resolved against
+  the one before and an absolute one starting over (`env -C /other git -C .
+  commit` reads `/other`). After a `cd` the session directory is checked
+  too, because a `cd` in a subshell does not persist, and a `cd` whose target
+  is not a literal directory (`cd "$D"`, `cd -`, `cd ~/x`, `popd`) makes the
+  branch count as protected. `command -v X` is a lookup and runs
   nothing. `watch` joins its operands into an `sh -c` string, so it is
   treated as a shell runner.
 - **Heredoc-to-script smuggling** (`<<EOF`, `<<-EOF`, `<<<`) — denied on the

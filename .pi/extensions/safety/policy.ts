@@ -4,7 +4,7 @@
  * Pure: no ctx, process.env, node:fs or default export; the one impure fact (current branch) arrives via PolicyFacts.
  */
 import type { CanonicalInvocation } from "./shell.ts";
-import { canonicalise, normaliseExecutable } from "./shell.ts";
+import { canonicalise, foldDirectories, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
 import { canonicalisePathArg, classifyPathRead, classifyPathWrite, isSensitiveSearchRoot } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
@@ -49,23 +49,15 @@ function extractStringField(input: unknown, field: string): FieldExtraction {
 		return { kind: "missing", reason: `input is not an object (received ${describeShape(input)})` };
 	}
 	const value = (input as Record<string, unknown>)[field];
-	if (typeof value !== "string") {
-		return { kind: "missing", reason: `"${field}" is missing or not a string (received ${describeShape(value)})` };
-	}
-	if (value === "") {
-		return { kind: "missing", reason: `"${field}" is an empty string` };
-	}
+	if (typeof value !== "string") return { kind: "missing", reason: `"${field}" is missing or not a string (received ${describeShape(value)})` };
+	if (value === "") return { kind: "missing", reason: `"${field}" is an empty string` };
 	return { kind: "ok", value };
 }
 
 /** Key-sorted: JSON.stringify order is insertion order and not stable across equivalent objects. */
 function stableStringify(value: unknown): string {
-	if (value === null || typeof value !== "object") {
-		return JSON.stringify(value);
-	}
-	if (Array.isArray(value)) {
-		return `[${value.map(stableStringify).join(",")}]`;
-	}
+	if (value === null || typeof value !== "object") return JSON.stringify(value);
+	if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
 	const obj = value as Record<string, unknown>;
 	const keys = Object.keys(obj).sort();
 	return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
@@ -108,12 +100,7 @@ function fromInfraVerdict(verdict: InfraVerdict, requestKey: string): Verdict {
 	}
 }
 
-/**
- * git's global options (-C, -c, --git-dir, --work-tree, --namespace) precede the subcommand; skip them, consuming the
- * value of those that take one, so the subcommand is the first positional word rather than "-C" hitting the fail-closed arm.
- */
-const GIT_GLOBAL_VALUE_OPTIONS = new Set(["-C", "-c", "--config-env", "--git-dir", "--work-tree", "--namespace"]);
-
+/** Skips git's global options and their values, so the subcommand is the first positional word rather than "-C". */
 function toGitInvocation(invocation: CanonicalInvocation): GitInvocation {
 	const args = invocation.args;
 	const configOverrides: string[] = [];
@@ -140,8 +127,12 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 	const executable = normaliseExecutable(invocation.executable);
 
 	if (executable === "git") {
+		const branchIn = (dir?: string): string => facts.currentBranchFor(foldDirectories([facts.cwd, dir ?? "."]) ?? facts.cwd);
+		// A subshell's `cd` does not persist, so the session cwd counts too; an unreadable `cd` target counts as protected.
+		const afterCd = invocation.afterCd === "unknown" ? [facts.protectedBranches[0] ?? ""] : invocation.afterCd === "known" ? [branchIn()] : [];
+		const branches = [branchIn(invocation.cwdOverride), ...afterCd];
 		const gitFacts: GitPolicyFacts = {
-			currentBranch: facts.currentBranchFor(invocation.cwdOverride ?? facts.cwd),
+			currentBranch: branches.find((b) => facts.protectedBranches.includes(b)) ?? branches[0],
 			protectedBranches: facts.protectedBranches,
 		};
 		strongest = strongerOf(strongest, fromGitVerdict(classifyGitInvocation(toGitInvocation(invocation), gitFacts)));
@@ -171,9 +162,7 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 /** canonicalise() refusal blocks first; then each invocation is classified and the strongest verdict wins, so one blocked segment blocks the whole command. */
 function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	const commandField = extractStringField(input, "command");
-	if (commandField.kind === "missing") {
-		return { kind: "block", reason: `bash input is malformed: ${commandField.reason}` };
-	}
+	if (commandField.kind === "missing") return { kind: "block", reason: `bash input is malformed: ${commandField.reason}` };
 	const command = commandField.value;
 
 	const shellVerdict = canonicalise(command);
@@ -195,9 +184,7 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 
 function evaluateRead(input: unknown, facts: PolicyFacts): Verdict {
 	const pathField = extractStringField(input, "path");
-	if (pathField.kind === "missing") {
-		return { kind: "block", reason: `read input is malformed: ${pathField.reason}` };
-	}
+	if (pathField.kind === "missing") return { kind: "block", reason: `read input is malformed: ${pathField.reason}` };
 	const verdict = classifyPathRead(canonicalOf(pathField.value, facts), pathFactsOf(facts));
 	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
 }
@@ -205,9 +192,7 @@ function evaluateRead(input: unknown, facts: PolicyFacts): Verdict {
 /** Shared by write and edit: both take { path } and are governed by classifyPathWrite. */
 function evaluateWrite(input: unknown, facts: PolicyFacts): Verdict {
 	const pathField = extractStringField(input, "path");
-	if (pathField.kind === "missing") {
-		return { kind: "block", reason: `write/edit input is malformed: ${pathField.reason}` };
-	}
+	if (pathField.kind === "missing") return { kind: "block", reason: `write/edit input is malformed: ${pathField.reason}` };
 	const verdict = classifyPathWrite(canonicalOf(pathField.value, facts), pathFactsOf(facts));
 	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
 }
@@ -223,12 +208,8 @@ type OptionalFieldExtraction =
  */
 function extractOptionalStringField(input: Readonly<Record<string, unknown>>, field: string): OptionalFieldExtraction {
 	const value = input[field];
-	if (value === undefined || value === "") {
-		return { kind: "absent" };
-	}
-	if (typeof value !== "string") {
-		return { kind: "malformed", reason: `"${field}" is present but not a string (received ${describeShape(value)})` };
-	}
+	if (value === undefined || value === "") return { kind: "absent" };
+	if (typeof value !== "string") return { kind: "malformed", reason: `"${field}" is present but not a string (received ${describeShape(value)})` };
 	return { kind: "ok", value };
 }
 
@@ -238,15 +219,11 @@ function extractOptionalStringField(input: Readonly<Record<string, unknown>>, fi
  * with no exemption when the session is rooted at $HOME, where the default search would walk ~/.aws and ~/.ssh.
  */
 function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: PolicyFacts, fieldLabel: string): Verdict {
-	if (extraction.kind === "malformed") {
-		return { kind: "block", reason: `${fieldLabel} is malformed: ${extraction.reason}` };
-	}
+	if (extraction.kind === "malformed") return { kind: "block", reason: `${fieldLabel} is malformed: ${extraction.reason}` };
 	const canonicalPath = extraction.kind === "ok" ? canonicalOf(extraction.value, facts) : facts.projectRoot;
 	const pathFacts = pathFactsOf(facts);
 	const fileVerdict = classifyPathRead(canonicalPath, pathFacts);
-	if (fileVerdict.kind === "block") {
-		return { kind: "block", reason: fileVerdict.reason };
-	}
+	if (fileVerdict.kind === "block") return { kind: "block", reason: fileVerdict.reason };
 	if (isSensitiveSearchRoot(canonicalPath, pathFacts)) {
 		return {
 			kind: "block",
@@ -261,12 +238,8 @@ function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: Pol
  * Wildcard shapes such as ".env*" are a published residual gap (docs/SAFETY.md known bypasses).
  */
 function evaluateGlobField(extraction: OptionalFieldExtraction, facts: PolicyFacts): Verdict {
-	if (extraction.kind === "malformed") {
-		return { kind: "block", reason: `grep "glob" is malformed: ${extraction.reason}` };
-	}
-	if (extraction.kind === "absent") {
-		return { kind: "allow" };
-	}
+	if (extraction.kind === "malformed") return { kind: "block", reason: `grep "glob" is malformed: ${extraction.reason}` };
+	if (extraction.kind === "absent") return { kind: "allow" };
 	const verdict = classifyPathRead(canonicalOf(extraction.value, facts), pathFactsOf(facts));
 	return verdict.kind === "block" ? { kind: "block", reason: `grep glob refers to a sensitive file: ${verdict.reason}` } : { kind: "allow" };
 }
@@ -278,9 +251,7 @@ function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 	}
 	const record = input as Record<string, unknown>;
 	const pathVerdict = evaluateSearchRootField(extractOptionalStringField(record, "path"), facts, `grep "path"`);
-	if (pathVerdict.kind === "block") {
-		return pathVerdict;
-	}
+	if (pathVerdict.kind === "block") return pathVerdict;
 	return evaluateGlobField(extractOptionalStringField(record, "glob"), facts);
 }
 
