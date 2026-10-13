@@ -88,11 +88,11 @@ export interface EvasionCase {
 // ---------------------------------------------------------------------------
 
 /** Unquoted Windows path in bash — `Word.value` strips the backslashes as POSIX escapes (`paths.ts`'s own documented limitation). */
-const WIN_UNQUOTED_AWS_CREDS = String.raw`cat C:\Users\Admin\.aws\credentials`;
+const WIN_UNQUOTED_AWS_CREDS = String.raw`cat C:\Users\tester\.aws\credentials`;
 /** Same path, double-quoted — quoting preserves `Word.value` as the literal text, so this one survives intact. */
-const WIN_QUOTED_AWS_CREDS = 'cat "' + String.raw`C:\Users\Admin\.aws\credentials` + '"';
+const WIN_QUOTED_AWS_CREDS = 'cat "' + String.raw`C:\Users\tester\.aws\credentials` + '"';
 /** The `read` tool's own `path` parameter has no separate raw/resolved form, so the same string reaching it directly is unaffected. */
-const WIN_READ_AWS_CREDS = String.raw`C:\Users\Admin\.aws\credentials`;
+const WIN_READ_AWS_CREDS = String.raw`C:\Users\tester\.aws\credentials`;
 /** `git -C` with a Windows path — the different-repo case in its Windows spelling. */
 const WIN_DIFFERENT_REPO = "git -C " + String.raw`C:\other\repo` + " push";
 /** A real backslash-then-newline line continuation, not an escaped literal. */
@@ -954,7 +954,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: WIN_UNQUOTED_AWS_CREDS },
 		expect: "OUT-OF-SCOPE",
-		why: "confirmed by execution: an UNQUOTED Windows path argument to a bash command mangles under Word.value's POSIX backslash-escape handling (\"C:\\Users\\Admin\\.aws\\credentials\" loses every backslash), so classifyPathRead's segment match never fires -- a KNOWN LIMITATION already named in policy.ts's own module docstring, not newly discovered here.",
+		why: "confirmed by execution: an UNQUOTED Windows path argument to a bash command mangles under Word.value's POSIX backslash-escape handling (\"C:\\Users\\<user>\\.aws\\credentials\" loses every backslash), so classifyPathRead's segment match never fires -- a KNOWN LIMITATION already named in policy.ts's own module docstring, not newly discovered here.",
 		reference: "policy.ts module docstring 'a bash argument reaches canonicalisePathArg as Word.value-resolved'; paths.ts docstring 'WHY NORMALISATION READS arg.text, NEVER arg.value'",
 	},
 	{
