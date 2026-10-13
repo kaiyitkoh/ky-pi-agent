@@ -149,6 +149,7 @@ export const AUTHORED_SCRIPT_ROOTS: readonly string[] = [
 	".npmrc",
 	".pi/npm/.npmrc",
 	".pi/templates/env.example",
+	".pi/templates/*.json",
 	".env.example",
 ];
 
@@ -196,7 +197,8 @@ export function extractHashComments(raw: string): CommentRange[] {
 /** Comments of any authored file type, dispatched on extension. */
 export function extractAnyComments(path: string, raw: string): CommentRange[] {
 	const text = raw.replace(/\r\n/g, "\n");
-	return /\.(?:ts|mjs|js)$/.test(path) ? extractComments(text) : extractHashComments(text);
+	// JSONC templates carry `//` comments, which the TS scanner reads correctly.
+	return /\.(?:ts|mjs|js|json)$/.test(path) ? extractComments(text) : extractHashComments(text);
 }
 
 export function subsystemOf(path: string): string {

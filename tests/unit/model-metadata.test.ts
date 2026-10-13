@@ -439,9 +439,9 @@ describe("PROV-06 — the unverified output cap keeps its mark", () => {
 		).toContain("UNVERIFIED");
 		expect(
 			text,
-			`${TEMPLATE} no longer mentions RB-03-05, the runbook entry that measures the ` +
-				"unverified figures. A gap with no named owner is a gap nobody closes.",
-		).toContain("RB-03-05");
+			`${TEMPLATE} no longer names the runbook check that measures the unverified figures ` +
+				"(by its title, since comments carry no IDs). A gap with no named owner is a gap nobody closes.",
+		).toContain("the real DashScope context cap and per-token price");
 	});
 });
 
