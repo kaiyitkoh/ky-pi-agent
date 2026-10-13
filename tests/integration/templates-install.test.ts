@@ -45,7 +45,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
-import { afterEach, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import {
 	BEDROCK_PROVIDER_ID,
@@ -263,9 +263,19 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	// `scratch` (which every copy's root is also pushed onto) is enough.
 	afterEach(scratch.cleanup);
 
+	// One clean install into a directory the script must create, shared by the cases that only read its result.
+	const shared = scratchDirs();
+	let cleanDir = "";
+	let clean: Run;
+	beforeAll(() => {
+		cleanDir = join(shared.make("kypi-agentroot-"), "agent");
+		clean = runFullBootstrap(cleanDir);
+	});
+	afterAll(shared.cleanup);
+
 	it("case 1 -- a clean install writes both files, compat block intact", () => {
-		const agentDir = tempDir("kypi-agentdir-");
-		const run = runFullBootstrap(agentDir);
+		const agentDir = cleanDir;
+		const run = clean;
 
 		expectReachedTheScript(run);
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
@@ -344,8 +354,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		// prefers the stored value over the ambient one -- so every subsequent
 		// Bedrock request resolved a profile that does not exist, with no error and
 		// no output saying so.
-		const agentDir = tempDir("kypi-agentdir-");
-		const run = runFullBootstrap(agentDir);
+		const agentDir = cleanDir;
+		const run = clean;
 		expectReachedTheScript(run);
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
@@ -407,18 +417,9 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		// never re-chmods the DIRECTORY. That directory then holds auth.json,
 		// models.json and Pi's session transcripts at 0755 for the life of the
 		// machine.
-		// A path the SCRIPT must create, not one `mkdtempSync` already created.
-		// mkdtempSync makes its directory 0700 by definition, so pointing at one
-		// would make this case green whatever bootstrap did -- the tautology the
-		// assertion is meant to rule out.
-		const agentDir = join(tempDir("kypi-agentroot-"), "agent");
-		expect(
-			existsSync(agentDir),
-			"the agent directory already exists before the run, so its mode is this test's " +
-				"doing rather than the script's",
-		).toBe(false);
-
-		const run = runFullBootstrap(agentDir);
+		// cleanDir is a path the script created: mkdtempSync makes 0700 directories, which would pass whatever it did.
+		const agentDir = cleanDir;
+		const run = clean;
 		expectReachedTheScript(run);
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
@@ -460,9 +461,9 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	}, TIMEOUT_MS);
 
 	it("case 2 -- a second run is byte-identical in both files", () => {
-		const agentDir = tempDir("kypi-agentdir-");
+		const agentDir = cleanDir;
 
-		const first = runFullBootstrap(agentDir);
+		const first = clean;
 		expectReachedTheScript(first);
 		expect(first.status, `first run stderr:\n${first.stderr}`).toBe(0);
 		const modelsA = readFileSync(join(agentDir, "models.json"), "utf-8");
@@ -751,8 +752,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	}, TIMEOUT_MS);
 
 	it("case 6 -- PROV-01: the installed pair resolves $DASHSCOPE_API_KEY from the environment", async () => {
-		const agentDir = tempDir("kypi-agentdir-");
-		const run = runFullBootstrap(agentDir);
+		const agentDir = cleanDir;
+		const run = clean;
 		expectReachedTheScript(run);
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
