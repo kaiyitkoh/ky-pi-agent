@@ -187,8 +187,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	// a number this phase re-reviewed for tightness.
 	{
 		file: ".pi/extensions/routing/index.ts",
-		budget: 390,
-		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 313 raw lines 2026-08-14, rounded up to the next ten. RAISED 320 -> 340: the profile wiring stopped narrowing a session whose transcript already declared tools and gained a pre-prompt pass (now on `input`) that drops only undeclared out-of-profile tools; measured 336 raw lines 2026-10-13, rounded up to the next ten. Re-measured 389 raw lines 2026-10-13 after model_select and input enforcement of the model guard and the pinned subagent routing, rounded up to the next ten",
+		budget: 400,
+		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 313 raw lines 2026-08-14, rounded up to the next ten. RAISED 320 -> 340: the profile wiring stopped narrowing a session whose transcript already declared tools and gained a pre-prompt pass (now on `input`) that drops only undeclared out-of-profile tools; measured 336 raw lines 2026-10-13, rounded up to the next ten. Re-measured 389 raw lines 2026-10-13 after model_select and input enforcement of the model guard and the pinned subagent routing, rounded up to the next ten. RAISED 390 -> 400: the input backstop takes the image need from the prompt's own attachments, and subagent children skip the planner-pin bookkeeping; 392 raw lines",
 	},
 	{
 		file: ".pi/extensions/harness/index.ts",
@@ -355,14 +355,14 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/routing",
-		budget: 1350,
+		budget: 1440,
 		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 1019 " +
 			"raw lines across 5 files 2026-10-13, rounded up to the next ten. RAISED 1020 -> 1110: profiles.ts (78 lines, " +
 			"the tool-profile table and resolver) plus 5 lines of wiring in index.ts. Re-measured 1102 raw lines across 6 files 2026-10-13. " +
 			"RAISED 1110 -> 1120: index.ts grew by the transcript-loadout guard and the pre-prompt pass (see its per-file entry); " +
 			"measured 1120 raw lines across 6 files 2026-10-13. RAISED 1120 -> 1130: an explicit --tools allowlist now bypasses " +
 			"narrowing (hasExplicitToolAllowlist in profiles.ts plus 2 lines in index.ts); measured 1121 raw lines across 6 files " +
-			"2026-10-13, rounded up to the next ten. Re-measured 1341 raw lines 2026-10-13 after the model guard, per-mode agent overrides and enforcement of the routing profile (agent-overrides.ts 283, guard.ts 130, index.ts 389, modes.ts 321, profiles.ts 83, schema.ts 135), rounded up to the next ten",
+			"2026-10-13, rounded up to the next ten. Re-measured 1341 raw lines 2026-10-13 after the model guard, per-mode agent overrides and enforcement of the routing profile (agent-overrides.ts 283, guard.ts 130, index.ts 389, modes.ts 321, profiles.ts 83, schema.ts 135), rounded up to the next ten. RAISED 1350 -> 1440: agent-overrides.ts records per-key pins with owner pids and restores only when every owner has ended, and both it and pickConfiguredCandidate apply the Bedrock prefix through resolveBedrockRef; nestedNeed sizes a nested call from its own request; 1434 raw lines (agent-overrides.ts 356, guard.ts 138, index.ts 392, modes.ts 330)",
 	},
 	{
 		dir: ".pi/extensions/harness",
@@ -528,7 +528,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 2490,
+		budget: 2480,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
@@ -570,7 +570,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 				"311), rounded up to the next ten. RAISED 2200 -> 2250 by plan 09-14 (FLOW-05): review-schema.ts gained the " +
 				"optional scopeDrift field, the validateReview rejection of a model-supplied drift property and the Scope " +
 				"Drift render block (392 -> 443). Re-measured 2,242 raw lines across the same 8 files 2026-10-13, rounded up " +
-				"to the next ten. Re-measured 2305 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 2426 raw lines 2026-10-13 after the lint leg, the change gate availability rules and the design-review pass (advisor.ts 75, calibration.ts 122, design-review.ts 143, gates.ts 158, index.ts 267, review-schema.ts 469, reviewer.ts 240, rules.ts 631, verdict.ts 321), rounded up to the next ten Re-measured 2436 raw lines 2026-10-13 (index.ts 278) after the gate legs began resolving git's top-level-relative paths from the top level and finding the ESLint config up to it, rounded up to the next ten. Re-measured 2430 raw lines 2026-10-13 (index.ts 272) after localBin reused the bounded findUp walk. Re-measured 2468 raw lines 2026-10-13 (index.ts 310) after the lint leg began reading ESLint's JSON report so an all-ignored run is unavailable, not a pass, and the missing config names, rounded up to the next ten. Re-measured 2486 raw lines 2026-10-13 (index.ts 328) after the typecheck leg began refusing a solution-style tsconfig that checks nothing, rounded up to the next ten. Re-measured 2494 raw lines 2026-10-13 (design-review.ts 151) after a failed design pass became a notice and malformed design findings began to be dropped one by one, rounded up to the next ten. Re-measured 2490 raw lines 2026-10-13 after the comment cleanup. Re-measured 2491 raw lines 2026-10-13 (design-review.ts 152) after the quoted diff header fix, rounded up to the next ten. Re-measured 2487 raw lines 2026-10-13 (index.ts 321) after the ESLint config probe lost its try/catch, rounded up to the next ten.",
+				"to the next ten. Re-measured 2305 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 2426 raw lines 2026-10-13 after the lint leg, the change gate availability rules and the design-review pass (advisor.ts 75, calibration.ts 122, design-review.ts 143, gates.ts 158, index.ts 267, review-schema.ts 469, reviewer.ts 240, rules.ts 631, verdict.ts 321), rounded up to the next ten Re-measured 2436 raw lines 2026-10-13 (index.ts 278) after the gate legs began resolving git's top-level-relative paths from the top level and finding the ESLint config up to it, rounded up to the next ten. Re-measured 2430 raw lines 2026-10-13 (index.ts 272) after localBin reused the bounded findUp walk. Re-measured 2468 raw lines 2026-10-13 (index.ts 310) after the lint leg began reading ESLint's JSON report so an all-ignored run is unavailable, not a pass, and the missing config names, rounded up to the next ten. Re-measured 2486 raw lines 2026-10-13 (index.ts 328) after the typecheck leg began refusing a solution-style tsconfig that checks nothing, rounded up to the next ten. Re-measured 2494 raw lines 2026-10-13 (design-review.ts 151) after a failed design pass became a notice and malformed design findings began to be dropped one by one, rounded up to the next ten. Re-measured 2490 raw lines 2026-10-13 after the comment cleanup. Re-measured 2491 raw lines 2026-10-13 (design-review.ts 152) after the quoted diff header fix, rounded up to the next ten. Re-measured 2487 raw lines 2026-10-13 (index.ts 321) after the ESLint config probe lost its try/catch, rounded up to the next ten.. LOWERED 2490 -> 2480: nested role calls no longer build their own guard need, runSingleShotRole derives it from the request; 2479 raw lines",
 	},
 	{
 		dir: ".pi/extensions/providers",
