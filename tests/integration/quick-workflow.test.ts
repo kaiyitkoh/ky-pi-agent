@@ -70,6 +70,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
+import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
@@ -90,17 +91,9 @@ import { readJsonl } from "../helpers/logs.ts";
 import { withFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
 
 /**
- * CR-03: every case from case 3 onward reaches `workflows/index.ts:42`'s
- * `runQuickGateStage(ctx.cwd)`, between the git pre-flight and `startRun` --
- * against a `gitInit`-only temp `cwd` with NO `node_modules`. Without this
- * override installed, a real `tsc`/`vitest` spawn would either fail (this
- * repository's CR-01/CR-02 fix: an honest `unavailable`, never blocking) or,
- * pre-CR-01 on a platform where `npx` DOES spawn, attempt to fetch a package
- * over the network -- exactly the "install nothing" rule this project's
- * autonomous-run constraints forbid. `tests/integration/quality-gate-
- * order.test.ts`'s own module docstring calls this seam mandatory; this file
- * mirrors it exactly, installing and restoring the override around every
- * `command.handler(...)` call that reaches the gate stage.
+ * Every case that settles a commit runs the deterministic change gate at agent_settled, against a
+ * `gitInit`-only temp `cwd` with no `node_modules`. Without this override a real `tsc` spawn would either
+ * fail or try to reach the network; the override keeps the typecheck leg instant and offline.
  */
 const INSTANT_PASS_EXEC: ExecRunner = () => ({ code: 0, stdout: "", stderr: "" });
 
@@ -281,6 +274,7 @@ interface EvidenceRowShape {
 	headSha?: string;
 	recordCount?: number;
 	tools?: string[];
+	failedToolCalls?: number;
 }
 
 /** Read the evidence log for `cwd`, failing with the remedy rather than an `ENOENT` stack. */
@@ -833,7 +827,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
-	it("case 6 (CR-01 iteration 2 regression, PROBE F) -- a failed verification command is not buried by a commit that lands afterwards", async () => {
+	it("case 6 -- a failed exploratory command before a clean commit is logged and counted, not fatal", async () => {
 		const candidate = flashExecutorCandidate();
 
 		await withFauxSession(
@@ -890,25 +884,14 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					const rows = readEvidence(cwd);
 					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
 					const row = rows[0] as EvidenceRowShape;
-					expect(
-						row.verdict,
-						`PROBE F: a run holding a recorded failure must be REJECTED even though a commit landed ` +
-							`afterwards, got: ${JSON.stringify(row)}`,
-					).toBe("reject");
-					expect(row.reason ?? "", "the reject reason must name the failing tool").toContain("bash");
-					expect(
-						row.recordCount ?? 0,
-						"both the failing verification AND the passing commit must have been recorded",
-					).toBe(2);
-					expect(
-						row.baseSha,
-						"HEAD genuinely moved during this run -- the commit really landed, and still rejected",
-					).not.toBe(row.headSha);
+					expect(row.verdict, `a commit landed after a failed exploratory call, got: ${JSON.stringify(row)}`).toBe("accept");
+					expect(row.failedToolCalls, "the failed call is logged").toBe(1);
+					expect(row.recordCount ?? 0, "both the failing call and the commit are recorded").toBe(2);
+					expect(row.baseSha, "HEAD genuinely moved").not.toBe(row.headSha);
 
-					expect(notifications.length, "a rejection must still report an outcome").toBe(1);
-					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
-
-					// The model's own prose claimed success -- the reject reason must never echo it.
+					expect(notifications.length).toBe(1);
+					expect(notifications[0]?.level).toBe("info");
+					expect(notifications[0]?.text).toContain("1 failed tool call(s) logged");
 					expect(row.reason ?? "").not.toContain("tests pass");
 				} finally {
 					restore();
@@ -918,7 +901,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
-	it("case 7 (CR-01 iteration 3 regression, PROBE P4) -- a call BLOCKED by this repo's own safety layer is not invisible to the gate", async () => {
+	it("case 7 -- a call blocked by the safety layer is recorded and counted, and the run still settles on its commit", async () => {
 		const candidate = flashExecutorCandidate();
 		const BLOCKED_PUSH = "git push --force origin main";
 
@@ -988,34 +971,14 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					const rows = readEvidence(cwd);
 					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
 					const row = rows[0] as EvidenceRowShape;
-					expect(
-						row.verdict,
-						`PROBE P4: a run containing a call BLOCKED by this repo's own safety layer must be REJECTED, ` +
-							`even though a commit landed afterwards, got: ${JSON.stringify(row)}`,
-					).toBe("reject");
-					expect(
-						row.recordCount ?? 0,
-						"both the BLOCKED push and the passing commit must have been recorded -- a blocked call must " +
-							"not be structurally invisible to the gate",
-					).toBe(2);
-					// GATE-01: the commit's tree genuinely changed (a real content commit,
-					// not --allow-empty), so branch (6) does not fire -- the reason below
-					// must therefore be branch (3)'s, naming the failing tool, proving the
-					// block is what this case's own rejection is actually about.
-					expect(
-						row.reason ?? "",
-						"the reject reason must name the failing (blocked) tool, not a tree-comparison reason",
-					).toContain("bash");
-					expect(
-						row.baseSha,
-						"HEAD genuinely moved during this run -- the commit really landed, and still rejected",
-					).not.toBe(row.headSha);
+					expect(row.verdict, `a blocked call is logged, not fatal: ${JSON.stringify(row)}`).toBe("accept");
+					expect(row.failedToolCalls, "the blocked push is counted").toBe(1);
+					expect(row.recordCount ?? 0, "both the blocked push and the commit are recorded").toBe(2);
+					expect(row.baseSha).not.toBe(row.headSha);
 
-					expect(notifications.length, "a rejection must still report an outcome").toBe(1);
-					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
-
-					// The model's own prose claimed success -- the reject reason must never echo it.
-					expect(row.reason ?? "").not.toContain("pushed and verified");
+					expect(notifications.length).toBe(1);
+					expect(notifications[0]?.level).toBe("info");
+					expect(notifications[0]?.text).not.toContain("pushed and verified");
 				} finally {
 					restore();
 					setQuickGateExecOverrideForTests(undefined);
@@ -1024,7 +987,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
-	it("case 8 (CR-01 iteration 3 regression, PROBE P7) -- a dropped capture (currentSha throws mid-run) must reject, never silently vanish into an ACCEPT", async () => {
+	it("case 8 -- a dropped capture (currentSha throws mid-run) is logged as a failed call, never silently dropped", async () => {
 		const candidate = flashExecutorCandidate();
 
 		await withFauxSession(
@@ -1087,26 +1050,12 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					const rows = readEvidence(cwd);
 					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
 					const row = rows[0] as EvidenceRowShape;
-					expect(
-						row.verdict,
-						`PROBE P7: a run holding a DROPPED capture must be REJECTED, not silently accepted just ` +
-							`because the surviving record's own SHA happens to match headSha, got: ${JSON.stringify(row)}`,
-					).toBe("reject");
-					expect(
-						row.reason ?? "",
-						"the reject reason must name the capture-failed record so a human can tell it apart from an ordinary tool failure",
-					).toContain("capture failed");
-					expect(
-						row.recordCount ?? 0,
-						"the capture failure must be recorded as ITS OWN row, not silently dropped -- CR-01 iteration 3's whole point",
-					).toBe(2);
-					expect(
-						row.baseSha,
-						"HEAD genuinely moved during this run -- the commit really landed, and still rejected",
-					).not.toBe(row.headSha);
-
-					expect(notifications.length, "a rejection must still report an outcome").toBe(1);
-					expect(notifications[0]?.level, "a rejection is an error, not an info message").toBe("error");
+					expect(row.verdict, JSON.stringify(row)).toBe("accept");
+					expect(row.tools, "the dropped capture is its own record").toContain("bash (capture failed)");
+					expect(row.failedToolCalls).toBe(1);
+					expect(row.recordCount ?? 0).toBe(2);
+					expect(row.baseSha).not.toBe(row.headSha);
+					expect(notifications.at(-1)?.level).toBe("info");
 				} finally {
 					restore();
 					setQuickGateExecOverrideForTests(undefined);
@@ -1128,7 +1077,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					// (1) a real, successful tool call that moves HEAD -- CREATES
 					// NO COMMIT, landing on a SHA that already existed before this
 					// run was even armed.
-					fauxAssistantMessage([fauxToolCall("bash", { command: "git checkout --detach HEAD~1" })], {
+					fauxAssistantMessage([fauxToolCall("bash", { command: "git checkout --detach HEAD^" })], {
 						stopReason: "toolUse",
 					}),
 					// (2) a false completion claim -- no commit was ever made here.
@@ -1142,7 +1091,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				await waitForConfiguredAuth(modelRuntime, candidate.provider);
 
 				gitInit(cwd, "work");
-				// A second commit so HEAD~1 is a real, pre-existing commit for the
+				// A second commit so HEAD^ is a real, pre-existing commit for the
 				// checkout below to land on.
 				writeFileSync(join(cwd, "second.txt"), "second\n", "utf-8");
 				runGit(["add", "--", "second.txt"], cwd);
@@ -1367,7 +1316,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
-	it("WR-02 regression (PROBE I) -- a currentSha failure inside agent_end still disarms and writes a reject row, never leaves /quick armed forever", async () => {
+	it("WR-02 regression (PROBE I) -- a currentSha failure inside agent_settled still disarms and writes a reject row, never leaves /quick armed forever", async () => {
 		const candidate = flashExecutorCandidate();
 
 		await withFauxSession(
@@ -1455,3 +1404,119 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 });
+
+const SWALLOW = ["export function f(): void {", "  try {", "    JSON.parse('x');", "  } catch {}", "}"];
+const CLEAN = ["export const ok = 1;"];
+
+/** One bash command that writes `lines` to `file` and commits it. */
+function commitCommand(file: string, lines: readonly string[]): string {
+	const writes = lines.map((line, i) => `echo "${line.replace(/"/g, '\\"')}" ${i === 0 ? ">" : ">>"} ${file}`);
+	return `mkdir -p src && ${writes.join(" && ")} && git add ${file} && git commit -m "quick: change ${file}"`;
+}
+
+/** Drive one /quick run to settle in a temp repo and hand the evidence rows and notifications to `check`. */
+async function quickRun(
+	opts: { responses: FauxResponseStep[]; cwdFiles?: Record<string, string>; expectRows?: number },
+	check: (r: { cwd: string; rows: EvidenceRowShape[]; notifications: Notification[]; callCount: number }) => void,
+): Promise<void> {
+	const candidate = flashExecutorCandidate();
+	await withFauxSession(
+		{
+			extensionSource: composite(false),
+			tools: ["bash"],
+			providerId: candidate.provider,
+			models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+			responses: opts.responses,
+			cwdFiles: opts.cwdFiles,
+		},
+		async ({ session, faux, cwd, modelRuntime }) => {
+			await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+			await waitForConfiguredAuth(modelRuntime, candidate.provider);
+			gitInit(cwd, "work");
+			const ctx = session.extensionRunner.createCommandContext();
+			const command = session.extensionRunner.getCommand("quick");
+			if (command === undefined) throw new Error('getCommand("quick") returned undefined');
+			setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC);
+			const { notifications, restore } = captureNotify(ctx);
+			try {
+				await command.handler("make the change", ctx);
+				const file = logPath(cwd, EVIDENCE_LOG_BASE);
+				await waitFor(() => existsSync(file) && readJsonl(file).length >= (opts.expectRows ?? 1), 15000, "the evidence rows");
+				check({ cwd, rows: readEvidence(cwd), notifications, callCount: faux.state.callCount });
+			} finally {
+				restore();
+				setQuickGateExecOverrideForTests(undefined);
+			}
+		},
+	);
+}
+
+const stop = () => fauxAssistantMessage([fauxText("done")], { stopReason: "stop" });
+const bashCall = (command: string) => fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" });
+
+describe("/quick gates its own change at agent_settled, in the target repo", () => {
+	it("a finding already present under <cwd>/.pi/extensions does not stop /quick from starting", async () => {
+		await quickRun(
+			{ cwdFiles: { ".pi/extensions/old/bad.ts": `${SWALLOW.join("\n")}\n` }, responses: [bashCall(commitCommand("src/ok.ts", CLEAN)), stop()] },
+			({ rows, notifications, callCount }) => {
+				expect(callCount, "the pre-existing finding must not refuse the run").toBeGreaterThan(0);
+				expect(rows[0]?.verdict).toBe("accept");
+				expect(notifications.some((n) => n.level === "error"), JSON.stringify(notifications)).toBe(false);
+			},
+		);
+	});
+
+	it("a commit that adds a new error-tier anti-pattern is rejected, naming the finding", async () => {
+		await quickRun(
+			{ responses: [bashCall(commitCommand("src/x.ts", SWALLOW)), stop()], expectRows: 2 },
+			({ rows, notifications }) => {
+				expect(rows.at(-1)?.verdict, JSON.stringify(rows)).toBe("reject");
+				expect(rows.at(-1)?.reason).toContain("swallowed-exception");
+				const last = notifications.at(-1);
+				expect(last?.level).toBe("error");
+				expect(last?.text).toContain("src/x.ts");
+			},
+		);
+	});
+
+	it("a clean commit is accepted and the verdict names the legs that ran and the failed-call count", async () => {
+		await quickRun({ responses: [bashCall(commitCommand("src/ok.ts", CLEAN)), stop()] }, ({ rows, notifications }) => {
+			expect(rows).toHaveLength(1);
+			expect(rows[0]?.verdict).toBe("accept");
+			const last = notifications.at(-1);
+			expect(last?.level).toBe("info");
+			expect(last?.text).toContain("anti-pattern: PASS");
+			expect(last?.text).toContain("0 failed tool call(s) logged");
+		});
+	});
+
+	it("an exploratory no-match grep followed by a clean commit is accepted", async () => {
+		await quickRun(
+			{ responses: [bashCall("grep zzz-no-such-text seed.txt"), bashCall(commitCommand("src/ok.ts", CLEAN)), stop()] },
+			({ rows, notifications }) => {
+				expect(rows[0]?.verdict, JSON.stringify(rows)).toBe("accept");
+				expect(rows[0]?.failedToolCalls).toBe(1);
+				expect(notifications.at(-1)?.text).toContain("1 failed tool call(s) logged");
+			},
+		);
+	});
+
+	it("a retried turn gates once, on the final HEAD", async () => {
+		await quickRun(
+			{
+				responses: [
+					fauxAssistantMessage("", { stopReason: "error", errorMessage: "provider overloaded, please retry" }),
+					bashCall(commitCommand("src/ok.ts", CLEAN)),
+					stop(),
+				],
+			},
+			({ cwd, rows, callCount }) => {
+				expect(callCount, "the failed turn was retried").toBe(3);
+				expect(rows, "one verdict for the one run").toHaveLength(1);
+				expect(rows[0]?.verdict, JSON.stringify(rows)).toBe("accept");
+				expect(rows[0]?.headSha).toBe(realHeadSha(cwd));
+			},
+		);
+	});
+});
+

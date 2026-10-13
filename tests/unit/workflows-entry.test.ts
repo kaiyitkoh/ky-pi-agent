@@ -22,6 +22,9 @@ import { describe, expect, it } from "vitest";
 import { logDir } from "../../.pi/lib/jsonl.ts";
 import workflows from "../../.pi/extensions/workflows/index.ts";
 import { isRunArmed, startRun } from "../../.pi/extensions/workflows/evidence.ts";
+import { armQuickSettle, settleQuickRun } from "../../.pi/extensions/workflows/settle.ts";
+import { currentSha, currentTree } from "../../.pi/extensions/safety/git.ts";
+import { commitFile, makeTempRepo } from "../helpers/git.ts";
 import { logFilesIn, withTempLogCwd } from "../helpers/logs.ts";
 
 /** A recording stub of exactly the `ExtensionAPI` surface `workflows/index.ts` touches. */
@@ -56,13 +59,13 @@ describe("/quick's entry point registers exactly what it claims to", () => {
 		expect(commandNames).toEqual(["quick"]);
 	});
 
-	it("registers exactly three hooks: tool_execution_end, agent_end, session_start (WR-04, CR-01 iteration 3)", () => {
+	it("registers exactly three hooks: tool_execution_end, agent_settled, session_start", () => {
 		expect(
 			hooks,
 			"an extra hook here is new surface this test did not expect; a missing session_start means " +
 				"WR-04's retention wiring silently stopped registering, and tool_result instead of " +
 				"tool_execution_end means CR-01 iteration 3's capture-point move regressed",
-		).toEqual(["tool_execution_end", "agent_end", "session_start"]);
+		).toEqual(["tool_execution_end", "agent_settled", "session_start"]);
 	});
 });
 
@@ -93,8 +96,8 @@ describe("WR-04 -- the registered session_start handler actually prunes the evid
 	});
 });
 
-describe("WR-02 (iteration 3) -- the registered session_start handler disarms a run orphaned before agent_end", () => {
-	it("frees a run left armed by a prior session that never reached agent_end", async () => {
+describe("WR-02 (iteration 3) -- the registered session_start handler disarms a run orphaned before agent_settled", () => {
+	it("frees a run left armed by a prior session that never reached agent_settled", async () => {
 		const { pi, handlers } = stubPi();
 		workflows(pi);
 		const sessionStartHandler = handlers.get("session_start");
@@ -128,5 +131,27 @@ describe("/quick's command handler is a real async function (vacuous-pass guard 
 		} as unknown as ExtensionAPI;
 		workflows(recordingPi);
 		expect(typeof commands.get("quick")?.handler).toBe("function");
+	});
+});
+
+describe("settleQuickRun", () => {
+	it("an aborted settle disarms the run without a verdict, a notification or an evidence row", () => {
+		const repo = makeTempRepo("quick-abort-");
+		commitFile(repo, "seed.txt", "seed", "seed");
+		const base = currentSha(repo);
+		startRun(repo, base, currentTree(repo));
+		armQuickSettle({ baseSha: base, baseTypecheckFailed: false });
+		commitFile(repo, "a.txt", "a", "change");
+		const notes: string[] = [];
+		settleQuickRun({ fallbackCwd: repo, projectTrusted: false, aborted: true, notify: (t) => void notes.push(t) });
+		expect(isRunArmed()).toBe(false);
+		expect(notes).toHaveLength(0);
+		expect(logFilesIn(logDir(repo))).toEqual([]);
+	});
+
+	it("a settle with nothing armed does nothing", () => {
+		const notes: string[] = [];
+		settleQuickRun({ fallbackCwd: ".", projectTrusted: false, aborted: false, notify: (t) => void notes.push(t) });
+		expect(notes).toHaveLength(0);
 	});
 });

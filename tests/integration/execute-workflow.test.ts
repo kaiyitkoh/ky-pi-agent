@@ -12,6 +12,8 @@ import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
+import type { AssistantMessage, Context, FauxResponseStep } from "@earendil-works/pi-ai";
+import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { logDir, logPath } from "../../.pi/lib/jsonl.ts";
@@ -23,8 +25,10 @@ import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/gril
 import workflowsExtension from "../../.pi/extensions/workflows/index.ts";
 import { EVIDENCE_LOG_BASE, endRun, isRunArmed } from "../../.pi/extensions/workflows/evidence.ts";
 import { setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
-import { commitFile, headSha, makeTempRepo } from "../helpers/git.ts";
+import { approve } from "../../.pi/extensions/safety/approvals.ts";
+import { commitFile, headSha, makeTempRepo, repoRoot } from "../helpers/git.ts";
 import { readJsonl } from "../helpers/logs.ts";
+import { withFauxSession } from "../helpers/session.ts";
 
 type Handler = (event: unknown, ctx: unknown) => unknown;
 
@@ -183,7 +187,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 
 		const sha = commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h, "REAL-OUTPUT 1 passed");
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain(`## T001 @ ${headSha(h.repo)}`);
@@ -203,7 +207,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const before = bytes(progressFile(h));
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		bash(h, "git commit -am x", "[work abc] x");
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("never run");
 		expect(bytes(progressFile(h))).toBe(before);
 	});
@@ -215,7 +219,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		verify(h);
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		bash(h, "git log -1", "commit");
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("run it after committing");
 		expect(bytes(progressFile(h))).toBe(before);
 	});
@@ -227,7 +231,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		writeFileSync(join(h.repo, "src", "helper.ts"), "export const helper = 1;\n");
 		verify(h);
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("src/helper.ts");
 		expect(h.notes.at(-1)?.text).toContain("not the commit");
 		expect(bytes(progressFile(h))).toBe(before);
@@ -239,7 +243,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h);
 		writeFileSync(join(h.repo, "src", "late.ts"), "export const late = 1;\n");
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("src/late.ts");
 		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
 	});
@@ -253,7 +257,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		mkdirSync(logDir(h.repo), { recursive: true });
 		writeFileSync(join(logDir(h.repo), "wire-x.jsonl"), "{}\n");
 		verify(h);
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		expect(readFileSync(progressFile(h), "utf-8")).toContain(`## T001 @ ${sha}`);
 		git(h.repo, ["add", "-A"]);
 		const staged = spawnSync("git", ["diff", "--cached", "--name-only"], { cwd: h.repo, encoding: "utf-8" }).stdout;
@@ -275,7 +279,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		bash(h, "cat README.md", "UNRELATED-OUTPUT");
 		verify(h, "VERIFY-OUTPUT");
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain("VERIFY-OUTPUT");
 		expect(text).not.toContain("UNRELATED-OUTPUT");
@@ -291,7 +295,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const before = bytes(progressFile(h));
 		commitIn(h.repo, bad, "export function f(): void {\n\ttry {\n\t\tJSON.parse(\"x\");\n\t} catch {}\n}\n");
 		verify(h);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("deterministic gate fails on the committed change");
 		expect(bytes(progressFile(h))).toBe(before);
 	});
@@ -305,7 +309,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		commitIn(h.repo, bad, `${swallow}export const g = 1;\n`);
 		verify(h);
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain("## T001 @");
 		expect(text).toContain("- Deterministic gate: typecheck: UNAVAILABLE");
@@ -320,7 +324,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const before = bytes(progressFile(h));
 		commitIn(h.repo, doc, "# a\n");
 		verify(h);
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		expect(h.confirms.join("\n")).toContain("anti-pattern: UNAVAILABLE");
 		expect(h.notes.at(-1)?.text).toContain("not approved");
 		expect(bytes(progressFile(h))).toBe(before);
@@ -329,7 +333,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		commitIn(h.repo, doc, "# a\n\nmore\n");
 		verify(h);
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		expect(readFileSync(progressFile(h), "utf-8")).toContain("no check ran; recorded with the user's approval");
 	});
 
@@ -343,7 +347,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 			await h.command(SLUG);
 			commitIn(h.repo, tf, "resource \"x\" \"y\" {}\n");
 			verify(h);
-			await h.fire("agent_end", {});
+			await h.fire("agent_settled", { aborted: false });
 		} finally {
 			setQuickGateExecOverrideForTests(undefined);
 		}
@@ -358,7 +362,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 			await h.command(SLUG);
 			commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 			verify(h);
-			await h.fire("agent_end", {});
+			await h.fire("agent_settled", { aborted: false });
 		} finally {
 			setQuickGateExecOverrideForTests(undefined);
 		}
@@ -372,7 +376,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(ignored.status, "a model's `git add .` must never pick up the work artifacts").toBe(0);
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h, `HEAD-OF-OUTPUT key=AKIA${"A".repeat(16)}\n${"x".repeat(20_000)}\nTAIL-OF-OUTPUT`);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain("TAIL-OF-OUTPUT");
 		expect(text).toContain("earlier characters elided");
@@ -386,7 +390,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h, `ok key=AKIA${"B".repeat(16)}`);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(readFileSync(progressFile(h), "utf-8")).not.toContain(`AKIA${"B".repeat(16)}`);
 	});
 
@@ -394,7 +398,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const h = harness();
 		for (let i = 0; i < 3; i++) {
 			await h.command(SLUG);
-			h.fire("agent_end", {});
+			h.fire("agent_settled", { aborted: false });
 			expect(h.notes.at(-1)?.text).toContain("rejected");
 		}
 		expect(h.notes.at(-1)?.text).toContain("escalated");
@@ -415,7 +419,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 			await h.command(SLUG);
 			commitIn(h.repo, bad, `export function f${i}(): void {\n\ttry {\n\t\tJSON.parse("x");\n\t} catch {}\n}\n`);
 			verify(h);
-			await h.fire("agent_end", {});
+			await h.fire("agent_settled", { aborted: false });
 			expect(h.notes.at(-1)?.text).toContain("deterministic gate fails");
 		}
 		expect(h.notes.at(-1)?.text).toContain("escalated");
@@ -426,7 +430,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		for (let i = 0; i < 2; i++) {
 			await h.command(SLUG);
 			h.fire("tool_execution_end", toolEnd("boom", true));
-			await h.fire("agent_end", {});
+			await h.fire("agent_settled", { aborted: false });
 		}
 		expect(h.notes.at(-1)?.text).toContain("rejected");
 		expect(h.notes.at(-1)?.text).not.toContain("escalated");
@@ -439,7 +443,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const before = bytes(progressFile(h));
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		// The model's narration of "npm test -> 99 passed" has no structured tool result behind it.
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.level).toBe("error");
 		expect(h.notes.at(-1)?.text).toContain("rejected");
 		expect(before, "vacuity guard: the file must exist with content").toBeGreaterThan(0);
@@ -452,21 +456,50 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const before = bytes(progressFile(h));
 		git(h.repo, ["commit", "--allow-empty", "-m", "empty"]);
 		h.fire("tool_execution_end", toolEnd("ok"));
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("rejected");
 		expect(bytes(progressFile(h))).toBe(before);
 	});
 
-	it("isError: a failed tool result anywhere in the run -> rejected even though a commit landed", async () => {
+	it("a failing exploratory call and a red-before-fix verification run before the commit do not reject: the final verification decides", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		bash(h, "grep zzz-no-such-text README.md", "", 1);
+		bash(h, "npm test", "red-before-fix", 1);
+		h.fire("tool_execution_end", toolEnd("edit failed", true));
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		bash(h, "npm test", "1 passed");
+		h.fire("agent_settled", { aborted: false });
+		expect(readFileSync(progressFile(h), "utf-8")).toContain("## T001 @");
+		expect(h.notes.at(-1)?.text).toContain("failed tool call(s) logged");
+		const rows = readJsonl(logPath(h.repo, EVIDENCE_LOG_BASE)) as { verdict?: string; failedToolCalls?: number }[];
+		expect(rows.at(-1)?.verdict).toBe("accept");
+		expect(rows.at(-1)?.failedToolCalls, "the red run, the grep and the failed edit are counted").toBe(3);
+	});
+
+	it("a commit whose final verification fails is rejected naming the command, whatever else passed", async () => {
 		const h = harness();
 		await h.command(SLUG);
 		const before = bytes(progressFile(h));
-		h.fire("tool_execution_end", toolEnd("boom", true));
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
-		h.fire("tool_execution_end", toolEnd("ok"));
-		h.fire("agent_end", {});
-		expect(h.notes.at(-1)?.text).toContain("rejected");
+		bash(h, "npm test", "1 failed", 1);
+		h.fire("agent_settled", { aborted: false });
+		expect(h.notes.at(-1)?.text).toContain("`npm test` exited 1");
 		expect(bytes(progressFile(h))).toBe(before);
+	});
+
+	it("an aborted settle disarms the run with no verdict, no evidence row and no attempt counted", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		bash(h, "npm test", "1 passed");
+		const notesBefore = h.notes.length;
+		h.fire("agent_settled", { aborted: true });
+		expect(isRunArmed()).toBe(false);
+		expect(executeRunContext()).toBeUndefined();
+		expect(h.notes.slice(notesBefore)).toHaveLength(0);
+		expect(existsSync(logPath(h.repo, EVIDENCE_LOG_BASE))).toBe(false);
+		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("T001");
 	});
 
 	it("drift: a commit touching a path outside the allowance HALTS, file unchanged", async () => {
@@ -475,7 +508,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const before = bytes(progressFile(h));
 		commitIn(h.repo, "src/b.ts", "export const b = 1;\n");
 		verify(h);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("HALT");
 		expect(h.notes.at(-1)?.text).toContain("src/b.ts");
 		expect(bytes(progressFile(h))).toBe(before);
@@ -487,13 +520,13 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const before = bytes(progressFile(h));
 		commitIn(h.repo, "src/b.ts", "export const b = 1;\n");
 		verify(h);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("HALT");
 
 		await h.command(SLUG);
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("HALT");
 		expect(h.notes.at(-1)?.text).toContain("src/b.ts");
 		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
@@ -505,7 +538,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		commitIn(h.repo, "src/b.ts", "export const b = 1;\n");
 		verify(h);
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		expect(h.notes.at(-1)?.text).toContain("HALT");
 
 		await h.command(`${SLUG} --rebase-base`);
@@ -519,7 +552,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h);
-		await h.fire("agent_end", {});
+		await h.fire("agent_settled", { aborted: false });
 		expect(readFileSync(progressFile(h), "utf-8")).toContain(`## T001 @ ${headSha(h.repo)}`);
 	});
 
@@ -535,7 +568,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 			expect(h.sent[0]).toContain("run the verification command yourself");
 			commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 			bash(h, "subagent", "child says: 3 passed");
-			h.fire("agent_end", {});
+			h.fire("agent_settled", { aborted: false });
 			expect(h.notes.at(-1)?.text, "a child's report is not the parent's verification run").toContain("never run");
 		} finally {
 			g[key] = prior;
@@ -549,13 +582,13 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(h.sent[0]).not.toContain("Dispatch this packet");
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain("degraded (ordinary prompt loop)");
 		expect(text).not.toMatch(/\bdelegated\b/);
 	});
 
-	it("a run whose agent_end never arrived is cleared at session_start, so it cannot settle a later turn", async () => {
+	it("a run whose agent_settled never arrived is cleared at session_start, so it cannot settle a later turn", async () => {
 		const h = harness();
 		await h.command(SLUG);
 		expect(executeRunContext()).toBeDefined();
@@ -569,7 +602,7 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 		verify(h);
-		h.fire("agent_end", {});
+		h.fire("agent_settled", { aborted: false });
 		expect(readFileSync(progressFile(h), "utf-8")).toContain(`## T001 @ ${headSha(h.repo)}`);
 		expect(isRunArmed()).toBe(false);
 		endRun("", ""); // leave no armed run behind
@@ -588,5 +621,82 @@ describe("PROGRESS.md rendering keeps tool output inert", () => {
 	it("never reads a heading inside the output as a recorded task", () => {
 		expect(recordedEntries(text)).toEqual([{ taskId: "T001", sha: SHA }]);
 		expect(progressBlocks(text)).toHaveLength(1);
+	});
+});
+
+const entry = (name: string): string => `${repoRoot()}/.pi/extensions/${name}/index.ts`.replace(/\\/g, "/");
+
+function quotedField(text: string, field: string): string {
+	const start = text.indexOf(`${field}="`);
+	if (start === -1) throw new Error(`no ${field} in block reason: ${text}`);
+	let j = start + field.length + 2;
+	while (j < text.length && text[j] !== '"') j += text[j] === "\\" ? 2 : 1;
+	return JSON.parse(text.slice(start + field.length + 1, j + 1)) as string;
+}
+
+describe("/execute in a real session with the safety layer loaded", () => {
+	it("an approved command and a failing exploratory call do not reject: commit plus passing verification is ACCEPTED", async () => {
+		const confirmCommand = "terraform apply";
+		const reissue: FauxResponseStep = ((context: Context): AssistantMessage => {
+			const last = [...context.messages].reverse().find((m) => m.role === "toolResult");
+			const text = last?.role === "toolResult" ? last.content.map((b) => (b.type === "text" ? b.text : "")).join("") : "";
+			const command = quotedField(text, "command");
+			if (!approve(quotedField(text, "request_id"), command, quotedField(text, "reason"))) throw new Error("approve() refused the pending request");
+			return fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" });
+		}) as FauxResponseStep;
+		const bashStep = (command: string) => fauxAssistantMessage([fauxToolCall("bash", { command })], { stopReason: "toolUse" });
+		const verification = "git rev-parse --verify HEAD";
+		const source = [
+			`import safety from ${JSON.stringify(entry("safety"))};`,
+			`import execute from ${JSON.stringify(entry("execute"))};`,
+			`import workflows from ${JSON.stringify(entry("workflows"))};`,
+			"export default function (pi) { safety(pi); execute(pi); workflows(pi); }",
+		].join("\n");
+
+		await withFauxSession(
+			{
+				extensionSource: source,
+				tools: ["bash"],
+				cwdFiles: {
+					[`.pi/work/${SLUG}/SPEC.md`]: renderSpecMarkdown(SPEC),
+					[`.pi/work/${SLUG}/PLAN.md`]: `- [ ] T001 [R1] Create the a module in src/a.ts | verify: ${verification}\n`,
+					[`.pi/work/${SLUG}/PROGRESS.md`]: "# Progress\n",
+				},
+				responses: [
+					bashStep("grep zzz-no-such-text seed.txt"),
+					bashStep(confirmCommand),
+					reissue,
+					bashStep('mkdir -p src && echo "export const a = 1;" > src/a.ts && git add src/a.ts && git commit -m "add a"'),
+					bashStep(verification),
+					fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
+				],
+			},
+			async ({ session, cwd }) => {
+				for (const args of [["init"], ["config", "user.email", "t@test.invalid"], ["config", "user.name", "t"], ["checkout", "-b", "work"]]) git(cwd, args);
+				writeFileSync(join(cwd, "seed.txt"), "seed\n");
+				git(cwd, ["add", "--", "seed.txt"]);
+				git(cwd, ["commit", "-m", "seed"]);
+
+				const ctx = session.extensionRunner.createCommandContext();
+				const notes: string[] = [];
+				(ctx.ui as unknown as { notify: (t: string) => void }).notify = (t) => void notes.push(t);
+				setQuickGateExecOverrideForTests(() => ({ code: 0, stdout: "", stderr: "" }));
+				try {
+					await session.extensionRunner.getCommand("execute")?.handler(SLUG, ctx);
+					const file = logPath(cwd, EVIDENCE_LOG_BASE);
+					const deadline = Date.now() + 15000;
+					while ((!existsSync(file) || readJsonl(file).length < 1) && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+
+					const rows = readJsonl(file) as { verdict?: string; failedToolCalls?: number; recordCount?: number }[];
+					expect(rows, notes.join(" | ")).toHaveLength(1);
+					expect(rows[0]?.verdict, `${JSON.stringify(rows[0])} ${notes.join(" | ")}`).toBe("accept");
+					expect(rows[0]?.failedToolCalls, "the no-match grep and the approved-then-failed command are both logged").toBeGreaterThanOrEqual(2);
+					expect(readFileSync(join(cwd, ".pi", "work", SLUG, "PROGRESS.md"), "utf-8")).toContain("## T001 @");
+					expect(notes.at(-1)).toContain("recorded at");
+				} finally {
+					setQuickGateExecOverrideForTests(undefined);
+				}
+			},
+		);
 	});
 });

@@ -3,11 +3,12 @@
  * Rationale and the dispatch order's findings live in docs/WORKFLOWS.md; this header stays short for the line budget.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { refundQualityCost } from "../diagnostics/quality-cost.ts";
-import { runQuickGateStage } from "../quality/index.ts";
+import { runTypecheckAt } from "../quality/index.ts";
+import { deriveNeed } from "../routing/guard.ts";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
+import { armQuickSettle, clearQuickSettle, settleQuickRun } from "./settle.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
 import { disarmExecuteRun, executeRunContext } from "../execute/progress.ts";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
@@ -22,7 +23,7 @@ export default function (pi: ExtensionAPI): void {
 				ctx.ui.notify('quick: usage is "/quick <task>"', "error");
 				return;
 			}
-			const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
+			const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: deriveNeed(ctx, { promptChars: task.length }) });
 			if (!plan.ok) {
 				ctx.ui.notify(plan.reason, "error");
 				return;
@@ -38,15 +39,12 @@ export default function (pi: ExtensionAPI): void {
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
 				disarmExecuteRun(); // with no shared run armed, an /execute slot is a leak that would otherwise settle this run
 
-				// Trust reaches the gate stage so an untrusted cwd's node_modules/.bin is never spawned.
-				const gate = runQuickGateStage(ctx.cwd, ctx.isProjectTrusted());
-				if (gate.blocking) {
-					// Refund only this gate's own cost: draining the ledger would erase other contributors in the same turn.
-					refundQualityCost({ ms: gate.totalMs });
-					return void ctx.ui.notify(gate.report, "error");
-				}
 				claimWorkflow("quick");
-				startRun(ctx.cwd, currentSha(ctx.cwd), currentTree(ctx.cwd)); // baseTree captured in the same try, so a throw refuses via the catch and never arms a run
+				const baseSha = currentSha(ctx.cwd);
+				const baseTree = currentTree(ctx.cwd); // read in the same try, so a throw refuses via the catch and never arms a run
+				// A typecheck that already fails on the base cannot be blamed on the change.
+				armQuickSettle({ baseSha, baseTypecheckFailed: runTypecheckAt(ctx.cwd, ctx.isProjectTrusted()).status === "fail" });
+				startRun(ctx.cwd, baseSha, baseTree);
 				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
 			} catch (err) {
 				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
@@ -70,20 +68,15 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
 		if (executeRunContext() !== undefined) return; // /execute owns the settle of its own run, whatever the load order
-		let sha = ""; // currentSha fails closed by design (safety/git.ts#currentSha)
-		let tree = ""; // same fail-closed contract: an empty tree or sha never matches, so the gate rejects
-		try { sha = currentSha(armedCwd() ?? ctx.cwd); tree = currentTree(armedCwd() ?? ctx.cwd); } catch { /* gate rejects on unknown SHA/tree below */ }
 		try {
-			const verdict = endRun(sha, tree);
-			// Accept wording states what was checked (HEAD moved), never that a commit landed.
-			if (verdict !== undefined) ctx.ui.notify(verdict.ok ? `quick: HEAD moved to ${verdict.sha} with a changed tree and no failed tool result -- no commit was verified and the work itself is NOT verified` : verdict.reason, verdict.ok ? "info" : "error");
+			settleQuickRun({ fallbackCwd: ctx.cwd, projectTrusted: ctx.isProjectTrusted(), aborted: event.aborted, notify: (text, level) => ctx.ui.notify(text, level) });
 		} catch {
 			// Swallowed -- same rule as the tool_execution_end handler above.
 		}
 	});
 
-	// endRun("") disarms an orphaned run (no agent_end arrived) before pruning; no-op when nothing is armed.
-	pi.on("session_start", (_event, ctx) => { endRun("", ""); pruneEvidenceLogs(ctx.cwd); });
+	// An orphaned run (no agent_settled arrived) is disarmed before pruning.
+	pi.on("session_start", (_event, ctx) => { clearQuickSettle(); endRun("", ""); pruneEvidenceLogs(ctx.cwd); });
 }

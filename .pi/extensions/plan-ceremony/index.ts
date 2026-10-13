@@ -125,9 +125,9 @@ export default function (pi: ExtensionAPI): void {
 		return reject === undefined ? undefined : { message: { customType: "plan-gate", content: `The last ${PLAN_FILE_NAME} was refused by the gate: ${reject}`, display: false } };
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
 		const current = armed();
-		if (current === undefined) return;
+		if (current === undefined || event.aborted) return;
 		current.turns += 1;
 		try {
 			const file = join(workDir(current.cwd, current.slug), PLAN_FILE_NAME);

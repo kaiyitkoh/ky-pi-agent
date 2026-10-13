@@ -70,7 +70,7 @@ function harness(load: (pi: unknown) => void) {
 		notes,
 		dir: join(repo, ".pi", "work", SLUG),
 		run: async (name: string, args: string) => commands.get(name)?.(args, ctx),
-		fire: (name: string): unknown[] => (handlers.get(name) ?? []).map((fn) => fn({}, ctx)),
+		fire: (name: string, event: object = {}): unknown[] => (handlers.get(name) ?? []).map((fn) => fn(event, ctx)),
 	};
 }
 
@@ -107,26 +107,37 @@ describe("/grill -- the settle hook gates whatever SPEC.md the model wrote", () 
 		expect(brief.message.content).toContain(`Question 1 of ${HARD_QUESTION_BUDGET}`);
 
 		modelWrites(join(h.dir, "SPEC.md"), UNGATED_SPEC, 1);
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		expect(h.notes.at(-1)?.text).toContain("refused");
 		const next = h.fire("before_agent_start")[0] as { message: { content: string } };
 		expect(next.message.content).toContain("Question 2 of");
 		expect(next.message.content).toContain("refused by the gate");
 
 		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 2);
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		expect(h.notes.at(-1)?.level).toBe("info");
 		expect(validateGatedSpec(readFileSync(join(h.dir, "SPEC.md"), "utf-8")).ok).toBe(true);
 		expect(h.fire("before_agent_start")[0], "a gated SPEC disarms the interrogation").toBeUndefined();
 	});
 
+	it("an aborted settle neither counts a question nor gates the SPEC", async () => {
+		const h = harness(grillExtension as (pi: unknown) => void);
+		await h.run("grill", "add the a module");
+		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 1);
+		const before = h.notes.length;
+		for (let i = 0; i < HARD_QUESTION_BUDGET + 2; i++) h.fire("agent_settled", { aborted: true });
+		expect(h.notes.slice(before), "an Esc is not a turn").toHaveLength(0);
+		const brief = h.fire("before_agent_start")[0] as { message: { content: string } };
+		expect(brief.message.content).toContain(`Question 1 of ${HARD_QUESTION_BUDGET}`);
+	});
+
 	it("disarms with an error once the question budget is spent without a gated SPEC", async () => {
 		const h = harness(grillExtension as (pi: unknown) => void);
 		await h.run("grill", "add the a module");
-		for (let i = 0; i < HARD_QUESTION_BUDGET; i++) h.fire("agent_end");
+		for (let i = 0; i < HARD_QUESTION_BUDGET; i++) h.fire("agent_settled");
 		const last = h.fire("before_agent_start")[0] as { message: { content: string } };
 		expect(last.message.content).toContain("hard budget");
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		expect(h.notes.at(-1)?.level).toBe("error");
 		expect(h.fire("before_agent_start")[0]).toBeUndefined();
 	});
@@ -139,7 +150,7 @@ describe("/grill -- the settle hook gates whatever SPEC.md the model wrote", () 
 		claimWorkflow("execute");
 		expect(h.fire("before_agent_start")[0], "an /execute turn must not carry the grill brief").toBeUndefined();
 		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 1);
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		expect(h.notes.slice(armedNotes), "a retired run gates nothing").toHaveLength(0);
 
 		await h.run("grill", "--resume");
@@ -185,16 +196,29 @@ describe("/plan -- refuses an ungated SPEC and gates whatever PLAN.md the model 
 		expect(h.sent.length).toBe(1);
 
 		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R9] Create the a module in src/a.ts | verify: npm test\n", 1);
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		expect(h.notes.at(-1)?.text).toContain("refused");
 		const retry = h.fire("before_agent_start")[0] as { message: { content: string } };
 		expect(retry.message.content).toContain("refused by the gate");
 
 		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R1] Create the a module in src/a.ts | verify: npm test\n", 2);
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		expect(h.notes.at(-1)?.level).toBe("info");
 		expect(readFileSync(join(h.dir, "PLAN.md"), "utf-8")).toContain("## Task List");
 		expect(existsSync(join(h.dir, "PLAN.md"))).toBe(true);
+	});
+
+	it("an aborted settle neither counts a turn nor gates the PLAN", async () => {
+		const h = harness(planExtension as (pi: unknown) => void);
+		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 0);
+		await h.run("plan", SLUG);
+		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R9] Create the a module in src/a.ts | verify: npm test\n", 1);
+		const before = h.notes.length;
+		for (let i = 0; i < HARD_QUESTION_BUDGET + 2; i++) h.fire("agent_settled", { aborted: true });
+		expect(h.notes.slice(before), "an Esc is not a turn").toHaveLength(0);
+		expect(h.fire("before_agent_start")[0], "the run is still armed").toBeUndefined();
+		h.fire("agent_settled", { aborted: false });
+		expect(h.notes.at(-1)?.text).toContain("refused");
 	});
 
 	it("disarms with an error after the same hard turn budget as /grill", async () => {
@@ -202,7 +226,7 @@ describe("/plan -- refuses an ungated SPEC and gates whatever PLAN.md the model 
 		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 0);
 		await h.run("plan", SLUG);
 		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R9] Create the a module in src/a.ts | verify: npm test\n", 1);
-		for (let i = 0; i < HARD_QUESTION_BUDGET; i++) h.fire("agent_end");
+		for (let i = 0; i < HARD_QUESTION_BUDGET; i++) h.fire("agent_settled");
 		expect(h.notes.at(-1)?.level).toBe("error");
 		expect(h.notes.at(-1)?.text).toContain("turns passed");
 		expect(h.fire("before_agent_start")[0], "a spent /plan injects nothing into later turns").toBeUndefined();
@@ -213,11 +237,11 @@ describe("/plan -- refuses an ungated SPEC and gates whatever PLAN.md the model 
 		modelWrites(join(h.dir, "SPEC.md"), renderSpecMarkdown(SPEC), 0);
 		await h.run("plan", SLUG);
 		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R9] Create the a module in src/a.ts | verify: npm test\n", 1);
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		claimWorkflow("execute");
 		expect(h.fire("before_agent_start")[0]).toBeUndefined();
 		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R1] Create the a module in src/a.ts | verify: npm test\n", 2);
-		h.fire("agent_end");
+		h.fire("agent_settled");
 		expect(readFileSync(join(h.dir, "PLAN.md"), "utf-8"), "a retired /plan re-renders nothing").not.toContain("## Task List");
 	});
 });

@@ -14,7 +14,7 @@ import { gateDepthFor } from "../quality/gates.ts";
 import { registeredToolNames, runChangeGateStage, runTypecheckAt } from "../quality/index.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
+import { disarmRun, endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, readLedger } from "./ledger.ts";
 import {
@@ -123,14 +123,14 @@ export default function (pi: ExtensionAPI): void {
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
 				claimWorkflow("execute");
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });
-				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nAny failed tool call rejects this attempt, so do not run a check you expect to fail. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
+				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nFailed intermediate tool calls are logged, not fatal: the attempt passes when the one atomic commit lands and the verification command, run exactly as written on the committed HEAD, exits 0. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
 			}
 		},
 	});
 
-	// A run whose agent_end never arrived must not settle some later turn.
+	// A run whose agent_settled never arrived must not settle some later turn.
 	pi.on("session_start", () => disarmExecuteRun());
 
 	pi.on("tool_execution_start", (event) => {
@@ -144,9 +144,10 @@ export default function (pi: ExtensionAPI): void {
 		noteToolEnd(event.toolCallId, event.isError, event.result, () => ({ sha: headShaOrEmpty(run.cwd), dirty: uncommittedPaths(run.cwd) }));
 	});
 
-	pi.on("agent_end", async (_event, ctx) => {
+	pi.on("agent_settled", async (event, ctx) => {
 		const run = executeRunContext();
 		if (run === undefined) return;
+		if (event.aborted) return void (disarmExecuteRun(), disarmRun()); // an aborted run records no verdict and consumes no attempt
 		const verification = verificationRecord();
 		disarmExecuteRun();
 		try {
@@ -185,7 +186,7 @@ export default function (pi: ExtensionAPI): void {
 			// The ledger row is the record; PROGRESS.md is the readable copy.
 			appendLedger(cwd, run.slug, { kind: "accepted", taskId: run.taskId, sha: verdict.sha, entry: rendered });
 			appendProgress(cwd, run.slug, rendered);
-			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode})`, "info");
+			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode}); ${verdict.failedToolCalls} failed tool call(s) logged`, "info");
 		} catch (err) {
 			ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${err instanceof Error ? err.message : String(err)}`, "error");
 		}

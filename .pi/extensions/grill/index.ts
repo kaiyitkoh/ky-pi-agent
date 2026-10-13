@@ -146,9 +146,9 @@ export default function (pi: ExtensionAPI): void {
 		return current === undefined ? undefined : { message: { customType: "grill-turn", content: turnBrief(current), display: false } };
 	});
 
-	pi.on("agent_end", (_event, ctx) => {
+	pi.on("agent_settled", (event, ctx) => {
 		const current = armed();
-		if (current === undefined) return;
+		if (current === undefined || event.aborted) return;
 		current.asked += 1;
 		try {
 			const file = join(workDir(current.cwd, current.slug), SPEC_FILE_NAME);
