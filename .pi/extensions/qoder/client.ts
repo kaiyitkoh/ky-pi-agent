@@ -292,11 +292,12 @@ export function createResultFolder(): ResultFolder {
 			return;
 		}
 
-		// A new session's own idle status, or a replayed one, arrives before the agent has started on the task.
-		if (type === "session.status_idle" && started) {
-			done = true;
+		if (type === "session.status_idle") {
 			const sr = readRecord(record.stop_reason);
 			const srType = sr === undefined ? undefined : readString(sr.type);
+			// A new session's own idle arrives before the agent starts; only one naming a failure ends the stream that early.
+			if (!started && (srType === undefined || srType === "end_turn")) return;
+			done = true;
 			if (srType !== undefined) {
 				stopReason = srType;
 			}

@@ -443,6 +443,16 @@ describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a 
 		});
 	});
 
+	it("an idle frame naming a failure before the agent started ends the stream with that failure", async () => {
+		const failed = 'event: session.status_idle\ndata: {"type":"session.status_idle","stop_reason":{"type":"error"}}\n';
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: `${failed}\n` }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(/stop_reason "error"/);
+			});
+		});
+	});
+
 	it("asks for an event stream", async () => {
 		await withTempLogCwd(async (cwd) => {
 			await withQoderLoopback({}, async (loop) => {
