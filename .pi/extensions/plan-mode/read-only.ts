@@ -73,6 +73,7 @@
  * point that must sit at `index.ts`). Registers nothing; does not spell the
  * tool-registration call in code or prose.
  */
+import { gitProgramOption } from "../safety/git-options.ts";
 import { canonicalise, normaliseExecutable, PACKAGE_RUNNER_WRAPPERS } from "../safety/shell.ts";
 
 /** Plan mode's answer for one bash command. `reason` is shown to the model verbatim. */
@@ -203,41 +204,6 @@ const GIT_SAFE_GLOBAL_FLAGS = new Set([
 	"--man-path",
 	"--info-path",
 ]);
-
-/**
- * `git` options that execute a command or write a file, whatever the
- * subcommand. Checked across the WHOLE argv rather than per subcommand,
- * because none of them has a benign meaning anywhere in the read-only set.
- *
- * All three were executed (git 2.54.0.windows.1):
- *
- *   $ git grep -O'sh -c "echo PAGER_RAN"' needle
- *   PAGER_RAN
- *   $ git ls-remote --upload-pack='sh -c "echo UPLOADPACK_RAN; exit 1"' .
- *   fatal: protocol error: bad line length character: UPLO   <- the command ran
- *   $ git diff --output=/tmp/wrote.txt HEAD && ls /tmp/wrote.txt
- *   /tmp/wrote.txt                                            <- a file appeared
- *
- * Every entry here is a LONG option, so no short-option bundling applies and
- * exact matching is right. `git grep`'s `-O` is checked separately, in the
- * `grep` clause, precisely because it is short: matching `-O` across the whole
- * argv would deny `git log -SFOO` (whose `-SFOO` cluster contains an `O`) and
- * `git diff -O<orderfile>` (which merely reads an order file).
- */
-const GIT_EXECUTING_OR_WRITING_FLAGS = ["--upload-pack", "--receive-pack", "--output", "--ext-diff"];
-
-/**
- * `git grep`'s pager flags. `-O<cmd>` / `--open-files-in-pager=<cmd>` runs
- * `<cmd>`, and it BUNDLES — both spellings were executed:
- *
- *   $ git grep -O'sh -c "echo PAGER_RAN"' needle
- *   PAGER_RAN
- *   $ git grep -iO'sh -c "echo BUNDLED_PAGER_RAN"' needle
- *   BUNDLED_PAGER_RAN
- *
- * so {@link hasBundledFlag} is what checks them.
- */
-const GIT_GREP_PAGER_FLAGS = ["-O", "--open-files-in-pager"];
 
 /**
  * `git remote` / `git reflog` operations that are read-only. Both subcommands
@@ -433,16 +399,8 @@ const ARGUMENT_RULES: Record<string, (args: readonly string[]) => string | undef
 		const sub = args[i];
 		if (sub === undefined) return "`git` with no subcommand";
 		if (!GIT_READ_SUBCOMMANDS.has(sub)) return `\`git ${sub}\` is not a read-only git subcommand`;
-		// CR2-02, step 2: long flags that execute or write, wherever they appear.
-		const executing = hasFlag(args, GIT_EXECUTING_OR_WRITING_FLAGS);
-		if (executing !== undefined) {
-			return `\`git ${executing}\` runs its argument as a command or writes a file`;
-		}
-		// CR2-02, step 3: `git grep`'s pager flag is arbitrary execution, and bundles.
-		if (sub === "grep") {
-			const pager = hasBundledFlag(args, GIT_GREP_PAGER_FLAGS);
-			if (pager !== undefined) return `\`git grep ${pager}\` runs its argument as a pager command`;
-		}
+		const program = gitProgramOption(sub, args.slice(i + 1));
+		if (program !== undefined) return `\`git ${program}\` runs its argument as a command or writes a file`;
 		// CR2-02, step 4: two subcommands on the read set carry mutating operations.
 		if (sub === "remote" || sub === "reflog") {
 			const read = sub === "remote" ? GIT_REMOTE_READ_OPERATIONS : GIT_REFLOG_READ_OPERATIONS;

@@ -5,8 +5,8 @@
  *   function here. Asking "does the command mention `main`" instead would block
  *   `git worktree add -b feat main`, `git fetch origin main`, `git diff main`.
  * - Is this subcommand a WRITE given its args? A pure table of per-subcommand predicates
- *   (`{ subcommand, matches(args), why }`); `rebase` and `apply` appear in both tables with
- *   complementary predicates. `push` is always a write while `HEAD` is protected.
+ *   (`{ subcommand, matches(args), why }`); `apply` appears in both tables with complementary
+ *   predicates. `push` and every `rebase` are writes while `HEAD` is protected.
  *
  * `push` on any branch: force, every-branch and protected or ambiguous destinations block. Otherwise the destination is
  * resolved (explicit `src:dst`, or from config via {@link GitPolicyFacts.readConfig} only when nothing earlier in the
@@ -32,6 +32,8 @@
  * matches it as a substring).
  */
 import { spawnSync } from "node:child_process";
+
+import { gitProgramOption } from "./git-options.ts";
 
 /** `currentBranch` result for a detached HEAD or any `git symbolic-ref` failure; never a real branch name, so never protected. */
 export const DETACHED_HEAD = "(detached HEAD)";
@@ -121,10 +123,6 @@ interface GitSubcommandRule {
 	readonly why: string;
 }
 
-function hasPositionalArg(args: readonly string[]): boolean {
-	return args.some((a) => !a.startsWith("-"));
-}
-
 /** Subcommands that WRITE to the checked-out branch for at least some argument shapes. */
 export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "push", matches: () => true, why: "a write regardless of refspec, since an implicit destination is the checked-out branch" },
@@ -141,8 +139,8 @@ export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	},
 	{
 		subcommand: "rebase",
-		matches: (args) => !hasPositionalArg(args),
-		why: "bare rebase rewrites the checked-out branch's history against its upstream",
+		matches: () => true,
+		why: "rewrites the checked-out branch, or the branch it switches to first",
 	},
 ];
 
@@ -166,11 +164,6 @@ export const GIT_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 		why:
 			"reads the named ref to populate a SECOND working directory -- with or without -b/-B, neither form " +
 			"mutates the named ref itself (the pinned answer for the without--b case)",
-	},
-	{
-		subcommand: "rebase",
-		matches: (args) => hasPositionalArg(args),
-		why: "an explicit target ref makes this the read-preview form, rewriting the OTHER ref, not the checked-out branch",
 	},
 	{
 		subcommand: "apply",
@@ -506,6 +499,10 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 	}
 	const restricted = restrictedFormReason(invocation.subcommand, invocation.args);
 	if (restricted !== undefined) return { kind: "block", reason: `"${display}": ${restricted} -- blocked on every branch` };
+	const program = gitProgramOption(invocation.subcommand, invocation.args);
+	if (program !== undefined) {
+		return { kind: "block", reason: `"${display}": "${program}" runs a program or writes a file -- blocked on every branch` };
+	}
 
 	const push = invocation.subcommand === "push" ? planPush(invocation.args, invocation.configOverrides ?? [], facts) : undefined;
 	if (push?.kind === "refused") {

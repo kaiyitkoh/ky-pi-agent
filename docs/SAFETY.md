@@ -67,10 +67,11 @@ docstring for the structural argument). Concretely, it catches:
 - **Backgrounding** (`nohup ... &`) — denied on the presence of a backgrounded
   statement, because this guard cannot observe it complete before returning.
 - **`git`/`glab` writes to a protected branch** — `git push`, `commit`,
-  `reset`, `merge`, `cherry-pick`, `revert`, `am`, a non-dry-run `apply`, and a
-  bare `rebase` all block when `HEAD` is protected, while `fetch`, `diff`,
-  `log`, `status`, `show`, `branch`, `remote`, `stash list`,
-  `worktree add -b feat main`, and a rebase naming an explicit target ref all
+  `reset`, `merge`, `cherry-pick`, `revert`, `am`, a non-dry-run `apply`, and
+  every `rebase` (`git rebase origin/main` rewrites the checked-out branch)
+  all block when `HEAD` is protected, while `fetch`, `diff`,
+  `log`, `status`, `show`, `branch`, `remote`, `stash list` and
+  `worktree add -b feat main` all
   stay allowed — a named allow-case, never merely "absent from the deny list".
   A leading git GLOBAL option before the subcommand (`git -C /repo status`,
   `git --no-pager log`) is skipped correctly rather than misread as an
@@ -236,6 +237,14 @@ being written, blocks); `symbolic-ref` reads only; `format-patch` refuses mail
 options and an output directory outside the project; `archive` refuses
 `--remote` and `--exec`; `notes` allows `list` and `show`; `sparse-checkout`
 allows `list`.
+
+Options and forms that make git run a program or write a file block on every
+branch, through one list (`safety/git-options.ts`) that plan mode also uses:
+`--upload-pack`, `--receive-pack`, `--exec`, `--output`, `--ext-diff`,
+`--extcmd`, `git grep -O`/`--open-files-in-pager`, `git rebase -x`,
+`git clone -u`, `git ls-remote -u` (short options also when bundled, such as
+`-iO<cmd>`), `git submodule foreach` and `git bisect run`. `filter-branch`,
+`difftool` and `mergetool` are not in the subcommand list, so they block too.
 
 Global options before the subcommand are parsed against a list. `-c` is allowed
 only for `core.quotepath` and `color.ui`. `--config-env`, `--exec-path`,
