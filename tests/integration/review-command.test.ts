@@ -9,12 +9,21 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import { allowanceOf, appendLedger, ledgerFile } from "../../.pi/extensions/execute/ledger.ts";
+import { allowanceOf, appendLedger, ledgerFile, specDigest, tasksOf } from "../../.pi/extensions/execute/ledger.ts";
+import { validatePlan } from "../../.pi/extensions/plan-ceremony/plan-schema.ts";
 import { renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import { buildReviewerContext } from "../../.pi/extensions/quality/reviewer.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
 import { commitFile, makeTempRepo } from "../helpers/git.ts";
+
+/** The pin /execute would write for the SPEC and PLAN currently on disk. */
+function livePin(repo: string): { tasks: ReturnType<typeof tasksOf>; specHash: string } {
+	const dir = join(repo, ".pi", "work", SLUG);
+	const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), ["R1"]);
+	if (!plan.ok) throw new Error(plan.reason);
+	return { tasks: tasksOf(plan.plan.tasks), specHash: specDigest(readFileSync(join(dir, "SPEC.md"), "utf-8")) };
+}
 
 const mocks = vi.hoisted(() => ({
 	review: undefined as unknown,
@@ -120,7 +129,7 @@ function setup(extra?: string, aSource = "export const a = 1;\n", opts: { aName?
 	const recordedSha = extras.length === 0 ? sha : head;
 	const entry = renderProgressAppend({ taskId: "T001", commitSha: recordedSha, verificationCommand: "npm test", output: "ok", exitCode: 0, recordedAt: 0 });
 	writeFileSync(join(dir, "PROGRESS.md"), entry);
-	appendLedger(repo, SLUG, { kind: "base", sha: baseSha, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), tasks: [{ id: "T001", path: "src/a.ts", verificationCommand: "npm test" }], reason: "test" });
+	appendLedger(repo, SLUG, { kind: "base", sha: baseSha, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), ...livePin(repo), reason: "test" });
 	appendLedger(repo, SLUG, { kind: "accepted", taskId: "T001", sha: recordedSha, entry });
 	mocks.reviewPath = join(dir, "REVIEW.md");
 
@@ -254,6 +263,20 @@ describe("/review -- the real handler", () => {
 		expect(mocks.calls).toHaveLength(0);
 	});
 
+	it("refuses when SPEC.md changed after /execute pinned it, and a --repin row clears it without reading as a rebase", async () => {
+		const h = setup();
+		const specFile = join(h.repo, ".pi", "work", SLUG, "SPEC.md");
+		writeFileSync(specFile, readFileSync(specFile, "utf-8").replace("create the a module so callers", "create the a module so nobody"));
+		await h.run(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("SPEC.md changed since /execute pinned them");
+		expect(mocks.calls).toHaveLength(0);
+
+		appendLedger(h.repo, SLUG, { kind: "pin", allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), ...livePin(h.repo), reason: "test re-pin" });
+		await h.run(SLUG);
+		expect(mocks.calls).toHaveLength(1);
+		expect(mocks.calls[0]?.args.at(-1)).not.toContain("Re-pinned at");
+	});
+
 	it("refuses when no slug has a PROGRESS.md", async () => {
 		const h = setup();
 		rmSync(join(h.repo, ".pi", "work", SLUG, "PROGRESS.md"));
@@ -281,7 +304,7 @@ describe("/review -- the real handler", () => {
 		expect(mocks.calls).toHaveLength(0);
 
 		const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: h.repo, encoding: "utf-8" }).trim();
-		appendLedger(h.repo, SLUG, { kind: "base", sha: head, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), reason: "test re-pin" });
+		appendLedger(h.repo, SLUG, { kind: "base", sha: head, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), ...livePin(h.repo), reason: "test re-pin" });
 		await h.run(SLUG);
 		expect(mocks.calls).toHaveLength(1);
 		expect(mocks.calls[0]?.args.at(-1)).toContain(`Re-pinned at ${head}`);

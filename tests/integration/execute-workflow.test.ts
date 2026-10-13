@@ -20,6 +20,7 @@ import { logDir, logPath } from "../../.pi/lib/jsonl.ts";
 import { recordCheckpoint } from "../../.pi/extensions/checkpoint/store.ts";
 import executeExtension from "../../.pi/extensions/execute/index.ts";
 import { HANDOFF_AGENT } from "../../.pi/extensions/execute/handoff.ts";
+import { latestRepin, readLedger } from "../../.pi/extensions/execute/ledger.ts";
 import { driftAbort, executeRunContext, progressBlocks, recordedEntries, renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import workflowsExtension from "../../.pi/extensions/workflows/index.ts";
@@ -607,11 +608,11 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.fire("agent_settled", { aborted: true });
 		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), PLAN.replace("verify: npm test", "verify: true"));
 		await h.command(SLUG);
-		expect(h.notes.at(-1)?.text).toContain("differ from those pinned");
+		expect(h.notes.at(-1)?.text).toContain("changed since s1 was pinned");
 		expect(h.sent, "a tampered plan hands nothing to the model").toHaveLength(1);
 
 		h.approve = true;
-		await h.command(`${SLUG} --rebase-base`);
+		await h.command(`${SLUG} --repin`);
 		expect(h.confirms.at(-1)).toContain("verify: npm test");
 		expect(h.confirms.at(-1)).toContain("verify: true");
 		await h.command(SLUG);
@@ -627,7 +628,47 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.fire("agent_settled", { aborted: true });
 		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), PLAN);
 		await h.command(SLUG);
-		expect(h.notes.at(-1)?.text).toContain("differ from those pinned");
+		expect(h.notes.at(-1)?.text).toContain("changed since s1 was pinned");
+	});
+
+	it("a later task's text rewritten with the same path and verification is refused", async () => {
+		const two = `${PLAN}- [ ] T002 [R1] Implement rate limiting in src/a.ts | verify: npm test\n`;
+		const h = harness({ plan: two });
+		await h.command(SLUG);
+		await h.fire("agent_settled", { aborted: true });
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), two.replace("Implement rate limiting", "Add a comment"));
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("PLAN.md's tasks");
+		expect(h.sent).toHaveLength(1);
+	});
+
+	it("a SPEC.md edited after the pin is refused", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		await h.fire("agent_settled", { aborted: true });
+		const specFile = join(h.repo, ".pi", "work", SLUG, "SPEC.md");
+		writeFileSync(specFile, readFileSync(specFile, "utf-8").replace("unrelated to the a module", "not needed"));
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("SPEC.md changed since s1 was pinned");
+		expect(h.sent).toHaveLength(1);
+	});
+
+	it("--repin re-pins only with approval and never moves the drift base", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		await h.fire("agent_settled", { aborted: true });
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), PLAN.replace("Create the a module", "Create the a module carefully"));
+		await h.command(`${SLUG} --repin`);
+		expect(h.notes.at(-1)?.text).toContain("declined");
+		h.approve = true;
+		await h.command(`${SLUG} --repin`);
+		expect(h.confirms.at(-1)).toContain("drift base stays");
+		const rows = readLedger(h.repo, SLUG);
+		expect(rows.filter((r) => r.kind === "base")).toHaveLength(1);
+		expect(latestRepin(rows), "a PLAN edit is not a rebase, so /review keeps its history check").toBeUndefined();
+		await h.command(SLUG);
+		expect(h.sent).toHaveLength(2);
+		await h.fire("agent_settled", { aborted: true });
 	});
 
 	it("delegated dispatch names the executor-handoff agent and still requires the parent's own verification run", async () => {

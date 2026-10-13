@@ -454,8 +454,8 @@ allowance, in the ledger. It never prompts the model. `/review` then exempts
 entries recorded before the re-pin from the "on HEAD's history" check, treats
 the re-pinned commit as the last verified point, and adds a line to the MR's
 Verification section saying the earlier entries were verified on commits a
-rebase may have replaced. An intended SPEC/PLAN allowance change is accepted
-the same way.
+rebase may have replaced. An intended SPEC/PLAN change with no rebase uses
+`--repin` instead (below), so it never reads as one.
 `/review` diffs from `git merge-base HEAD staging`, and any drifted path needs
 explicit approval before the MR opens. It reads the
 committed diff only, and `/review` refuses to start while any non-ignored
@@ -506,15 +506,26 @@ nothing. `/execute` and `/review` also refuse when SPEC's expected files and
 PLAN's files-touched no longer match the allowance pinned with the base, so
 a model cannot widen its own allowance to absorb drift.
 
-The task list is pinned the same way. The base row also records each task's
-id, path and verification command. `.pi/work/` sits in the work tree and the
-model writes SPEC.md and PLAN.md during `/grill` and `/plan`, so it cannot be
-a protected path; instead `/execute` and `/review` refuse when PLAN.md's tasks
-differ from the pin (a rewritten verification command, a deleted or added
-task). The verification command an attempt is checked against is the pinned
-one, fixed when the run is armed. `/execute <slug> --rebase-base` shows the
-pinned and current task lists side by side and re-pins only on approval. A
-ledger written before tasks were pinned refuses until it is re-pinned this way.
+The task list and the SPEC are pinned the same way. The base row also
+records each task's full line (its description), requirement ids, path and
+verification command, and a SHA-256 of SPEC.md. `.pi/work/` sits in the work
+tree and the model writes SPEC.md and PLAN.md during `/grill` and `/plan`, so
+it cannot be a protected path; instead `/execute` and `/review` refuse when
+PLAN.md's tasks or SPEC.md differ from the pin (a later task's description
+rewritten, a requirement id moved, a verification command changed, a task
+deleted or added, any SPEC edit). The next brief is therefore only ever built
+from pinned content, and the verification command an attempt is checked
+against is the pinned one, fixed when the run is armed.
+
+A legitimate SPEC or PLAN edit (fixing a wrong verification command for a task
+not yet run, say) is accepted with `/execute <slug> --repin`. It shows the
+pinned and current allowance, task lines and whether SPEC.md changed through
+`ctx.ui.confirm`, and on approval appends a `pin` row. A `pin` row never moves
+the drift base and is not a rebase: `/review` keeps checking every recorded
+commit against HEAD's history and adds no rebase line to the MR.
+`--rebase-base` also re-pins this content, alongside the base. A ledger
+written before the full task line and SPEC hash were pinned refuses until it
+is re-pinned.
 
 The key is protected by the safety path guard, not by the operating system.
 Any `read`/`write`/`edit` path, or any bash argument, that passes through a

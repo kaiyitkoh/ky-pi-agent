@@ -19,10 +19,22 @@ export interface PinnedTask {
 	readonly id: string;
 	readonly path: string | null;
 	readonly verificationCommand: string | null;
+	readonly requirementIds?: readonly string[];
+	readonly line?: string;
 }
 
+/** The SPEC and PLAN content a run is held to; `tasks` and `specHash` are absent from rows written before they were pinned. */
+export interface PlanPin {
+	readonly allowance: readonly string[];
+	readonly tasks?: readonly PinnedTask[];
+	readonly specHash?: string;
+	readonly reason: string;
+}
+
+/** `base` moves the drift base; `pin` re-pins the SPEC and PLAN content only, so it never reads as a rebase. */
 export type LedgerRow =
-	| { readonly kind: "base"; readonly sha: string; readonly allowance: readonly string[]; readonly reason: string; readonly tasks?: readonly PinnedTask[] }
+	| ({ readonly kind: "base"; readonly sha: string } & PlanPin)
+	| ({ readonly kind: "pin" } & PlanPin)
 	| { readonly kind: "rejected"; readonly taskId: string; readonly count: number | null }
 	| { readonly kind: "reset"; readonly taskId: string }
 	| { readonly kind: "accepted"; readonly taskId: string; readonly sha: string; readonly entry: string };
@@ -95,25 +107,39 @@ export function ledgerBase(rows: readonly LedgerRow[]): string | undefined {
 	return last !== undefined && "sha" in last ? last.sha : undefined;
 }
 
-/** The write allowance pinned with the latest base, so a widened SPEC/PLAN cannot absorb drift unnoticed. */
+/** The SPEC and PLAN content pinned by the latest `base` or `pin` row; undefined before the first /execute. */
+export function pinnedPlan(rows: readonly LedgerRow[]): PlanPin | undefined {
+	return rows.filter((r) => r.kind === "base" || r.kind === "pin").at(-1) as PlanPin | undefined;
+}
+
+/** The pinned write allowance, so a widened SPEC/PLAN cannot absorb drift unnoticed. */
 export function pinnedAllowance(rows: readonly LedgerRow[]): readonly string[] | undefined {
-	const base = rows.filter((r) => r.kind === "base").at(-1);
-	return base?.kind === "base" ? base.allowance : undefined;
+	return pinnedPlan(rows)?.allowance;
 }
 
-/** The task list pinned with the latest base; undefined when no base, or a base written before tasks were pinned. */
+/** The task list pinned with the latest `base` or `pin`; undefined when none, or a row written before tasks were pinned. */
 export function pinnedTasks(rows: readonly LedgerRow[]): readonly PinnedTask[] | undefined {
-	const base = rows.filter((r) => r.kind === "base").at(-1);
-	return base?.kind === "base" ? base.tasks : undefined;
+	return pinnedPlan(rows)?.tasks;
 }
 
-export function tasksOf(tasks: readonly { readonly id: string; readonly path?: string; readonly verificationCommand?: string }[]): readonly PinnedTask[] {
-	return tasks.map((t) => ({ id: t.id, path: t.path ?? null, verificationCommand: t.verificationCommand ?? null }));
+export function tasksOf(tasks: readonly { readonly id: string; readonly path?: string; readonly verificationCommand?: string; readonly requirementIds: readonly string[]; readonly rawLine: string }[]): readonly PinnedTask[] {
+	return tasks.map((t) => ({ id: t.id, path: t.path ?? null, verificationCommand: t.verificationCommand ?? null, requirementIds: t.requirementIds, line: t.rawLine }));
+}
+
+export function specDigest(specMarkdown: string): string {
+	return createHash("sha256").update(specMarkdown).digest("hex");
+}
+
+/** Which pinned file the live SPEC/PLAN content departs from, or undefined when it matches or nothing is pinned yet. */
+export function pinMismatch(pin: PlanPin | undefined, now: { readonly tasks: readonly PinnedTask[]; readonly specHash: string }): string | undefined {
+	if (pin === undefined) return undefined;
+	if (JSON.stringify(pin.tasks) !== JSON.stringify(now.tasks)) return "PLAN.md's tasks (text, requirement ids, paths or verification commands)";
+	return pin.specHash === now.specHash ? undefined : "SPEC.md";
 }
 
 /** One line per task, so a re-pin prompt shows exactly what moved. */
 export function renderTasks(tasks: readonly PinnedTask[] | undefined): string {
-	return tasks === undefined ? "(none pinned)" : tasks.map((t) => `${t.id} ${t.path ?? "-"} | verify: ${t.verificationCommand ?? "(none)"}`).join("\n");
+	return tasks === undefined ? "(none pinned)" : tasks.map((t) => t.line ?? `${t.id} ${t.path ?? "-"} | verify: ${t.verificationCommand ?? "(none)"}`).join("\n");
 }
 
 export function acceptedEntries(rows: readonly LedgerRow[]): readonly { readonly taskId: string; readonly sha: string; readonly entry: string }[] {

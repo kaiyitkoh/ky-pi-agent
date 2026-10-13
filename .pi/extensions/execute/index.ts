@@ -18,7 +18,7 @@ import { deriveNeed, guardRoute } from "../routing/guard.ts";
 import { acceptedReason, disarmRun, endRun, isRunArmed, isRunPending, startRun, writeRunEvidence } from "../workflows/evidence.ts";
 import { IN_FLIGHT, notePrompt } from "../workflows/settle.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
-import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, pinnedTasks, readLedger, renderTasks, tasksOf } from "./ledger.ts";
+import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinMismatch, pinnedAllowance, pinnedPlan, pinnedTasks, readLedger, renderTasks, specDigest, tasksOf } from "./ledger.ts";
 import {
 	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureHarnessIgnored, normalisePathForDrift,
 	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, renderProgressAppend, uncommittedPaths, verificationRecord,
@@ -59,7 +59,8 @@ export default function (pi: ExtensionAPI): void {
 				if (verdict.kind === "block") return fail(verdict.reason);
 
 				if (!existsSync(join(dir, "PLAN.md"))) return fail(`execute: .pi/work/${slug}/PLAN.md does not exist -- run /plan first`);
-				const spec = validateGatedSpec(readFileSync(join(dir, "SPEC.md"), "utf-8"));
+				const specText = readFileSync(join(dir, "SPEC.md"), "utf-8");
+				const spec = validateGatedSpec(specText);
 				if (!spec.ok) return fail(spec.reason);
 				const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), extractSpecRequirementIds(spec.spec.requirementsBody));
 				if (!plan.ok) return fail(plan.reason);
@@ -75,23 +76,31 @@ export default function (pi: ExtensionAPI): void {
 				const from = ledgerBase(rows);
 				const tasks = tasksOf(plan.plan.tasks);
 				const pinnedT = pinnedTasks(rows);
+				const specHash = specDigest(specText);
+				const pinShown = `Allowance pinned: ${(pinnedUnion ?? []).join(", ")}\nAllowance now: ${union.join(", ")}\nSPEC.md: ${pinnedPlan(rows)?.specHash === specHash ? "unchanged" : "CHANGED since the pin"}\nTasks pinned:\n${renderTasks(pinnedT)}\nTasks now:\n${renderTasks(tasks)}`;
+				if (tokens.includes("--repin")) {
+					// A PLAN or SPEC edit the user accepts: the drift base stays, so /review keeps checking every recorded commit's ancestry.
+					if (from === undefined) return fail(`execute: ${slug} has nothing pinned yet -- run /execute ${slug} first`);
+					if (!(await ctx.ui.confirm("Re-pin the SPEC and PLAN?", `Re-pin ${slug}'s SPEC and PLAN content; the drift base stays ${from}.\n${pinShown}`))) return void ctx.ui.notify("execute: nothing re-pinned -- declined", "warning");
+					appendLedger(ctx.cwd, slug, { kind: "pin", allowance: union, tasks, specHash, reason: "re-pinned by the user with --repin" });
+					return void ctx.ui.notify(`execute: ${slug}'s SPEC and PLAN are re-pinned; run /execute ${slug} to continue`, "info");
+				}
 				if (tokens.includes("--rebase-base")) {
-					// The only way past a rebase, a user's own commit or an intended allowance change: the user sees what moves.
+					// The only way past a rebase or a user's own commit: the user sees what moves.
 					if (from === undefined) return fail(`execute: ${slug} has no pinned base to move -- run /execute ${slug} first`);
 					const head = currentSha(ctx.cwd);
 					const undeclared = changedFiles(ctx.cwd, from, head).filter((p) => !union.includes(normalisePathForDrift(p)));
-					const shown = `Move ${slug}'s drift base from ${from} to HEAD ${head}.\nChanged since the base and not declared: ${undeclared.join(", ") || "none"}\nAllowance pinned: ${(pinnedUnion ?? []).join(", ")}\nAllowance now: ${union.join(", ")}\nTasks pinned:\n${renderTasks(pinnedT)}\nTasks now:\n${renderTasks(tasks)}`;
+					const shown = `Move ${slug}'s drift base from ${from} to HEAD ${head}.\nChanged since the base and not declared: ${undeclared.join(", ") || "none"}\n${pinShown}`;
 					if (!(await ctx.ui.confirm("Re-pin the drift base?", shown))) return void ctx.ui.notify("execute: drift base not moved -- re-pin declined", "warning");
-					appendLedger(ctx.cwd, slug, { kind: "base", sha: head, allowance: union, tasks, reason: "re-pinned by the user with --rebase-base" });
+					appendLedger(ctx.cwd, slug, { kind: "base", sha: head, allowance: union, tasks, specHash, reason: "re-pinned by the user with --rebase-base" });
 					return void ctx.ui.notify(`execute: ${slug}'s drift base is now ${head}; run /execute ${slug} to continue`, "info");
 				}
 				if (pinnedUnion !== undefined && pinnedUnion.join("\n") !== union.join("\n")) {
-					return fail(`execute: the SPEC/PLAN write allowance changed since ${slug}'s base was pinned (pinned: ${pinnedUnion.join(", ")}) -- restore it, or accept it with /execute ${slug} --rebase-base`);
+					return fail(`execute: the SPEC/PLAN write allowance changed since ${slug} was pinned (pinned: ${pinnedUnion.join(", ")}) -- restore it, or accept it with /execute ${slug} --repin`);
 				}
-				// The executor can edit PLAN.md mid-run, so a task's verification command comes from the signed pin, never PLAN.md alone.
-				if (from !== undefined && JSON.stringify(pinnedT) !== JSON.stringify(tasks)) {
-					return fail(`execute: PLAN.md's tasks or verification commands differ from those pinned for ${slug} -- restore them, or accept the change with /execute ${slug} --rebase-base, which shows both`);
-				}
+				// The executor can edit SPEC.md and PLAN.md mid-run, so the next brief is built only from content that matches the signed pin.
+				const moved = pinMismatch(pinnedPlan(rows), { tasks, specHash });
+				if (moved !== undefined) return fail(`execute: ${moved} changed since ${slug} was pinned -- restore it, or accept the change with /execute ${slug} --repin, which shows both`);
 				const recorded = new Set(acceptedEntries(rows).map((e) => e.taskId));
 				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !recorded.has(t.id));
 				const verificationCommand = (pinnedT ?? tasks).find((t) => t.id === task?.id)?.verificationCommand ?? undefined;
@@ -129,7 +138,7 @@ export default function (pi: ExtensionAPI): void {
 				const ignoredNow = ensureHarnessIgnored(ctx.cwd);
 				if (ignoredNow !== undefined) ctx.ui.notify(`execute: ${ignoredNow}`, "info");
 				const headSha = currentSha(ctx.cwd);
-				if (from === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, tasks, reason: "first /execute" });
+				if (from === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, tasks, specHash, reason: "first /execute" });
 				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
 				baseSha = from ?? headSha;
 				const message = `${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${verificationCommand}\nFailed intermediate tool calls are logged, not fatal: the attempt passes when the one atomic commit lands and the verification command, run exactly as written on the committed HEAD, exits 0. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`;

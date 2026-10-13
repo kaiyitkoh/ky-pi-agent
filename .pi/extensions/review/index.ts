@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
-import { acceptedEntries, allowanceOf, latestRepin, pinnedAllowance, pinnedTasks, readLedger, tasksOf } from "../execute/ledger.ts";
+import { acceptedEntries, allowanceOf, latestRepin, pinMismatch, pinnedAllowance, pinnedPlan, readLedger, specDigest, tasksOf } from "../execute/ledger.ts";
 import { ensureHarnessIgnored, uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
@@ -62,7 +62,8 @@ export default function (pi: ExtensionAPI): void {
 				for (const f of ["SPEC.md", "PLAN.md", "PROGRESS.md"]) {
 					if (!existsSync(join(dir, f))) return fail(`review: .pi/work/${slug}/${f} does not exist`);
 				}
-				const spec = validateGatedSpec(readFileSync(join(dir, "SPEC.md"), "utf-8"));
+				const specText = readFileSync(join(dir, "SPEC.md"), "utf-8");
+				const spec = validateGatedSpec(specText);
 				if (!spec.ok) return fail(spec.reason);
 				const ids = extractSpecRequirementIds(spec.spec.requirementsBody);
 				const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), ids);
@@ -71,12 +72,10 @@ export default function (pi: ExtensionAPI): void {
 				const rows = readLedger(ctx.cwd, slug);
 				const pinned = pinnedAllowance(rows);
 				if (pinned !== undefined && pinned.join("\n") !== allowanceOf(spec.spec.scopePin.expectedFiles, plan.plan.filesTouched).join("\n")) {
-					return fail(`review: the SPEC/PLAN write allowance changed since /execute pinned it (pinned: ${pinned.join(", ")}) -- restore it`);
+					return fail(`review: the SPEC/PLAN write allowance changed since /execute pinned it (pinned: ${pinned.join(", ")}) -- restore it, or re-pin with /execute ${slug} --repin`);
 				}
-				const pinnedT = pinnedTasks(rows);
-				if (pinnedT !== undefined && JSON.stringify(pinnedT) !== JSON.stringify(tasksOf(plan.plan.tasks))) {
-					return fail(`review: PLAN.md's tasks or verification commands changed since /execute pinned them -- restore them, or re-pin with /execute ${slug} --rebase-base`);
-				}
+				const moved = pinMismatch(pinnedPlan(rows), { tasks: tasksOf(plan.plan.tasks), specHash: specDigest(specText) });
+				if (moved !== undefined) return fail(`review: ${moved} changed since /execute pinned them -- restore them, or re-pin with /execute ${slug} --repin`);
 				const repin = latestRepin(rows);
 				const accepted = acceptedEntries(rows);
 				const lastStale = accepted.map((e) => repin?.before.has(e.sha) === true).lastIndexOf(true);
