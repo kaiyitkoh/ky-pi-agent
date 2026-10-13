@@ -730,8 +730,16 @@ const optionValues = (arg: string): string[] => [arg, ...(arg.includes("=") ? [a
 // Best-effort: a written basename inside a word as a whole name (`require "w.pl"` matches w.pl, `new.pl` does not); a computed name is not seen.
 const mentionsName = (word: string, name: string): boolean => new RegExp(`(^|[^\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w.-])`).test(word.toLowerCase());
 
-const PROGRAM_FILE_GRAMMAR: ReadonlyMap<string, { readonly program: string; readonly valued: string; readonly long: readonly string[] }> = new Map([
-	...["awk", "gawk", "mawk", "nawk"].map((n) => [n, { program: "fEil", valued: "fEilvFW", long: ["--file", "--exec", "--include", "--load"] }] as const),
+interface ProgramFileGrammar {
+	readonly program: string;
+	readonly valued: string;
+	readonly long: readonly string[];
+}
+
+const AWK_PROGRAM_FILES: ProgramFileGrammar = { program: "fEil", valued: "fEilvFW", long: ["--file", "--exec", "--include", "--load"] };
+
+const PROGRAM_FILE_GRAMMAR = new Map<string, ProgramFileGrammar>([
+	...["awk", "gawk", "mawk", "nawk"].map((n): [string, ProgramFileGrammar] => [n, AWK_PROGRAM_FILES]),
 	["sed", { program: "f", valued: "fel", long: ["--file"] }],
 ]);
 
