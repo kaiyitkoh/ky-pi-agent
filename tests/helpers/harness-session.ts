@@ -14,7 +14,7 @@ import { join } from "node:path";
 
 import type { FauxResponseStep, Tool, TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider, toToolDeclaration } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ExtensionUIContext } from "@earendil-works/pi-coding-agent";
 import {
 	createAgentSession,
 	ModelRuntime,
@@ -53,6 +53,8 @@ const OPENSPEC_ENV = [
 // Mirrors Pi's loader discovery (no export inspection): `<dir>/*.ts` and `<dir>/<name>/index.ts`.
 const DISCOVERED = /^\.pi\/extensions\/(?:[^/]+\.ts|[^/]+\/index\.ts)$/;
 
+type BindExtensionsOptions = NonNullable<Parameters<AgentSession["bindExtensions"]>[0]>;
+
 export interface HarnessSessionOptions {
 	/** Repo-relative entry points to load. Default: every tracked one. */
 	entryPoints?: readonly string[];
@@ -78,6 +80,12 @@ export interface HarnessSessionOptions {
 	agentSkills?: Record<string, string>;
 	/** User-level prompt templates written to `<agentDir>/prompts/<name>.md`. Default: none. */
 	agentPrompts?: Record<string, string>;
+	/** UI bound to extensions. Default: none, so Pi uses its no-op UI and ctx.hasUI is false. */
+	uiContext?: ExtensionUIContext;
+	/** Mode reported to extensions as ctx.mode. Default: Pi's own default for an unbound mode. */
+	mode?: BindExtensionsOptions["mode"];
+	/** Faux model ids, all reasoning-capable; the first is the session model. Default: ["faux-flash"]. */
+	fauxModels?: readonly string[];
 }
 
 export interface HarnessHandle {
@@ -198,8 +206,11 @@ export async function createHarnessSession(
 			return fauxAssistantMessage("ok");
 		};
 
+		const fauxModelIds = opts.fauxModels ?? ["faux-flash"];
+		const primaryModelId = fauxModelIds[0];
+		if (primaryModelId === undefined) throw new Error("createHarnessSession: fauxModels must not be empty");
 		const faux = fauxProvider({
-			models: [{ id: "faux-flash", reasoning: true }],
+			models: fauxModelIds.map((id) => ({ id, reasoning: true })),
 		});
 		faux.setResponses(opts.responses ?? [capture]);
 
@@ -209,7 +220,7 @@ export async function createHarnessSession(
 			refreshOnCreate: false,
 		});
 		modelRuntime.registerNativeProvider(wrapFauxWithPayload(faux, undefined));
-		const model = modelRuntime.getModel(faux.provider.id, "faux-flash");
+		const model = modelRuntime.getModel(faux.provider.id, primaryModelId);
 		if (!model) throw new Error("createHarnessSession: faux model did not resolve");
 
 		const { session } = await createAgentSession({
@@ -231,7 +242,14 @@ export async function createHarnessSession(
 			session.extensionRunner.setFlagValue(name, value);
 		}
 		opts.beforeBind?.(session);
-		await session.bindExtensions({});
+		if (opts.uiContext === undefined && opts.mode === undefined) {
+			await session.bindExtensions({});
+		} else {
+			await session.bindExtensions({
+				...(opts.uiContext !== undefined ? { uiContext: opts.uiContext } : {}),
+				...(opts.mode !== undefined ? { mode: opts.mode } : {}),
+			});
+		}
 
 		return {
 			session,
