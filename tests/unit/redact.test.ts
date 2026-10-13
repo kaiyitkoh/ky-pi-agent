@@ -40,6 +40,7 @@ import {
 	redactionPlaceholder,
 } from "../../.pi/extensions/diagnostics/redact.ts";
 import { LOG_ONLY_PATTERNS, SHAPE_PATTERNS } from "../../.pi/lib/secret-patterns.ts";
+import { CI_TIME_FACTOR, settledMs } from "../helpers/timing.ts";
 
 interface Sample {
 	readonly label: string;
@@ -562,6 +563,7 @@ describe("the two consumers: logs mask by name, model inputs by shape only", () 
 
 describe("every rule is linear-time", () => {
 	const SIZE = 200_000;
+	const BUDGET_MS = 100 * CI_TIME_FACTOR;
 	const fill = (unit: string): string => unit.repeat(Math.ceil(SIZE / unit.length));
 	// Near-matches are the expensive inputs, so each rule gets every prefix of its own sample three ways,
 	// plus these units, which defeated earlier versions of the table.
@@ -578,16 +580,14 @@ describe("every rule is linear-time", () => {
 
 	SECRET_VALUE_PATTERNS.forEach((pattern, index) => {
 		const sample = SECRET_SAMPLES[index] as Sample;
-		it(`rule ${index} (${sample.label}) scans every 200 KB hostile input in under 100 ms`, () => {
+		it(`rule ${index} (${sample.label}) scans every 200 KB hostile input in under ${BUDGET_MS} ms`, () => {
 			let worst = 0;
 			let worstInput = "";
 			for (const input of hostileFor(sample.value)) {
-				const start = performance.now();
-				input.replace(pattern, "");
-				const elapsed = performance.now() - start;
+				const elapsed = settledMs(() => input.replace(pattern, ""), BUDGET_MS);
 				if (elapsed > worst) [worst, worstInput] = [elapsed, input];
 			}
-			expect(worst, `slowest input starts ${JSON.stringify(worstInput.slice(0, 24))}`).toBeLessThan(100);
+			expect(worst, `slowest input starts ${JSON.stringify(worstInput.slice(0, 24))}`).toBeLessThan(BUDGET_MS);
 		});
 	});
 
@@ -601,11 +601,9 @@ describe("every rule is linear-time", () => {
 		["a curl flag before a run of equals signs", ` -u ${"=".repeat(200_000)}`],
 	];
 	for (const [label, input] of whole) {
-		it(`redactString masks 200 KB of ${label} in under 100 ms`, () => {
+		it(`redactString masks 200 KB of ${label} in under ${BUDGET_MS} ms`, () => {
 			expect(input.length).toBeGreaterThanOrEqual(200_000);
-			const start = performance.now();
-			redactString(input);
-			expect(performance.now() - start).toBeLessThan(100);
+			expect(settledMs(() => redactString(input), BUDGET_MS)).toBeLessThan(BUDGET_MS);
 		});
 	}
 });

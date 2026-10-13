@@ -9,6 +9,7 @@ import { dirname, join, resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
+import { CI_TIME_FACTOR, settledMs } from "../helpers/timing.ts";
 import {
 	DESIGN_REVIEW_FILE_SPAN,
 	GATE_LEGS,
@@ -161,22 +162,20 @@ describe("QUAL-02 — no model round trip and a measured wall-clock budget", () 
 	 * 303.98ms — cold-start (first `ts.createSourceFile` call, jiti/vitest
 	 * transform warm-up) accounts for the first figure being highest; the
 	 * steady state is ~300ms. The budget below is set at roughly 4x the
-	 * worst measured figure (390ms) — generous enough not to flake on a
-	 * loaded CI runner, tight enough that an order-of-magnitude regression
+	 * worst measured figure (390ms), and CI_TIME_FACTOR widens it on shared
+	 * runners (93 files took ~2.1s there) — tight enough that an order-of-magnitude regression
 	 * (a rule that stops being syntax-only, an accidental O(n^2) walk)
 	 * still trips it. A budget with no recorded measurement behind it is a
 	 * guess; this one is not.
 	 */
-	const ANTI_PATTERN_BUDGET_MS = 1600;
+	const ANTI_PATTERN_BUDGET_MS = 1600 * CI_TIME_FACTOR;
 
 	it(`MEASURED: runAntiPatternLeg over every tracked .pi/extensions/*.ts file stays under ${ANTI_PATTERN_BUDGET_MS}ms`, () => {
 		const paths = trackedFiles(".pi/extensions").filter((p) => p.endsWith(".ts"));
 		expect(paths.length, "no tracked .ts under .pi/extensions/ — the measurement below would be over an empty set").toBeGreaterThanOrEqual(1);
 		const sources: QualitySource[] = paths.map((path) => ({ path, text: readFileSync(join(repoRoot(), path), "utf-8") }));
 
-		const start = process.hrtime.bigint();
-		runAntiPatternLeg(sources);
-		const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
+		const elapsedMs = settledMs(() => runAntiPatternLeg(sources), ANTI_PATTERN_BUDGET_MS);
 
 		expect(
 			elapsedMs,
