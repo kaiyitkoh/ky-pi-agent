@@ -171,9 +171,8 @@ export function isRunPending(): boolean {
 }
 
 /**
- * Bind the armed run to the prompt now being sent. Pi's sendUserMessage is fire-and-forget, so the run's own prompt can fail
- * before it starts (no model, expired auth, a refused route); any other prompt reaching here first disarms the run.
- * `starting` is true at before_agent_start; at `input` a match is not yet a start. Returns true when it disarmed.
+ * Starts the pending run when its own prompt reaches before_agent_start (`starting`); any other prompt seen first disarms it,
+ * since Pi can drop the run's prompt before it starts. Returns true when it disarmed. Rationale: docs/WORKFLOWS.md section 2.
  */
 export function notePromptForRun(text: string, starting: boolean): boolean {
 	const state = runSlot();

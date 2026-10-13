@@ -166,7 +166,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
-		budget: 310,
+		budget: 300,
 		why: "CR-01 iteration 3 fix: recordCaptureFailure() so a tool_execution_end capture that throws " +
 			"rejects instead of vanishing, plus the tool_execution_end docstring rewrite -- measured 336 " +
 			"raw lines 2026-08-15 (up from 328), rounded up to the next ten. RAISED 340 -> 390 by plan 08-12 " +
@@ -174,7 +174,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"branches (2) and (3), with the docstring explaining why), startRun/endRun now thread baseTree/headTree " +
 			"through RunState, and the WHAT THIS PREDICATE DOES NOT PROVE paragraph was rewritten to state the " +
 			"narrower, still-true unrelated-content limit rather than the now-closed empty-commit one. Measured " +
-			"381 raw lines 2026-08-15. Re-measured 242 raw lines 2026-10-13 after the comment cleanup, rounded up to the next ten. Re-measured 238 raw lines 2026-10-13 after the evidence gate began passing on a commit plus the declared verification, with failed calls logged, rounded up to the next ten Re-measured 258 raw lines 2026-10-13 after the gate began requiring HEAD to be a new commit on the base, rounded up to the next ten. Re-measured 280 raw lines 2026-10-13 after endRun stopped writing and each run began writing exactly one row with its final verdict (RunSummary, writeRunEvidence), already a multiple of ten. Re-measured 304 raw lines 2026-10-13 after a run was bound to the prompt that starts it (isRunPending, notePromptForRun), rounded up to the next ten.",
+			"381 raw lines 2026-08-15. Re-measured 242 raw lines 2026-10-13 after the comment cleanup, rounded up to the next ten. Re-measured 238 raw lines 2026-10-13 after the evidence gate began passing on a commit plus the declared verification, with failed calls logged, rounded up to the next ten Re-measured 258 raw lines 2026-10-13 after the gate began requiring HEAD to be a new commit on the base, rounded up to the next ten. Re-measured 280 raw lines 2026-10-13 after endRun stopped writing and each run began writing exactly one row with its final verdict (RunSummary, writeRunEvidence), already a multiple of ten. Re-measured 304 raw lines 2026-10-13 after a run was bound to the prompt that starts it (isRunPending, notePromptForRun), rounded up to the next ten. Re-measured 300 raw lines 2026-10-13 after the comment cleanup, already a multiple of ten.",
 	},
 	{
 		file: ".pi/extensions/workflows/settle.ts",
