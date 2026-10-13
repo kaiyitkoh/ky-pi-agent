@@ -675,7 +675,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 8.2. Comment Discipline | 13/13 | Complete | 2026-10-12 |
 | 11. Terminal UI | 7/7 | Complete    | 2026-10-13 |
 | 12. OpenSpec Opt-in Skill | 4/4 | Complete — 4 live checks OUTSTANDING | 2026-10-13 |
-| 12.1. v1.0 Gap Closure | 10/10 | Complete pending verification | 2026-10-13 |
+| 12.1. v1.0 Gap Closure | 10/10 | Complete   | 2026-10-13 |
 | 13. Orca Desktop Front-end | 0/0 | Awaiting discussion | - |
 
 ### Phase 12: OpenSpec Opt-in Skill
@@ -724,7 +724,7 @@ Plans:
 7. The capability guard runs all four checks in production paths, including `/model`. `.pi/agents/reviewer.md` no longer shadows the built-in. The comment-rule test covers every authored path.
 8. Traceability is consistent: REQUIREMENTS.md has UPG/OSPEC/CMT rows, checkboxes match status, SAFE-10 wording is current, and the ROADMAP progress table and STATE.md are correct.
 9. `npx tsc --noEmit` is clean and the full suite passes once at the end, including the safety line budget (trimmed, or raised with a recorded justification).
-**Plans:** 9/10 plans executed
+**Plans:** 10/10 plans complete
 
 Plans:
 - [x] 12.1-01-PLAN.md — Safety paths (case/ADS/8.3/credential/glob reads, protected agent dirs), required child guard + subagent management confirm, RPC push confirm, tool profiles
@@ -736,7 +736,7 @@ Plans:
 - [x] 12.1-07-PLAN.md — Fallback, redaction, Qoder stream, bounded logs, env templates, dead exports
 - [x] 12.1-08-PLAN.md — D-02 global install via bootstrap, manifest agents, reviewer.md removal, README pin, RUNBOOK RB-12-05..07
 - [x] 12.1-09-PLAN.md — Comment-rule scanner on every authored path, CI matrix, load-path error assertion
-- [ ] 12.1-10-PLAN.md — Budgets, WORKFLOWS/QUALITY docs, traceability + test, full suite once, finding status tables
+- [x] 12.1-10-PLAN.md — Budgets, WORKFLOWS/QUALITY docs, traceability + test, full suite once, finding status tables
 
 ### Phase 13: Orca Desktop Front-end
 

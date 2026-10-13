@@ -2,16 +2,16 @@
 gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: "Gap Closure: audit + deep review fixes"
-status: executing
+status: verifying
 stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-13T07:50:48.311Z"
+last_updated: "2026-10-13T08:06:25.094Z"
 last_activity: 2026-10-13
 progress:
   total_phases: 2
-  completed_phases: 0
+  completed_phases: 1
   total_plans: 10
-  completed_plans: 9
-  percent: 0
+  completed_plans: 10
+  percent: 50
 ---
 
 # Project State
@@ -27,13 +27,13 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 
 Phase: 12.1 (v1.0 Gap Closure) — EXECUTING
 Plan: 10 of 10
-Status: Ready to execute
+Status: Phase complete — ready for verification
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-10-13
 
-Progress: [█████████░] 90%
+Progress: [██████████] 100%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -178,6 +178,7 @@ credentials can do has been done".
 | Phase 10 P05 | 25m | 2 tasks | 2 files |
 | Phase 11 P06 | 10min | 2 tasks | 4 files |
 | Phase 12.1 P08 | 75min | 3 tasks | 24 files |
+| Phase 12.1 P10 | 50min | 3 tasks | 12 files |
 
 ## Accumulated Context
 
@@ -477,6 +478,7 @@ Recent decisions affecting current work:
 - [Phase 11]: 11-06: wire check exits 64 on usage errors, 2 on missing logs; truncation noted but non-failing
 - [Phase 12.1]: Plan 01: implement profile floor rose 2344 to 4179 tokens because questionnaire and bg_* are default-active
 - [Phase 12.1]: 12.1-08: agentScanDirs lives in settings.json subagents key; only stub plus git package is a hard check-only failure
+- [Phase ?]: 12.1-10: full suite deferred to the orchestrator final run after code review
 
 ### Pending Todos
 
@@ -535,7 +537,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-10-13T07:50:48.302Z
+Last session: 2026-10-13T08:06:19.216Z
 Stopped at: Completed 09-12-PLAN.md
 Resume file: None
 
