@@ -20,7 +20,7 @@ import { logDir, logPath } from "../../.pi/lib/jsonl.ts";
 import { recordCheckpoint } from "../../.pi/extensions/checkpoint/store.ts";
 import executeExtension from "../../.pi/extensions/execute/index.ts";
 import { HANDOFF_AGENT } from "../../.pi/extensions/execute/handoff.ts";
-import { latestRepin, readLedger } from "../../.pi/extensions/execute/ledger.ts";
+import { latestRepin, pinnedSpecFile, readLedger } from "../../.pi/extensions/execute/ledger.ts";
 import { driftAbort, executeRunContext, progressBlocks, recordedEntries, renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import workflowsExtension from "../../.pi/extensions/workflows/index.ts";
@@ -666,6 +666,33 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		await h.command(SLUG);
 		expect(h.notes.at(-1)?.text).toContain("SPEC.md changed since s1 was pinned");
 		expect(h.sent).toHaveLength(1);
+	});
+
+	it("a SPEC.md change is shown line by line at --repin, and the refusal names a pinned copy that restores it", async () => {
+		const two = `${PLAN}- [ ] T002 [R1] Extend the a module in src/a.ts | verify: npm test\n`;
+		const h = harness({ plan: two });
+		await h.command(SLUG);
+		await h.fire("agent_settled", { aborted: true });
+		const specFile = join(h.repo, ".pi", "work", SLUG, "SPEC.md");
+		const pinnedSpec = readFileSync(specFile, "utf-8");
+		writeFileSync(specFile, pinnedSpec.replace("unrelated to the a module", "not needed"));
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), two.replace("Extend the a module", "Rewrite the a module"));
+		await h.command(SLUG);
+		const copy = pinnedSpecFile(h.repo, SLUG);
+		expect(readFileSync(copy, "utf-8")).toBe(pinnedSpec);
+
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), two);
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain(`!cp "${copy}"`);
+
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), two.replace("Extend the a module", "Rewrite the a module"));
+		await h.command(`${SLUG} --repin`);
+		const shown = h.confirms.at(-1) ?? "";
+		expect(shown).toMatch(/^- .*unrelated to the a module/m);
+		expect(shown).toMatch(/^\+ .*not needed/m);
+		expect(shown).toMatch(/^- T002 .*Extend the a module/m);
+		expect(shown).toMatch(/^\+ T002 .*Rewrite the a module/m);
+		expect(shown, "an unchanged task is not listed as a change").not.toMatch(/^[-+] T001/m);
 	});
 
 	it("--repin re-pins only with approval and never moves the drift base", async () => {

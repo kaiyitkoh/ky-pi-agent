@@ -143,7 +143,71 @@ export function pinMismatch(pin: PlanPin | undefined, now: { readonly tasks: rea
 
 /** One line per task, so a re-pin prompt shows exactly what moved. */
 export function renderTasks(tasks: readonly PinnedTask[] | undefined): string {
-	return tasks === undefined ? "(none pinned)" : tasks.map((t) => t.line ?? `${t.id} ${t.path ?? "-"} | verify: ${t.verificationCommand ?? "(none)"}`).join("\n");
+	return tasks === undefined ? "(none pinned)" : tasks.map((t) => withoutCheckbox(t.line) ?? `${t.id} ${t.path ?? "-"} | verify: ${t.verificationCommand ?? "(none)"}`).join("\n");
+}
+
+/** The SPEC.md copy a `base` or `pin` row pinned, kept beside the ledger where the safety path guard keeps the model out. */
+export function pinnedSpecFile(cwd: string, slug: string): string {
+	return ledgerFile(cwd, slug).replace(/\.jsonl$/, ".SPEC.md");
+}
+
+/** Append a `base` or `pin` row, writing the SPEC.md copy it pins first. */
+export function appendPin(cwd: string, slug: string, row: Extract<LedgerRow, { kind: "base" | "pin" }>, specText: string): void {
+	const file = pinnedSpecFile(cwd, slug);
+	mkdirSync(dirname(file), { recursive: true });
+	writeFileSync(file, specText, "utf-8");
+	appendLedger(cwd, slug, row);
+}
+
+/** The pinned SPEC.md text, or undefined when the copy is missing or does not hash to the signed pin. */
+export function readPinnedSpec(cwd: string, slug: string, pin: PlanPin | undefined): string | undefined {
+	const file = pinnedSpecFile(cwd, slug);
+	if (pin?.specHash === undefined || !existsSync(file)) return undefined;
+	const text = readFileSync(file, "utf-8");
+	return specDigest(text) === pin.specHash ? text : undefined;
+}
+
+/** Changed lines only, `-` pinned and `+` now: the common head and tail are trimmed, then an LCS runs on the middle. */
+export function lineDiff(before: readonly string[], after: readonly string[]): string[] {
+	let head = 0;
+	while (head < before.length && head < after.length && before[head] === after[head]) head++;
+	let tail = 0;
+	while (tail < before.length - head && tail < after.length - head && before.at(-1 - tail) === after.at(-1 - tail)) tail++;
+	const a = before.slice(head, before.length - tail);
+	const b = after.slice(head, after.length - tail);
+	const w = b.length + 1;
+	// Past the cap the quadratic table is skipped and every middle line is shown.
+	if (a.length * b.length > 1_000_000) return [...a.map((l) => `- ${l}`), ...b.map((l) => `+ ${l}`)];
+	const lcs = new Int32Array((a.length + 1) * w);
+	for (let i = a.length - 1; i >= 0; i--) {
+		for (let j = b.length - 1; j >= 0; j--) lcs[i * w + j] = a[i] === b[j] ? (lcs[(i + 1) * w + j + 1] as number) + 1 : Math.max(lcs[(i + 1) * w + j] as number, lcs[i * w + j + 1] as number);
+	}
+	const out: string[] = [];
+	let i = 0;
+	let j = 0;
+	while (i < a.length || j < b.length) {
+		if (i < a.length && j < b.length && a[i] === b[j]) [i, j] = [i + 1, j + 1];
+		else if (j < b.length && (i === a.length || (lcs[i * w + j + 1] as number) >= (lcs[(i + 1) * w + j] as number))) out.push(`+ ${b[j++] as string}`);
+		else out.push(`- ${a[i++] as string}`);
+	}
+	return out;
+}
+
+/** What a re-pin would accept: the allowance, then only the changed task and SPEC.md lines. */
+export function renderPinChanges(cwd: string, slug: string, rows: readonly LedgerRow[], now: { readonly allowance: readonly string[]; readonly tasks: readonly PinnedTask[]; readonly specText: string }): string {
+	const pin = pinnedPlan(rows);
+	const taskDiff = lineDiff(renderTasks(pin?.tasks).split("\n"), renderTasks(now.tasks).split("\n"));
+	const pinnedSpec = readPinnedSpec(cwd, slug, pin);
+	const specDiff = pinnedSpec === undefined ? [] : lineDiff(pinnedSpec.split(/\r?\n/), now.specText.split(/\r?\n/));
+	const specShown = pin?.specHash === specDigest(now.specText) ? "none" : pinnedSpec === undefined ? `CHANGED, but the pinned copy ${pinnedSpecFile(cwd, slug)} is missing or does not match the pin, so the change cannot be shown` : `\n${specDiff.join("\n")}`;
+	return `Allowance pinned: ${(pin?.allowance ?? []).join(", ")}\nAllowance now: ${now.allowance.join(", ")}\nTask changes (- pinned, + now): ${taskDiff.length === 0 ? "none" : `\n${taskDiff.join("\n")}`}\nSPEC.md changes (- pinned, + now): ${specShown}`;
+}
+
+/** How to get back to the pin; SPEC.md names its pinned copy, which the user can restore with `!cp`. */
+export function restoreAdvice(cwd: string, slug: string, moved: string, rows: readonly LedgerRow[]): string {
+	const copy = moved === "SPEC.md" && readPinnedSpec(cwd, slug, pinnedPlan(rows)) !== undefined ? pinnedSpecFile(cwd, slug) : undefined;
+	const restore = copy === undefined ? "restore it" : `restore it with !cp "${copy}" ".pi/work/${slug}/SPEC.md"`;
+	return `${restore}, or accept it with /execute ${slug} --repin, which shows what changed`;
 }
 
 export function acceptedEntries(rows: readonly LedgerRow[]): readonly { readonly taskId: string; readonly sha: string; readonly entry: string }[] {

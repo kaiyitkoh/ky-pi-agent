@@ -531,9 +531,14 @@ from pinned content, and the verification command an attempt is checked
 against is the pinned one, fixed when the run is armed.
 
 A legitimate SPEC or PLAN edit (fixing a wrong verification command for a task
-not yet run, say) is accepted with `/execute <slug> --repin`. It shows the
-pinned and current allowance, task lines and whether SPEC.md changed through
-`ctx.ui.confirm`, and on approval appends a `pin` row. A `pin` row never moves
+not yet run, say) is accepted with `/execute <slug> --repin`. It shows,
+through `ctx.ui.confirm`, the pinned and current allowance, then only the task
+lines and SPEC.md lines that changed, as `-` pinned and `+` now, and on
+approval appends a `pin` row. Every `base` or `pin` row also writes the SPEC.md
+it pins to `<git common dir>/kypi-ledger/<slug>.<worktree>.SPEC.md`, where the
+safety path guard keeps the model out; the copy is used only when it hashes to
+the signed pin. A refusal over a SPEC.md change names that copy with a
+`!cp "<copy>" ".pi/work/<slug>/SPEC.md"` that restores it. A `pin` row never moves
 the drift base and is not a rebase: `/review` keeps checking every recorded
 commit against HEAD's history and adds no rebase line to the MR.
 `--rebase-base` also re-pins this content, alongside the base. A ledger

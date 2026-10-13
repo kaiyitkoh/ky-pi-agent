@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
-import { acceptedEntries, allowanceOf, latestRepin, pinMismatch, pinnedAllowance, pinnedPlan, readLedger, specDigest, tasksOf } from "../execute/ledger.ts";
+import { acceptedEntries, allowanceOf, latestRepin, pinMismatch, pinnedAllowance, pinnedPlan, readLedger, restoreAdvice, specDigest, tasksOf } from "../execute/ledger.ts";
 import { ensureHarnessIgnored, uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
@@ -72,10 +72,10 @@ export default function (pi: ExtensionAPI): void {
 				const rows = readLedger(ctx.cwd, slug);
 				const pinned = pinnedAllowance(rows);
 				if (pinned !== undefined && pinned.join("\n") !== allowanceOf(spec.spec.scopePin.expectedFiles, plan.plan.filesTouched).join("\n")) {
-					return fail(`review: the SPEC/PLAN write allowance changed since /execute pinned it (pinned: ${pinned.join(", ")}) -- restore it, or re-pin with /execute ${slug} --repin`);
+					return fail(`review: the SPEC/PLAN write allowance changed since /execute pinned it (pinned: ${pinned.join(", ")}) -- restore it, or accept it with /execute ${slug} --repin, which shows what changed`);
 				}
 				const moved = pinMismatch(pinnedPlan(rows), { tasks: tasksOf(plan.plan.tasks), specHash: specDigest(specText) });
-				if (moved !== undefined) return fail(`review: ${moved} changed since /execute pinned them -- restore them, or re-pin with /execute ${slug} --repin`);
+				if (moved !== undefined) return fail(`review: ${moved} changed since /execute pinned them -- ${restoreAdvice(ctx.cwd, slug, moved, rows)}`);
 				const repin = latestRepin(rows);
 				const accepted = acceptedEntries(rows);
 				const lastStale = accepted.map((e) => repin?.before.has(e.sha) === true).lastIndexOf(true);
