@@ -86,6 +86,27 @@ const EQUIVALENT_TO_AWS_CREDENTIALS: ReadonlyArray<{ label: string; word: PathWo
 		word: arg("/cygdrive/c/Users/Admin/.aws/credentials"),
 	},
 	{
+		label: "MSYS form behind a . segment",
+		word: arg("/./c/Users/Admin/.aws/credentials"),
+	},
+	{
+		label: "MSYS form behind a .. segment",
+		word: arg("/tmp/../c/Users/Admin/.aws/credentials"),
+	},
+	{
+		label: "MSYS form behind duplicate separators",
+		word: arg("/.//c//Users/Admin/.aws/credentials"),
+	},
+	{
+		label: "/cygdrive form behind a .. segment",
+		word: arg("/x/../cygdrive/c/Users/Admin/.aws/credentials"),
+	},
+	{
+		label: "relative path from the root directory",
+		word: arg("c/Users/Admin/.aws/credentials"),
+		ctxOverrides: { cwd: "/" },
+	},
+	{
 		label: "already-forward-slash C:/ form",
 		word: arg("C:/Users/Admin/.aws/credentials"),
 	},

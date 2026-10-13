@@ -154,14 +154,12 @@ function joinWithCwd(cwd: string, relative: string): string {
 	return `${normalizedCwd}/${relative}`;
 }
 
-/** Canonical form of one path arg: quotes stripped, home expanded, MSYS/UNC/backslashes normalised, resolved against `cwd`, drive letter upper-cased, `.`/`..` collapsed. */
+/** Canonical form of one path arg: quotes stripped, home expanded, slashes normalised, resolved against `cwd`, `.`/`..` collapsed, then the MSYS drive rewritten. */
 export function canonicalisePathArg(arg: PathWordArg, ctx: PathResolutionContext): string {
-	const unquoted = stripSurroundingQuotes(arg.text);
-	const homeExpanded = expandHome(unquoted, ctx.home);
-	const driveRewritten = rewriteMsysDrivePrefix(homeExpanded);
-	const slashNormalized = normalizeSlashes(driveRewritten);
+	const slashNormalized = normalizeSlashes(expandHome(stripSurroundingQuotes(arg.text), ctx.home));
 	const rooted = isAbsolutePath(slashNormalized) ? slashNormalized : joinWithCwd(ctx.cwd, slashNormalized);
-	return collapseSegments(rooted);
+	// The drive rewrite runs on the collapsed path, or `/./c/x` and `/tmp/../c/x` would keep root `/` and miss every home rule.
+	return collapseSegments(rewriteMsysDrivePrefix(collapseSegments(rooted)));
 }
 
 

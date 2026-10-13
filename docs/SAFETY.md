@@ -588,6 +588,11 @@ here rather than in code comments:
   option, operand or `NAME=value` word the table cannot account for marks the
   segment unconfident, and an unconfident segment that mentions a guarded verb
   is refused.
+- **Paths are collapsed before the MSYS drive rewrite.** `.`, `..` and
+  duplicate separators are collapsed first, then `/c/...` and
+  `/cygdrive/c/...` become `C:/...`, then the rules match. So
+  `/./c/Users/x`, `/tmp/../c/Users/x` and `c/Users/x` after `cd /` are the
+  same `C:/Users/x` that Git Bash opens.
 - **"Mentions a guarded verb"** means the raw segment with quotes and
   backslashes removed, or any quote-resolved word, so `g''it` and `\git` count
   as `git`. A shell runner carrying one is denied outright by this word match,
