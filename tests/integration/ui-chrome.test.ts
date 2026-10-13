@@ -167,6 +167,17 @@ describe("ui extension in a session", () => {
 		expect(last(seen)).not.toContain("agent");
 	});
 
+	it("does not count a subagent management call as a running agent", async () => {
+		const { rec, handle } = await open("tui", {
+			responses: [
+				fauxAssistantMessage(fauxToolCall("subagent", { action: "status" }, { id: "call-1" }), { stopReason: "toolUse" }),
+				fauxAssistantMessage("ok"),
+			],
+		});
+		await handle.session.prompt("go");
+		expect(rec.statuses("ky-statusline").some((s) => s?.includes("agent"))).toBe(false);
+	});
+
 	it("shows the changed-file count in a git checkout", async () => {
 		const { rec, handle } = await open("tui", { agentsMd: false, beforeBind: seedGit });
 		await handle.session.prompt("hi");

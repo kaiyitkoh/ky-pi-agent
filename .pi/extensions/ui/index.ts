@@ -138,7 +138,7 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("tool_execution_start", (event, ctx) => {
 		try {
 			lastCtx = ctx;
-			if (tracker.onToolStart(event.toolName, event.toolCallId)) refresh();
+			if (tracker.onToolStart(event.toolName, event.toolCallId, event.args)) refresh();
 		} catch {
 			// Swallowed deliberately.
 		}

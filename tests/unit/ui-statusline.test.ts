@@ -127,6 +127,27 @@ describe("agent tracker", () => {
     expect(t.running()).toBe(0);
   });
 
+  it("does not count management actions or async launches as foreground runs", () => {
+    const t = createAgentTracker();
+    expect(t.onToolStart("subagent", "c1", { action: "status" })).toBe(false);
+    expect(t.onToolStart("subagent", "c2", { action: "steer", id: "r1" })).toBe(false);
+    expect(t.onToolStart("subagent", "c3", { agent: "scout", task: "x", async: true })).toBe(false);
+    expect(t.running()).toBe(0);
+    t.onBusEvent("subagent:async-started", { id: "r1" });
+    expect(t.running()).toBe(1);
+    expect(t.onToolStart("subagent", "c4", { agent: "scout", task: "x" })).toBe(true);
+    expect(t.running()).toBe(2);
+  });
+
+  it("drops an async run on process-terminal even without a delivered completion", () => {
+    const t = createAgentTracker();
+    t.onBusEvent("subagent:async-started", { id: "r1" });
+    expect(t.onBusEvent("subagent:process-terminal", { version: 1, state: "observed", runId: "r1" })).toBe(true);
+    expect(t.running()).toBe(0);
+    expect(t.onBusEvent("subagent:async-complete", { id: "r1" })).toBe(false);
+    expect(t.running()).toBe(0);
+  });
+
   it("dedupes starts and ignores unknown completes", () => {
     const t = createAgentTracker();
     t.onBusEvent("subagent:async-started", { id: "r1" });
