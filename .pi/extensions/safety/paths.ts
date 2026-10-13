@@ -30,7 +30,6 @@ export interface PathResolutionContext {
 }
 
 
-// Strip one matched pair of surrounding `"` or `'` characters, if present.
 function stripSurroundingQuotes(text: string): string {
 	if (text.length >= 2) {
 		const first = text[0];
@@ -42,7 +41,7 @@ function stripSurroundingQuotes(text: string): string {
 	return text;
 }
 
-// Expand a leading `~`, `$HOME` or `${HOME}` against `home`; unbash expands none of them.
+// unbash expands none of `~`, `$HOME` or `${HOME}`.
 function expandHome(path: string, home: string): string {
 	const trimmedHome = home.replace(/[/\\]+$/, "");
 	const prefixes = ["~/", "$HOME/", "${HOME}/"];
@@ -60,7 +59,6 @@ function expandHome(path: string, home: string): string {
 	return path;
 }
 
-// Rewrite MSYS drive prefixes `/cygdrive/<x>/...` and `/<x>/...` to `<X>:/...`.
 function rewriteMsysDrivePrefix(path: string): string {
 	const cygdrive = /^\/cygdrive\/([A-Za-z])(\/.*)?$/.exec(path);
 	if (cygdrive !== undefined && cygdrive !== null) {
@@ -215,7 +213,8 @@ function isWithinRoot(target: string, root: string): boolean {
 	return r.parts.every((part, i) => part.toLowerCase() === t.parts[i].toLowerCase());
 }
 
-// `.env`, `.env.local`, `.env.production` block in any letter case; `.env.example` and `.env.template` are a deliberate carve-out, since blocking documentation trains the user to disable the guard.
+// `.env.example` and `.env.template` are a deliberate carve-out:
+// blocking documentation trains the user to disable the guard.
 function isDotEnvFile(basename: string): boolean {
 	const lower = basename.toLowerCase();
 	if (lower === ".env") {

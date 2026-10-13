@@ -567,10 +567,8 @@ const mentionsGuardedVerb = (texts: readonly string[]): boolean =>
 
 const segmentTexts = (inv: CanonicalInvocation): string[] => [inv.rawSegment, inv.executable, ...inv.args];
 
-/**
- * What a runner runs, or undefined for a non-runner: `find -exec` runs only the words after its primary, and an interpreter's
- * script file is opaque unless its name starts with a guarded verb (`openspec.js`, `openspec-setup.sh`, not `gen-openspec.mjs`).
- */
+// `find -exec` runs only the words after its primary; an interpreter's script file is opaque unless its name
+// starts with a guarded verb (`openspec.js`, `openspec-setup.sh`, not `gen-openspec.mjs`).
 function runnerTexts(inv: CanonicalInvocation): string[] | undefined {
 	const executable = normaliseExecutable(inv.executable);
 	const execPrimaries = FIND_EXEC_PRIMARIES.get(executable);

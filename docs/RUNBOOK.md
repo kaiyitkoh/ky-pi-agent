@@ -859,6 +859,21 @@ Phase 1, 2 and 3 ones: it parses both the summary-table row and the
 `**Status:**` line of every `RB-<phase>-<n>` entry, and a disagreement between
 the two is reported as `INCONSISTENT`, which is never an acceptable status.
 
+**The user-scope safety stub.** `bin/bootstrap.sh` writes
+`~/.pi/agent/extensions/ky-safety/index.ts`, which imports the checkout's
+guard. A project-scoped extension never loads headless (trust resolves false
+with no UI), and the absence reads as "nothing dangerous happened", so the
+guard loads at user scope regardless of trust. The stub imports the target
+unconditionally: an existence check against the project copy would skip both
+copies in an untrusted headless run. When the target is missing, or its import
+or factory throws, the stub blocks every tool call instead of loading nothing,
+because Pi drops an extension whose factory throws and an uncaught error would
+leave every repository unguarded. Both copies loading is a duplicate hook,
+which the deferral marker keyed on `toolCallId` tolerates (`docs/SAFETY.md`,
+"Load order is part of this"). The checkout path's backslashes are normalised
+before it is embedded in a TypeScript string literal, where they would be
+escape sequences.
+
 | ID | Check | Status |
 |----|-------|--------|
 | RB-04-01 | SAFE-01 — a push to a protected GitLab branch is rejected server-side | OUTSTANDING |

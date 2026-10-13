@@ -815,20 +815,8 @@ console.log("  subagent config.json worktreeSetupHook key merged: " + p);
 # ---------------------------------------------------------------------------
 # Safety extension at user scope
 # ---------------------------------------------------------------------------
-# A project-scoped extension never loads headless (trust resolves false with no
-# UI), and the absence reads as "nothing dangerous happened". The user-scope
-# stub loads the checkout's guard regardless of trust.
-#
-# The stub imports the target unconditionally: an existence check against the
-# project copy would skip BOTH copies in an untrusted headless run. When the
-# target is missing, or its import or factory throws, the stub blocks every
-# tool call instead of loading nothing: Pi drops an extension whose factory
-# throws, so an uncaught error would leave every repository unguarded. Both
-# copies loading is a duplicate hook, which the deferral marker keyed on
-# toolCallId tolerates (docs/SAFETY.md, "Load order is part of this").
-#
-# Backslashes are normalised before the path is embedded in a TS string literal,
-# where they would be escape sequences.
+# The stub loads the guard regardless of project trust and blocks every tool call when it cannot;
+# docs/RUNBOOK.md, "The user-scope safety stub", says why. Backslashes would be escapes in the TS literal.
 install_safety_extension() {
 	_safety_src="$REPO_ROOT/.pi/extensions/safety/index.ts"
 	if [ ! -f "$_safety_src" ]; then
