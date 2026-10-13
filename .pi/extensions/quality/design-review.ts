@@ -87,21 +87,24 @@ export interface DesignReviewResult {
 
 const SEVERITIES = new Set(["BLOCKER", "WARNING", "NIT"]);
 
-function parseFindings(raw: unknown): ReviewFinding[] | undefined {
+/** Each well-formed finding, and how many malformed ones were dropped; one bad item never discards the rest. */
+function parseFindings(raw: unknown): { readonly findings: ReviewFinding[]; readonly dropped: number } | undefined {
 	const list = (raw as { findings?: unknown } | undefined)?.findings;
 	if (!Array.isArray(list)) return undefined;
-	const out: ReviewFinding[] = [];
+	const findings: ReviewFinding[] = [];
 	for (const item of list) {
-		const f = item as Record<string, unknown> | null;
-		if (f === null || typeof f !== "object") return undefined;
+		const f = (item !== null && typeof item === "object" ? item : {}) as Record<string, unknown>;
 		const { severity, location, concreteFailure, suggestedFix } = f;
-		if (typeof severity !== "string" || !SEVERITIES.has(severity)) return undefined;
-		if (typeof location !== "string" || !isFileLine(location)) return undefined;
-		if (typeof concreteFailure !== "string" || concreteFailure.trim() === "") return undefined;
-		if (typeof suggestedFix !== "string" || suggestedFix.trim() === "") return undefined;
-		out.push({ severity: severity as ReviewFinding["severity"], location, concreteFailure, suggestedFix });
+		if (
+			typeof severity === "string" && SEVERITIES.has(severity) &&
+			typeof location === "string" && isFileLine(location) &&
+			typeof concreteFailure === "string" && concreteFailure.trim() !== "" &&
+			typeof suggestedFix === "string" && suggestedFix.trim() !== ""
+		) {
+			findings.push({ severity: severity as ReviewFinding["severity"], location, concreteFailure, suggestedFix });
+		}
 	}
-	return out;
+	return { findings, dropped: list.length - findings.length };
 }
 
 /** One extra reviewer call. An unusable reply yields no findings and a notice: the correctness review already stands. */
@@ -124,19 +127,24 @@ export async function runDesignReview(
 	];
 	const messages: Message[] = [{ role: "user", content, timestamp: Date.now() }];
 	const start = process.hrtime.bigint();
-	const message: AssistantMessage = await runSingleShotRole(ctx, {
-		role: "reviewer",
-		systemPrompt: DESIGN_SYSTEM_PROMPT,
-		messages,
-		need: deriveNeed(ctx, { promptChars: content.length + DESIGN_SYSTEM_PROMPT.length }),
-		tools,
-	});
+	let message: AssistantMessage;
+	try {
+		message = await runSingleShotRole(ctx, {
+			role: "reviewer",
+			systemPrompt: DESIGN_SYSTEM_PROMPT,
+			messages,
+			need: deriveNeed(ctx, { promptChars: content.length + DESIGN_SYSTEM_PROMPT.length }),
+			tools,
+		});
+	} catch (err) {
+		return { findings: [], notice: `the design pass failed (${err instanceof Error ? err.message : String(err)}); it added no findings` };
+	}
 	addQualityCost({ ms: Number(process.hrtime.bigint() - start) / 1_000_000, tokens: message.usage.totalTokens });
 
 	const call = message.content.find(
 		(b): b is Extract<AssistantMessage["content"][number], { type: "toolCall" }> => b.type === "toolCall" && b.name === DESIGN_TOOL_NAME,
 	);
-	const findings = call === undefined ? undefined : parseFindings(call.arguments);
-	if (findings === undefined) return { findings: [], notice: `the design pass returned no usable ${DESIGN_TOOL_NAME} call; it added no findings` };
-	return { findings };
+	const parsed = call === undefined ? undefined : parseFindings(call.arguments);
+	if (parsed === undefined) return { findings: [], notice: `the design pass returned no usable ${DESIGN_TOOL_NAME} call; it added no findings` };
+	return parsed.dropped === 0 ? { findings: parsed.findings } : { findings: parsed.findings, notice: `the design pass dropped ${parsed.dropped} malformed finding(s) and kept ${parsed.findings.length}` };
 }

@@ -2,9 +2,19 @@
  * computeDesignSignals over real unified-diff text: each signal fires on its own evidence and an ordinary
  * small change fires none.
  */
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import { computeDesignSignals } from "../../.pi/extensions/quality/design-review.ts";
+const reply = vi.hoisted(() => ({ next: undefined as unknown }));
+vi.mock("../../.pi/extensions/routing/modes.ts", async (importOriginal) => ({
+	...(await importOriginal<object>()),
+	runSingleShotRole: async () => {
+		if (reply.next instanceof Error) throw reply.next;
+		return reply.next;
+	},
+}));
+vi.mock("../../.pi/extensions/routing/guard.ts", async (importOriginal) => ({ ...(await importOriginal<object>()), deriveNeed: () => ({}) }));
+
+import { computeDesignSignals, runDesignReview } from "../../.pi/extensions/quality/design-review.ts";
 import { shouldRunDesignReview } from "../../.pi/extensions/quality/gates.ts";
 
 function diffOf(file: string, added: string[], removed: string[] = []): string {
@@ -74,5 +84,29 @@ describe("computeDesignSignals", () => {
 		const s = signalsFor(["src/a.ts"], diffOf("src/a.ts", ["const x = 1;"]), true);
 		expect(s.escalateRequested).toBe(true);
 		expect(shouldRunDesignReview(s)).toBe(true);
+	});
+});
+
+describe("runDesignReview never aborts the review it follows", () => {
+	const input = { diffText: "", changed: ["src/a.ts"], requirements: [] };
+	const ctx = {} as Parameters<typeof runDesignReview>[0];
+	const call = (findings: unknown[]) => ({
+		content: [{ type: "toolCall", id: "1", name: "submit_design_review", arguments: { findings } }],
+		usage: { totalTokens: 1 },
+	});
+
+	it("a throwing reviewer call yields no findings and a notice, never an exception", async () => {
+		reply.next = new Error("provider timed out");
+		const result = await runDesignReview(ctx, input);
+		expect(result.findings).toEqual([]);
+		expect(result.notice).toContain("provider timed out");
+	});
+
+	it("one malformed finding is dropped and counted; the well-formed BLOCKER survives", async () => {
+		const good = { severity: "BLOCKER", location: "src/a.ts:3", concreteFailure: "N+1 queries", suggestedFix: "batch them" };
+		reply.next = call([good, { severity: "BLOCKER", location: "nowhere", concreteFailure: "x", suggestedFix: "y" }]);
+		const result = await runDesignReview(ctx, input);
+		expect(result.findings).toEqual([good]);
+		expect(result.notice).toContain("dropped 1 malformed");
 	});
 });
