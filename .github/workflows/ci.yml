@@ -1,66 +1,23 @@
-# ky-pi-agent CI — the cross-platform proof for this phase.
+# Cross-platform proof for the harness.
 #
-# ---------------------------------------------------------------------------
-# Why three jobs and not one matrix
-# ---------------------------------------------------------------------------
-# BOOT-06 has two halves that no single runner can satisfy:
+# posix-lint is its own Ubuntu job: executing a script under Git-for-Windows sh or macOS /bin/sh only
+# proves bash-in-POSIX-mode accepted it, and ShellCheck is preinstalled on ubuntu runners only.
+# The CR scan runs inside the matrix because line endings must be asserted on the platform that can
+# break them. fail-fast is off so one failing leg cannot cancel the others; macOS is verified nowhere else.
 #
-#   conformance — is the script actually POSIX `sh`?
-#       Execution cannot answer this. Both Git-for-Windows `sh` and macOS
-#       /bin/sh ARE bash in POSIX mode, so `sh script.sh` passing proves only
-#       that bash-in-posix-mode accepted it. ShellCheck is what proves
-#       conformance, and it is preinstalled on ubuntu-24.04 (0.9.0) and ABSENT
-#       from both windows-latest and macos-latest
-#       [CITED: actions/runner-images Windows2025/macos-15/Ubuntu2404 READMEs,
-#        fetched 2026-08-13]. Hence `posix-lint` is its own Ubuntu job.
-#
-#   line endings — did the script check out with LF?
-#       That has to be asserted ON the platform that could break it, so the CR
-#       scan runs inside the matrix, on every leg.
-#
-# BOOT-07 is the matrix itself: windows-latest + macos-latest. macOS cannot be
-# tested on the development machine at all, so this workflow IS how macOS is
-# verified. `fail-fast: false` is load-bearing — a Windows-only failure that
-# cancels the macOS leg defeats the entire reason the matrix exists.
-#
-# ---------------------------------------------------------------------------
-# Rules this file obeys
-# ---------------------------------------------------------------------------
-#   * Every action reference is pinned to a 40-character commit SHA with the
-#     tag kept as a trailing comment. Tags are mutable: a tag can be repointed
-#     at different code between two runs, and these runners hold a checkout of
-#     this repo, with a token.
-#     Resolved with `gh api repos/<owner>/<repo>/commits/<tag> --jq .sha` on
-#     2026-08-13. Asserted by tests/unit/ci-pinning.test.ts.
-#
-#     THE COMMENT IS PART OF THE PIN, NOT DECORATION. It shipped once saying
-#     `# v5.0.0` against a commit that `gh api repos/actions/setup-node/tags`
-#     reports as v7.0.0 — two majors out, and nothing in the repo noticed,
-#     because the test only required the comment to be non-empty. Corrected on
-#     2026-08-13 by re-resolving both refs live. The offline half of the gate is
-#     now the explicit (SHA, tag) table in tests/unit/ci-pinning.test.ts; the
-#     online half is the `pin-audit` step below, which re-resolves every comment
-#     through the API on every run. Never edit a SHA or a tag comment without
-#     re-resolving BOTH and updating that table in the same change.
-#   * `defaults.run.shell: bash` at workflow level. Without an explicit shell
-#     the Windows runner defaults to pwsh, `sh bin/bootstrap.sh` then behaves
-#     oddly, and the usual "fix" is a PowerShell script — which this project
-#     forbids. Pi hard-requires a bash on Windows and finds Git Bash with no
-#     configuration (docs/windows.md:3-7).
-#   * No line-ending fix-up step. `.gitattributes` (`* text=auto eol=lf`) is
-#     the fix and is proven to win regardless of the runner's git autocrlf
-#     setting [VERIFIED: executed 2026-08-13, git 2.54.0.windows.1]. The CR
-#     scan below is the PROOF, not the remedy. Do not add a git config step and
-#     call it a fix — that would mask a broken .gitattributes.
-#   * Every install carries `--ignore-scripts` (BOOT-01). The ordering clause
-#     applies here too: nothing installs before the control is in place.
+# Rules this file obeys:
+#   * Every action is pinned to a 40-character commit SHA with the tag as a trailing comment, because
+#     tags are mutable and these runners hold a checkout and a token. The comment is part of the pin:
+#     tests/unit/ci-pinning.test.ts holds the audited (SHA, tag) table and the pin-audit step below
+#     re-resolves every comment through the API. Update both whenever a SHA or tag changes.
+#   * defaults.run.shell is bash, otherwise the Windows runner falls back to pwsh.
+#   * No line-ending fix-up step: .gitattributes (`* text=auto eol=lf`) is the fix and the CR scan
+#     is the proof. A git config step would mask a broken .gitattributes.
+#   * Every install carries --ignore-scripts.
 
 name: ci
 
-# A bare `push:` plus `pull_request:` fires BOTH events for a PR from a branch
-# in this repo, doubling every run. Harmless, but this project's stated
-# constraint is zero spend and macOS minutes bill at 10x. Restricting push to
-# main keeps the post-merge signal while letting the PR event own branch runs.
+# push is limited to main so a PR from a branch in this repo does not trigger two runs.
 on:
   push:
     branches: [main]
@@ -74,7 +31,6 @@ defaults:
     shell: bash
 
 jobs:
-  # BOOT-06, conformance half. Ubuntu is the ONLY runner with shellcheck.
   posix-lint:
     name: posix-lint (ubuntu-latest)
     runs-on: ubuntu-latest
@@ -93,16 +49,12 @@ jobs:
           shellcheck --version
           shellcheck --shell=sh --severity=style $files
 
-      # CR-03. The offline gate (tests/unit/ci-pinning.test.ts) can only check a
-      # tag comment against a table someone typed. This step checks it against
-      # the registry of record. It runs here rather than in the matrix because
-      # it needs a token and one resolution is enough; ubuntu already has `gh`.
+      # Checks each tag comment against the registry, which the offline table in ci-pinning.test.ts cannot.
       - name: pin-audit -- every tag comment must resolve to the pinned SHA
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Each surviving line is `<owner/repo@sha> <tag>`. A wholly-commented
-          # line cannot match: the pattern anchors uses: to the line start.
+          # Each surviving line is `<owner/repo@sha> <tag>`; the pattern anchors uses: to the line start.
           sed -n 's/^[[:space:]]*-\{0,1\}[[:space:]]*uses:[[:space:]]*\([^[:space:]#]*\)[[:space:]]*#[[:space:]]*\([^[:space:]]*\).*/\1 \2/p' \
             .github/workflows/*.yml | sort -u > pins.txt
           if [ ! -s pins.txt ]; then
@@ -127,7 +79,6 @@ jobs:
           rm -f pins.txt
           exit $fail
 
-  # BOOT-07. Both legs EXECUTE the suite and every shipped script.
   test:
     name: test (${{ matrix.os }})
     runs-on: ${{ matrix.os }}
@@ -138,17 +89,13 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # 22.19.0 is the floor Pi's `engines` declares, not whatever the runner
-      # happens to ship (22.23.x today). Testing the minimum is the point: a
-      # syntax or API that needs a newer Node must fail here, not on a user's
-      # machine that meets the documented requirement.
+      # 22.19.0 is the floor Pi's `engines` declares, not whatever the runner ships, so code needing
+      # a newer Node fails here rather than on a machine that meets the documented requirement.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '22.19.0'
 
-      # BOOT-06, line-ending half. node rather than `grep -P` or `file`:
-      # neither behaves identically across Windows, macOS and Linux, and node
-      # is a hard prerequisite of this project anyway.
+      # node rather than `grep -P` or `file`, which behave differently across the three platforms.
       - name: Assert every tracked shell script checked out with LF
         run: |
           files=$(git ls-files '*.sh')
@@ -170,10 +117,7 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
-      # The load-path integration tests invoke the `pi` binary and THROW rather
-      # than skip when it is absent (tests/helpers/pi.ts). A skipped load-path
-      # test is a green run that verified nothing, so CI must supply the binary
-      # at the same pin the harness targets.
+      # The load-path tests throw rather than skip when `pi` is absent, so CI supplies the pinned binary.
       - name: Install the pinned Pi globally
         run: npm install -g --ignore-scripts @earendil-works/pi-coding-agent@1.1.0
 
@@ -183,17 +127,12 @@ jobs:
       - name: Syntax-check the bootstrap under sh
         run: sh -n bin/bootstrap.sh
 
-      # This is the step that makes "actually executes rather than merely
-      # building" true. --check-only runs every probe and repo-side assertion
-      # and mutates nothing, so it exits 0 on a clean runner.
+      # --check-only runs every probe and repo-side assertion and mutates nothing.
       - name: Execute the bootstrap in check-only mode
         run: sh bin/bootstrap.sh --check-only
 
-      # SAFE-16. GitHub runners ship a `gh` that is authenticated via
-      # GITHUB_TOKEN, so a bare invocation would exit 1 on EVERY run and the
-      # signal would be discarded within a week. --warn-only reports the
-      # /share exfiltration risk without failing the build; the work-laptop
-      # runbook runs it bare, where non-zero is the point.
+      # GitHub runners ship a `gh` authenticated via GITHUB_TOKEN, so a bare run would exit 1 every
+      # time; --warn-only reports the /share exposure without failing the build.
       - name: Report the /share (gh auth) exposure
         run: sh scripts/check-gh-unauthenticated.sh --warn-only
 

@@ -1,4 +1,4 @@
-// Single machine copy of the comment rules; AGENTS.md mirrors it verbatim.
+// Single machine copy of the comment rules; AGENTS.md carries these rules plus the vendored-exemption bullet.
 export const COMMENT_RULES_HEADING = "## Code comments";
 
 export const COMMENT_RULES_SECTION = "code_comments";

@@ -4,8 +4,12 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
+	AUTHORED_SCRIPT_ROOTS,
 	VENDORED_EXEMPT,
 	authoredFiles,
+	authoredScriptFiles,
+	extractAnyComments,
+	extractHashComments,
 	emitWithoutComments,
 	extractComments,
 	findIdTokens,
@@ -92,6 +96,46 @@ describe("comment scanner self-tests", () => {
 		const a = 'const s = "a//b"; // one\n';
 		expect(emitWithoutComments(a)).toBe(emitWithoutComments('const s = "a//b"; // two, longer\n'));
 		expect(emitWithoutComments(a)).not.toBe(emitWithoutComments('const s = "a//c"; // one\n'));
+	});
+});
+
+describe("script comment scanner", () => {
+	it("catches an ID in a hash comment but not a plain explanation", () => {
+		const sh = ["#!/bin/sh", "# fixes WR-03", "echo hi # Windows needs LF here", 'url="https://x/#a" # per D-02'].join("\n");
+		const hits = extractHashComments(sh).flatMap((c) => findIdTokens(c.text));
+		expect(hits).toEqual(["WR-03", "D-02"]);
+	});
+
+	it("skips the shebang, quoted hashes and URL fragments", () => {
+		const src = ["#!/bin/sh", 'echo "# not a comment"', "echo 'a # b'", "curl https://x/#frag", "key=a#b"].join("\n");
+		expect(extractHashComments(src)).toEqual([]);
+	});
+
+	it("dispatches .mjs to the JS scanner and .yml to the hash scanner", () => {
+		expect(extractAnyComments("a.mjs", "// per D-02\nconst a = '#x';").map((c) => c.text)).toEqual(["// per D-02"]);
+		expect(extractAnyComments("a.yml", "a: 1 # per D-02").map((c) => c.text)).toEqual(["# per D-02"]);
+	});
+
+	it("covers every script type and is not vacuous", () => {
+		const files = authoredScriptFiles();
+		for (const ext of [".sh", ".mjs", ".yml", ".npmrc"]) {
+			expect(files.some((f) => f.endsWith(ext)), ext).toBe(true);
+		}
+		expect(files).toContain("vitest.config.ts");
+		expect(AUTHORED_SCRIPT_ROOTS.length).toBeGreaterThan(5);
+	});
+
+	it("has no plan/requirement/review IDs in script or config comments", () => {
+		const offenders: string[] = [];
+		for (const f of authoredScriptFiles()) {
+			const text = read(f).replace(/\r\n/g, "\n");
+			for (const c of extractAnyComments(f, text)) {
+				for (const token of findIdTokens(c.text)) {
+					offenders.push(`${f}:${text.slice(0, c.pos).split("\n").length} ${token}`);
+				}
+			}
+		}
+		expect(offenders, `Delete history and IDs from these comments:\n${offenders.join("\n")}`).toEqual([]);
 	});
 });
 

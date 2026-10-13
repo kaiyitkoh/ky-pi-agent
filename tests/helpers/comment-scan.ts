@@ -135,6 +135,68 @@ export function authoredFiles(): string[] {
 		.sort();
 }
 
+/** Scripts and config outside the extension tree; checked for IDs and history, not for comment ratio. */
+export const AUTHORED_SCRIPT_ROOTS: readonly string[] = [
+	"bin/*.sh",
+	"scripts/*.sh",
+	"scripts/*.mjs",
+	"scripts/*.ts",
+	".pi/scripts/*.mjs",
+	"vitest.config.ts",
+	".github/workflows/*.yml",
+	".npmrc",
+	".pi/npm/.npmrc",
+	".pi/templates/env.example",
+	".env.example",
+];
+
+function globToRegExp(glob: string): RegExp {
+	const body = glob.replace(/\./g, "[.]").replace(/\*/g, "[^/]*");
+	return new RegExp(`^${body}$`);
+}
+
+export function authoredScriptFiles(): string[] {
+	const matchers = AUTHORED_SCRIPT_ROOTS.map(globToRegExp);
+	return trackedFiles()
+		.filter((p) => matchers.some((m) => m.test(p)) && !isExempt(p))
+		.sort();
+}
+
+/** `#` comments of sh, yml, npmrc and env files: a `#` inside quotes or glued to a word (URL fragment) is not one, and a shebang is skipped. */
+export function extractHashComments(raw: string): CommentRange[] {
+	const text = raw.replace(/\r\n/g, "\n");
+	const out: CommentRange[] = [];
+	let offset = 0;
+	for (const [n, line] of text.split("\n").entries()) {
+		let quote = "";
+		for (let i = 0; i < line.length; i++) {
+			const ch = line[i];
+			if (quote) {
+				if (ch === "\\" && quote === '"') i++;
+				else if (ch === quote) quote = "";
+				continue;
+			}
+			if (ch === '"' || ch === "'") {
+				quote = ch;
+				continue;
+			}
+			if (ch !== "#") continue;
+			if (n === 0 && i === 0 && line.startsWith("#!")) break;
+			if (i > 0 && !/\s/.test(line[i - 1])) continue;
+			out.push({ pos: offset + i, end: offset + line.length, text: line.slice(i) });
+			break;
+		}
+		offset += line.length + 1;
+	}
+	return out;
+}
+
+/** Comments of any authored file type, dispatched on extension. */
+export function extractAnyComments(path: string, raw: string): CommentRange[] {
+	const text = raw.replace(/\r\n/g, "\n");
+	return /\.(?:ts|mjs|js)$/.test(path) ? extractComments(text) : extractHashComments(text);
+}
+
 export function subsystemOf(path: string): string {
 	if (path.startsWith(".pi/lib/")) return "lib";
 	return path.slice(".pi/extensions/".length).split("/")[0];
