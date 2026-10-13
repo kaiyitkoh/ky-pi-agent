@@ -41,7 +41,7 @@ export const HEREDOC_OPERATORS = new Set(["<<", "<<-", "<<<"]);
 const EXPANSION_PART_TYPES = new Set(["SimpleExpansion", "ParameterExpansion"]);
 
 /** Guarded executables, word-bounded so `git` does not match `digit`; shared by the command-position rule and shell-runner denial. */
-export const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl)\b/i;
+export const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl|openspec)\b/i;
 
 /** Runners that can hide a guarded verb in a script argument; denied only with {@link GUARDED_VERB_PATTERN} in the raw segment. */
 export const SHELL_RUNNERS = new Set([
@@ -154,6 +154,26 @@ interface WrapperGrammar {
 
 const NO_OPTIONS: ReadonlySet<string> = new Set();
 
+/** npx/bunx/pnpm dlx and kin: `-p` names the package, `-c` takes a shell string instead of a binary. */
+const PACKAGE_RUNNER_GRAMMAR: WrapperGrammar = {
+	boolean: new Set([
+		"-y",
+		"--yes",
+		"--no",
+		"--no-install",
+		"--ignore-existing",
+		"-q",
+		"--quiet",
+		"--silent",
+		"--prefer-offline",
+		"--prefer-online",
+		"--offline",
+		"--bun",
+	]),
+	value: new Set(["-p", "--package"]),
+	shellString: new Set(["-c", "--call", "--shell-mode"]),
+};
+
 const WRAPPER_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, WrapperGrammar>([
 	[
 		"env",
@@ -193,6 +213,17 @@ const WRAPPER_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, Wr
 	["builtin", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 	["toybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 	["busybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
+	["npx", PACKAGE_RUNNER_GRAMMAR],
+	["pnpx", PACKAGE_RUNNER_GRAMMAR],
+	["bunx", PACKAGE_RUNNER_GRAMMAR],
+]);
+
+/** Package managers whose named subcommand runs a package binary: `npm exec openspec` resolves like `npx openspec`. */
+const PACKAGE_MANAGER_RUNNERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["npm", new Set(["exec", "x"])],
+	["pnpm", new Set(["dlx", "exec"])],
+	["yarn", new Set(["dlx", "exec"])],
+	["bun", new Set(["x"])],
 ]);
 
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
@@ -223,12 +254,15 @@ export type ShellVerdict =
 
 /**
  * Reduce an executable to the verb policy classifies on: basename, lower-cased, Windows
- * extension stripped. Every bare-verb gate MUST route through it, or `git.exe push`,
- * `/usr/bin/git push` and `terraform.exe apply` classify as allow.
+ * extension and npm `@version` suffix stripped. Every bare-verb gate MUST route through it,
+ * or `git.exe push`, `/usr/bin/git push` and `npx @fission-ai/openspec@1.13.2 update` classify as allow.
  */
 export function normaliseExecutable(executable: string): string {
 	const base = executable.replace(/\\/g, "/").split("/").pop() ?? executable;
-	return base.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
+	return base
+		.toLowerCase()
+		.replace(/(.)@[^@]*$/, "$1")
+		.replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
 
@@ -529,12 +563,16 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 
 	while (i < values.length) {
 		const verb = normaliseExecutable(values[i]);
-		const grammar = WRAPPER_GRAMMARS.get(verb);
+		const runnerSubcommand = values[i + 1];
+		const isPackageManagerRunner =
+			runnerSubcommand !== undefined && PACKAGE_MANAGER_RUNNERS.get(verb)?.has(runnerSubcommand) === true;
+		const grammar = isPackageManagerRunner ? PACKAGE_RUNNER_GRAMMAR : WRAPPER_GRAMMARS.get(verb);
 		if (grammar === undefined) {
 			break;
 		}
-		wrappers.push(verb);
-		const consumed = consumeWrapperOptions(values, i + 1, grammar, (option, value) => {
+		wrappers.push(isPackageManagerRunner ? `${verb} ${runnerSubcommand}` : verb);
+		const optionsStart = isPackageManagerRunner ? i + 2 : i + 1;
+		const consumed = consumeWrapperOptions(values, optionsStart, grammar, (option, value) => {
 			if (verb === "env" && (option === "-C" || option === "--chdir")) {
 				cwdOverride = value;
 			}

@@ -224,6 +224,20 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 		why: "each wrapper's grammar is applied in turn until a non-wrapper word is reached",
 	},
 	{
+		label: "npx with a versioned scoped package",
+		cmd: "npx -y @fission-ai/openspec@1.13.2 update",
+		expectedExecutable: "@fission-ai/openspec@1.13.2",
+		expectedWrappers: ["npx"],
+		why: "npx runs the named package's binary; normaliseExecutable reduces the spec to 'openspec' for classification",
+	},
+	{
+		label: "pnpm dlx as a two-word wrapper",
+		cmd: "pnpm dlx openspec update",
+		expectedExecutable: "openspec",
+		expectedWrappers: ["pnpm dlx"],
+		why: "pnpm's dlx subcommand runs a package binary, so it resolves like npx",
+	},
+	{
 		label: "npm run deploy (task-runner indirection)",
 		cmd: "npm run deploy",
 		outOfScope: true,
@@ -368,6 +382,20 @@ const SHELL_RUNNER_TABLE: readonly ShellRunnerRow[] = [
 		why: "CR-08: a path-qualified xargs invocation must classify identically to the bare 'xargs' spelling already covered above.",
 	},
 	{
+		label: "sh -c with openspec",
+		cmd: 'sh -c "openspec update"',
+		expected: "refused",
+		cause: "shell-runner",
+		why: "openspec is a guarded verb, so hiding it in a shell runner is refused like git",
+	},
+	{
+		label: "xargs supplying openspec's subcommand",
+		cmd: "xargs openspec init",
+		expected: "refused",
+		cause: "shell-runner",
+		why: "xargs appends stdin words, so the real subcommand is unknown at parse time",
+	},
+	{
 		label: "watch with a guarded verb",
 		cmd: 'watch -n 5 "git push"',
 		expected: "refused",
@@ -427,8 +455,8 @@ describe("SAFE-02 -- SHELL_RUNNERS / GUARDED_VERB_PATTERN are exported and consi
 		}
 	});
 
-	it("GUARDED_VERB_PATTERN matches git/glab/terraform/aws/kubectl as whole words only", () => {
-		for (const verb of ["git", "glab", "terraform", "aws", "kubectl"]) {
+	it("GUARDED_VERB_PATTERN matches git/glab/terraform/aws/kubectl/openspec as whole words only", () => {
+		for (const verb of ["git", "glab", "terraform", "aws", "kubectl", "openspec"]) {
 			expect(GUARDED_VERB_PATTERN.test(`sh -c "${verb} status"`), `${verb} must be recognised as a guarded verb`).toBe(true);
 		}
 		expect(GUARDED_VERB_PATTERN.test("sh -c \"digit status\""), "must not match 'git' as a substring of another word").toBe(

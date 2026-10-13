@@ -301,6 +301,30 @@ const ROWS: readonly Row[] = [
 		expected: "confirm",
 	},
 
+	{ name: "npx openspec update -- confirm", toolName: "bash", input: { command: "npx openspec update" }, expected: "confirm" },
+	{ name: "bunx openspec update -- confirm", toolName: "bash", input: { command: "bunx openspec update" }, expected: "confirm" },
+	{
+		name: "pnpm dlx scoped openspec update -- confirm",
+		toolName: "bash",
+		input: { command: "pnpm dlx @fission-ai/openspec update" },
+		expected: "confirm",
+	},
+	{ name: "npx openspec list -- allow", toolName: "bash", input: { command: "npx openspec list" }, expected: "allow" },
+	{
+		name: "sh -c openspec update -- shell-runner block",
+		toolName: "bash",
+		input: { command: 'sh -c "openspec update"' },
+		expected: "block",
+		reasonIncludes: "shell-runner",
+	},
+	{
+		name: "node running openspec's entry point -- shell-runner block",
+		toolName: "bash",
+		input: { command: "node /x/openspec/bin/openspec.js update" },
+		expected: "block",
+		reasonIncludes: "shell-runner",
+	},
+
 	// wrapper spellings must classify exactly as the plain command
 	{
 		name: "env assignment then git push on protected main -- block",

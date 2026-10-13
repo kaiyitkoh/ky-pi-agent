@@ -48,7 +48,7 @@
  *
  * CORRECTION TO THAT RESIDUAL (CR2-01). "Not the primary control" understates
  * the position for ONE verb family. `.pi/extensions/safety/` guards
- * `git|glab|terraform|aws|kubectl` (`shell.ts`'s `GUARDED_VERB_PATTERN`) and
+ * `git|glab|terraform|aws|kubectl|openspec` (`shell.ts`'s `GUARDED_VERB_PATTERN`) and
  * has no `curl`/`wget` handling at all — that is not an oversight, it is a
  * published limit of that layer, corpus row `EV-36` in
  * `tests/fixtures/evasion-corpus.ts` and a row in `docs/SAFETY.md`'s "Known
