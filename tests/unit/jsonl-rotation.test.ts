@@ -513,3 +513,42 @@ describe("a locked live file does not stall or lose appends", () => {
 		});
 	});
 });
+
+describe("concurrent rotation never replaces another process's rotated file", () => {
+	it("a stale cached size does not rotate a live file another process already rotated", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = logPath(cwd, TURNS_LOG_BASE, now);
+			const opts = { rotateBytes: ROTATE_BYTES, now };
+			appendRun(cwd, PER_FILE, opts);
+			// Another process rotates within the size cache's one-second window and starts a fresh live file.
+			renameSync(live, rotatedPath(live, 1));
+			writeFileSync(live, `${JSON.stringify(makeRecord(100))}\n`, "utf-8");
+
+			appendJsonl(cwd, TURNS_LOG_BASE, makeRecord(101), opts);
+
+			expect(existsSync(rotatedPath(live, 2)), "a second, one-record rotation was made from a stale size").toBe(false);
+			expect(readIntact(live, "the live file")).toHaveLength(2);
+			expect(readIntact(rotatedPath(live, 1), "the other process's rotation")).toHaveLength(PER_FILE);
+		});
+	});
+
+	it("a rotated file that could not be shifted is never overwritten by the live file", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = logPath(cwd, "lockedlog", now);
+			const held = rotatedPath(live, 1);
+			const shiftRefused = ((src: string, dst: string): void => {
+				if (src === held) throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+				renameSync(src, dst);
+			}) as unknown as typeof renameSync;
+			for (let i = 1; i <= 2; i += 1) libAppendJsonl(cwd, "lockedlog", makeRecord(i), { rotateBytes: RECORD_BYTES * 2, now });
+			writeFileSync(held, `${JSON.stringify(makeRecord(50, "HELD"))}\n`, "utf-8");
+
+			libAppendJsonl(cwd, "lockedlog", makeRecord(3), { rotateBytes: RECORD_BYTES * 2, now, renameFile: shiftRefused });
+
+			expect(readIntact(held, "the held rotated file")).toEqual([makeRecord(50, "HELD")]);
+			expect(readIntact(live, "the live file")).toHaveLength(3);
+		});
+	});
+});

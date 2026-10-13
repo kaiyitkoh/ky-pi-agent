@@ -6,6 +6,8 @@
  * The stream constructor is deliberately not spelled here, so jsonl-append-only.test.ts can grep for it.
  * Rename-based rotation needs no lock: four concurrent appending processes lost no record (verified on
  * Windows, node 24.16.0; macOS unverified; POSIX `O_APPEND` atomicity for very large writes is not guaranteed).
+ * Concurrent rotation is narrowed, not locked: the live size is re-`stat`ed before rotating, and no rename
+ * overwrites an existing rotated file, so a process acting on a stale size cannot replace another's rotation.
  * `withFileMutationQueue` is not used: its state is per process (pi 1.1.0 `core/tools/file-mutation-queue.ts:4`)
  * and subagents are separate processes.
  *
@@ -291,6 +293,8 @@ export function rotate(
 			continue;
 		}
 		const dst = rotatedPath(file, n + 1);
+		// `renameSync` replaces an existing target on Windows and POSIX alike; another process's rotation is never overwritten.
+		if (existsSync(dst)) continue;
 		try {
 			renameFile(src, dst);
 			producedSlot().add(dst);
@@ -302,6 +306,8 @@ export function rotate(
 
 	if (maxRotated >= 1 && isRegularFile(file)) {
 		const dst = rotatedPath(file, 1);
+		// Another process rotated in between and its `.1` is still in place; the live file it left behind is new.
+		if (existsSync(dst)) return true;
 		try {
 			renameFile(file, dst);
 			producedSlot().add(dst);
@@ -375,13 +381,21 @@ export function appendJsonl(
 
 	const nowMs = now.getTime();
 	let size = cachedSize(file, nowMs);
+	// The cached size can be a second stale, and another process may have rotated since; decide on a fresh stat.
+	if (size > 0 && size + bytes > cap) {
+		size = regularFileSize(file);
+		sizeCacheSlot().set(file, { size, checkedAt: nowMs });
+	}
 	if (size > 0 && size + bytes > cap) {
 		const backoff = rotateBackoffSlot();
 		const state = backoff.get(file);
 		if (state === undefined || nowMs >= state.retryAt) {
-			if (rotate(cwd, file, maxRotated, opts.renameFile)) {
+			const rotated = rotate(cwd, file, maxRotated, opts.renameFile);
+			const fresh = regularFileSize(file);
+			// A rotation skipped to avoid overwriting another process's file counts as a failure while the live file is still over.
+			if (rotated && !(fresh > 0 && fresh + bytes > cap)) {
 				backoff.delete(file);
-				size = 0;
+				size = fresh;
 			} else {
 				const failures = (state?.failures ?? 0) + 1;
 				const retryAt =

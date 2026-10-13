@@ -587,7 +587,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/lib",
-		budget: 770,
+		budget: 780,
 		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs no longer filters to `.pi/extensions/` " +
 			"only -- `.pi/lib/jsonl.ts` is imported (via `../../lib/jsonl.ts`) by quality/index.ts (indirectly, " +
 			"through .pi/lib/win-quote.ts's own CR2-01 wiring), routing/index.ts, safety/audit.ts and " +
@@ -607,7 +607,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten. LOWERED 840 -> 660 by the " +
 			"08.2 review fix WR-07: .pi/lib joined the comment-discipline gate and its history/ID comments were " +
 			"condensed. Re-measured 655 raw lines on 2026-10-13 (jsonl.ts 497, win-quote.ts 67, " +
-			"work-artifacts.ts 91), rounded up to the next ten. Re-measured 670 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 715 raw lines 2026-10-13 after the signed-ledger and JSONL hardening in jsonl.ts (active-workflow.ts 15, jsonl.ts 542, win-quote.ts 67, work-artifacts.ts 91), rounded up to the next ten. RAISED 720 -> 770: secret-patterns.ts is the one credential-shape table shared by the wire redactor and the safety audit, so the wire log is never redacted more weakly than the audit; 765 raw lines (secret-patterns.ts 50)",
+			"work-artifacts.ts 91), rounded up to the next ten. Re-measured 670 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 715 raw lines 2026-10-13 after the signed-ledger and JSONL hardening in jsonl.ts (active-workflow.ts 15, jsonl.ts 542, win-quote.ts 67, work-artifacts.ts 91), rounded up to the next ten. RAISED 720 -> 770: secret-patterns.ts is the one credential-shape table shared by the wire redactor and the safety audit, so the wire log is never redacted more weakly than the audit; 765 raw lines (secret-patterns.ts 50). RAISED 770 -> 780: jsonl.ts re-stats the live file before rotating and never renames onto an existing rotated file; 779 raw lines (jsonl.ts 556)",
 	},
 	{
 		dir: ".pi/extensions/grill",
