@@ -6,10 +6,11 @@ is authoritative and this document is a bug.** Fix the document; do not fix
 the code to match the document.
 
 **Ownership.** `.pi/extensions/quality/` (`gates.ts`, `rules.ts`,
-`review-schema.ts`, `reviewer.ts`, `verdict.ts`, `advisor.ts`,
-`calibration.ts`, `index.ts`) and `tests/fixtures/seeded-defects/` are
-Phase 8's subsystem. It imports the Phase 2 chokepoint (`callModel()`, via
-`routing/modes.ts`'s `runSingleShotRole`) and nothing from `safety/` —
+`review-schema.ts`, `reviewer.ts`, `design-review.ts`, `verdict.ts`,
+`advisor.ts`, `role-call.ts`, `calibration.ts`, `index.ts`) and
+`tests/fixtures/seeded-defects/`. Every model call goes through
+`role-call.ts`'s `callRole`, which wraps the chokepoint (`callModel()`, via
+`routing/modes.ts`'s `runSingleShotRole`) and charges its cost; the layer imports nothing from `safety/` —
 `safety/` imports nothing from `routing/` either, and neither imports
 `quality/`. `/review` wires `verdict.ts`'s stop signal and `reviewer.ts`'s dispatch; `/quick` and `/execute` call the deterministic stage.
 
@@ -33,7 +34,7 @@ nobody downstream can tell — in a new costume. This is why `LegStatus` is a
 three-arm discriminated union and not a boolean plus a nullable reason: a
 two-state type cannot represent "did not run" as anything other than "ran
 and passed" or "ran and failed", both of which are lies about a leg that
-never executed. `GateResult.failed` is computed as "any leg reports `fail`" — `unavailable` never sets it, by construction, so an absent LSP install is never a reason to reject a change on its own, but it is always visible in the gate report for a human to read.
+never executed. `ChangeGateResult.failed` is computed as "any leg reports `fail`" — `unavailable` never sets it, by construction, so an absent LSP install is never a reason to reject a change on its own, but it is always visible in the gate report for a human to read.
 
 The legs run on the work repo's change, not on this harness, and each has its own availability rule. Changed paths come from `git diff`, relative to the git top level, so the legs (and `/review`'s file reader) resolve them from the top level even when Pi runs in a subdirectory of a monorepo:
 
@@ -42,14 +43,14 @@ The legs run on the work repo's change, not on this harness, and each has its ow
 | `typecheck` | a code file changed, a `tsconfig.json` exists at or above the cwd (up to the git top level), the project is trusted, the repo-local TypeScript is installed and the base tree did not already fail it | `unavailable`, including for a solution-style `tsconfig.json` (only `references`, or `"files": []`) that would have `tsc --noEmit` check no file and pass vacuously |
 | `lint` | the project is trusted, an ESLint config (`eslint.config.{js,mjs,cjs,ts,mts,cts}`, `.eslintrc{,.js,.cjs,.json,.yml,.yaml}` or `package.json#eslintConfig`) exists at or above the cwd (up to the git top level), and a repo-local `eslint` binary; it runs from the directory holding that config with `--format json`; an error-severity message (or exit 1) is `fail`; `pass` needs at least one changed file ESLint actually linted | `unavailable`, including when ESLint ignored every changed file ("File ignored because ...") or printed no JSON report; any other non-zero exit is also `unavailable` |
 | `lsp` | never | always `unavailable` |
-| `anti-pattern` | a changed code file exists; only error-tier findings the base did not already have count | `pass` with nothing found |
+| `anti-pattern` | a changed code file exists; only error-tier findings the base did not already have count | `unavailable` when no code file changed |
 
 **The `lint` leg runs the target repo's own ESLint** on the changed code files, passing the files after `--` so a name beginning with `-` cannot be read as a flag, with output bounded at 40 lines. It never runs without an ESLint config and a repo-local binary, and never on an untrusted project: a report of "no lint problems" from a linter that was not there is the failure this document exists to prevent.
 
 **The LSP leg is `UNAVAILABLE` by a Pi API limit, not by an absent install.** A command or event context in Pi 1.1.0 has no `executeTool` (`dist/core/extensions/types.d.ts:262-280`: only a tool's own execute context carries it), so the gate cannot call `lsp_diagnostics`, and a registered tool is not a run. The probe (`probeLspAvailability`) still reads the live tool-name list and requires both `lsp_diagnostics` and `lsp_fix`, so the report names what is missing. Whether the model can reach a real language server through the tool path is the live half, `RB-08-02` in `docs/RUNBOOK.md`.
 
 **The anti-pattern leg (QUAL-01) is syntax-only, never a type-checked
-walk.** Its six rules (§2) parse with `ts.createSourceFile` and walk with
+walk.** Its six rules (§2) parse each file once with `ts.createSourceFile` and walk with
 `ts.forEachChild`, never `ts.createProgram`/`getTypeChecker` and never
 `String.match`. This is what keeps QUAL-02's wall-clock claim true rather
 than merely asserted: parsing one file is cheap in a way type-checking a
@@ -88,10 +89,11 @@ Calibration is offline only and is listed for no workflow. `runBoundedReviewLoop
 
 The two WARNING-tier rules (`literal-special-case`, `n-plus-one`) are
 **only partially decidable without type information or a real call graph**,
-and neither can ever flip `GateResult.failed` to true on its own —
-`runAntiPatternLeg` only ever reaches `fail` when at least one ERROR-tier
-finding exists; a warning-only run still reports its findings (tagged by
-tier) inside a `pass` leg.
+and neither can ever flip `ChangeGateResult.failed` to true on its own: the
+change gate counts only ERROR-tier findings the base did not already have,
+and `runAntiPatternLeg` only reaches `fail` when at least one ERROR-tier
+finding exists. A warning-only run is a bare `pass`; the gate report does
+not carry warnings, so a WARNING-tier hit reaches no human through it.
 
 **The `tests/fixtures/**` exemption.** `SCAN_EXEMPT_PREFIXES` names
 `tests/fixtures/` so that a corpus deliberately *built* out of these six
@@ -217,124 +219,49 @@ The corpus is **six real, dated incidents from this project's own history**
 | `symptomatic-fix` | Phase 3: a "fix" that suppressed a failing assertion instead of addressing its cause. |
 | `false-label` | Phase 7: a test labelled "MUTATION-VERIFIED" that survived its own mutation. |
 
-**The number recorded so far — 2 of 6, catch rate 0.333... — is a SCRIPTED
-faux reviewer's number, not a live model's judgement.** Its purpose is to
-prove the pipeline (corpus → `runReview` → `validateReview` →
-`scoreCalibration`) computes a real, reproducible, non-rounded number end
-to end.
+**The recorded number, 2 of 6 (catch rate 0.333...), is a SCRIPTED faux
+reviewer's, not a live model's judgement.** It proves the pipeline (corpus →
+`runReview` → `validateReview` → `scoreCalibration`) computes a real,
+reproducible, unrounded number end to end. The scripted reviewer submits
+three findings (`tests/integration/reviewer-calibration.test.ts`'s
+`KNOWN_SUBSET_ARGS`); today's matcher credits two (`KNOWN_SUBSET_CAUGHT`).
+The fixture text is never edited to move that number when the matcher
+changes: the catch rate measures the matcher against unedited text, it is
+not a target.
 
-**WR3-02 disclosure (`08-REVIEW.md` iteration 3).** This fixture was
-originally scripted to catch 3 of 6, including `false-label`. When WR2-05
-raised the matcher's needle requirement from one to two (`bb2a67c`),
-`false-label`'s finding text did not naturally contain a second needle, so
-— in the SAME commit that raised the bar — it was extended with a phrase
-lifted from the corpus's own `mustMentionAny` answer key, which kept the
-reported 0.5 unchanged **by construction**, not by measurement; the
-pre-edit text scores 2/6 = 0.333... under that same, already-raised bar.
-The fixture has been reverted to its original, unmodified text
-(`tests/integration/reviewer-calibration.test.ts`'s `KNOWN_SUBSET_ARGS`
-and `KNOWN_SUBSET_CAUGHT`), and **2 of 6, 0.333..., is the honest number**:
-the false-label finding is still submitted by the scripted reviewer (three
-findings go in), but only two are credited as genuine catches by today's
-matcher. This is not being re-inflated back toward 0.5 — the catch rate is
-a measurement of what the current matcher, run against unedited fixture
-text, actually reports, not a target to preserve across matcher changes.
+**How a finding catches.** `findingCatches` is a substring-match proxy for
+defect identification, never a semantic one. A finding catches an
+expectation only when it:
 
-Its purpose is proven further by FOUR required negative controls
-(unaffected by the WR3-02 revert above, since none of them ever depended
-on the `false-label` finding's text): a blind reviewer (approves
-everything) scores
-`catchRate: 0`; a shotgun reviewer (twenty generic findings, e.g.
-"this area could probably be improved somehow") also scores `catchRate: 0`;
-(WR-03) a **name-dropping shotgun** — one finding per touched file, naming
-only that file's own most conspicuous symbol (`markMigrationComplete`,
-`isGuardedCommand`, …) with no description of what is actually wrong — also
-scores `catchRate: 0`; and (WR2-05, `08-REVIEW.md` iteration 2) a
-**boilerplate kitchen sink** — ONE sentence, reused verbatim across all six
-touched files, engineered to contain exactly one `mustMentionAny` phrase per
-defect class — scores `catchRate: 0` too. The name-dropping control exists
-because the first version of `tests/fixtures/seeded-defects/index.ts`'s
-`mustMentionAny` needles were bare symbol names, trivially derivable from
-"the file's only function" (five of the six fixture files contain exactly
-one) without having understood the defect at all — that exact shape scored
-`catchRate: 1.0` (6/6, having caught nothing) before the needles were
-rewritten to describe the DEFECT's behaviour (e.g. `absent-guard`'s needle
-is `"never calls isGuardedCommand"`, not bare `"isGuardedCommand"`). The
-kitchen-sink control exists because that rewrite alone was still not enough:
-`mustMentionAny` is an OR set, and an OR set is only as strong as its
-weakest member — a single crafted sentence carrying one generic-sounding
-phrase per class ALSO scored `catchRate: 1.0` having identified nothing,
-until `findingCatches` was changed to require **two independent needles**
-per expectation (`calibration.ts`'s `MIN_DISTINCT_NEEDLES`), not merely one.
-**`findingCatches` is honestly a substring-match proxy for defect
-identification, never a semantic one** — it requires the right file **and**
-at least two of the phrases the corpus names as describing the specific
-malformed *behaviour*, which is a stronger bar than a bare finding count or
-the right identifier alone, but it is still pattern matching against known
-text, not judgement.
+1. names the expectation's `locationFile`;
+2. contains at least two of its `mustMentionAny` needles
+   (`MIN_DISTINCT_NEEDLES`), each describing the defect's *behaviour* (e.g.
+   `absent-guard`'s `"never calls isGuardedCommand"`, never a bare symbol a
+   reviewer could name without understanding anything);
+3. does **not** also clear a different expectation's two-needle bar, which
+   is what a sentence reused verbatim across every file must do; and
+4. carries at least the expectation's minimum severity.
 
-(WR3-01, `08-REVIEW.md` iteration 3) The two-needle bar above did not close
-the exploit, it only raised its price: a single sentence carrying TWO
-needles per defect class, reused verbatim across all six touched files,
-still scored `catchRate: 1.0` having identified zero defects — one measured
-data point, not a ceiling: extending the same boilerplate by one more
-phrase per class defeats the matcher just as the one-needle version did.
-`findingCatches` was changed again to also reject a finding whose text
-*also* independently clears a DIFFERENT, unrelated expectation's own
-two-needle bar — a genuine finding about one file's one defect does not
-organically use enough of a wholly different defect's vocabulary to catch
-it too, which is exactly what a sentence reused across all six files must
-do. A fifth permanent control, `TWO_NEEDLE_KITCHEN_SINK_ARGS`
-(`tests/integration/reviewer-calibration.test.ts`), pins this: it now
-scores `catchRate: 0`, and is kept alongside the blind/shotgun/name-drop/
-kitchen-sink controls as a permanent regression test for this exploit
-shape, not a claim that the substring-match approach has no further
-exploit — the OR/AND-of-substrings axis this scorer is built on is not
-exhausted by proving four constructions against it, and a live reviewer's
-findings are never phrased to defeat any of this in the first place. **No
-live reviewer, of any kind, has ever run against this corpus.** The live
-calibration run is `RB-08-03` in `docs/RUNBOOK.md`, OUTSTANDING, and its
-result is expected to differ from the scripted number in either direction,
-since a live model was never tuned to this corpus the way the scripted one
-was.
+Rule 3 only holds when each class's needles are mutually independent (no
+shared word or substring, so one phrase cannot satisfy two needles); the
+corpus-wide needle-independence test pins that.
 
-**CR3C-01 correction (`08-REVIEW-R3CHECK.md`).** The paragraph above's claim
-— "a genuine finding about one file's one defect does not organically use
-enough of a wholly different defect's vocabulary to catch it too" — was
-**false** for two of the six classes, and for a narrower reason than the
-cross-contamination rule itself: `tautological-test`'s needle set contained
-`"cannot fail"` **and** `"structurally cannot"`, which are not independent
-facts — the single phrase `"structurally cannot fail"` (this project's own
-house vocabulary for this entire defect family; see `seeded-defects/
-index.ts`'s own header and `CLAUDE.md`) satisfies both at once.
-`escaped-side-effect` had the same shape (`"writes into the real"` +
-`"developer's own home directory"`, both satisfied by one natural clause).
-Two consequences: (1) a genuine, correctly-located finding carrying two of
-its OWN class's needles could be wrongly rejected merely for ALSO containing
-that phrase, because the phrase looked like it independently cleared
-`tautological-test`'s own two-needle bar too — the exact failure mode the
-paragraph above claims cannot happen; (2) the same three-word phrase, reused
-verbatim across all six files with zero analysis, scored a non-zero
-`catchRate` on its own, needing no answer-key access unlike the kitchen-sink
-controls. **The fix is the needle sets, not the cross-contamination rule
-itself** — `tests/fixtures/seeded-defects/index.ts`'s `tautological-test`
-and `escaped-side-effect` entries now each carry four needles with no
-shared word or substring between any pair (pinned corpus-wide by
-`reviewer-calibration.test.ts`'s own needle-independence test), and the
-cross-contamination rule is otherwise unchanged and still load-bearing (see
-`TWO_NEEDLE_KITCHEN_SINK_ARGS` above, still `catchRate: 0` after this fix —
-verified, not assumed). The corrected claim: cross-contamination catches a
-finding that organically clears a DIFFERENT class's bar **only when that
-class's own needles are genuinely mutually independent** — a property that
-must hold for every expectation, is now pinned by a permanent test, and was
-NOT true for two of six before this fix. A sixth permanent control (the
-two generic phrases above, run through `scoreCalibration` directly) and a
-regression test (a genuine `false-label` finding using the phrase
-"structurally cannot fail" is credited, not rejected) both now pin this.
-**The 2/6 = 0.333... number is unaffected** — neither fixed needle
-participates in `KNOWN_SUBSET_ARGS`'s three scripted findings, and every
-other control was re-verified to still score `catchRate: 0` after the
-needle change.
+**Negative controls**, each a permanent regression test scoring
+`catchRate: 0`: a blind reviewer (approves everything); a shotgun reviewer
+(twenty generic findings); a name-dropping shotgun (one finding per file
+naming only its most conspicuous symbol); a one-needle kitchen sink (one
+sentence reused across all six files, one needle per class); a two-needle
+kitchen sink (`TWO_NEEDLE_KITCHEN_SINK_ARGS`); and two generic phrases
+derivable from the input alone ("structurally cannot fail", "writes into
+the real developer's own home directory") run through `scoreCalibration`
+directly. A
+genuine finding that happens to use that phrase is still credited. The
+controls prove the constructions they name are defeated, not that the
+substring approach has no further exploit.
+
+**No live reviewer, of any kind, has ever run against this corpus.** The
+live calibration run is `RB-08-03` in `docs/RUNBOOK.md`, OUTSTANDING; its
+result may differ from the scripted number in either direction.
 
 ## 7. The cost record
 
@@ -396,10 +323,11 @@ plainly what a passing check does not cover:
   the system prompt) and sets no `terminate`, since a consult continues the turn.
 - **The production runner never names `npx`.** `npx` is `npx.cmd` on Windows and
   unspawnable without a shell; elsewhere an unpinned `npx <pkg>` downloads from
-  the registry. `productionExec` resolves `node_modules/.bin/<name>` (walking up
-  ancestors to the git top level, never past it, so a binary outside the
-  trusted project is never run), refuses a `%` in the command line on Windows, and degrades to
-  `unavailable` for a foreign `cwd` or an untrusted project.
+  the registry. `productionExec` resolves `node_modules/.bin/<name>`
+  (walking up ancestors to the git top level, never past it, so a binary outside
+  the trusted project is never run), refuses a `%` in the command line on Windows,
+  and degrades to `unavailable` for a foreign `cwd`; `resolveExec` refuses an
+  untrusted project before any runner is chosen.
 - **Chokepoint hygiene.** `gates.ts` never reaches a model and never spells the
   bypass routes or the tool-registration call, even in comments; the raw-source
   lint tests grant `quality/` no exemption.
