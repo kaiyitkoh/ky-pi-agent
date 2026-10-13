@@ -129,7 +129,7 @@ export default function (pi: ExtensionAPI): void {
 				if (shouldRunDesignReview(signals)) {
 					ctx.ui.notify("review: running the design-level pass", "info");
 					const design = await runDesignReview(ctx, { diffText: contract.diff, changed, requirements: contract.requirements });
-					if (design.notice !== undefined) ctx.ui.notify(`review: ${design.notice}`, "warning");
+					if (design.notice !== undefined) gateDoubts.push(`the design pass this change's signals called for is incomplete: ${design.notice}`);
 					const added = design.findings.map((f) => ({ ...f, concreteFailure: `[design] ${f.concreteFailure}` }));
 					review = { ...review, findings: [...review.findings, ...added], designPass: { ran: true, note: design.notice ?? `${added.length} finding(s) added`, signals } };
 				} else {

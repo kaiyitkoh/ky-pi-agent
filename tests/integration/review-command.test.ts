@@ -28,6 +28,7 @@ function livePin(repo: string): { tasks: ReturnType<typeof tasksOf>; specHash: s
 const mocks = vi.hoisted(() => ({
 	review: undefined as unknown,
 	designCalls: 0,
+	designNotice: undefined as string | undefined,
 	context: "",
 	calls: [] as { args: string[]; reviewWritten: boolean }[],
 	reviewPath: "",
@@ -44,6 +45,7 @@ vi.mock("../../.pi/extensions/quality/design-review.ts", async (importOriginal) 
 	...(await importOriginal<object>()),
 	runDesignReview: async () => {
 		mocks.designCalls += 1;
+		if (mocks.designNotice !== undefined) return { findings: [], notice: mocks.designNotice };
 		return { findings: [{ severity: "WARNING", location: "src/a.ts:1", concreteFailure: "quadratic scan", suggestedFix: "index it" }] };
 	},
 }));
@@ -88,6 +90,7 @@ const repos: string[] = [];
 beforeEach(() => {
 	mocks.calls = [];
 	mocks.designCalls = 0;
+	mocks.designNotice = undefined;
 	mocks.review = CLEAN;
 });
 afterEach(() => {
@@ -225,6 +228,16 @@ describe("/review -- the real handler", () => {
 		const h = setup();
 		await h.run(SLUG);
 		expect(mocks.designCalls).toBe(1);
+	});
+
+	it("a design pass that failed asks before the MR opens, and a refusal opens none", async () => {
+		mocks.designNotice = "the design pass failed (aborted); it added no findings";
+		const h = setup();
+		h.setApprove(false);
+		await h.run(SLUG);
+		expect(mocks.designCalls).toBe(1);
+		expect(h.confirms.join("\n")).toContain("the design pass failed");
+		expect(mocks.calls).toHaveLength(0);
 	});
 
 	it("writes REVIEW.md, then opens exactly one MR against staging", async () => {
