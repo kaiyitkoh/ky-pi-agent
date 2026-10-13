@@ -197,6 +197,7 @@ patch_skill() {
 run_check() {
 	check_cli_version
 	failures=$(report_missing "$SKILLS_DIR" "$PROMPTS_DIR" 'FAIL: missing')
+	: "${failures:=1}"
 	for skill in $OPENSPEC_SKILLS; do
 		f="$SKILLS_DIR/$skill/SKILL.md"
 		if [ -f "$f" ] && ! has_one_flag "$f"; then
@@ -244,7 +245,8 @@ run_install() {
 	)
 
 	gen="$work/proj/.pi"
-	if [ "$(report_missing "$gen/skills" "$gen/prompts" 'FATAL: openspec did not generate')" -gt 0 ]; then
+	missing=$(report_missing "$gen/skills" "$gen/prompts" 'FATAL: openspec did not generate')
+	if [ "${missing:-1}" -ne 0 ]; then
 		printf 'Nothing was installed.\n' >&2
 		exit 1
 	fi
