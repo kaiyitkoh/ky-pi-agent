@@ -355,3 +355,21 @@ describe("the change gate's four legs report only what ran", () => {
 		expect(result.ranAny).toBe(false);
 	});
 });
+
+describe("a cwd below the git top level still gates the changed files git reports", () => {
+	it("an anti-pattern added under the subdirectory is found, and lint runs from the config above cwd on the real file", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const repo = makeTempRepo("kypi-subdir-gate-");
+		const base = commitFile(repo, "seed.txt", "seed\n", "seed");
+		const sub = join(repo, "apps", "web");
+		mkdirSync(join(sub, "src"), { recursive: true });
+		writeFileSync(join(repo, "eslint.config.js"), "export default [];\n", "utf-8");
+		const argsFile = join(repo, "eslint-args.txt");
+		stubBin(repo, "eslint", { exitCode: 0, argsFile });
+		writeFileSync(join(sub, "src", "x.ts"), "export function f(): void {\n  try {\n    JSON.parse('x');\n  } catch {}\n}\n", "utf-8");
+		const result = runChangeGateStage({ cwd: sub, projectTrusted: true, baseSha: base, changed: ["apps/web/src/x.ts"], baseTypecheckFailed: false });
+		expect(result.antiPattern.status, result.report).toBe("fail");
+		expect(result.lint.status, result.report).toBe("pass");
+		expect(readFileSync(argsFile, "utf-8")).toContain("x.ts");
+	});
+});

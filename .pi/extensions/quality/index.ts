@@ -4,7 +4,7 @@
  * Authored in this repo, not vendored; the "vendored" kind in the tool-count registry means in-repo source only.
  */
 import { existsSync, readFileSync } from "node:fs";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -69,7 +69,7 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 		);
 	}
 	// A test-file target absent from this cwd would make the runner report a false FAIL, so degrade to unavailable.
-	const missingTargets = args.filter((a) => a.endsWith(".test.ts") && !existsSync(join(cwd, a)));
+	const missingTargets = args.filter((a) => a.endsWith(".test.ts") && !existsSync(resolve(cwd, a)));
 	if (missingTargets.length > 0) {
 		throw new Error(
 			`${cmd} target file(s) not found under ${cwd}: ${missingTargets.join(", ")} -- a leg naming test files only applies where they exist`,
@@ -119,25 +119,31 @@ function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
 	return productionExec;
 }
 
+/** The git top level of `cwd`, or `cwd` outside a repository. `git diff` paths are relative to it, not to `cwd`. */
+export function repoTop(cwd: string): string {
+	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	return resolve(top.status === 0 ? top.stdout.trim() : cwd);
+}
+
+/** The nearest directory from `cwd` up to the git top level that holds one of `names`; never above the project. */
+function findUp(cwd: string, names: readonly string[]): string | undefined {
+	const norm = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
+	const stop = norm(repoTop(cwd));
+	let dir = resolve(cwd);
+	for (;;) {
+		if (names.some((name) => existsSync(join(dir, name)))) return dir;
+		const parent = dirname(dir);
+		if (norm(dir) === stop || parent === dir) return undefined;
+		dir = parent;
+	}
+}
+
 /** `tsc --noEmit` at `cwd`, alone; unavailable when no tsconfig.json exists from `cwd` up to the git top level. */
 export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus {
-	if (!hasTsconfig(cwd)) {
+	if (findUp(cwd, ["tsconfig.json"]) === undefined) {
 		return { status: "unavailable", reason: `no tsconfig.json at or above ${cwd} (up to the git top level), so tsc has no project to check` };
 	}
 	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
-}
-
-function hasTsconfig(cwd: string): boolean {
-	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	const norm = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
-	const stop = top.status === 0 ? norm(top.stdout.trim()) : norm(cwd);
-	let dir = resolve(cwd);
-	for (;;) {
-		if (existsSync(join(dir, "tsconfig.json"))) return true;
-		const parent = dirname(dir);
-		if (norm(dir) === stop || parent === dir) return false;
-		dir = parent;
-	}
 }
 
 const ESLINT_CONFIGS = [
@@ -155,15 +161,19 @@ const ESLINT_CONFIGS = [
 
 const LINT_OUTPUT_MAX_LINES = 40;
 
-/** Runs the target repo's own ESLint on the changed code files; unavailable unless the repo configures it and is trusted. */
-function runLintAt(cwd: string, projectTrusted: boolean, files: readonly string[]): LegStatus {
+/**
+ * Runs the target repo's own ESLint on the changed code files (paths relative to `top`), from the nearest directory between
+ * `cwd` and `top` that holds a config; unavailable unless the repo configures it and is trusted.
+ */
+function runLintAt(cwd: string, top: string, projectTrusted: boolean, files: readonly string[]): LegStatus {
 	if (files.length === 0) return { status: "unavailable", reason: "no changed TypeScript/JavaScript file for eslint to check" };
-	if (!ESLINT_CONFIGS.some((name) => existsSync(join(cwd, name)))) {
-		return { status: "unavailable", reason: `no ESLint config in ${cwd}, so there is no lint rule set to apply` };
+	const configDir = findUp(cwd, ESLINT_CONFIGS);
+	if (configDir === undefined) {
+		return { status: "unavailable", reason: `no ESLint config at or above ${cwd} (up to the git top level), so there is no lint rule set to apply` };
 	}
 	let result: { code: number; stdout: string; stderr: string };
 	try {
-		result = resolveExec(cwd, projectTrusted)("eslint", ["--", ...files], cwd);
+		result = resolveExec(configDir, projectTrusted)("eslint", ["--", ...files.map((f) => relative(configDir, join(top, f)))], configDir);
 	} catch (err) {
 		return { status: "unavailable", reason: `eslint could not be run: ${err instanceof Error ? err.message : String(err)}` };
 	}
@@ -211,7 +221,8 @@ export function runChangeGateStage(input: {
 	readonly changed: readonly string[];
 	readonly baseTypecheckFailed: boolean;
 }): ChangeGateResult {
-	const code = input.changed.filter((p) => CODE_FILE.test(p) && existsSync(join(input.cwd, p)));
+	const top = repoTop(input.cwd);
+	const code = input.changed.filter((p) => CODE_FILE.test(p) && existsSync(join(top, p)));
 	let antiPattern: LegStatus = { status: "unavailable", reason: "no changed TypeScript/JavaScript file to scan" };
 	if (code.length > 0) {
 		const before = new Map<string, number>();
@@ -220,7 +231,7 @@ export function runChangeGateStage(input: {
 			return text === undefined ? [] : [{ path, text }];
 		});
 		for (const f of runAntiPatternRules(baseSources)) before.set(findingKey(f), (before.get(findingKey(f)) ?? 0) + 1);
-		const added = runAntiPatternRules(code.map((path) => ({ path, text: readFileSync(join(input.cwd, path), "utf-8") }))).filter((f) => {
+		const added = runAntiPatternRules(code.map((path) => ({ path, text: readFileSync(join(top, path), "utf-8") }))).filter((f) => {
 			const left = before.get(findingKey(f)) ?? 0;
 			before.set(findingKey(f), left - 1);
 			return left <= 0 && f.tier === "error";
@@ -232,7 +243,7 @@ export function runChangeGateStage(input: {
 		: input.baseTypecheckFailed
 			? { status: "unavailable", reason: "tsc already failed on the base tree, so a failure cannot be attributed to this change" }
 			: runTypecheckAt(input.cwd, input.projectTrusted);
-	const lint = runLintAt(input.cwd, input.projectTrusted, code);
+	const lint = runLintAt(input.cwd, top, input.projectTrusted, code);
 	const lsp = probeLspAvailability(registeredToolNames());
 	const legs = [["typecheck", typecheck], ["lint", lint], ["lsp", lsp], ["anti-pattern", antiPattern]] as const;
 	const report = legs

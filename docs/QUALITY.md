@@ -35,12 +35,12 @@ two-state type cannot represent "did not run" as anything other than "ran
 and passed" or "ran and failed", both of which are lies about a leg that
 never executed. `GateResult.failed` is computed as "any leg reports `fail`" — `unavailable` never sets it, by construction, so an absent LSP install is never a reason to reject a change on its own, but it is always visible in the gate report for a human to read.
 
-The legs run on the work repo's change, not on this harness, and each has its own availability rule:
+The legs run on the work repo's change, not on this harness, and each has its own availability rule. Changed paths come from `git diff`, relative to the git top level, so the legs (and `/review`'s file reader) resolve them from the top level even when Pi runs in a subdirectory of a monorepo:
 
 | Leg | Runs when | Otherwise |
 |-----|-----------|-----------|
 | `typecheck` | a code file changed, a `tsconfig.json` exists at or above the cwd (up to the git top level), the project is trusted, the repo-local TypeScript is installed and the base tree did not already fail it | `unavailable` |
-| `lint` | the project is trusted, the repo has an ESLint config (`eslint.config.{js,mjs,cjs,ts}` or `.eslintrc{,.js,.cjs,.json,.yml,.yaml}`) and a repo-local `eslint` binary; exit 1 is `fail` | `unavailable`; any other non-zero exit is also `unavailable` |
+| `lint` | the project is trusted, an ESLint config (`eslint.config.{js,mjs,cjs,ts}` or `.eslintrc{,.js,.cjs,.json,.yml,.yaml}`) exists at or above the cwd (up to the git top level), and a repo-local `eslint` binary; it runs from the directory holding that config; exit 1 is `fail` | `unavailable`; any other non-zero exit is also `unavailable` |
 | `lsp` | never | always `unavailable` |
 | `anti-pattern` | a changed code file exists; only error-tier findings the base did not already have count | `pass` with nothing found |
 

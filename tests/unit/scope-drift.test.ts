@@ -179,3 +179,13 @@ describe("readTouchedFiles", () => {
 		expect(big?.contents).toContain(`truncated: first ${MAX_TOUCHED_FILE_BYTES} of ${MAX_TOUCHED_FILE_BYTES + 500} bytes`);
 	});
 });
+
+describe("readTouchedFiles from a subdirectory", () => {
+	it("reads git's top-level-relative paths from the top level, not from cwd", () => {
+		const repo = makeTempRepo("kypi-touched-sub-");
+		mkdirSync(join(repo, "apps", "web"), { recursive: true });
+		writeFileSync(join(repo, "apps", "web", "a.ts"), "const a = 1;\n");
+		const [a] = readTouchedFiles(join(repo, "apps", "web"), ["apps/web/a.ts"]);
+		expect(a).toEqual({ path: "apps/web/a.ts", contents: "const a = 1;\n" });
+	});
+});

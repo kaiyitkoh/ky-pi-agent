@@ -77,8 +77,11 @@ const BINARY_SNIFF_BYTES = 8_000;
 
 /** Full contents of each changed file for the reviewer; deleted, binary and lockfile entries carry a note instead of bytes, and large files are cut. */
 export function readTouchedFiles(cwd: string, changed: readonly string[]): TouchedFile[] {
+	// `changed` comes from git diff, so it is relative to the top level even when `cwd` is a subdirectory.
+	const top = gitOut(cwd, ["rev-parse", "--show-toplevel"]);
+	const root = top.status === 0 && top.out !== "" ? top.out : cwd;
 	return changed.map((path) => {
-		const abs = join(cwd, path);
+		const abs = join(root, path);
 		if (!existsSync(abs) || !statSync(abs).isFile()) return { path, contents: "(deleted in this change)" };
 		const size = statSync(abs).size;
 		if (LOCKFILE_NAMES.has(basename(path))) return { path, contents: `(content omitted: lockfile, ${size} bytes)` };
