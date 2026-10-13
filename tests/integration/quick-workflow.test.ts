@@ -66,7 +66,6 @@
  * or binding to a tree hash instead of a commit SHA, is Phase 8's job, not
  * this walking skeleton's.
  */
-import { spawnSync } from "node:child_process";
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -84,11 +83,10 @@ import { getModeState, planRoleCall } from "../../.pi/extensions/routing/modes.t
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { classifyGitInvocation, currentBranch } from "../../.pi/extensions/safety/git.ts";
 import { PROTECTED_BRANCHES } from "../../.pi/extensions/safety/index.ts";
-import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { EVIDENCE_LOG_BASE, isRunArmed } from "../../.pi/extensions/workflows/evidence.ts";
-import { repoRoot } from "../helpers/git.ts";
-import { readJsonl } from "../helpers/logs.ts";
-import { withFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { gitInit, repoRoot, runGit } from "../helpers/git.ts";
+import { readAudit, readJsonl } from "../helpers/logs.ts";
+import { captureNotify, waitFor, waitForConfiguredAuth, withFauxSession, type Notification } from "../helpers/session.ts";
 
 /**
  * Every case that settles a commit runs the deterministic change gate at agent_settled, against a
@@ -137,35 +135,6 @@ function composite(withDiagnostics: boolean): string {
 	return lines.join("\n");
 }
 
-/** Run one git argv in `cwd`, throwing with the exact failing argv on a non-zero exit. */
-function runGit(args: string[], cwd: string): string {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in ${cwd}: ${result.error.message}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(`git ${args.join(" ")} failed (exit ${result.status}) in ${cwd}: ${result.stderr ?? ""}`);
-	}
-	return result.stdout ?? "";
-}
-
-/**
- * Init a real git repository IN the faux session's own `cwd` (never a fresh
- * temp dir -- `/quick` reads `ctx.cwd`, so the repository under test must be
- * the session's own working directory), checked out on `branch`, with one
- * seed commit so `currentSha`/`git rev-parse HEAD` never throw on "no
- * commits yet".
- */
-function gitInit(cwd: string, branch: string): void {
-	runGit(["init"], cwd);
-	runGit(["config", "user.email", "quick@test.invalid"], cwd);
-	runGit(["config", "user.name", "quick test"], cwd);
-	runGit(["checkout", "-b", branch], cwd);
-	writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf-8");
-	runGit(["add", "--", "seed.txt"], cwd);
-	runGit(["commit", "-m", "seed"], cwd);
-}
-
 /** The number of commits reachable from HEAD, read fresh every call. */
 function commitCount(cwd: string): number {
 	return Number(runGit(["rev-list", "--count", "HEAD"], cwd).trim());
@@ -182,86 +151,6 @@ function logOneline(cwd: string): string {
  */
 function realHeadSha(cwd: string): string {
 	return runGit(["rev-parse", "HEAD"], cwd).trim();
-}
-
-/**
- * Poll `predicate` until it is true, or throw naming `label` and the
- * timeout. Modelled on `mode-switch.test.ts`'s `waitForConfiguredAuth` --
- * never a bare `setTimeout` guess. Needed because `pi.sendUserMessage` is
- * fire-and-forget [`agent-session.js:1855-1862`]: `/quick`'s command handler
- * returns before the turn -- and therefore the evidence gate -- has run.
- */
-async function waitFor(predicate: () => boolean, timeoutMs = 5000, label = "condition"): Promise<void> {
-	const start = Date.now();
-	while (!predicate()) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(`waitFor: "${label}" was not met within ${timeoutMs}ms`);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
-
-/**
- * Poll `modelRuntime.hasConfiguredAuth(providerId)` until `true`. Copied from
- * `tests/integration/mode-switch.test.ts`'s measured finding: the awaited
- * `setRuntimeApiKey` promise resolving is not sufficient by itself --
- * `hasConfiguredAuth` reads a cached snapshot that lags the live check by a
- * few milliseconds.
- */
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms`);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
-
-/** A notification `ctx.ui.notify` recorded. */
-interface Notification {
-	text: string;
-	level?: string;
-}
-
-/**
- * Patch `ctx.ui`'s own `notify` METHOD, not the `ctx.ui` property itself.
- *
- * `ctx.ui` is a getter that returns `runner.uiContext`
- * [VERIFIED: `dist/core/extensions/runner.js:464-467`] -- the SAME object
- * reference every time it is read, from EVERY context the runner ever
- * builds. `/quick`'s own refusal notifications happen inside the command
- * handler, on the exact `ctx` this file passes to `command.handler(...)`,
- * but the acceptance/rejection verdict (cases 3 and 4) is notified from
- * `agent_end`, a DIFFERENT, freshly built context object
- * [`runner.js:459-537`, `createContext()`]. Shadowing `ctx.ui` itself (the
- * technique `tests/integration/mode-switch.test.ts` uses, sufficient there
- * because every assertion in that file happens inside the SAME command
- * handler) would miss `agent_end`'s notification entirely -- confirmed by
- * running this file with that technique first and observing an empty
- * `notifications` array on cases 3 and 4 despite a real evidence row landing.
- * Mutating the METHOD on the shared underlying object is read back
- * identically by every context, command or event. Restored in a `finally` by
- * every caller so the mutation never leaks into a later test in the same
- * worker.
- */
-function captureNotify(ctx: ExtensionCommandContext): { notifications: Notification[]; restore: () => void } {
-	const notifications: Notification[] = [];
-	const ui = ctx.ui as unknown as { notify: (text: string, level?: string) => void };
-	const original = ui.notify;
-	ui.notify = (text: string, level?: string) => {
-		notifications.push({ text, level });
-	};
-	return {
-		notifications,
-		restore: () => {
-			ui.notify = original;
-		},
-	};
 }
 
 /** The row shape `workflows/evidence.ts#writeEvidenceRow` writes. */
@@ -287,27 +176,6 @@ function readEvidence(cwd: string): EvidenceRowShape[] {
 		);
 	}
 	return readJsonl(file) as EvidenceRowShape[];
-}
-
-/** A row from the Phase 4 audit log, narrowed to the fields this file reads. */
-interface AuditRowShape {
-	event?: string;
-	tool?: string;
-	command?: string;
-	verdict?: "allow" | "block";
-	reason?: string;
-}
-
-/** Read the Phase 4 audit log for `cwd`, failing with the remedy rather than an `ENOENT` stack. */
-function readAudit(cwd: string): AuditRowShape[] {
-	const file = logPath(cwd, AUDIT_LOG_BASE);
-	if (!existsSync(file)) {
-		throw new Error(
-			`${file} does not exist: the session wrote no safety audit log at all. The likeliest cause is the ` +
-				"safety extension not loading at USER scope.",
-		);
-	}
-	return readJsonl(file) as AuditRowShape[];
 }
 
 /** A row from the Phase 2 turns log, narrowed to the field this file reads. */

@@ -46,7 +46,7 @@
 import { join } from "node:path";
 
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
-import type { CustomEntry, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { CustomEntry } from "@earendil-works/pi-coding-agent";
 
 import { describe, expect, it } from "vitest";
 

@@ -62,17 +62,15 @@
  * own Case 1 alternative names. Every command below is `cat`/`echo` over a
  * path or a literal string; none of them touch git.
  */
-import { existsSync } from "node:fs";
 
-import type { AssistantMessage, FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
+import type { FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 
 import { describe, expect, it } from "vitest";
 
-import { logPath } from "../../.pi/lib/jsonl.ts";
-import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { readJsonl } from "../helpers/logs.ts";
+import { assertAuditNonEmpty, readAudit } from "../helpers/logs.ts";
+import { capturing, lastToolResult } from "../helpers/faux.ts";
 import { withFauxSession } from "../helpers/session.ts";
 
 /** Absolute path of the safety extension this repository ships, forward-slashed for a TS import specifier. */
@@ -86,66 +84,6 @@ const BENIGN_A = "echo benign-a";
 
 /** A SECOND allowed command, distinct from {@link BENIGN_A} -- the negative control's mutation target. */
 const BENIGN_B = "echo benign-b";
-
-/** The row shape this file asserts on. */
-interface AuditRowShape {
-	event?: string;
-	tool?: string;
-	command?: string;
-	verdict?: "allow" | "block";
-	reason?: string;
-}
-
-/**
- * Read the safety audit log for `cwd`, failing with the remedy rather than an
- * `ENOENT` stack -- a missing file is what "the safety extension never
- * loaded" looks like, and it is the single most likely failure of this whole
- * file.
- */
-function readAudit(cwd: string): AuditRowShape[] {
-	const file = logPath(cwd, AUDIT_LOG_BASE);
-	if (!existsSync(file)) {
-		throw new Error(
-			`${file} does not exist: the session wrote no safety audit log at all. The likeliest cause ` +
-				"is the safety extension not loading -- it must sit at USER scope (extensionPath/" +
-				"extensionSource in tests/helpers/session.ts), because project-scoped .pi/extensions is " +
-				"gated behind project trust and that resolves false headless.",
-		);
-	}
-	return readJsonl(file) as AuditRowShape[];
-}
-
-/**
- * VACUITY GUARD (plan-mandated, Case 4): every audit assertion in this file
- * runs this FIRST. An empty file would make every "no forbidden row is
- * present" assertion pass having verified nothing.
- */
-function assertAuditNonEmpty(rows: AuditRowShape[]): void {
-	expect(
-		rows.length,
-		"the audit file exists but is empty -- every allow/block assertion below would pass " +
-			"vacuously against zero rows, which is the exact false-assurance shape Phase 2 already " +
-			"tripped over twice",
-	).toBeGreaterThan(0);
-}
-
-/** A response step that records the outgoing context (including the prior tool result) before answering. */
-function capturing(into: TranscriptContext[], reply: AssistantMessage): FauxResponseStep {
-	return ((context: TranscriptContext): AssistantMessage => {
-		into.push(context);
-		return reply;
-	}) as FauxResponseStep;
-}
-
-/** The most recent `toolResult` message in a captured context, or `undefined` if none exists. */
-function lastToolResult(context: TranscriptContext): { isError: boolean; text: string } | undefined {
-	const msg = [...context.messages].reverse().find((m) => m.role === "toolResult");
-	if (msg === undefined || msg.role !== "toolResult") {
-		return undefined;
-	}
-	const text = msg.content.map((block) => (block.type === "text" ? block.text : "")).join("");
-	return { isError: msg.isError, text };
-}
 
 /**
  * An inline user-scope extension: the REAL safety extension, plus a SECOND

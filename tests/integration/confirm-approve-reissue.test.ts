@@ -44,7 +44,6 @@
  * (`safety.tool_call_hook` / `safety.wrapped_execute` verdicts and reasons),
  * never about the real command's exit code.
  */
-import { existsSync } from "node:fs";
 
 import type { AssistantMessage, Context, FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
@@ -52,35 +51,13 @@ import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi
 import { describe, expect, it } from "vitest";
 
 import { approve } from "../../.pi/extensions/safety/approvals.ts";
-import { logPath } from "../../.pi/lib/jsonl.ts";
-import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { readJsonl } from "../helpers/logs.ts";
+import { readAudit } from "../helpers/logs.ts";
+import { capturing, lastToolResult } from "../helpers/faux.ts";
 import { withFauxSession } from "../helpers/session.ts";
-
-const SAFETY_ENTRY = `${repoRoot()}/.pi/extensions/safety/index.ts`.replace(/\\/g, "/");
 
 /** Classified `confirm` unconditionally by `infra.ts`, no HEAD/branch fixture needed. */
 const CONFIRM_COMMAND = "terraform apply";
-
-interface AuditRowShape {
-	event?: string;
-	tool?: string;
-	command?: string;
-	verdict?: "allow" | "block";
-	reason?: string;
-}
-
-function readAudit(cwd: string): AuditRowShape[] {
-	const file = logPath(cwd, AUDIT_LOG_BASE);
-	if (!existsSync(file)) {
-		throw new Error(
-			`${file} does not exist: the session wrote no safety audit log at all -- the safety extension ` +
-				"likely failed to load at user scope.",
-		);
-	}
-	return readJsonl(file) as AuditRowShape[];
-}
 
 /** Extract a `field="<json-quoted string>"` value from the hook's block-reason text, unescaping it via JSON.parse. */
 function extractQuotedField(text: string, field: string): string {
@@ -101,22 +78,6 @@ function extractQuotedField(text: string, field: string): string {
 		j += 1;
 	}
 	return JSON.parse(text.slice(i, j + 1)) as string;
-}
-
-function lastToolResult(context: Context): { isError: boolean; text: string } | undefined {
-	const msg = [...context.messages].reverse().find((m) => m.role === "toolResult");
-	if (msg === undefined || msg.role !== "toolResult") {
-		return undefined;
-	}
-	const text = msg.content.map((block) => (block.type === "text" ? block.text : "")).join("");
-	return { isError: msg.isError, text };
-}
-
-function capturing(into: Context[], reply: AssistantMessage): FauxResponseStep {
-	return ((context: Context): AssistantMessage => {
-		into.push(context);
-		return reply;
-	}) as FauxResponseStep;
 }
 
 /**

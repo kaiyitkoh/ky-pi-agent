@@ -51,9 +51,7 @@
  * A faux provider registered under a real provider id (`"deepseek"`) still
  * resolves `hasConfiguredAuth` false until `ModelRuntime#setRuntimeApiKey` is
  * called AND the cached availability snapshot catches up — a measured async
- * gap, not a synchronous one. {@link waitForConfiguredAuth} below is copied
- * from `tests/integration/mode-switch.test.ts`, which is where the finding
- * was made and recorded.
+ * gap, not a synchronous one. `waitForConfiguredAuth` (tests/helpers/session.ts) polls for it.
  *
  * ---------------------------------------------------------------------------
  * THE IDENTITY GUARD (Phase 3's own lesson, applied here)
@@ -107,7 +105,7 @@ import { MODE_ENTRY_TYPE, type KyModeData } from "../../.pi/extensions/routing/s
 import { buildOpenAiFixturePayload, wrapFauxWithPayload } from "../helpers/faux.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readTornSafe } from "../helpers/logs.ts";
-import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth } from "../helpers/session.ts";
+import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 
 /** Absolute path of the diagnostics extension this repository ships. */
 const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;

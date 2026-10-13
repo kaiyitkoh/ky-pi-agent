@@ -1,5 +1,4 @@
-import { spawnSync } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
@@ -7,19 +6,11 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { transcriptView } from "../helpers/faux.ts";
+import { commitFile, gitInit, runGit } from "../helpers/git.ts";
 import { createHarnessSession, type HarnessHandle } from "../helpers/harness-session.ts";
 
 const TRACKED = "ky-volatile-tracked-file.txt";
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
-
-function git(cwd: string, ...args: string[]): void {
-	const r = spawnSync(
-		"git",
-		["-c", "user.name=t", "-c", "user.email=t@test.invalid", "-c", "commit.gpgsign=false", ...args],
-		{ cwd, encoding: "utf-8", shell: false, windowsHide: true },
-	);
-	if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
-}
 
 /** Empty string when the three requests share one byte-equal prompt and tool list; otherwise the reason. */
 function instabilityReason(contexts: readonly TranscriptContext[]): string {
@@ -59,17 +50,15 @@ async function runThreeTurns(opts: { profile?: string; extraExtensionSource?: st
 	const contexts: TranscriptContext[] = [];
 	const handle = await createHarnessSession({ ...opts, responses: capturing(contexts) });
 	sessions.push(handle);
-	git(handle.cwd, "init", "-q");
-	writeFileSync(join(handle.cwd, TRACKED), "one\n");
-	git(handle.cwd, "add", "--", TRACKED);
-	git(handle.cwd, "commit", "-q", "-m", "init");
+	gitInit(handle.cwd, "work", false);
+	commitFile(handle.cwd, TRACKED, "one\n", "init");
 
 	vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
 	const tokens: number[] = [];
 	for (let turn = 1; turn <= 3; turn++) {
 		if (turn > 1) {
 			vi.setSystemTime(Date.now() + WEEK_MS);
-			git(handle.cwd, "checkout", "-q", "-b", `ky-volatile-branch-${turn}`);
+			runGit(["checkout", "-q", "-b", `ky-volatile-branch-${turn}`], handle.cwd);
 			appendFileSync(join(handle.cwd, TRACKED), `edit ${turn}\n`);
 		}
 		await handle.session.prompt(`turn ${turn}`);

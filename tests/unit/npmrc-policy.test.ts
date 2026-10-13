@@ -29,13 +29,13 @@
  * Nothing here writes outside `os.tmpdir()`.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { repoRoot } from "../helpers/git.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 // npm ships as `npm.cmd` on Windows and Node has refused to spawn `.cmd`
 // without a shell since CVE-2024-27980, so `shell: true` is unavoidable there
 // -- and `shell: true` alongside an args array is unescaped concatenation
@@ -54,23 +54,9 @@ const NPM_TIMEOUT_MS = 120_000;
  */
 const BOOTSTRAP_NPMRC = "ignore-scripts=true\n";
 
-/** Directories created by this file; removed in afterEach, always. */
-const created: string[] = [];
-
-function tempDir(label: string): string {
-	const dir = mkdtempSync(join(tmpdir(), `kypi-${label}-`));
-	created.push(dir);
-	return dir;
-}
-
-afterEach(() => {
-	while (created.length > 0) {
-		const dir = created.pop();
-		if (dir !== undefined) {
-			rmSync(dir, { recursive: true, force: true });
-		}
-	}
-});
+const scratch = scratchDirs();
+const tempDir = (label: string): string => scratch.make(`kypi-${label}-`);
+afterEach(scratch.cleanup);
 
 interface NpmResult {
 	stdout: string;

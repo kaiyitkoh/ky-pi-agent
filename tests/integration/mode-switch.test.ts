@@ -26,7 +26,7 @@
  * `checkAuth(providerId)` (a live, uncached per-call check) is already `true`
  * at that same point, so the gap is specific to the CACHED availability
  * snapshot `hasConfiguredAuth` reads, not to whether the credential itself
- * "took". {@link waitForConfiguredAuth} below polls with a real timeout for
+ * "took". `waitForConfiguredAuth` (tests/helpers/session.ts) polls with a real timeout for
  * exactly this reason — a fixed `setTimeout` guess would be exactly the kind
  * of flaky, undocumented magic-number this project's own conventions forbid.
  * This finding, and the seam it justifies, is recorded in

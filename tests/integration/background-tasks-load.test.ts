@@ -18,15 +18,14 @@
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AssistantMessage, FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
+import type { TranscriptContext } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 
 import { describe, expect, it } from "vitest";
 
-import { logPath } from "../../.pi/lib/jsonl.ts";
-import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { readJsonl } from "../helpers/logs.ts";
+import { assertAuditNonEmpty, readAudit } from "../helpers/logs.ts";
+import { capturing, lastToolResult } from "../helpers/faux.ts";
 import { withFauxSession } from "../helpers/session.ts";
 
 const root = repoRoot().replace(/\\/g, "/");
@@ -48,42 +47,6 @@ const INPUT_BEARING =
  * Empty: the trimmed vendored surface has no such tool (bg_status/bg_logs/bg_kill take taskId/maxBytes/tail).
  */
 const GUARDED_TOOLS: readonly string[] = [];
-
-interface AuditRowShape {
-	tool?: string;
-	command?: string;
-	verdict?: "allow" | "block";
-}
-
-function readAudit(cwd: string): AuditRowShape[] {
-	const file = logPath(cwd, AUDIT_LOG_BASE);
-	if (!existsSync(file)) {
-		throw new Error(
-			`${file} does not exist: the safety extension never wrote an audit log. Remedy: it must load ` +
-				"before the vendored entry, at USER scope (tests/helpers/session.ts extensionSource).",
-		);
-	}
-	return readJsonl(file) as AuditRowShape[];
-}
-
-function assertAuditNonEmpty(rows: AuditRowShape[]): void {
-	expect(rows.length, "audit file is empty -- the assertions below would be vacuous").toBeGreaterThan(0);
-}
-
-function capturing(into: TranscriptContext[], reply: AssistantMessage): FauxResponseStep {
-	return ((context: TranscriptContext): AssistantMessage => {
-		into.push(context);
-		return reply;
-	}) as FauxResponseStep;
-}
-
-function lastToolResult(context: TranscriptContext): { isError: boolean; text: string } | undefined {
-	const msg = [...context.messages].reverse().find((m) => m.role === "toolResult");
-	if (msg === undefined || msg.role !== "toolResult") {
-		return undefined;
-	}
-	return { isError: msg.isError, text: msg.content.map((b) => (b.type === "text" ? b.text : "")).join("") };
-}
 
 /** Safety first, then the vendored extension (the production order). */
 const COMBINED_SOURCE = [

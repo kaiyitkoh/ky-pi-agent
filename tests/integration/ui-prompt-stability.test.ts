@@ -1,5 +1,4 @@
-import { spawnSync } from "node:child_process";
-import { appendFileSync, writeFileSync } from "node:fs";
+import { appendFileSync } from "node:fs";
 import { join } from "node:path";
 
 import type { FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
@@ -7,6 +6,7 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { transcriptView } from "../helpers/faux.ts";
+import { commitFile, gitInit, runGit } from "../helpers/git.ts";
 import { createHarnessSession, type HarnessHandle } from "../helpers/harness-session.ts";
 import { createRecordingUI } from "../helpers/recording-ui.ts";
 
@@ -20,15 +20,6 @@ const MODES = [
 	{ mode: "max", escalated: true },
 	{ mode: "cheap", escalated: false },
 ];
-
-function git(cwd: string, ...args: string[]): void {
-	const r = spawnSync(
-		"git",
-		["-c", "user.name=t", "-c", "user.email=t@test.invalid", "-c", "commit.gpgsign=false", ...args],
-		{ cwd, encoding: "utf-8", shell: false, windowsHide: true },
-	);
-	if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
-}
 
 /** Empty string when every request shares one byte-equal prompt and tool list; otherwise the reason. */
 function instabilityReason(contexts: readonly TranscriptContext[]): string {
@@ -85,17 +76,15 @@ async function runTurns(opts: { body?: string } = {}) {
 	(globalThis as Record<string, unknown>)[REC_KEY] = rec;
 	const bus = (globalThis as Record<string, unknown>)[STASH_KEY] as Bus;
 
-	git(handle.cwd, "init", "-q");
-	writeFileSync(join(handle.cwd, TRACKED), "one\n");
-	git(handle.cwd, "add", "--", TRACKED);
-	git(handle.cwd, "commit", "-q", "-m", "init");
+	gitInit(handle.cwd, "work", false);
+	commitFile(handle.cwd, TRACKED, "one\n", "init");
 
 	vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-01T12:00:00Z") });
 	const tokens: number[] = [];
 	for (let turn = 1; turn <= TURNS; turn++) {
 		if (turn > 1) {
 			vi.setSystemTime(Date.now() + WEEK_MS);
-			git(handle.cwd, "checkout", "-q", "-b", `ky-volatile-branch-${turn}`);
+			runGit(["checkout", "-q", "-b", `ky-volatile-branch-${turn}`], handle.cwd);
 			appendFileSync(join(handle.cwd, TRACKED), `edit ${turn}\n`);
 			bus.events.emit("ky.routing.mode_changed", { ...MODES[(turn - 2) % MODES.length]!, model: "faux/faux-flash" });
 			if (turn > 2) bus.events.emit("subagent:async-complete", { id: `ky-volatile-run-${turn - 1}` });

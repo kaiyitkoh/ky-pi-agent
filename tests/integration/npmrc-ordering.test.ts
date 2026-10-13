@@ -35,14 +35,14 @@
  * and the one case that reaches `install_pi` reaches a stub. [threat T-01-07]
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
 /**
@@ -63,13 +63,8 @@ interface Run {
 	status: number | null;
 }
 
-let scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 /**
  * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
@@ -79,7 +74,7 @@ function tempDir(prefix: string): string {
  */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
-	scratch.push(copy.root);
+	scratch.track(copy.root);
 	return copy;
 }
 
@@ -209,16 +204,7 @@ function piStub(logTo: string): StubSpec {
  *     refusal is deliberate, not an accident of the directory being empty)
  */
 describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent control", () => {
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	/** A `PI_CODING_AGENT_DIR` whose npm root really does carry the control. */
 	function hardenedAgentDir(): string {
@@ -352,16 +338,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 });
 
 describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any install", () => {
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	it("case 1 -- `--assert-hardening` refuses on an unhardened npm root", () => {
 		// An EMPTY temp dir is the whole point. The full bootstrap was run for

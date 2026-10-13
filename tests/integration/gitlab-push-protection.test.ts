@@ -22,35 +22,20 @@
  * same way `tests/integration/git-head-main.test.ts` composed them for a
  * disposable CHECKOUT rather than a disposable SERVER.
  */
-import { spawnSync } from "node:child_process";
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { gitResult, runGit } from "../helpers/git.ts";
 
 const classifyPushFailure = (stderr: string): "protected-branch-rejection" | "other" =>
 	/not allowed to push code to protected branches/i.test(stderr) ? "protected-branch-rejection" : "other";
 
-/** One git invocation against `cwd`, real subprocess, never a mock. */
-function git(args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in "${cwd}": ${result.error.message}`);
-	}
-	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
-}
-
-function requireOk(result: { status: number | null; stderr: string }, description: string): void {
-	if (result.status !== 0) {
-		throw new Error(`${description} failed (exit ${result.status}): ${result.stderr}`);
-	}
-}
-
 function configureIdentity(dir: string): void {
-	requireOk(git(["config", "user.email", "kypi-fixture@example.invalid"], dir), "git config user.email");
-	requireOk(git(["config", "user.name", "kypi fixture"], dir), "git config user.name");
+	runGit(["config", "user.email", "kypi-fixture@example.invalid"], dir);
+	runGit(["config", "user.name", "kypi fixture"], dir);
 }
 
 /**
@@ -94,13 +79,13 @@ const PRE_RECEIVE_HOOK = [
 function makeBareRepoWithHook(dir: string): void {
 	mkdirSync(dir, { recursive: true });
 
-	const initWithB = git(["init", "--bare", "-b", "main"], dir);
+	const initWithB = gitResult(["init", "--bare", "-b", "main"], dir);
 	if (initWithB.status !== 0) {
 		// Older git without `-b` on `init`: init plainly, then force the default
 		// ref before any push can create one, per the git-head-main.test.ts
 		// precedent -- never rely on this machine's init.defaultBranch.
-		requireOk(git(["init", "--bare"], dir), "git init --bare");
-		requireOk(git(["symbolic-ref", "HEAD", "refs/heads/main"], dir), "git symbolic-ref HEAD refs/heads/main");
+		runGit(["init", "--bare"], dir);
+		runGit(["symbolic-ref", "HEAD", "refs/heads/main"], dir);
 	}
 
 	const hookPath = join(dir, "hooks", "pre-receive");
@@ -123,12 +108,12 @@ describe("SAFE-01 offline proxy -- a real server-side pre-receive hook, parsed c
 
 		makeBareRepoWithHook(bareDir);
 
-		requireOk(git(["clone", bareDir, workA], base), "git clone (work-a)");
+		runGit(["clone", bareDir, workA], base);
 		configureIdentity(workA);
 		// Force the branch name explicitly, never trust init.defaultBranch/clone
 		// inference, per the plan's explicit instruction (mirrors
 		// git-head-main.test.ts's makeCommittedRepo).
-		requireOk(git(["symbolic-ref", "HEAD", "refs/heads/main"], workA), "git symbolic-ref HEAD refs/heads/main (work-a)");
+		runGit(["symbolic-ref", "HEAD", "refs/heads/main"], workA);
 	});
 
 	afterAll(() => {
@@ -140,10 +125,10 @@ describe("SAFE-01 offline proxy -- a real server-side pre-receive hook, parsed c
 
 	it("case 1 -- a push to the protected branch is rejected SERVER-SIDE, with the rejection text on stderr", () => {
 		writeFileSync(join(workA, "README.md"), "kypi-fixture\n", "utf-8");
-		requireOk(git(["add", "README.md"], workA), "git add README.md");
-		requireOk(git(["commit", "-m", "initial"], workA), "git commit -m initial");
+		runGit(["add", "README.md"], workA);
+		runGit(["commit", "-m", "initial"], workA);
 
-		const push = git(["push", "origin", "main"], workA);
+		const push = gitResult(["push", "origin", "main"], workA);
 		expect(push.status, "a push to a protected ref must exit non-zero").not.toBe(0);
 		expect(
 			push.stderr,
@@ -158,12 +143,12 @@ describe("SAFE-01 offline proxy -- a real server-side pre-receive hook, parsed c
 		// Without this case, case 1's rejection is equally consistent with a hook
 		// that rejects EVERYTHING, or with a broken clone. Same bare repo, same
 		// hook, only the target ref differs.
-		requireOk(git(["checkout", "-b", "feature/allowed"], workA), "git checkout -b feature/allowed");
+		runGit(["checkout", "-b", "feature/allowed"], workA);
 		writeFileSync(join(workA, "feature.txt"), "feature commit A\n", "utf-8");
-		requireOk(git(["add", "feature.txt"], workA), "git add feature.txt");
-		requireOk(git(["commit", "-m", "feature commit A"], workA), "git commit -m feature commit A");
+		runGit(["add", "feature.txt"], workA);
+		runGit(["commit", "-m", "feature commit A"], workA);
 
-		const push = git(["push", "origin", "feature/allowed"], workA);
+		const push = gitResult(["push", "origin", "feature/allowed"], workA);
 		expect(
 			push.status,
 			`a push to a non-protected ref against the identical hook must succeed: ${push.stderr}`,
@@ -181,23 +166,23 @@ describe("SAFE-01 offline proxy -- a real server-side pre-receive hook, parsed c
 		// REAL non-fast-forward rejection -- no hook involved, git's own
 		// receive-pack refuses a non-ff update -- by diverging two clones of the
 		// same non-protected branch.
-		requireOk(git(["clone", bareDir, workB], base), "git clone (work-b)");
+		runGit(["clone", bareDir, workB], base);
 		configureIdentity(workB);
-		requireOk(git(["checkout", "feature/allowed"], workB), "git checkout feature/allowed (work-b)");
+		runGit(["checkout", "feature/allowed"], workB);
 
 		// work-a advances feature/allowed with a second commit and pushes it.
 		writeFileSync(join(workA, "feature.txt"), "feature commit B\n", "utf-8");
-		requireOk(git(["add", "feature.txt"], workA), "git add feature.txt (commit B)");
-		requireOk(git(["commit", "-m", "feature commit B"], workA), "git commit -m feature commit B");
-		requireOk(git(["push", "origin", "feature/allowed"], workA), "git push feature/allowed (commit B)");
+		runGit(["add", "feature.txt"], workA);
+		runGit(["commit", "-m", "feature commit B"], workA);
+		runGit(["push", "origin", "feature/allowed"], workA);
 
 		// work-b, still sitting on the earlier commit, makes a DIVERGENT commit
 		// and pushes without fetching first -- a genuine non-fast-forward.
 		writeFileSync(join(workB, "other.txt"), "feature commit C (diverged)\n", "utf-8");
-		requireOk(git(["add", "other.txt"], workB), "git add other.txt (commit C)");
-		requireOk(git(["commit", "-m", "feature commit C (diverged)"], workB), "git commit -m feature commit C");
+		runGit(["add", "other.txt"], workB);
+		runGit(["commit", "-m", "feature commit C (diverged)"], workB);
 
-		const push = git(["push", "origin", "feature/allowed"], workB);
+		const push = gitResult(["push", "origin", "feature/allowed"], workB);
 		expect(push.status, "a diverged, non-fast-forward push must be rejected").not.toBe(0);
 		expect(
 			push.stderr,

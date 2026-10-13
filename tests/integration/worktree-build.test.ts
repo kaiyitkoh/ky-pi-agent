@@ -31,7 +31,7 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { headSha, repoRoot } from "../helpers/git.ts";
+import { gitResult, headSha, repoRoot } from "../helpers/git.ts";
 import { addWorktree, makeTempRepoWithNodeModulesAndEnv, removeWorktree } from "../helpers/worktree.ts";
 
 /** Absolute, resolved once -- never a write target, only ever read from. */
@@ -52,15 +52,6 @@ afterEach(() => {
 	}
 	cleanups = [];
 });
-
-/** One real, synchronous `git` invocation -- matches `tests/helpers/git.ts`'s own spawn discipline. */
-function git(args: string[], cwd: string): { stdout: string; status: number | null } {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in "${cwd}": ${result.error.message}`);
-	}
-	return { stdout: result.stdout ?? "", status: result.status };
-}
 
 /** `node src/index.js` in `cwd` -- the fixture's own real build proxy, real subprocess. */
 function runBuild(cwd: string): { status: number | null; stdout: string; stderr: string } {
@@ -99,7 +90,7 @@ describe("EXT-02 -- a fresh worktree provably cannot build, and the shipped hook
 			// file rather than only trusted from the helper: if `node_modules`
 			// or `.env` were somehow tracked, `git worktree add` would carry
 			// them and every assertion below would be a tautology.
-			const lsFiles = git(["ls-files", "--", "node_modules", ".env"], repo);
+			const lsFiles = gitResult(["ls-files", "--", "node_modules", ".env"], repo);
 			expect(lsFiles.status, `git ls-files failed in ${repo}`).toBe(0);
 			expect(
 				lsFiles.stdout.trim(),

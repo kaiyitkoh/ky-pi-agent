@@ -61,52 +61,18 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AssistantMessage, Context, FauxResponseStep } from "@earendil-works/pi-ai";
+import type { Context } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 
 import { describe, expect, it } from "vitest";
 
-import { logPath } from "../../.pi/lib/jsonl.ts";
-import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { readJsonl } from "../helpers/logs.ts";
+import { readAudit } from "../helpers/logs.ts";
+import { capturing, lastToolResult } from "../helpers/faux.ts";
 import { withFauxSession } from "../helpers/session.ts";
-import { existsSync } from "node:fs";
 
 const RELATIVE_PATH = "cr-02-canonicalisation-probe.txt";
 const CONTENT = "kypi-cr-02-positive-control";
-
-interface AuditRowShape {
-	event?: string;
-	tool?: string;
-	command?: string;
-	verdict?: "allow" | "block";
-	reason?: string;
-}
-
-function readAudit(cwd: string): AuditRowShape[] {
-	const file = logPath(cwd, AUDIT_LOG_BASE);
-	if (!existsSync(file)) {
-		throw new Error(`${file} does not exist -- the safety extension likely never loaded`);
-	}
-	return readJsonl(file) as AuditRowShape[];
-}
-
-function lastToolResult(context: Context): { isError: boolean; text: string } | undefined {
-	const msg = [...context.messages].reverse().find((m) => m.role === "toolResult");
-	if (msg === undefined || msg.role !== "toolResult") {
-		return undefined;
-	}
-	const text = msg.content.map((block) => (block.type === "text" ? block.text : "")).join("");
-	return { isError: msg.isError, text };
-}
-
-function capturing(into: Context[], reply: AssistantMessage): FauxResponseStep {
-	return ((context: Context): AssistantMessage => {
-		into.push(context);
-		return reply;
-	}) as FauxResponseStep;
-}
 
 describe("CR-02 -- a write inside the project root is allowed on a native-backslash cwd", () => {
 	it("write({ path: 'relative-file.txt' }) inside the session's own (backslash-native) cwd is ALLOWED, not blocked as 'outside the project root'", async () => {

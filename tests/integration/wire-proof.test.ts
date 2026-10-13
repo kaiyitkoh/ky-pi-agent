@@ -97,7 +97,7 @@ import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { buildOpenAiFixturePayload, wrapFauxWithPayload } from "../helpers/faux.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readTornSafe } from "../helpers/logs.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 
 /** Absolute paths of the two extensions this repository ships, composed into one fixture. */
 const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
@@ -152,31 +152,6 @@ function readRows<T>(file: string): T[] {
 /** Only the rows `turn_end` writes: `kind:"turn"`. Error/session rows carry no `kind`. */
 function turnKindRows(rows: readonly TurnsRow[]): TurnsRow[] {
 	return rows.filter((row) => row.kind === "turn");
-}
-
-/**
- * Poll `modelRuntime.hasConfiguredAuth(providerId)` until it reports `true`.
- * Copied from `tests/integration/mode-switch.test.ts` — see that file's
- * header for the measured async gap this closes: a faux provider registered
- * under a real provider id resolves configured auth only after a handful of
- * milliseconds of polling, not synchronously after the grant resolves.
- */
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(
-				`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms ` +
-					"after setRuntimeApiKey resolved. See tests/integration/mode-switch.test.ts's header for " +
-					"the measured async gap.",
-			);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
 }
 
 /** A model registered on this fixture's `deepseek` faux provider that no route ever selects. */

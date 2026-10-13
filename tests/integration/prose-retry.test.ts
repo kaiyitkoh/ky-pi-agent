@@ -79,7 +79,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { AssistantMessage, Context, FauxResponseStep } from "@earendil-works/pi-ai";
+import type { Context, FauxResponseStep } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 
 import { beforeAll, describe, expect, it } from "vitest";
@@ -95,6 +95,7 @@ import {
 } from "../../.pi/extensions/diagnostics/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readTornSafe } from "../helpers/logs.ts";
+import { capturing } from "../helpers/faux.ts";
 import { withFauxSession } from "../helpers/session.ts";
 
 /** Absolute path of the diagnostics extension this repository ships. */
@@ -279,22 +280,6 @@ function runbookPipeline(command: string, logText: string): number {
 		throw new Error(`RB-02-03 command ${JSON.stringify(command)} produced no number at all`);
 	}
 	return count;
-}
-
-/**
- * A response step that records the outgoing context before answering.
- *
- * This is how the retry is proven to have REACHED the model rather than merely
- * been handed to `sendUserMessage`. `fauxProvider` accepts a factory in place of
- * a canned message and calls it with the request context
- * [pi-ai src/providers/faux.ts], so the assertion is on the bytes the second
- * call would have sent.
- */
-function capturing(into: Context[], reply: AssistantMessage): FauxResponseStep {
-	return ((context: Context): AssistantMessage => {
-		into.push(context);
-		return reply;
-	}) as FauxResponseStep;
 }
 
 /** Drive one session to completion and hand back everything worth asserting on. */

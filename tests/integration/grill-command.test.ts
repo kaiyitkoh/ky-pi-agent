@@ -28,19 +28,17 @@
  * the same assertion shape `tests/integration/quick-workflow.test.ts`
  * established for its own two refusal seams.
  */
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import { writeSpecIfGated } from "../../.pi/extensions/grill/index.ts";
 import { classifyGitInvocation, currentBranch } from "../../.pi/extensions/safety/git.ts";
 import { PROTECTED_BRANCHES } from "../../.pi/extensions/safety/index.ts";
-import { repoRoot } from "../helpers/git.ts";
-import { withFauxSession } from "../helpers/session.ts";
+import { gitInit, repoRoot } from "../helpers/git.ts";
+import { captureNotify, withFauxSession } from "../helpers/session.ts";
 
 /** Absolute, forward-slashed path of the safety extension this repository ships. */
 const SAFETY_ENTRY = `${repoRoot()}/.pi/extensions/safety/index.ts`.replace(/\\/g, "/");
@@ -69,58 +67,6 @@ function grillOnly(): string {
 		"\tgrill(pi);",
 		"}",
 	].join("\n");
-}
-
-/** Run one git argv in `cwd`, throwing with the exact failing argv on a non-zero exit. */
-function runGit(args: string[], cwd: string): string {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in ${cwd}: ${result.error.message}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(`git ${args.join(" ")} failed (exit ${result.status}) in ${cwd}: ${result.stderr ?? ""}`);
-	}
-	return result.stdout ?? "";
-}
-
-/** Init a real git repository IN the faux session's own `cwd` -- `/grill` reads `ctx.cwd`. */
-function gitInit(cwd: string, branch: string): void {
-	runGit(["init"], cwd);
-	runGit(["config", "user.email", "grill@test.invalid"], cwd);
-	runGit(["config", "user.name", "grill test"], cwd);
-	runGit(["checkout", "-b", branch], cwd);
-	writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf-8");
-	runGit(["add", "--", "seed.txt"], cwd);
-	runGit(["commit", "-m", "seed"], cwd);
-}
-
-/** A notification `ctx.ui.notify` recorded. */
-interface Notification {
-	text: string;
-	level?: string;
-}
-
-/**
- * Patch `ctx.ui`'s own `notify` METHOD, not the `ctx.ui` property itself --
- * `ctx.ui` is the SAME object reference from every context the runner
- * builds [`dist/core/extensions/runner.js:464-467`], so mutating the method
- * on that shared object is read back identically everywhere. Restored in a
- * `finally` by every caller. Copied from `quick-workflow.test.ts`'s own
- * helper of the same name.
- */
-function captureNotify(ctx: ExtensionCommandContext): { notifications: Notification[]; restore: () => void } {
-	const notifications: Notification[] = [];
-	const ui = ctx.ui as unknown as { notify: (text: string, level?: string) => void };
-	const original = ui.notify;
-	ui.notify = (text: string, level?: string) => {
-		notifications.push({ text, level });
-	};
-	return {
-		notifications,
-		restore: () => {
-			ui.notify = original;
-		},
-	};
 }
 
 describe("FLOW-02/FLOW-03 -- /grill: registration, two zero-cost refusal seams", () => {

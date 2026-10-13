@@ -68,7 +68,7 @@ import { runAntiPatternRules, type QualitySource } from "../../.pi/extensions/qu
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { wrapFauxWithPayload } from "../helpers/faux.ts";
 import { makeTempRepo } from "../helpers/git.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 import { DEFECT_CLASSES, SEEDED_DEFECTS } from "../fixtures/seeded-defects/index.ts";
 
 // -----------------------------------------------------------------------------
@@ -225,20 +225,6 @@ const REQUIREMENT_ID = "GATE-08";
  * the catch rate is a measurement, not a target.
  */
 const KNOWN_SUBSET_CAUGHT: readonly string[] = ["fabricated-evidence", "absent-guard"];
-
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms`);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
 
 /** Builds ALL six defects into ONE fresh temp repo and assembles the combined review contract. */
 function buildCombinedFixture(prefix: string): { contract: ReviewerContractInput; requirementIds: string[] } {

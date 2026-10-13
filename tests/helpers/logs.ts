@@ -46,6 +46,11 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
+import { expect } from "vitest";
+
+import { AUDIT_LOG_BASE, type AuditRow } from "../../.pi/extensions/safety/schema.ts";
+import { logPath } from "../../.pi/lib/jsonl.ts";
+
 /**
  * Create a temp working directory, await `fn` with it, then remove it.
  *
@@ -135,4 +140,16 @@ export function readTornSafe(path: string): TornSafeResult {
 		}
 	}
 	return { records, unparseable };
+}
+
+/** Today's safety audit rows for `cwd`. A missing file means the safety extension never loaded: it must load at user scope. */
+export function readAudit(cwd: string): Partial<AuditRow>[] {
+	const file = logPath(cwd, AUDIT_LOG_BASE);
+	if (!existsSync(file)) throw new Error(`${file} does not exist: the safety extension never wrote an audit log (it must load at user scope)`);
+	return readJsonl(file) as Partial<AuditRow>[];
+}
+
+/** Fails when `rows` is empty, so allow/block assertions over it cannot pass vacuously. */
+export function assertAuditNonEmpty(rows: readonly unknown[]): void {
+	expect(rows.length, "audit file is empty -- the assertions below would be vacuous").toBeGreaterThan(0);
 }

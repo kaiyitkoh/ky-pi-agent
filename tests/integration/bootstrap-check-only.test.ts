@@ -27,14 +27,14 @@
  * timestamp, a duration or a run counter from ever creeping into it.
  */
 import { spawnSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
 /**
@@ -57,14 +57,8 @@ interface Run {
 	status: number | null;
 }
 
-/** Temp directories created by this suite; removed after every case. */
-let scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 /**
  * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
@@ -74,7 +68,7 @@ function tempDir(prefix: string): string {
  */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
-	scratch.push(copy.root);
+	scratch.track(copy.root);
 	return copy;
 }
 
@@ -176,17 +170,7 @@ function npmStub(logTo: string): StubSpec {
 }
 
 describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure. Never mask a real
-				// assertion result behind a cleanup error.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	it("case 1 -- `--check-only` exits 0 and reports every probe with its requirement class", () => {
 		const run = runBootstrap(["--check-only"], { agentDir: tempDir("kypi-agentdir-") });

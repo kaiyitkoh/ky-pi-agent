@@ -50,7 +50,6 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -61,9 +60,8 @@ import { decideWorkflowStop } from "../../.pi/extensions/quality/verdict.ts";
 import { getModeState, planRoleCall } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { isRunArmed } from "../../.pi/extensions/workflows/evidence.ts";
-import { repoRoot } from "../helpers/git.ts";
-import { withFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
-import { spawnSync } from "node:child_process";
+import { gitInit, repoRoot, runGit } from "../helpers/git.ts";
+import { captureNotify, waitFor, waitForConfiguredAuth, withFauxSession } from "../helpers/session.ts";
 
 /** Absolute, forward-slashed entry paths — mirrors `tests/integration/quick-workflow.test.ts`'s own SAFETY_ENTRY/WORKFLOWS_ENTRY convention. */
 const SAFETY_ENTRY = `${repoRoot()}/.pi/extensions/safety/index.ts`.replace(/\\/g, "/");
@@ -94,29 +92,6 @@ function composite(): string {
 	].join("\n");
 }
 
-/** Run one git argv in `cwd`, throwing with the exact failing argv on a non-zero exit — mirrors `quick-workflow.test.ts#runGit`. */
-function runGit(args: string[], cwd: string): string {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in ${cwd}: ${result.error.message}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(`git ${args.join(" ")} failed (exit ${result.status}) in ${cwd}: ${result.stderr ?? ""}`);
-	}
-	return result.stdout ?? "";
-}
-
-/** Init a real git repository IN the faux session's own `cwd` — `/quick` reads `ctx.cwd`, so the repo under test must be that same directory. */
-function gitInit(cwd: string, branch: string): void {
-	runGit(["init"], cwd);
-	runGit(["config", "user.email", "quick@test.invalid"], cwd);
-	runGit(["config", "user.name", "quick test"], cwd);
-	runGit(["checkout", "-b", branch], cwd);
-	writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf-8");
-	runGit(["add", "--", "seed.txt"], cwd);
-	runGit(["commit", "-m", "seed"], cwd);
-}
-
 /** Plant a `.ts` file under `<cwd>/.pi/extensions/` carrying a shipped-TODO comment — an ERROR-tier finding that predates the run's change. */
 function seedOffendingSource(cwd: string): void {
 	const dir = join(cwd, ".pi", "extensions", "quality-fixture");
@@ -138,49 +113,6 @@ function flashExecutorCandidate(): { provider: string; id: string } {
 		throw new Error("ROLE_MAP.cheap.executor.candidates is empty -- this fixture has no candidate to make servable");
 	}
 	return candidate;
-}
-
-/** Poll `predicate` until true, or throw naming `label` and the timeout — mirrors `quick-workflow.test.ts#waitFor`. */
-async function waitFor(predicate: () => boolean, timeoutMs = 5000, label = "condition"): Promise<void> {
-	const start = Date.now();
-	while (!predicate()) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(`waitFor: "${label}" was not met within ${timeoutMs}ms`);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
-
-/** Poll `modelRuntime.hasConfiguredAuth(providerId)` until true — mirrors `quick-workflow.test.ts#waitForConfiguredAuth`. */
-async function waitForConfiguredAuth(modelRuntime: FauxSessionHandle["modelRuntime"], providerId: string, timeoutMs = 2000): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms`);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
-
-interface Notification {
-	text: string;
-	level?: string;
-}
-
-/** Patch `ctx.ui`'s own `notify` METHOD — see `quick-workflow.test.ts#captureNotify`'s own docstring for why the property itself must not be shadowed. */
-function captureNotify(ctx: ExtensionCommandContext): { notifications: Notification[]; restore: () => void } {
-	const notifications: Notification[] = [];
-	const ui = ctx.ui as unknown as { notify: (text: string, level?: string) => void };
-	const original = ui.notify;
-	ui.notify = (text: string, level?: string) => {
-		notifications.push({ text, level });
-	};
-	return {
-		notifications,
-		restore: () => {
-			ui.notify = original;
-		},
-	};
 }
 
 /** Wire a session up with a configured, servable `executor` route -- every group that calls `/quick`'s handler needs this. */

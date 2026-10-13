@@ -377,7 +377,7 @@ export interface Notification {
 
 /**
  * Replaces `ctx.ui` with a recorder. `defineProperty`, not assignment: the command context's `ui` is a getter-only
- * accessor (pi 1.1.0 dist/core/extensions/runner.js:463-467, :538-542).
+ * accessor (pi 1.1.0 dist/core/extensions/runner.js:618-620, :728).
  */
 export function withCapturedNotify(ctx: ExtensionContext, notifications: Notification[]): void {
 	Object.defineProperty(ctx, "ui", {
@@ -386,4 +386,26 @@ export function withCapturedNotify(ctx: ExtensionContext, notifications: Notific
 		configurable: true,
 		enumerable: true,
 	});
+}
+
+/** Polls `predicate` every 5ms until true, or throws naming `label`. */
+export async function waitFor(predicate: () => boolean, timeoutMs = 5000, label = "condition"): Promise<void> {
+	const start = Date.now();
+	while (!predicate()) {
+		if (Date.now() - start > timeoutMs) throw new Error(`waitFor: "${label}" was not met within ${timeoutMs}ms`);
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+}
+
+/**
+ * Patches the shared `ctx.ui.notify` method, so notifications from event contexts (e.g. `agent_end`) are recorded too:
+ * every context's `ui` getter returns the same `runner.uiContext` (pi 1.1.0 dist/core/extensions/runner.js:618-620).
+ * Callers must `restore()` in a `finally`.
+ */
+export function captureNotify(ctx: ExtensionContext): { notifications: Notification[]; restore: () => void } {
+	const notifications: Notification[] = [];
+	const ui = ctx.ui as unknown as { notify: (text: string, level?: string) => void };
+	const original = ui.notify;
+	ui.notify = (text, level) => void notifications.push({ text, level });
+	return { notifications, restore: () => void (ui.notify = original) };
 }

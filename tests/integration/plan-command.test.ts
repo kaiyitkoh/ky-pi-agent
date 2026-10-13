@@ -34,19 +34,17 @@
  * refusal seams.
  */
 import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
 import { writePlanIfGated } from "../../.pi/extensions/plan-ceremony/index.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
 import { classifyGitInvocation, currentBranch } from "../../.pi/extensions/safety/git.ts";
 import { PROTECTED_BRANCHES } from "../../.pi/extensions/safety/index.ts";
-import { repoRoot } from "../helpers/git.ts";
-import { withFauxSession } from "../helpers/session.ts";
+import { gitInit, repoRoot } from "../helpers/git.ts";
+import { captureNotify, withFauxSession } from "../helpers/session.ts";
 
 /** Absolute, forward-slashed path of the plan-ceremony extension (`/plan`) this repository ships. */
 const PLAN_ENTRY = `${repoRoot()}/.pi/extensions/plan-ceremony/index.ts`.replace(/\\/g, "/");
@@ -64,29 +62,6 @@ function composite(): string {
 		"\tplanMode(pi);",
 		"}",
 	].join("\n");
-}
-
-/** Run one git argv in `cwd`, throwing with the exact failing argv on a non-zero exit. */
-function runGit(args: string[], cwd: string): string {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in ${cwd}: ${result.error.message}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(`git ${args.join(" ")} failed (exit ${result.status}) in ${cwd}: ${result.stderr ?? ""}`);
-	}
-	return result.stdout ?? "";
-}
-
-/** Init a real git repository IN the faux session's own `cwd` -- `/plan` reads `ctx.cwd`. */
-function gitInit(cwd: string, branch: string): void {
-	runGit(["init"], cwd);
-	runGit(["config", "user.email", "plan@test.invalid"], cwd);
-	runGit(["config", "user.name", "plan test"], cwd);
-	runGit(["checkout", "-b", branch], cwd);
-	writeFileSync(join(cwd, "seed.txt"), "seed\n", "utf-8");
-	runGit(["add", "--", "seed.txt"], cwd);
-	runGit(["commit", "-m", "seed"], cwd);
 }
 
 /** A well-formed SPEC artifact -- round-tripped through renderSpecMarkdown, so `validateSpec` is guaranteed to accept it. */
@@ -114,28 +89,6 @@ const VALID_SPEC: SpecArtifact = {
 		"Overall: 0.1",
 	].join("\n"),
 };
-
-/** A notification `ctx.ui.notify` recorded. */
-interface Notification {
-	text: string;
-	level?: string;
-}
-
-/** Patch `ctx.ui`'s own `notify` METHOD. Copied from `grill-command.test.ts`'s own helper of the same name. */
-function captureNotify(ctx: ExtensionCommandContext): { notifications: Notification[]; restore: () => void } {
-	const notifications: Notification[] = [];
-	const ui = ctx.ui as unknown as { notify: (text: string, level?: string) => void };
-	const original = ui.notify;
-	ui.notify = (text: string, level?: string) => {
-		notifications.push({ text, level });
-	};
-	return {
-		notifications,
-		restore: () => {
-			ui.notify = original;
-		},
-	};
-}
 
 describe("FLOW-06 -- /plan: registration, and every refusal seam at zero provider requests", () => {
 	it("case 0 -- /plan and /plan-mode both resolve, and loading both registers zero tools", async () => {

@@ -8,25 +8,20 @@
  * Driven through Pi's real DefaultResourceLoader, whose reload() runs the same
  * conflict detection the CLI does.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { DefaultResourceLoader, SettingsManager } from "@earendil-works/pi-coding-agent";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { repoRoot } from "../helpers/git.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 
 const GUARD = join(repoRoot(), ".pi", "extensions", "safety", "index.ts").replace(/\\/g, "/");
 const GUARD_TOOLS = ["approve_ky_command", "bash", "edit", "read", "write"];
 
-let scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 /** Same shape bin/bootstrap.sh#install_safety_extension writes: a dynamic import of the guard. */
 function writeStub(dir: string, name: string): string {
@@ -63,10 +58,7 @@ function toolNames(loader: DefaultResourceLoader): string[][] {
 }
 
 describe("safety extension double load", () => {
-	afterEach(() => {
-		for (const dir of scratch) rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	it("the second copy registers no tool, so Pi reports no conflict", async () => {
 		const { loader } = await loadBoth();

@@ -41,23 +41,17 @@
  * NEVER `it.skip`. `requirePiOnPath()` throws with the exact remedy if `pi`
  * is missing -- see tests/helpers/pi.ts's own docstring.
  */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { writeUserScopeShim } from "../helpers/session.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
 
-/** Temp dirs created by this suite, removed in afterAll. */
-const scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 /**
  * A Pi environment with a throwaway agent directory.
@@ -147,15 +141,7 @@ describe("SAFE-11 -- the user-scope re-export stub, proven against a real spawne
 		requirePiOnPath();
 	});
 
-	afterAll(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-	});
+	afterAll(scratch.cleanup);
 
 	it("case 1 -- POSITIVE: a user-scope re-export stub loads the sentinel", () => {
 		const sentinelDir = tempDir("kypi-sentinel-");

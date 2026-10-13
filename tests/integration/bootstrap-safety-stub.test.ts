@@ -22,9 +22,8 @@
  * developer's real global npm prefix.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 
@@ -32,6 +31,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
 /**
@@ -54,14 +54,8 @@ interface Run {
 	status: number | null;
 }
 
-/** Temp directories created by this suite; removed after every case. */
-let scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 /**
  * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
@@ -74,7 +68,7 @@ function tempDir(prefix: string): string {
  */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
-	scratch.push(copy.root);
+	scratch.track(copy.root);
 	return copy;
 }
 
@@ -157,16 +151,7 @@ function extractSpecifier(content: string): string {
 }
 
 describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scope", () => {
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	it("case 1 -- a full run writes the stub with a backslash-free specifier resolving to an existing file", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -333,16 +318,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
  * never actually uses for this file.
  */
 describe("CR-09 -- the generated stub registers unconditionally, regardless of a project-scoped copy at cwd", () => {
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	/**
 	 * The exact jiti entry point Pi itself resolves and uses --
@@ -723,16 +699,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 });
 
 describe("the generated stub fails closed when the safety extension throws", () => {
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	const jitiEntry = (): string => {
 		const requireFromRepo = createRequire(join(repoRoot(), "package.json"));

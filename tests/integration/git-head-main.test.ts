@@ -30,32 +30,18 @@
  * the git error text as its own remedy -- consistent with the "real subprocess,
  * never skip" rule restated across `tests/helpers/{pi,session,models}.ts`.
  */
-import { spawnSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
+import { gitResult, headSha, runGit } from "../helpers/git.ts";
+
 import { classifyGitInvocation, currentBranch, DETACHED_HEAD, type GitPolicyFacts } from "../../.pi/extensions/safety/git.ts";
 
 function facts(currentBranch: string): GitPolicyFacts {
 	return { currentBranch, protectedBranches: ["main", "master"] };
-}
-
-/** One git invocation against `cwd`, real subprocess, never a mock. */
-function git(args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in "${cwd}": ${result.error.message}`);
-	}
-	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
-}
-
-function requireOk(result: { status: number | null; stderr: string }, description: string): void {
-	if (result.status !== 0) {
-		throw new Error(`${description} failed (exit ${result.status}): ${result.stderr}`);
-	}
 }
 
 /**
@@ -64,21 +50,21 @@ function requireOk(result: { status: number | null; stderr: string }, descriptio
  * succeeds regardless of this machine's global git config.
  */
 function makeCommittedRepo(dir: string): void {
-	const initWithB = git(["init", "-b", "main"], dir);
+	const initWithB = gitResult(["init", "-b", "main"], dir);
 	if (initWithB.status !== 0) {
 		// Older git without `-b` on `init`: init plainly, then force the branch
 		// name before the first commit exists, per the plan's explicit warning
 		// against trusting init.defaultBranch.
-		requireOk(git(["init"], dir), "git init");
-		requireOk(git(["symbolic-ref", "HEAD", "refs/heads/main"], dir), "git symbolic-ref HEAD refs/heads/main");
+		runGit(["init"], dir);
+		runGit(["symbolic-ref", "HEAD", "refs/heads/main"], dir);
 	}
 
-	requireOk(git(["config", "user.email", "kypi-fixture@example.invalid"], dir), "git config user.email");
-	requireOk(git(["config", "user.name", "kypi fixture"], dir), "git config user.name");
+	runGit(["config", "user.email", "kypi-fixture@example.invalid"], dir);
+	runGit(["config", "user.name", "kypi fixture"], dir);
 
 	writeFileSync(join(dir, "README.md"), "kypi-fixture\n", "utf-8");
-	requireOk(git(["add", "README.md"], dir), "git add README.md");
-	requireOk(git(["commit", "-m", "initial"], dir), "git commit -m initial");
+	runGit(["add", "README.md"], dir);
+	runGit(["commit", "-m", "initial"], dir);
 }
 
 describe("SAFE-04 — currentBranch, proven against real disposable checkouts", () => {
@@ -120,7 +106,7 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 	});
 
 	it("case 2 — the SAME fixture, checked out onto feature/x, flips currentBranch AND the push verdict", () => {
-		requireOk(git(["checkout", "-b", "feature/x"], repoA), "git checkout -b feature/x");
+		runGit(["checkout", "-b", "feature/x"], repoA);
 
 		const branch = currentBranch(repoA);
 		expect(
@@ -138,12 +124,10 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 	});
 
 	it("case 3 — detached HEAD reports the distinct DETACHED_HEAD sentinel, and the classifier treats it as not-protected", () => {
-		const rev = git(["rev-parse", "HEAD"], repoA);
-		requireOk(rev, "git rev-parse HEAD");
-		const sha = rev.stdout.trim();
+		const sha = headSha(repoA);
 		expect(sha.length, "git rev-parse HEAD returned no sha to detach onto").toBeGreaterThan(0);
 
-		requireOk(git(["checkout", sha], repoA), `git checkout ${sha}`);
+		runGit(["checkout", sha], repoA);
 
 		const branch = currentBranch(repoA);
 		expect(
@@ -185,12 +169,12 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 	});
 
 	it("case 5 — git worktree add -b feat main EXECUTES for real on the main fixture, and the classifier allows it", () => {
-		requireOk(git(["checkout", "main"], repoA), "git checkout main");
+		runGit(["checkout", "main"], repoA);
 		expect(currentBranch(repoA), "must genuinely be back on main before this case proves anything").toBe("main");
 
 		const worktreePath = join(worktreeParent, "feat");
 		const worktreeArgs = ["worktree", "add", "-b", "feat", worktreePath, "main"];
-		const result = git(worktreeArgs, repoA);
+		const result = gitResult(worktreeArgs, repoA);
 
 		expect(
 			result.status,

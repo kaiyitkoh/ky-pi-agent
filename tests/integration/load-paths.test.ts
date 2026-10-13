@@ -34,25 +34,18 @@
  * never exercise both at once.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { SELFTEST_MODEL_ID } from "../../.pi/extensions/harness/index.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { commandFor } from "../helpers/win-quote.ts";
 
 const IS_WINDOWS = process.platform === "win32";
 
-/** Temp dirs created by this suite, removed in afterAll. */
-const scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 /**
  * Run a non-Pi command (git, npm) and return its captured result.
@@ -126,16 +119,7 @@ describe("BOOT-02 / BOOT-05 — extension load paths", () => {
 		requirePiOnPath();
 	});
 
-	afterAll(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure. Never mask a real
-				// assertion result behind a cleanup error.
-			}
-		}
-	});
+	afterAll(scratch.cleanup);
 
 	it("case 1 — BOOT-02: loads as a package via `-e <repoRoot>` from an unrelated cwd", () => {
 		const result = runPi(["-e", repoRoot(), "--list-models"], {

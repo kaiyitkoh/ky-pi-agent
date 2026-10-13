@@ -44,7 +44,7 @@ import {
 import type { ReviewArtifact, ReviewFinding } from "../../.pi/extensions/quality/review-schema.ts";
 import type { ReviewerContractInput } from "../../.pi/extensions/quality/reviewer.ts";
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 
 // -----------------------------------------------------------------------------
 // Fixture builders — plain data, no model involved.
@@ -110,20 +110,6 @@ function reviewAfterRefutation(review: ReviewArtifact, promoted: readonly Review
 // Session/faux plumbing — mirrors tests/integration/reviewer-contract.test.ts
 // and tests/integration/advisor-consult.test.ts.
 // -----------------------------------------------------------------------------
-
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms`);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
 
 interface Run {
 	// case 1

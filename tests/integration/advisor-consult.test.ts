@@ -66,7 +66,7 @@ import { TURNS_LOG_BASE, type RowKind } from "../../.pi/extensions/diagnostics/s
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { readTornSafe } from "../helpers/logs.ts";
-import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth } from "../helpers/session.ts";
+import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 import { existsSync } from "node:fs";
 
 /** A turns row as this file reads it back off disk. */

@@ -90,14 +90,14 @@
  * `requirePiOnPath()` throws with the exact remedy if `pi` is missing --
  * matching every other real-subprocess test in this repository.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { repoRoot } from "../helpers/git.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { writeUserScopeShim } from "../helpers/session.ts";
 
 /** Cold jiti compile; matches this suite's other real-subprocess spawns. */
@@ -112,14 +112,8 @@ const BLOCKED_COMMAND = "cat terraform.tfstate";
 /** Nothing this project's policy classifies -- plain `echo`, no git/infra/path invocation. */
 const BENIGN_COMMAND = "echo kypi-positive-control-sentinel";
 
-/** Temp dirs created by this suite, removed in `afterAll`. */
-const scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 function freshEnv(agentDir: string): Record<string, string> {
 	return {
@@ -264,15 +258,7 @@ describe("SAFE-10 / SAFE-11 -- a blocked command is denied inside a real headles
 		writeUserScopeShim(agentDir, "ky-safety", SAFETY_ENTRY_POINT);
 	});
 
-	afterAll(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-	});
+	afterAll(scratch.cleanup);
 
 	it(
 		"case 1 -- DENY: a blocked bash command is refused, with no UI bound and no hang",

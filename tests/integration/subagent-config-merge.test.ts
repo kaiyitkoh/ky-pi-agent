@@ -36,13 +36,14 @@
  * a throwaway copy per run, so nothing writes into this repository either.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
 import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
 const TIMEOUT_MS = 120_000;
@@ -55,24 +56,15 @@ interface Run {
 	log: string;
 }
 
-let scratch: string[] = [];
+const scratch = scratchDirs();
 
-afterEach(() => {
-	for (const dir of scratch) {
-		rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-	}
-	scratch = [];
-});
+afterEach(scratch.cleanup);
 
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const tempDir = scratch.make;
 
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-subagentcfg-repo-");
-	scratch.push(copy.root);
+	scratch.track(copy.root);
 	return copy;
 }
 

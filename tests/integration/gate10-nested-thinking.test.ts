@@ -69,7 +69,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { getModeState, runSingleShotRole, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
-import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth } from "../helpers/session.ts";
+import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 
 /** What one nested call's response factory saw as its outgoing `options`. */
 interface Capture {

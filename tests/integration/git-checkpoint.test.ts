@@ -51,7 +51,7 @@ import { afterEach, describe, expect, it } from "vitest";
 
 import { createCheckpoint, restoreCheckpoint } from "../../.pi/extensions/checkpoint/git.ts";
 import { readCheckpoints, recordCheckpoint } from "../../.pi/extensions/checkpoint/store.ts";
-import { commitFile, makeTempRepo, repoRoot } from "../helpers/git.ts";
+import { commitFile, gitResult, makeTempRepo, repoRoot } from "../helpers/git.ts";
 
 /** Every temp directory this file creates; removed after each case. */
 let tempDirs: string[] = [];
@@ -75,20 +75,11 @@ afterEach(() => {
 function trackedRepo(prefix: string): string {
 	const repo = makeTempRepo(prefix);
 	tempDirs.push(repo);
-	const autocrlf = git(["config", "core.autocrlf", "false"], repo);
+	const autocrlf = gitResult(["config", "core.autocrlf", "false"], repo);
 	if (autocrlf.status !== 0) {
 		throw new Error(`git config core.autocrlf false failed (exit ${autocrlf.status}) in ${repo}: ${autocrlf.stderr}`);
 	}
 	return repo;
-}
-
-/** One git invocation against `cwd`, real subprocess, matching `tests/helpers/git.ts`'s own discipline. */
-function git(args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } {
-	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (result.error) {
-		throw new Error(`git ${args.join(" ")} failed to launch in "${cwd}": ${result.error.message}`);
-	}
-	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
 }
 
 /**
@@ -171,7 +162,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 
 		// Vacuity guard, per this repo's standing idiom: prove the fixture's
 		// untracked file is genuinely untracked before any restore assertion.
-		const lsFiles = git(["ls-files", "--", "untracked.txt"], repo);
+		const lsFiles = gitResult(["ls-files", "--", "untracked.txt"], repo);
 		expect(
 			lsFiles.stdout.trim(),
 			"fixture sanity: untracked.txt must not already be tracked, or capturing it proves nothing about defect 2",
@@ -181,7 +172,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 
 		// Revert the tracked modification and delete the untracked file -- as if
 		// the model's turn that produced them had never happened.
-		expect(git(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
+		expect(gitResult(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
 		rmSync(join(repo, "untracked.txt"));
 		expect(
 			existsSync(join(repo, "untracked.txt")),
@@ -230,7 +221,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		// Reproduces upstream git-checkpoint.ts:22's exact call, WITH the flag
 		// someone reaching for "obviously I should capture untracked work too"
 		// would add.
-		const created = git(["stash", "create", "-u"], repo);
+		const created = gitResult(["stash", "create", "-u"], repo);
 		expect(created.status, `the control command itself must succeed: ${created.stderr}`).toBe(0);
 		const ref = created.stdout.trim();
 		expect(ref.length, "the control produced no ref -- the control itself is broken, not just the mechanism").toBeGreaterThan(0);
@@ -239,7 +230,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		// resulting commit's tree must NOT contain the untracked path. If a
 		// future git version changes this, THIS assertion turns red rather than
 		// silently invalidating createCheckpoint's own justification for existing.
-		const lsTree = git(["ls-tree", "-r", ref, "--name-only"], repo);
+		const lsTree = gitResult(["ls-tree", "-r", ref, "--name-only"], repo);
 		expect(
 			lsTree.stdout,
 			"the -u flag was measured to be accepted and silently ignored on this git version -- if this now " +
@@ -247,9 +238,9 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		).not.toContain("untracked.txt");
 
 		// Reproduces upstream git-checkpoint.ts:44's own restore.
-		expect(git(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
+		expect(gitResult(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
 		rmSync(join(repo, "untracked.txt"));
-		const applied = git(["stash", "apply", ref], repo);
+		const applied = gitResult(["stash", "apply", ref], repo);
 		expect(applied.status, `the control's own restore must succeed: ${applied.stderr}`).toBe(0);
 
 		expect(
@@ -273,7 +264,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 
 		// Vacuity guard: prove git genuinely classifies this path ignored before
 		// claiming createCheckpoint respects that classification.
-		const checkIgnore = git(["check-ignore", "-q", "--", "ignoredir/secret.txt"], repo);
+		const checkIgnore = gitResult(["check-ignore", "-q", "--", "ignoredir/secret.txt"], repo);
 		expect(
 			checkIgnore.status,
 			"fixture sanity: ignoredir/secret.txt must actually be classified ignored, or this case proves nothing",
@@ -291,7 +282,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		// present now, absent then). Both must survive untouched. This is what
 		// makes `git clean -fdx` a failing implementation of this function.
 		writeFileSync(join(repo, "ignoredir", "created-after.txt"), "ignored, made after the checkpoint\n", "utf-8");
-		const afterIgnore = git(["check-ignore", "-q", "--", "ignoredir/created-after.txt"], repo);
+		const afterIgnore = gitResult(["check-ignore", "-q", "--", "ignoredir/created-after.txt"], repo);
 		expect(
 			afterIgnore.status,
 			"fixture sanity: the post-checkpoint file must also be classified ignored, or it proves nothing",
@@ -354,7 +345,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		commitFile(repo, "tracked.txt", "line1\n", "init");
 		writeFileSync(join(repo, "tracked.txt"), "line1\nline2\n", "utf-8");
 		const sha = createCheckpoint(repo, "case5");
-		expect(git(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
+		expect(gitResult(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
 
 		// The library function's own signature: two plain strings, no ctx of any
 		// kind -- callable and effective with nothing UI-shaped in scope at all.
@@ -438,7 +429,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		await turnStart?.({}, stubCtx(repo, []));
 
 		// Now diverge from the checkpoint in all three directions at once.
-		expect(git(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
+		expect(gitResult(["checkout", "--", "tracked.txt"], repo).status).toBe(0);
 		rmSync(join(repo, "untracked.txt"));
 		writeFileSync(join(repo, "created-after.txt"), "must not survive\n", "utf-8");
 
@@ -537,7 +528,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		// The converse, and it is what stops this case being satisfied by a restore
 		// that deletes nothing at all: an ordinary post-checkpoint file still goes.
 		expect(
-			git(["log", "-1", "--format=%H"], repo).status,
+			gitResult(["log", "-1", "--format=%H"], repo).status,
 			"the repository must still be a working repository afterwards",
 		).toBe(0);
 	});
@@ -569,7 +560,7 @@ describe("EXT-07 -- checkpoint capture and restore, proven against real temp git
 		writeFileSync(join(repo, "sub", "notes.md"), "ordinary\n", "utf-8");
 
 		const sha = createCheckpoint(repo, "case9");
-		const tree = git(["ls-tree", "-r", "--name-only", sha], repo);
+		const tree = gitResult(["ls-tree", "-r", "--name-only", sha], repo);
 		expect(tree.status, "listing the checkpoint tree must succeed").toBe(0);
 		const captured = tree.stdout.split("\n").map((l) => l.trim()).filter((l) => l !== "");
 

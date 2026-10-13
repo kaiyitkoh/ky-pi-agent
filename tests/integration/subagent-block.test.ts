@@ -71,8 +71,7 @@
  * env-var gate and no `describe.skip` here, per this plan's own instruction
  * and `tests/helpers/pi.ts`'s stated no-skip contract.
  */
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
@@ -80,6 +79,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { repoRoot } from "../helpers/git.ts";
 import { logFilesIn, readJsonl } from "../helpers/logs.ts";
 import { requirePiOnPath, runPi } from "../helpers/pi.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { writeUserScopeShim } from "../helpers/session.ts";
 
 /** Cold jiti compile; matches this suite's other real-subprocess spawns. */
@@ -97,14 +97,8 @@ const BENIGN_COMMAND = "echo kypi-subagent-positive-control-sentinel";
 /** File the project-scoped sentinel writes IF (and only if) it is ever imported. */
 const PROJECT_SENTINEL_MARKER = "kypi-project-sentinel-loaded.marker";
 
-/** Temp dirs created by this suite, removed in `afterAll`. */
-const scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 function freshEnv(agentDir: string): Record<string, string> {
 	return {
@@ -278,15 +272,7 @@ describe("SAFE-12 -- a blocked command stays blocked inside a spawned headless s
 		writeFauxDriverExtension(agentDir, [BLOCKED_COMMAND, BENIGN_COMMAND]);
 	});
 
-	afterAll(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-	});
+	afterAll(scratch.cleanup);
 
 	it(
 		"one spawned child: blocks the dangerous command, allows the benign one, and never imports the project-scoped sentinel",

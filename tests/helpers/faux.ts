@@ -81,7 +81,9 @@
  * because there is not one. [IN-04]
  */
 import type {
+	AssistantMessage,
 	FauxProviderHandle,
+	FauxResponseStep,
 	Message,
 	Model,
 	Provider,
@@ -111,6 +113,21 @@ export function transcriptView(context: TranscriptContext): {
 		tools: getCurrentTools(context.messages),
 		messages: context.messages.filter((m): m is NonSystemMessage => m.role !== "system"),
 	};
+}
+
+/** A response step that records the outgoing context before replying with `reply`. */
+export function capturing(into: { messages: Message[] }[], reply: AssistantMessage): FauxResponseStep {
+	return (context: TranscriptContext) => {
+		into.push(context);
+		return reply;
+	};
+}
+
+/** The latest `toolResult` message in a captured context, flattened to its text. */
+export function lastToolResult(context: { messages: Message[] }): { isError: boolean; text: string } | undefined {
+	const msg = context.messages.findLast((m) => m.role === "toolResult");
+	if (msg?.role !== "toolResult") return undefined;
+	return { isError: msg.isError, text: msg.content.map((b) => (b.type === "text" ? b.text : "")).join("") };
 }
 
 /**

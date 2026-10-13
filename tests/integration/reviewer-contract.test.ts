@@ -16,22 +16,12 @@
  * a bug of omission (`src/b.ts` needed changing too) is genuinely
  * representable, and "full contents contains a line the diff does not" is a
  * real git fact, not a fabricated string.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE DUPLICATES `waitForConfiguredAuth` FROM
- * `single-shot-roles.test.ts` RATHER THAN IMPORTING IT
- * ---------------------------------------------------------------------------
- * `single-shot-roles.test.ts` itself copies this helper from
- * `mode-switch.test.ts` rather than exporting a shared one — same measured
- * async gap (`ModelRuntime#setRuntimeApiKey` resolving before the cached
- * `hasConfiguredAuth` snapshot catches up), same reasoning for keeping each
- * test file self-contained.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
-import type { FauxProviderHandle, SimpleStreamOptions, TranscriptContext } from "@earendil-works/pi-ai";
+import type { SimpleStreamOptions, TranscriptContext } from "@earendil-works/pi-ai";
 import {
 	fauxAssistantMessage,
 	fauxProvider,
@@ -50,7 +40,7 @@ import {
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { SECRET_FIXTURE_TOKEN, transcriptView, wrapFauxWithPayload } from "../helpers/faux.ts";
 import { commitFile, makeTempRepo } from "../helpers/git.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 
 // -----------------------------------------------------------------------------
 // The real-repo fixture: A imports B, then a change touching A only
@@ -169,20 +159,6 @@ function buildContract(repoFixture: RepoFixture): { contract: ReviewerContractIn
 // -----------------------------------------------------------------------------
 // Session/faux plumbing -- mirrors tests/integration/single-shot-roles.test.ts
 // -----------------------------------------------------------------------------
-
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms`);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
 
 interface CapturedRequest {
 	context: TranscriptContext;

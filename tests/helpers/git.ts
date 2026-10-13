@@ -42,7 +42,8 @@ import { join } from "node:path";
 
 let cachedRoot: string | undefined;
 
-function run(args: string[], cwd?: string): { stdout: string; status: number | null } {
+/** Runs `git args` in `cwd`, returning its output and status; throws only when git cannot launch. */
+export function gitResult(args: string[], cwd?: string): { stdout: string; stderr: string; status: number | null } {
 	const result = spawnSync("git", args, {
 		cwd,
 		encoding: "utf-8",
@@ -52,7 +53,7 @@ function run(args: string[], cwd?: string): { stdout: string; status: number | n
 	if (result.error) {
 		throw new Error(`git ${args.join(" ")} failed to launch: ${result.error.message}`);
 	}
-	return { stdout: result.stdout ?? "", status: result.status };
+	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
 }
 
 /**
@@ -63,7 +64,7 @@ function run(args: string[], cwd?: string): { stdout: string; status: number | n
  */
 export function repoRoot(): string {
 	if (cachedRoot === undefined) {
-		const { stdout, status } = run(["rev-parse", "--show-toplevel"]);
+		const { stdout, status } = gitResult(["rev-parse", "--show-toplevel"]);
 		if (status !== 0) {
 			throw new Error("not inside a git repository -- `git rev-parse --show-toplevel` failed");
 		}
@@ -83,7 +84,7 @@ export function repoRoot(): string {
  * BOOT-09 table needs no fixture files on disk.
  */
 export function isIgnored(path: string): boolean {
-	const { status } = run(["check-ignore", "-q", "--no-index", "--", path], repoRoot());
+	const { status } = gitResult(["check-ignore", "-q", "--no-index", "--", path], repoRoot());
 	if (status !== 0 && status !== 1) {
 		throw new Error(`git check-ignore returned unexpected exit code ${status} for ${path}`);
 	}
@@ -98,7 +99,7 @@ export function isIgnored(path: string): boolean {
  * accidentally committed" questions.
  */
 export function trackedFiles(pattern = "."): string[] {
-	const { stdout, status } = run(["ls-files", "--", pattern], repoRoot());
+	const { stdout, status } = gitResult(["ls-files", "--", pattern], repoRoot());
 	if (status !== 0) {
 		throw new Error(`git ls-files failed for pathspec ${pattern}`);
 	}
@@ -108,67 +109,41 @@ export function trackedFiles(pattern = "."): string[] {
 		.filter((line) => line !== "");
 }
 
-/**
- * Create a fresh, empty git repository in a new temp directory (under
- * `os.tmpdir()`, never inside this repository), checked out on a branch
- * named `work` — never `main`/`master` — so no fixture built on top of it
- * depends on this machine's `init.defaultBranch` setting.
- *
- * Every one of the four setup calls (`init`, two `config` calls,
- * `checkout -b`) is asserted to succeed; a failure throws naming the exact
- * argv that failed rather than returning a half-initialised path silently.
- */
+/** Runs `git args` in `cwd` and returns stdout, throwing with the argv and stderr on a non-zero exit. */
+export function runGit(args: string[], cwd: string): string {
+	const { stdout, stderr, status } = gitResult(args, cwd);
+	if (status !== 0) throw new Error(`git ${args.join(" ")} failed (exit ${status}) in ${cwd}: ${stderr}`);
+	return stdout;
+}
+
+/** Inits a repository in `cwd` on `branch` (never the machine's `init.defaultBranch`), by default with one seed commit. */
+export function gitInit(cwd: string, branch: string, seed = true): void {
+	runGit(["init"], cwd);
+	runGit(["config", "user.email", "test@test.invalid"], cwd);
+	runGit(["config", "user.name", "test"], cwd);
+	runGit(["config", "commit.gpgsign", "false"], cwd);
+	runGit(["checkout", "-b", branch], cwd);
+	if (seed) commitFile(cwd, "seed.txt", "seed\n", "seed");
+}
+
+/** A fresh repository in a new temp directory, on branch `work`, with no commits. */
 export function makeTempRepo(prefix: string): string {
 	const repo = mkdtempSync(join(tmpdir(), prefix));
-	const setup: string[][] = [
-		["init"],
-		["config", "user.email", "quick@test.invalid"],
-		["config", "user.name", "quick test"],
-		["checkout", "-b", "work"],
-	];
-	for (const args of setup) {
-		const { status } = run(args, repo);
-		if (status !== 0) {
-			throw new Error(`git ${args.join(" ")} failed (exit ${status}) while making temp repo ${repo}`);
-		}
-	}
+	gitInit(repo, "work", false);
 	return repo;
 }
 
-/**
- * Write `body` to `<repo>/<name>`, stage it and commit it with `message`,
- * returning the new HEAD SHA read back via {@link headSha} — never trusted
- * from `git commit`'s own stdout, which this module's header rule says is
- * never parsed.
- */
+/** Writes and commits `<repo>/<name>`, returning the new HEAD sha. */
 export function commitFile(repo: string, name: string, body: string, message: string): string {
 	writeFileSync(join(repo, name), body, "utf-8");
-	const steps: string[][] = [
-		["add", "--", name],
-		["commit", "-m", message],
-	];
-	for (const args of steps) {
-		const { status } = run(args, repo);
-		if (status !== 0) {
-			throw new Error(`git ${args.join(" ")} failed (exit ${status}) committing ${name} in ${repo}`);
-		}
-	}
+	runGit(["add", "--", name], repo);
+	runGit(["commit", "-m", message], repo);
 	return headSha(repo);
 }
 
-/**
- * The current HEAD SHA of `repo`, read directly via `git rev-parse HEAD`.
- * Throws naming the failing argv on a non-zero status or an empty result —
- * never returns an empty string silently.
- */
+/** HEAD's sha, throwing rather than returning an empty string. */
 export function headSha(repo: string): string {
-	const { stdout, status } = run(["rev-parse", "HEAD"], repo);
-	if (status !== 0) {
-		throw new Error(`git rev-parse HEAD failed (exit ${status}) in ${repo}`);
-	}
-	const sha = stdout.trim();
-	if (sha === "") {
-		throw new Error(`git rev-parse HEAD returned an empty SHA in ${repo}`);
-	}
+	const sha = runGit(["rev-parse", "HEAD"], repo).trim();
+	if (sha === "") throw new Error(`git rev-parse HEAD returned an empty SHA in ${repo}`);
 	return sha;
 }

@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -8,7 +7,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHeaderComponent, formatHeaderLines } from "../../.pi/extensions/ui/header.ts";
-import { repoRoot } from "../helpers/git.ts";
+import { repoRoot, runGit } from "../helpers/git.ts";
 import { createHarnessSession, type HarnessHandle, type HarnessSessionOptions } from "../helpers/harness-session.ts";
 import { createRecordingUI } from "../helpers/recording-ui.ts";
 
@@ -136,18 +135,9 @@ async function open(
 
 const last = (xs: (string | undefined)[]): string | undefined => xs[xs.length - 1];
 
-function git(cwd: string, ...args: string[]): void {
-	const r = spawnSync(
-		"git",
-		["-c", "user.name=t", "-c", "user.email=t@test.invalid", "-c", "commit.gpgsign=false", ...args],
-		{ cwd, encoding: "utf-8", shell: false, windowsHide: true },
-	);
-	if (r.status !== 0) throw new Error(`git ${args.join(" ")} failed: ${r.stderr}`);
-}
-
 function seedGit(session: AgentSession): void {
 	const cwd = session.sessionManager.getCwd();
-	git(cwd, "init", "-q");
+	runGit(["init", "-q"], cwd);
 	writeFileSync(join(cwd, "untracked.txt"), "x");
 }
 

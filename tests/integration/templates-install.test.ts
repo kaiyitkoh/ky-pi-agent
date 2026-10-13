@@ -42,8 +42,7 @@
  * about the template, never about a provider.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
@@ -55,6 +54,7 @@ import {
 import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
+import { scratchDirs } from "../helpers/scratch.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 
 /** npm is stubbed, so no registry round-trip; node startup still dominates. */
@@ -74,14 +74,8 @@ interface Run {
 	log: string;
 }
 
-/** Temp directories created by this suite; removed after every case. */
-let scratch: string[] = [];
-
-function tempDir(prefix: string): string {
-	const dir = mkdtempSync(join(tmpdir(), prefix));
-	scratch.push(dir);
-	return dir;
-}
+const scratch = scratchDirs();
+const tempDir = scratch.make;
 
 /**
  * A throwaway `REPO_ROOT` for one bootstrap run, registered for cleanup the
@@ -91,7 +85,7 @@ function tempDir(prefix: string): string {
  */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
-	scratch.push(copy.root);
+	scratch.track(copy.root);
 	return copy;
 }
 
@@ -286,17 +280,7 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	// against a throwaway `REPO_ROOT` copy (`bootstrapRepoCopy`), so a full
 	// run's `.env.example` write lands in that copy, not in the committed file.
 	// `scratch` (which every copy's root is also pushed onto) is enough.
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure. Never mask a real
-				// assertion result behind a cleanup error.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	it("case 1 -- a clean install writes both files, compat block intact", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -1152,16 +1136,7 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 });
 
 describe("global setup -- user settings, theme, agent scan dir and the pinned packages", () => {
-	afterEach(() => {
-		for (const dir of scratch) {
-			try {
-				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
-			} catch {
-				// A leftover temp dir is noise, not a failure.
-			}
-		}
-		scratch = [];
-	});
+	afterEach(scratch.cleanup);
 
 	const PINS = [
 		"npm:@narumitw/pi-lsp@0.49.9",
