@@ -617,7 +617,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 11-05-PLAN.md — Prompt-surface/ACP lint and full-UI prompt-stability proof with negative controls
+- [x] 11-05-PLAN.md — Prompt-surface/ACP lint and full-UI prompt-stability proof with negative controls
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
@@ -671,7 +671,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 17/17 | Complete    | 2026-10-12 |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
-| 11. Terminal UI | 5/7 | In Progress|  |
+| 11. Terminal UI | 6/7 | In Progress|  |
 
 ### Phase 12: OpenSpec Opt-in Skill
 
