@@ -11,9 +11,7 @@ the code to match the document.
 Phase 8's subsystem. It imports the Phase 2 chokepoint (`callModel()`, via
 `routing/modes.ts`'s `runSingleShotRole`) and nothing from `safety/` —
 `safety/` imports nothing from `routing/` either, and neither imports
-`quality/`. Phase 9 wires `verdict.ts`'s stop signal and `reviewer.ts`'s
-dispatch into a real ceremonial workflow (QUAL-08); nothing in this
-directory does that yet.
+`quality/`. `/review` wires `verdict.ts`'s stop signal and `reviewer.ts`'s dispatch; `/quick` and `/execute` call the deterministic stage.
 
 ---
 
@@ -35,31 +33,20 @@ nobody downstream can tell — in a new costume. This is why `LegStatus` is a
 three-arm discriminated union and not a boolean plus a nullable reason: a
 two-state type cannot represent "did not run" as anything other than "ran
 and passed" or "ran and failed", both of which are lies about a leg that
-never executed. `GateResult.blocking` is computed as "any leg reports
-`fail`" — `unavailable` never sets it, by construction, so an absent LSP
-install is never a reason to stop `/quick` on its own, but it is always
-visible in `GateResult.report` for a human to read.
+never executed. `GateResult.failed` is computed as "any leg reports `fail`" — `unavailable` never sets it, by construction, so an absent LSP install is never a reason to reject a change on its own, but it is always visible in the gate report for a human to read.
 
-**The `lint` leg is a named, exhaustive set, never a directory glob.**
-`LINT_GATE_FILES` names this repository's own twelve structural vitest
-suites explicitly (`chokepoint-lint`, `contributing-boundary`,
-`jsonl-append-only`, `extension-layout`, `pinning`, `gitignore-policy`,
-`docs-policy`, `npmrc-policy`, `secret-scan`, `ci-pinning`, `lf-and-shell`,
-`evasion-corpus`) — this project has no ESLint or other linter installed
-(`tests/unit/pinning.test.ts` pins exactly six audited `devDependencies`),
-so "lint" here means these named suites and never silently grows to mean
-"the whole unit test tree."
+The legs run on the work repo's change, not on this harness, and each has its own availability rule:
 
-**The LSP leg's real state on this machine, today: `UNAVAILABLE`.**
-`probeLspAvailability` reads the live, registered tool-name list — never
-`.pi/settings.json`, which lists what is *pinned*, not what is *loaded* —
-and requires **both** `lsp_diagnostics` and `lsp_fix` to be present, naming
-whichever is missing rather than collapsing to a bare boolean.
-`@narumitw/pi-lsp@0.49.4` is pinned in `.pi/settings.json` and has never
-been installed, so this leg has never reported anything but `UNAVAILABLE`
-in this repository. Whether it reports `FAIL` against a real type error,
-once the package and a real language server are both present, is
-`RB-08-02` in `docs/RUNBOOK.md`, OUTSTANDING.
+| Leg | Runs when | Otherwise |
+|-----|-----------|-----------|
+| `typecheck` | a code file changed, a `tsconfig.json` exists at or above the cwd (up to the git top level), the project is trusted, the repo-local TypeScript is installed and the base tree did not already fail it | `unavailable` |
+| `lint` | the project is trusted, the repo has an ESLint config (`eslint.config.{js,mjs,cjs,ts}` or `.eslintrc{,.js,.cjs,.json,.yml,.yaml}`) and a repo-local `eslint` binary; exit 1 is `fail` | `unavailable`; any other non-zero exit is also `unavailable` |
+| `lsp` | never | always `unavailable` |
+| `anti-pattern` | a changed code file exists; only error-tier findings the base did not already have count | `pass` with nothing found |
+
+**The `lint` leg runs the target repo's own ESLint** on the changed code files, passing the files after `--` so a name beginning with `-` cannot be read as a flag, with output bounded at 40 lines. It never runs without an ESLint config and a repo-local binary, and never on an untrusted project: a report of "no lint problems" from a linter that was not there is the failure this document exists to prevent.
+
+**The LSP leg is `UNAVAILABLE` by a Pi API limit, not by an absent install.** A command or event context in Pi 1.1.0 has no `executeTool` (`dist/core/extensions/types.d.ts:262-280`: only a tool's own execute context carries it), so the gate cannot call `lsp_diagnostics`, and a registered tool is not a run. The probe (`probeLspAvailability`) still reads the live tool-name list and requires both `lsp_diagnostics` and `lsp_fix`, so the report names what is missing. Whether the model can reach a real language server through the tool path is the live half, `RB-08-02` in `docs/RUNBOOK.md`.
 
 **The anti-pattern leg (QUAL-01) is syntax-only, never a type-checked
 walk.** Its six rules (§2) parse with `ts.createSourceFile` and walk with
@@ -70,13 +57,21 @@ whole program is not, measured at 300-390ms across every tracked
 `.pi/extensions/*.ts` file, against a 1600ms budget set at roughly 4x the
 worst observed run.
 
-**QUAL-07's design-review predicate lives here too, and it is a predicate,
-not a call.** `shouldRunDesignReview` decides *whether* a design-level pass
-should fire — on a diff spanning many files (`DESIGN_REVIEW_FILE_SPAN`, an
-explicitly untuned constant Phase 9 owns dialing), a loop wrapping a query,
-a data-model or public-interface change, or an explicit `/escalate` — and
-returns `false` on an ordinary small task. It never touches a reviewer
-itself; nothing in `quality/gates.ts` makes the design-review call.
+**QUAL-07's design-review pass is wired into `/review`, and it fires on signals, not on every run.** `shouldRunDesignReview` fires when the changed-file span reaches `DESIGN_REVIEW_FILE_SPAN` (8), an added line inside a loop body (the next 8 lines after a loop header) calls something query-like, a changed path matches schema, migration(s), models, `.prisma`, `.sql` or `.graphql`, an `export` line is added or removed in a JS/TS file, or the session is escalated. It returns `false` on an ordinary small task. When it fires, `design-review.ts` makes one extra reviewer call for complexity, scalability and abstraction-fit findings; the pass is additive and fails open, and a design BLOCKER goes through refute-or-promote like any other. REVIEW.md always carries a Design review section.
+
+### Gate depth per workflow
+
+This is the honest table: it lists what each workflow actually runs, not what the module could run.
+
+| Workflow | Mechanisms that run |
+|----------|---------------------|
+| `quick` | deterministic |
+| `execute` | deterministic |
+| `grill` | none (SPEC validators only) |
+| `plan` | none (PLAN validators only) |
+| `review` | deterministic, model-review, refute-or-promote |
+
+Calibration is offline only and is listed for no workflow. `runBoundedReviewLoop` is not credited anywhere.
 
 ## 2. The six anti-pattern rules (QUAL-01)
 
@@ -91,7 +86,7 @@ itself; nothing in `quality/gates.ts` makes the design-review call.
 
 The two WARNING-tier rules (`literal-special-case`, `n-plus-one`) are
 **only partially decidable without type information or a real call graph**,
-and neither can ever flip `GateResult.blocking` to `fail` on its own —
+and neither can ever flip `GateResult.failed` to true on its own —
 `runAntiPatternLeg` only ever reaches `fail` when at least one ERROR-tier
 finding exists; a warning-only run still reports its findings (tagged by
 tier) inside a `pass` leg.
@@ -357,7 +352,7 @@ plainly what a passing check does not cover:
   DeepSeek/DashScope/Bedrock model, dispatched as this reviewer, catches a
   real defect is unmeasured — `RB-08-03`, OUTSTANDING.
 - **The LSP leg has never executed against a real language server.** Its
-  `UNAVAILABLE` state on this machine reflects an absent install, not a
+  `UNAVAILABLE` state reflects an API limit (section 1), not a
   clean result — `RB-08-02`, OUTSTANDING.
 - **The main-loop half of GATE-10's thinking budgets is unproved on the
   wire.** Plan 08-01 proved the *nested* path (reviewer, advisor, vision,

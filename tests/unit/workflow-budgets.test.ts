@@ -166,7 +166,7 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/workflows/evidence.ts",
-		budget: 250,
+		budget: 240,
 		why: "CR-01 iteration 3 fix: recordCaptureFailure() so a tool_execution_end capture that throws " +
 			"rejects instead of vanishing, plus the tool_execution_end docstring rewrite -- measured 336 " +
 			"raw lines 2026-08-15 (up from 328), rounded up to the next ten. RAISED 340 -> 390 by plan 08-12 " +
@@ -174,7 +174,12 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 			"branches (2) and (3), with the docstring explaining why), startRun/endRun now thread baseTree/headTree " +
 			"through RunState, and the WHAT THIS PREDICATE DOES NOT PROVE paragraph was rewritten to state the " +
 			"narrower, still-true unrelated-content limit rather than the now-closed empty-commit one. Measured " +
-			"381 raw lines 2026-08-15. Re-measured 242 raw lines 2026-10-13 after the comment cleanup, rounded up to the next ten",
+			"381 raw lines 2026-08-15. Re-measured 242 raw lines 2026-10-13 after the comment cleanup, rounded up to the next ten. Re-measured 238 raw lines 2026-10-13 after the evidence gate began passing on a commit plus the declared verification, with failed calls logged, rounded up to the next ten",
+	},
+	{
+		file: ".pi/extensions/workflows/settle.ts",
+		budget: 70,
+		why: "the /quick change gate placement: runs the deterministic change gate on base..HEAD once on agent_settled, with the aborted-turn rule. Measured 65 raw lines 2026-10-13 with countRawLines, rounded up to the next ten",
 	},
 	// WR-05: these three are NOT under workflows/ -- discovered because they contain
 	// COMMAND_MARKER (isCommandSource). Declared here so the completeness check
@@ -182,8 +187,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	// a number this phase re-reviewed for tightness.
 	{
 		file: ".pi/extensions/routing/index.ts",
-		budget: 340,
-		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 313 raw lines 2026-08-14, rounded up to the next ten. RAISED 320 -> 340: the profile wiring stopped narrowing a session whose transcript already declared tools and gained a pre-prompt pass (now on `input`) that drops only undeclared out-of-profile tools; measured 336 raw lines 2026-10-13, rounded up to the next ten",
+		budget: 390,
+		why: "Phase 5's mode-switch commands (/mode, /escalate, ...) -- WR-05 widened discovery to catch command surfaces outside workflows/; measured 313 raw lines 2026-08-14, rounded up to the next ten. RAISED 320 -> 340: the profile wiring stopped narrowing a session whose transcript already declared tools and gained a pre-prompt pass (now on `input`) that drops only undeclared out-of-profile tools; measured 336 raw lines 2026-10-13, rounded up to the next ten. Re-measured 389 raw lines 2026-10-13 after model_select and input enforcement of the model guard and the pinned subagent routing, rounded up to the next ten",
 	},
 	{
 		file: ".pi/extensions/harness/index.ts",
@@ -307,13 +312,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/review/index.ts",
-		budget: 160,
-		why: "plan 09-15 (FLOW-08) -- the /review command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, the six-part reviewer contract, gate depth via gateDepthFor, refute-or-promote before the stop decision, REVIEW.md as the single write, and the MR step through openMr. Measured 124 raw lines 2026-10-13 (named git maxBuffer constant) with countRawLines, rounded up to the next ten. Re-measured 131 raw lines after the deterministic gate began running at HEAD, rounded up to the next ten. Re-measured 133 raw lines after undeclared changes began requiring approval, rounded up to the next ten. Re-measured 125 raw lines after the MR body stopped travelling through a temp file, rounded up to the next ten. Re-measured 129 raw lines after the history and upstream preconditions were wired in, rounded up to the next ten. Re-measured 130 raw lines after the gate notice began naming only what runs, rounded up to the next ten. Re-measured 133 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 143 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. Re-measured 151 raw lines after /review began git-ignoring the harness state directories, rounded up to the next ten",
-	},
-	{
-		file: ".pi/skills/review/SKILL.md",
-		budget: 50,
-		why: "plan 09-15 (FLOW-08) -- the six-input contract, the soft-failure table, REVIEW.md sections with consumers, severity and classification rules, and the MR rule, as tables. Measured 50 raw lines 2026-10-13 with countRawLines, already a multiple of ten",
+		budget: 170,
+		why: "plan 09-15 (FLOW-08) -- the /review command: slug resolution, git pre-flight, on-disk SPEC/PLAN revalidation, the six-part reviewer contract, gate depth via gateDepthFor, refute-or-promote before the stop decision, REVIEW.md as the single write, and the MR step through openMr. Measured 124 raw lines 2026-10-13 (named git maxBuffer constant) with countRawLines, rounded up to the next ten. Re-measured 131 raw lines after the deterministic gate began running at HEAD, rounded up to the next ten. Re-measured 133 raw lines after undeclared changes began requiring approval, rounded up to the next ten. Re-measured 125 raw lines after the MR body stopped travelling through a temp file, rounded up to the next ten. Re-measured 129 raw lines after the history and upstream preconditions were wired in, rounded up to the next ten. Re-measured 130 raw lines after the gate notice began naming only what runs, rounded up to the next ten. Re-measured 133 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 143 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. Re-measured 151 raw lines after /review began git-ignoring the harness state directories, rounded up to the next ten. Re-measured 166 raw lines 2026-10-13 after the MR audit row, verdict gating and the merge-base rule were wired in, rounded up to the next ten",
 	},
 	{
 		file: ".pi/skills/plan-ceremony/SKILL.md",
@@ -343,7 +343,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: WORKFLOWS_DIR,
-		budget: 340,
+		budget: 390,
 		why: "D-11's original ratchet -- /quick's own directory; measured 415 raw lines 2026-08-15 " +
 			"(index.ts 79 + evidence.ts 336) after iteration 3's CR-01/WR-02, rounded up to the next ten. " +
 			"RAISED 420 -> 430 by plan 08-11 (GATE-01 wiring) -- see the per-file entry above for what grew. " +
@@ -351,18 +351,18 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"of ten. RAISED 430 -> 480 by plan 08-12 (GATE-01's tree-comparison branch) -- see both per-file " +
 			"entries above for what grew. Re-measured 476 raw lines 2026-08-15 (index.ts 95 + evidence.ts 381), " +
 			"rounded up to the next ten. Code-review fix pass WR-06 (see the per-file entry above): re-measured " +
-			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381). Re-measured 326 raw lines 2026-10-13 (index.ts 84 + evidence.ts 242), rounded up to the next ten. Re-measured 328 raw lines after index.ts began deferring to an armed /execute run, rounded up to the next ten. Re-measured 332 raw lines after /quick began clearing a leaked /execute run and claiming the session, rounded up to the next ten",
+			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381). Re-measured 326 raw lines 2026-10-13 (index.ts 84 + evidence.ts 242), rounded up to the next ten. Re-measured 328 raw lines after index.ts began deferring to an armed /execute run, rounded up to the next ten. Re-measured 332 raw lines after /quick began clearing a leaked /execute run and claiming the session, rounded up to the next ten. Re-measured 386 raw lines 2026-10-13 after settle.ts was added (index.ts 83, evidence.ts 238, settle.ts 65), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/routing",
-		budget: 1130,
+		budget: 1350,
 		why: "WR-03 widened the ratchet to every command directory, not only workflows/ -- measured 1019 " +
 			"raw lines across 5 files 2026-10-13, rounded up to the next ten. RAISED 1020 -> 1110: profiles.ts (78 lines, " +
 			"the tool-profile table and resolver) plus 5 lines of wiring in index.ts. Re-measured 1102 raw lines across 6 files 2026-10-13. " +
 			"RAISED 1110 -> 1120: index.ts grew by the transcript-loadout guard and the pre-prompt pass (see its per-file entry); " +
 			"measured 1120 raw lines across 6 files 2026-10-13. RAISED 1120 -> 1130: an explicit --tools allowlist now bypasses " +
 			"narrowing (hasExplicitToolAllowlist in profiles.ts plus 2 lines in index.ts); measured 1121 raw lines across 6 files " +
-			"2026-10-13, rounded up to the next ten",
+			"2026-10-13, rounded up to the next ten. Re-measured 1341 raw lines 2026-10-13 after the model guard, per-mode agent overrides and enforcement of the routing profile (agent-overrides.ts 283, guard.ts 130, index.ts 389, modes.ts 321, profiles.ts 83, schema.ts 135), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/harness",
@@ -376,13 +376,13 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/diagnostics",
-		budget: 1940,
+		budget: 1980,
 		why: "WR-03; measured 3913 raw lines across 10 files 2026-08-15 (08-04 added quality-cost.ts; not " +
 			"re-reviewed for tightness), rounded up to the next ten. Code-review fix pass WR-06 added " +
 			"refundQualityCost() to quality-cost.ts (see workflows/index.ts's own budget entry for the finding). " +
 			"Re-measured 1930 raw lines across 10 files 2026-08-15 (budget.ts 435, call-model.ts 217, index.ts " +
 			"305, jsonl.ts 73, prose.ts 74, quality-cost.ts 115, redact.ts 159, schema.ts 208, turns.ts 176, " +
-			"wire.ts 168), rounded up to the next ten. Re-measured 1936 raw lines across 10 files 2026-10-13 (budget.ts 441 after the per-turn floor)",
+			"wire.ts 168), rounded up to the next ten. Re-measured 1936 raw lines across 10 files 2026-10-13 (budget.ts 441 after the per-turn floor). Re-measured 1973 raw lines 2026-10-13 after provider error redaction, the fixtures move and wire capture changes (budget.ts 441, call-model.ts 217, index.ts 299, jsonl.ts 74, prose.ts 74, quality-cost.ts 115, redact.ts 167, schema.ts 219, turns.ts 176, wire.ts 191), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/checkpoint",
@@ -452,7 +452,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 1240,
+		budget: 1250,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
@@ -499,11 +499,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"09-03: DEVIATION 6 (the /plan -> /plan-mode rename, a genuine composition conflict with " +
 			"Phase 9's ceremonial /plan workflow) added its header paragraph to index.ts. Re-measured " +
 			"1235 raw lines across 3 files 2026-08-15 (index.ts 547 + read-only.ts 585 + utils.ts 103), " +
-			"rounded up to the next ten",
+			"rounded up to the next ten. Re-measured 1248 raw lines 2026-10-13 after the plan-mode write holes were closed (index.ts 547, read-only.ts 598, utils.ts 103), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/safety",
-		budget: 2440,
+		budget: 3330,
 		why: "CR-04 (code-review fix pass): another directory importedSubsystemDirs newly discovers -- " +
 			"workflows/index.ts imports classifyGitInvocation/currentBranch/currentSha/currentTree from " +
 			"../safety/git.ts and PROTECTED_BRANCHES from ../safety/index.ts, and safety/ spells " +
@@ -524,11 +524,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"grew the powershell/MCP/codemode/tool_search/background-tasks deny + bg_run-as-bash branch, audit.ts " +
 			"records parentToolCallId, schema.ts gained the matching field. Re-measured 4,709 raw lines across the " +
 			"same 9 files 2026-10-13 (approvals.ts 411, audit.ts 138, git.ts 621, index.ts 973, infra.ts 431, " +
-			"paths.ts 585, policy.ts 664, schema.ts 81, shell.ts 805), rounded up to the next ten. RAISED 4710 -> 4760 by the 08.1 review fixes (CR-01/WR-01/WR-02 guardBgRun, WR-04 redactSecrets in audit.ts). Re-measured 2,706 raw lines across the same 9 files 2026-10-13, rounded up to the next ten. Re-measured 2,725 after the glab mr create target scan was tightened, rounded up to the next ten. Re-measured 2,765 after push required an explicit non-protected src:dst refspec, rounded up to the next ten. Re-measured 2777 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. LOWERED 2780 -> 2440 after the wrapper grammars, infra tables and audit rows were compacted into data tables and helpers: re-measured 2,431 raw lines across the same 9 files 2026-10-13 (approvals.ts 153, audit.ts 87, git.ts 366, index.ts 410, infra.ts 201, paths.ts 394, policy.ts 331, schema.ts 29, shell.ts 460), rounded up to the next ten. Re-measured 2,431 raw lines after directory overrides were folded and runner scripts narrowed, offset by compacting policy.ts guard clauses (policy.ts 296, shell.ts 495, the rest unchanged)",
+			"paths.ts 585, policy.ts 664, schema.ts 81, shell.ts 805), rounded up to the next ten. RAISED 4710 -> 4760 by the 08.1 review fixes (CR-01/WR-01/WR-02 guardBgRun, WR-04 redactSecrets in audit.ts). Re-measured 2,706 raw lines across the same 9 files 2026-10-13, rounded up to the next ten. Re-measured 2,725 after the glab mr create target scan was tightened, rounded up to the next ten. Re-measured 2,765 after push required an explicit non-protected src:dst refspec, rounded up to the next ten. Re-measured 2777 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. LOWERED 2780 -> 2440 after the wrapper grammars, infra tables and audit rows were compacted into data tables and helpers: re-measured 2,431 raw lines across the same 9 files 2026-10-13 (approvals.ts 153, audit.ts 87, git.ts 366, index.ts 410, infra.ts 201, paths.ts 394, policy.ts 331, schema.ts 29, shell.ts 460), rounded up to the next ten. Re-measured 2,431 raw lines after directory overrides were folded and runner scripts narrowed, offset by compacting policy.ts guard clauses (policy.ts 296, shell.ts 495, the rest unchanged). Re-measured 3322 raw lines across 10 files 2026-10-13, rounded up to the next ten. RAISED 2440 -> 3330 once, after dead exports were trimmed first (classifyPushFailure removed). Per-file raw lines: approvals.ts 163, audit.ts 90, git.ts 661, index.ts 503, infra.ts 230, paths.ts 555, policy.ts 399, schema.ts 29, shell.ts 565, subagents.ts 127. Causes: push planning in git.ts; the fail-closed command-name predicate, the git subcommand allow-list, and redirect, @file, glob, case and credential-read classification in shell.ts, paths.ts and policy.ts; the subagent required-child guard and management confirm in subagents.ts; the RPC confirm in approvals.ts. No frozen ceiling moved",
 	},
 	{
 		dir: ".pi/extensions/quality",
-		budget: 2310,
+		budget: 2430,
 		why: "CR-04 (code-review fix pass): GATE-01's gate stage, the reviewer, calibration and the refute pass " +
 			"-- called directly by /quick (workflows/index.ts:12 imports runQuickGateStage from ./index.ts, :42 " +
 			"calls it) but discovered by NO registerCommand( call anywhere in this directory; " +
@@ -570,11 +570,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 				"311), rounded up to the next ten. RAISED 2200 -> 2250 by plan 09-14 (FLOW-05): review-schema.ts gained the " +
 				"optional scopeDrift field, the validateReview rejection of a model-supplied drift property and the Scope " +
 				"Drift render block (392 -> 443). Re-measured 2,242 raw lines across the same 8 files 2026-10-13, rounded up " +
-				"to the next ten. Re-measured 2305 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten",
+				"to the next ten. Re-measured 2305 raw lines after the deterministic gate began checking the work repo's changed files, rounded up to the next ten. Re-measured 2426 raw lines 2026-10-13 after the lint leg, the change gate availability rules and the design-review pass (advisor.ts 75, calibration.ts 122, design-review.ts 143, gates.ts 158, index.ts 267, review-schema.ts 469, reviewer.ts 240, rules.ts 631, verdict.ts 321), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/providers",
-		budget: 600,
+		budget: 440,
 		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs' transitive walk newly discovers this " +
 			"directory -- routing/index.ts imports ./modes.ts (same-directory, already inside the routing/ " +
 			"ratchet), and modes.ts itself imports callWithFallback from ../providers/fallback.ts and CHAIN " +
@@ -583,11 +583,11 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"CR-04 set for quality/safety (not a number this phase reviewed for tightness) -- this entry did " +
 			"not exist before WR2-04, so there is no prior committed number to raise from. Measured 599 raw " +
 			"lines across 4 files 2026-10-13 (fallback.ts 112, index.ts 138, schema.ts 273, sso.ts 76), " +
-			"rounded up to the next ten",
+			"rounded up to the next ten. Re-measured 440 raw lines 2026-10-13 after the error fixtures moved to tests/fixtures and the dead exports were removed (fallback.ts 137, index.ts 138, schema.ts 89, sso.ts 76), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/lib",
-		budget: 670,
+		budget: 720,
 		why: "WR2-04 (`08-REVIEW.md` iteration 2): importedSubsystemDirs no longer filters to `.pi/extensions/` " +
 			"only -- `.pi/lib/jsonl.ts` is imported (via `../../lib/jsonl.ts`) by quality/index.ts (indirectly, " +
 			"through .pi/lib/win-quote.ts's own CR2-01 wiring), routing/index.ts, safety/audit.ts and " +
@@ -607,7 +607,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"win-quote.ts 81, work-artifacts.ts 152), rounded up to the next ten. LOWERED 840 -> 660 by the " +
 			"08.2 review fix WR-07: .pi/lib joined the comment-discipline gate and its history/ID comments were " +
 			"condensed. Re-measured 655 raw lines on 2026-10-13 (jsonl.ts 497, win-quote.ts 67, " +
-			"work-artifacts.ts 91), rounded up to the next ten. Re-measured 670 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten",
+			"work-artifacts.ts 91), rounded up to the next ten. Re-measured 670 raw lines after the workflow commands began retiring each other's per-turn hooks, rounded up to the next ten. Re-measured 715 raw lines 2026-10-13 after the signed-ledger and JSONL hardening in jsonl.ts (active-workflow.ts 15, jsonl.ts 542, win-quote.ts 67, work-artifacts.ts 91), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/grill",
@@ -693,8 +693,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/review",
-		budget: 380,
-		why: "plan 09-14 (FLOW-05) -- scope-drift.ts: the pure compareScope and the git-diff-backed changedFilesSince that make the scope pin machine-checkable. Measured 47 raw lines across 1 file 2026-10-13, rounded up to the next ten. RAISED 50 -> 290 by plan 09-15 (FLOW-08): index.ts (the /review command) and mr.ts (MR body from evidence, classify-then-exec openMr). Measured 47 + 123 + 117 = 287 raw lines across 3 files 2026-10-13, rounded up to the next ten. Re-measured 295 raw lines after index.ts began running the deterministic gate, rounded up to the next ten. Re-measured 297 raw lines after index.ts began requiring approval for undeclared changes, rounded up to the next ten. Re-measured 305 raw lines after mr.ts began passing the body as an argv element with no shell, rounded up to the next ten. Re-measured 336 raw lines after mr.ts gained the history and upstream preconditions, rounded up to the next ten. Re-measured 331 raw lines after mr.ts switched to the shared fence-aware entry parser, rounded up to the next ten. Re-measured 332 raw lines after the gate notice began naming only what runs, rounded up to the next ten. Re-measured 345 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. Re-measured 356 raw lines after the user-approved --rebase-base re-pin was added, rounded up to the next ten. Re-measured 366 raw lines after glab spawn errors began being reported by cause, rounded up to the next ten. Re-measured 375 raw lines after the MR source branch began being checked and passed explicitly, rounded up to the next ten",
+		budget: 470,
+		why: "plan 09-14 (FLOW-05) -- scope-drift.ts: the pure compareScope and the git-diff-backed changedFilesSince that make the scope pin machine-checkable. Measured 47 raw lines across 1 file 2026-10-13, rounded up to the next ten. RAISED 50 -> 290 by plan 09-15 (FLOW-08): index.ts (the /review command) and mr.ts (MR body from evidence, classify-then-exec openMr). Measured 47 + 123 + 117 = 287 raw lines across 3 files 2026-10-13, rounded up to the next ten. Re-measured 295 raw lines after index.ts began running the deterministic gate, rounded up to the next ten. Re-measured 297 raw lines after index.ts began requiring approval for undeclared changes, rounded up to the next ten. Re-measured 305 raw lines after mr.ts began passing the body as an argv element with no shell, rounded up to the next ten. Re-measured 336 raw lines after mr.ts gained the history and upstream preconditions, rounded up to the next ten. Re-measured 331 raw lines after mr.ts switched to the shared fence-aware entry parser, rounded up to the next ten. Re-measured 332 raw lines after the gate notice began naming only what runs, rounded up to the next ten. Re-measured 345 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. Re-measured 356 raw lines after the user-approved --rebase-base re-pin was added, rounded up to the next ten. Re-measured 366 raw lines after glab spawn errors began being reported by cause, rounded up to the next ten. Re-measured 375 raw lines after the MR source branch began being checked and passed explicitly, rounded up to the next ten. Re-measured 462 raw lines 2026-10-13 after the MR audit row, merge-base scope and verdict gating (index.ts 166, mr.ts 198, scope-drift.ts 98), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/todo.ts",
@@ -1308,30 +1308,21 @@ describe("FLOW-11 -- registry completeness, both directions", () => {
  * `.pi/agents/*.md` carries zero glob coverage anywhere above: neither
  * WORKFLOWS_DIR, PROMPTS_DIR, SKILLS_DIR nor EXTENSIONS_DIR is a prefix of
  * `.pi/agents/`, confirmed by grep (0 matches for `.pi/agents` in this file
- * before this plan). The two files that exist there today,
- * `.pi/agents/planner.md` and `.pi/agents/reviewer.md`, are declared to
- * their honest owner -- `quality/reviewer.ts` dispatches the reviewer via
- * `runSingleShotRole` and never touches either file
- * (`.pi/agents/reviewer.md:38`'s own HONEST STATUS paragraph) -- so an
+ * before this plan). The files that exist there, `.pi/agents/planner.md` and
+ * `.pi/agents/executor-handoff.md`, are declared to their owning code, so an
  * unreachable file still carries a budget rather than staying invisible.
  */
 const RESOURCE_EDGES: readonly { workflow: string; paths: readonly string[]; budget: number; why: string }[] = [
 	{
 		workflow: ".pi/extensions/quality/reviewer.ts (declared owner -- see this entry's own why)",
-		paths: [".pi/agents/planner.md", ".pi/agents/reviewer.md"],
-		budget: 110,
-		why: "nothing loads either file at runtime today -- .pi/agents/reviewer.md:38's own HONEST STATUS " +
-			"paragraph states ROLE_MECHANISM.reviewer === 'call-model' dispatches through " +
-			"quality/reviewer.ts#runSingleShotRole and never touches .pi/agents/*.md or the subagent " +
-			"machinery at all; RB-08-03 (the eventual real-subagent path) is OUTSTANDING. Declared here " +
-			"unconditionally anyway, because an unreachable file is exactly the shape that would otherwise " +
-			"slip past every budget in this repository. Measured 67 (planner.md) + 42 (reviewer.md) = 109 " +
-			"raw lines 2026-08-15, rounded up to the next ten",
+		paths: [".pi/agents/planner.md"],
+		budget: 50,
+		why: "nothing loads this file at runtime today -- the reviewer dispatches through quality/reviewer.ts#runSingleShotRole and never touches .pi/agents/*.md or the subagent machinery. Declared here unconditionally, because an unreachable file is exactly the shape that would otherwise slip past every budget in this repository. Measured 48 raw lines 2026-10-13 (planner.md), rounded up to the next ten. Re-measured after reviewer.md was deleted: its 42 raw lines are no longer counted",
 	},
 	{
 		workflow: ".pi/extensions/execute/handoff.ts (declared owner -- see this entry's own why)",
 		paths: [".pi/agents/executor-handoff.md"],
-		budget: 40,
+		budget: 20,
 		why: "plan 09-11 (FLOW-09) -- executor-handoff.md's own HONEST STATUS paragraph states plainly that " +
 			"nothing in this repository loads this file at runtime today; it is exercised only by " +
 			"tests/unit/handoff-packet.test.ts's offline packet-builder unit tests, which build and measure " +
@@ -1339,7 +1330,7 @@ const RESOURCE_EDGES: readonly { workflow: string; paths: readonly string[]; bud
 			"is pinned, RB-07-02, OUTSTANDING). Declared to handoff.ts as its honest owner for the identical " +
 			"reason the planner/reviewer row above declares to quality/reviewer.ts -- an unreachable file is " +
 			"exactly the shape that would otherwise slip past every budget in this repository. Measured 33 " +
-			"raw lines 2026-08-16, rounded up to the next ten",
+			"raw lines 2026-08-16, rounded up to the next ten. Re-measured 15 raw lines 2026-10-13 after executor-handoff.md was shortened, rounded up to the next ten",
 	},
 ];
 
@@ -1457,7 +1448,7 @@ describe("Item 1 (D-12) -- RESOURCE_EDGES: the non-import resource-edge closure"
 		expect(
 			candidates.length,
 			"resourceEdgeCandidates() found nothing -- without this guard the completeness assertion below " +
-				"would pass having checked nothing. .pi/agents/planner.md and .pi/agents/reviewer.md guarantee " +
+				"would pass having checked nothing. .pi/agents/planner.md and executor-handoff.md guarantee " +
 				"this is >= 2 today",
 		).toBeGreaterThanOrEqual(1);
 	});
@@ -1557,7 +1548,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		commandFile: ".pi/extensions/workflows/index.ts",
 		bodies: [],
 		budget: 100,
-		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 90 raw lines " +
+		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 83 raw lines " +
 			"2026-10-13 with countRawLines, inside 100 -- the independent greppable assertion on " +
 			"workflows/index.ts still holds",
 	},
@@ -1591,16 +1582,15 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		bodies: [],
 		budget: 250,
 		why: "FEATURES.md Part 2 ceiling for /execute -- FROZEN, may not move to absorb growth (D-13). No skill body; " +
-			"measured 194 raw lines 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
+			"measured 195 raw lines 2026-10-13 with countRawLines. handoff.ts and progress.ts are bound by " +
 			"the .pi/extensions/execute DIRECTORY_BUDGETS ratchet",
 	},
 	{
 		name: "review",
 		commandFile: ".pi/extensions/review/index.ts",
-		bodies: [".pi/skills/review/SKILL.md"],
+		bodies: [],
 		budget: 250,
-		why: "FEATURES.md Part 2 line 206's ceiling -- FROZEN, may not move to absorb growth (D-13). Measured 151 raw lines " +
-			"(index.ts) + 50 raw lines (SKILL.md) = 201 raw lines 2026-10-13 with countRawLines, inside 250. mr.ts and " +
+		why: "FEATURES.md Part 2 line 206's ceiling -- FROZEN, may not move to absorb growth (D-13). Measured 166 raw lines (index.ts), no skill body, = 166 raw lines 2026-10-13 with countRawLines, inside 250. mr.ts and " +
 			"scope-drift.ts are bound by the .pi/extensions/review DIRECTORY_BUDGETS ratchet",
 	},
 ];

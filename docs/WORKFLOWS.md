@@ -67,22 +67,13 @@ the whole claim being tested:
    (not a second `/quick`) would silently arm anyway, and `agent_end` would
    attribute that other turn's tool results (and its accept/reject verdict)
    to a task `/quick` never actually commissioned.
-5. **Run the deterministic gate stage (GATE-01), and refuse before any model
-   work if it blocks.** `/quick` calls `quality/index.ts#runQuickGateStage`
-   — never inlined here; see `quality/gates.ts` for the four legs
-   (typecheck, lint, the LSP probe, the QUAL-01 anti-pattern rules) and their
-   binding order. This is the step that makes GATE-01's ordering claim real:
-   it runs, and reports, entirely BEFORE `startRun` or `pi.sendUserMessage`
-   below, so a blocking result costs zero provider requests. A blocking
-   result — any leg reporting FAIL — is reported verbatim via
-   `gate.report`, and the handler returns without arming a run or sending a
-   message. The LSP leg's UNAVAILABLE state is visible in that same report
-   but never sets `blocking` on its own — an absent LSP install is not a
-   reason to stop `/quick`. A blocked gate must not bill a later, unrelated
-   turn for work it never asked for: the quality-cost accumulator the gate
-   stage just wrote into is drained and its value discarded on this branch
-   (see the four-part comment at the call site) precisely because no turn
-   ever composes here to carry it honestly.
+5. **Scan nothing before the work.** No gate runs ahead of the model: the
+   change does not exist yet, so there is nothing to check. The deterministic
+   change gate (`quality/index.ts#runChangeGateStage`, four legs described in
+   `docs/QUALITY.md`) runs once, at settle, on the committed change
+   (`base..HEAD`) in the target repo. A run that fails it is rejected there,
+   not refused here. The gate does not bill the turn ledger: it runs after
+   the last `turn_end`, so billing it would charge the next, unrelated turn.
 6. **Arm the evidence run.** `startRun` records the working directory and the
    SHA that is `HEAD` right now, before any work happens.
 7. **Hand the task to the ordinary prompt loop.** `/quick` does not run a
@@ -93,11 +84,11 @@ the whole claim being tested:
    session's own prompt loop — the model `/cheap`/`/balanced`/`/max` already
    selected — then acts on with its own tool calls, exactly as it would for
    any other prompt.
-8. **Gate at `agent_end`, not at an awaited idle.** A command handler's
+8. **Gate at settle (`agent_settled`), not at an awaited idle.** A command handler's
    `ctx.waitForIdle()` exists, but in a headless session it is bound to a
    no-op that resolves immediately [runner.js:260] — a `/quick` that awaited
    it would evaluate the completion gate before the model had done anything
-   at all, and would look correct while proving nothing. Pi's own `agent_end`
+   at all, and would look correct while proving nothing. Pi's own `agent_settled`
    event is what actually fires once the triggered turn is over, in both
    interactive and headless sessions, so the gate is wired there instead. The
    SHA read at this point is defensive: `currentSha` fails closed by design
@@ -112,9 +103,9 @@ Three Pi event handlers do the remaining work: one records every
 as `kind: "immediate"`: a call this repository's own safety layer blocked, a
 schema-validation failure, an unknown tool, or an abort. `tool_execution_end`
 fires for every finalized call, including all four of those); one calls
-`endRun` when `agent_end` fires, reporting whatever verdict comes back and
+`endRun` when `agent_settled` fires, reporting whatever verdict comes back and
 disarming the run either way; and one, on `session_start`, disarms any run
-left orphaned by a prior session that never reached `agent_end` (WR-02,
+left orphaned by a prior session that never reached `agent_settled` (WR-02,
 iteration 3) before pruning aged evidence logs.
 
 These two facts — that a nested single-shot call cannot serve the executor,
@@ -217,24 +208,20 @@ is no longer structurally invisible to the gate. A capture that itself throws
 (the SHA read cannot find a readable repository) is recorded as its own
 synthetic FAILING entry rather than silently dropped — dropping it would
 read, incorrectly, as "no failure happened." The completion verdict at
-`agent_end` is computed from those records and two SHAs — never from
+settle is computed from those records and two SHAs — never from
 anything the model said.
 
 **The `baseSha`/`headSha` rule.** `startRun` captures `HEAD` at arm time
-(`baseSha`); `agent_end` reads `HEAD` again once the triggered turn is over
+(`baseSha`); the settle step reads `HEAD` again once the triggered turn is over
 (`headSha`). The gate's first substantive check is `headSha !== baseSha` — if
 `HEAD` never moved, no commit landed during the run, and every tool result
 recorded is trivially "at HEAD" only because nothing was ever committed to
 move it; this is what stops `bash echo hi` (or a bare `read`, not even a
 command) from satisfying a completion claim on its own.
 
-**Any recorded failure rejects, regardless of when HEAD moved.** If ANY
-tool result recorded during the run has `isError === true`, the run rejects
-— even if a commit landed afterwards. This check runs BEFORE the SHA
-narrowing precisely so a verification failure cannot be "aged out" of
-relevance by a later commit: within one `/quick` run, every recorded result
-belongs to the same task, and a failure recorded at the pre-commit SHA is
-still a fact about that task after the commit lands.
+**The completion rule (D-01): a task passes when it produced a commit AND the declared verification passes at the end; intermediate non-zero exits, failed tool calls and blocked-then-approved calls are logged, not fatal.** A model that retries a failing command until it works has done the job; rejecting it for the first failure would punish ordinary debugging. Every finalized call is still recorded, and the count of failed ones is written to the evidence row (`failedToolCalls`) so the log shows what the run went through. What "declared verification" means differs per workflow. For `/execute` it is the task's verification command, checked by `checkVerification` against the call captured by tool call id: a clean run of that command at the commit being recorded is required. For `/quick` it is the deterministic change gate (`runChangeGateStage`) run on `base..HEAD` once the run settles; a failing leg rejects the run and writes a second, rejecting evidence row beside the first. A capture that itself throws is a counted failed record, not fatal on its own, but an unreadable `HEAD` at settle still rejects.
+
+**Settle runs on `agent_settled`, not `agent_end`.** `agent_settled` is the event that carries the `aborted` flag, which the settle step needs. An aborted settle disarms the run and records nothing: no verdict, no evidence row.
 
 **What an ACCEPT verdict actually guarantees, stated plainly because
 overclaiming here is worse than underclaiming it:** HEAD is a different
@@ -259,7 +246,7 @@ branch and before the recorded-failure branch: `headTree === baseTree`
 rejects, naming both tree ids. `HEAD^{tree}` is read via
 `.pi/extensions/safety/git.ts`'s `currentTree` (mirroring `currentSha`'s
 fail-closed contract exactly — no sentinel for an unknown tree, throws on a
-non-zero exit) at both arm time (`baseTree`) and at `agent_end`
+non-zero exit) at both arm time (`baseTree`) and at settle
 (`headTree`). An empty commit (`git commit --allow-empty`) moves the SHA
 but never the tree, and now REJECTS rather than accepting, naming both
 tree ids in the reason.
@@ -287,7 +274,7 @@ per-directory ratchets instead, as section 3 explains.
 | `grill` | `.pi/extensions/grill/index.ts` | `.pi/skills/grill/SKILL.md` | 250 |
 | `plan` | `.pi/extensions/plan-ceremony/index.ts` | `.pi/skills/plan-ceremony/SKILL.md` | 200 |
 | `execute` | `.pi/extensions/execute/index.ts` | none | 250 |
-| `review` | `.pi/extensions/review/index.ts` | `.pi/skills/review/SKILL.md` | 250 |
+| `review` | `.pi/extensions/review/index.ts` | none | 250 |
 | `quick` | `.pi/extensions/workflows/index.ts` | none | 100 |
 
 ## 6. The artifact set
@@ -308,23 +295,16 @@ the directory to this list). A file with no named consumer does not ship.
 
 `GATE_DEPTH_BY_WORKFLOW` in `.pi/extensions/quality/gates.ts`. A table row
 says which mechanisms the workflow is allowed to run, not that every run
-exercised them: `/review` runs the deterministic, model-review and
+exercised them. Calibration is offline only and is listed for no workflow. `/review` runs the deterministic, model-review and
 refute-or-promote mechanisms on a live change and does not run calibration,
 which scores seeded-defect fixtures and has no meaning for a live diff.
 `/execute` runs only the deterministic mechanism, on the committed change.
 `/grill` and `/plan` consult none of these; their gates are the SPEC and PLAN
 validators. Each command's notice names only the mechanisms it actually runs.
 
-In `/execute` and `/review` the deterministic mechanism is
-`runChangeGateStage`, which checks the work repo's change rather than this
-harness. It has two legs. The anti-pattern rules run on the changed
-TypeScript/JavaScript files, and a finding already present at the base commit
-is not counted. `tsc --noEmit` runs in the work repo when the change touches
-a TypeScript/JavaScript file, the project is trusted and TypeScript is
-installed, so a root `tsconfig.json` never vouches for a Terraform, Python or
-docs change. `/execute` skips the typecheck leg when
-it already failed on the base tree, because such a failure cannot be blamed
-on the change. The harness-only lint and LSP legs do not run here.
+The deterministic mechanism is `runChangeGateStage` in `/quick` (at settle, on `base..HEAD`), `/execute` (on the committed change) and `/review` (at HEAD). It checks the work repo's change rather than this harness, through the four legs described in `docs/QUALITY.md`: typecheck, lint, LSP (always UNAVAILABLE) and the anti-pattern rules. A finding already present at the base commit is not counted. `/execute` and `/quick` skip the typecheck leg when it already failed on the base tree, because such a failure cannot be blamed on the change.
+
+`/review` also decides on the MR. It resolves the merge base from remote-tracking `staging` first, then local `staging`, and otherwise refuses with a fetch hint. A Partial or Missing requirement verdict needs approval before the MR opens (a surviving BLOCKER still stops without approval), the MR body lists every verdict, and opening the MR writes one audit row (tool `glab`, event `mr_create`, allow or block, no body text).
 
 A leg that cannot run is UNAVAILABLE, never a pass. Each PROGRESS entry
 carries a `Deterministic gate:` line naming every leg's status, and the MR's
@@ -340,10 +320,10 @@ anti-pattern finding refuses outright.
 | Workflow | Mechanisms |
 |---|---|
 | `quick` | `deterministic` |
-| `grill` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
-| `plan` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
-| `execute` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
-| `review` | `deterministic`, `model-review`, `refute-or-promote`, `calibration` |
+| `grill` | none |
+| `plan` | none |
+| `execute` | `deterministic` |
+| `review` | `deterministic`, `model-review`, `refute-or-promote` |
 
 ## 8. The SPEC.md outline
 

@@ -1465,10 +1465,10 @@ describe("Group F — docs/WORKFLOWS.md agrees with the workflow code tables, in
 		);
 		for (const [workflow, mechanisms] of code) {
 			const row = docRows.find((r) => unquote(r[0]) === workflow)!;
-			expect(unquote(row[1]).split(", "), `${workflow}: mechanisms`).toEqual([...mechanisms]);
+			expect(unquote(row[1]) === "none" ? [] : unquote(row[1]).split(", "), `${workflow}: mechanisms`).toEqual([...mechanisms]);
 		}
 		expect(new Set(code.flatMap(([, m]) => m)), "a mechanism used in the table is missing from QUALITY_MECHANISMS").toEqual(
-			new Set(QUALITY_MECHANISMS.map((m) => m.id)),
+			new Set(QUALITY_MECHANISMS.filter((m) => m.production).map((m) => m.id)),
 		);
 	});
 
