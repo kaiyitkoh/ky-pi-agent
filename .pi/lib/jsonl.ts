@@ -3,7 +3,6 @@
  * Lives in `.pi/lib/` because `safety/` may import nothing from `diagnostics/`, and Pi auto-discovers only `.pi/extensions`.
  *
  * `appendFileSync` only, never a stream: a held descriptor keeps writing into the file rotation renamed away.
- * The stream constructor is deliberately not spelled here, so a test can grep this file for its absence.
  * Rename-based rotation needs no lock: four concurrent appending processes lost no record (verified on
  * Windows, node 24.16.0; macOS unverified; POSIX `O_APPEND` atomicity for very large writes is not guaranteed).
  * Concurrent rotation is narrowed, not locked: the live size is re-`stat`ed before rotating, and no rename

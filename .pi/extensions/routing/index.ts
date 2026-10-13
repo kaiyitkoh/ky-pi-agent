@@ -253,7 +253,7 @@ function isModeName(value: unknown): value is ModeName {
  * Deliberately never calls `setModel`: Pi already restores the executor from its native `model_change` entry
  * (pi 1.1.0 `dist/core/session-manager.js:146-161`); a second source of truth could disagree.
  * NEVER THROWS on a malformed payload: an invalid mode falls back to {@link DEFAULT_MODE}, an invalid `escalatedFrom` is dropped.
- * `session_start` does not fire in a headless `createAgentSession`, so tests call this directly.
+ * Exported because `session_start` does not fire in a headless `createAgentSession`.
  */
 export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
 	const modeEntries = branch.filter(
@@ -359,7 +359,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.on("input", (event, ctx) => {
 		// NEVER THROWS: a guard bug must not block a prompt.
 		try {
-			// Extension prompts are checked too: /grill and /plan run no guard of their own, and a refused /quick or /execute run stays pending and records nothing.
+			// Extension prompts are checked too; a refused workflow run stays pending and records nothing.
 			if (ctx.model === undefined) return;
 			const need = deriveNeed(ctx, { usesToolLoop: true, promptChars: event.text.length, image: (event.images?.length ?? 0) > 0 });
 			// An overfull context is left to Pi's own compaction and retry; only the other three blocks refuse a prompt.
