@@ -85,7 +85,7 @@ import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { classifyGitInvocation, currentBranch } from "../../.pi/extensions/safety/git.ts";
 import { PROTECTED_BRANCHES } from "../../.pi/extensions/safety/index.ts";
 import { AUDIT_LOG_BASE } from "../../.pi/extensions/safety/schema.ts";
-import { EVIDENCE_LOG_BASE } from "../../.pi/extensions/workflows/evidence.ts";
+import { EVIDENCE_LOG_BASE, isRunArmed } from "../../.pi/extensions/workflows/evidence.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readJsonl } from "../helpers/logs.ts";
 import { withFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
@@ -454,6 +454,38 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					).toBe(expectedGit.reason);
 					expect(notifications[0]?.level, "a refusal is an error, not an info message").toBe("error");
 					expect(faux.state.callCount, "a branch-policy refusal must cost zero provider requests").toBe(0);
+				} finally {
+					restore();
+				}
+			},
+		);
+	});
+
+	it("a dirty working tree: /quick refuses before arming, at zero provider requests, naming the path", async () => {
+		const candidate = flashExecutorCandidate();
+		await withFauxSession(
+			{
+				extensionSource: composite(false),
+				tools: ["bash"],
+				responses: [],
+				providerId: candidate.provider,
+				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
+			},
+			async ({ session, faux, cwd, modelRuntime }) => {
+				await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
+				await waitForConfiguredAuth(modelRuntime, candidate.provider);
+				gitInit(cwd, "work");
+				writeFileSync(join(cwd, "user-wip.ts"), "export const wip = 1;", "utf-8");
+				const ctx = session.extensionRunner.createCommandContext();
+				const command = session.extensionRunner.getCommand("quick");
+				if (command === undefined) throw new Error('getCommand("quick") returned undefined');
+				const { notifications, restore } = captureNotify(ctx);
+				try {
+					await command.handler("fix the typo", ctx);
+					expect(notifications.at(-1)?.level).toBe("error");
+					expect(notifications.at(-1)?.text).toContain("user-wip.ts");
+					expect(faux.state.callCount, "a dirty-tree refusal must cost zero provider requests").toBe(0);
+					expect(isRunArmed()).toBe(false);
 				} finally {
 					restore();
 				}

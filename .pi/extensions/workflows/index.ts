@@ -10,7 +10,7 @@ import { classifyGitInvocation, currentBranch, currentSha, currentTree } from ".
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { armQuickSettle, clearQuickSettle, settleQuickRun } from "./settle.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun, writeRunEvidence } from "./evidence.ts";
-import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext } from "../execute/progress.ts";
+import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext, uncommittedPaths } from "../execute/progress.ts";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 
 export default function (pi: ExtensionAPI): void {
@@ -40,13 +40,16 @@ export default function (pi: ExtensionAPI): void {
 				disarmExecuteRun(); // with no shared run armed, an /execute slot is a leak that would otherwise settle this run
 
 				ensureHarnessIgnored(ctx.cwd); // the settle refuses a dirty tree, and harness logs must not count as dirt
+				// Pre-existing changes would be swept into the run's commit by `git add -A`, and would fail the settle anyway.
+				const dirty = uncommittedPaths(ctx.cwd);
+				if (dirty !== "") return void ctx.ui.notify(`quick: the working tree has uncommitted or untracked changes (${dirty}) -- commit or stash them first`, "error");
 				claimWorkflow("quick");
 				const baseSha = currentSha(ctx.cwd);
 				const baseTree = currentTree(ctx.cwd); // read in the same try, so a throw refuses via the catch and never arms a run
 				// A typecheck that already fails on the base cannot be blamed on the change.
 				armQuickSettle({ baseSha, baseTypecheckFailed: runTypecheckAt(ctx.cwd, ctx.isProjectTrusted()).status === "fail" });
 				startRun(ctx.cwd, baseSha, baseTree);
-				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool.`);
+				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool, staging only the files you changed (git add <path>...).`);
 			} catch (err) {
 				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
 			}

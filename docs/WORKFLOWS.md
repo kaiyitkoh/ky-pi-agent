@@ -67,6 +67,12 @@ the whole claim being tested:
    (not a second `/quick`) would silently arm anyway, and `agent_end` would
    attribute that other turn's tool results (and its accept/reject verdict)
    to a task `/quick` never actually commissioned.
+   The same step then adds `.pi/work/`, `.pi/logs/` and `.pi/state/` to the
+   repo's `info/exclude` (as `/execute` does) and refuses a working tree with
+   uncommitted or untracked changes, naming them: a cheap model's
+   `git add -A` would sweep them into the run's commit, and the settle would
+   refuse that tree anyway. The brief tells the model to stage only the files
+   it changed.
 5. **Scan nothing before the work.** No gate runs ahead of the model: the
    change does not exist yet, so there is nothing to check. The deterministic
    change gate (`quality/index.ts#runChangeGateStage`, four legs described in
