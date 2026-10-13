@@ -21,7 +21,7 @@
  */
 
 import { chmodSync, constants, copyFileSync, existsSync, lstatSync, realpathSync, symlinkSync } from "node:fs";
-import { isAbsolute, resolve, sep } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve, sep } from "node:path";
 
 /** Read the whole of stdin as a UTF-8 string. */
 async function readStdin() {
@@ -45,14 +45,25 @@ function fail(reason, provisioned = []) {
 /**
  * Real, case-folded form of a path for containment comparison. Windows paths are case-insensitive
  * and `resolve()` keeps drive-letter case; `realpathSync.native` also resolves junctions and 8.3
- * names. A path not on disk yet falls back to `resolve()`, where only the case fold applies.
+ * names. A path not on disk yet is its nearest existing ancestor's real path plus the missing rest, so it
+ * compares in the same form as a sibling that does exist.
  */
 function canonical(p) {
-	let out = resolve(p);
-	try {
-		out = realpathSync.native(out);
-	} catch {
-		// Not on disk yet: resolve() is the best available canonical form.
+	let head = resolve(p);
+	const rest = [];
+	let out;
+	for (;;) {
+		try {
+			out = join(realpathSync.native(head), ...rest);
+			break;
+		} catch {
+			if (dirname(head) === head) {
+				out = resolve(p);
+				break;
+			}
+			rest.unshift(basename(head));
+			head = dirname(head);
+		}
 	}
 	return process.platform === "win32" ? out.toLowerCase() : out;
 }
