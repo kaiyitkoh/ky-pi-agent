@@ -94,6 +94,22 @@ function run(
  * what makes the trust-gate control honest: no saved decision can exist, so the
  * verdict comes from the gate rather than from this machine's history.
  */
+/** Pi reports a failed extension factory or a manifest problem on stderr in these two shapes. */
+const LOAD_ERROR = /failed to load extension|extension package "|extension error|error loading extension/i;
+
+function loadErrorLines(stderr: string): string[] {
+	return stderr.split(/\r?\n/).filter((line) => LOAD_ERROR.test(line));
+}
+
+/**
+ * `--list-models` exits before Pi reports extension diagnostics, so load errors are only visible on
+ * a prompt run. The model call itself fails offline; only stderr matters here.
+ */
+function probeLoadErrors(extra: string[], opts: { cwd: string; env: Record<string, string> }): string[] {
+	const probe = runPi([...extra, "-p", "hi"], opts);
+	return loadErrorLines(probe.stderr);
+}
+
 function freshAgentEnv(): Record<string, string> {
 	return {
 		...(process.env as Record<string, string>),
@@ -133,11 +149,15 @@ describe("BOOT-02 / BOOT-05 — extension load paths", () => {
 			"the pi manifest, the literal ./.pi/extensions entry, and collectAutoExtensionEntries " +
 				"must all resolve from a working directory unrelated to the repo",
 		).toContain(SELFTEST_MODEL_ID);
+		expect(
+			probeLoadErrors(["-e", repoRoot()], { cwd: tempDir("kypi-cwd-"), env: freshAgentEnv() }),
+			"every extension and the manifest must load cleanly",
+		).toEqual([]);
 	});
 
 	it("case 2 — BOOT-02: survives a real `git clone` + `npm install --omit=dev`", () => {
 		// The offline proxy for the OUTSTANDING live
-		// `pi install https://github.com/kaiyitkoh/ky-pi-agent` check, recorded in
+		// `pi install git:github.com/kaiyitkoh/ky-pi-agent@<tag>` check, recorded in
 		// docs/RUNBOOK.md. This is the ONLY case that proves the control files are
 		// genuinely committed rather than merely present on the author's disk, and
 		// the only one that proves nothing in devDependencies is needed at runtime.
@@ -160,6 +180,10 @@ describe("BOOT-02 / BOOT-05 — extension load paths", () => {
 			"a consumer receives what git committed, not what is on the author's disk — " +
 				"if this fails, some load-bearing file is untracked",
 		).toContain(SELFTEST_MODEL_ID);
+		expect(
+			probeLoadErrors(["-e", clone], { cwd: tempDir("kypi-cwd-"), env: freshAgentEnv() }),
+			"every extension and the manifest must load cleanly from the clone",
+		).toEqual([]);
 	}, 120_000);
 
 	it("case 3 — BOOT-05: loads project-locally with `-a` and cwd = repoRoot", () => {
@@ -174,6 +198,20 @@ describe("BOOT-02 / BOOT-05 — extension load paths", () => {
 			"`.pi/extensions/*/index.ts` is auto-discovered with no settings.json declaration; " +
 				"`-a` is load-bearing because the trust gate would otherwise drop it silently",
 		).toContain(SELFTEST_MODEL_ID);
+		expect(
+			probeLoadErrors(["-a"], { cwd: repoRoot(), env: freshAgentEnv() }),
+			"every project-local extension must load cleanly",
+		).toEqual([]);
+	});
+
+	it("case 5: an extension whose factory throws is reported, so the no-load-error assertion can fail", () => {
+		const broken = join(repoRoot(), "tests", "fixtures", "broken-extension", "index.ts");
+		const lines = probeLoadErrors(["-e", repoRoot(), "-e", broken], {
+			cwd: tempDir("kypi-cwd-"),
+			env: freshAgentEnv(),
+		});
+
+		expect(lines.join(" ")).toMatch(/broken-extension/);
 	});
 
 	it("case 4 — BOOT-05 control: the same run WITHOUT `-a` must not see the sentinel", () => {

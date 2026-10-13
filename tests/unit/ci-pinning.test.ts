@@ -454,7 +454,19 @@ describe("T-01-25 / T-01-28 -- the legs execute rather than merely build", () =>
 		expect(workflow).toMatch(/gh api "repos\/\$repo\/git\/ref\/tags\/\$tag"/);
 	});
 
-	it("tests the Node floor Pi declares, not the runner default", () => {
-		expect(workflow).toMatch(/node-version:\s*'22\.19\.0'/);
+	it("tests the Node floor Pi declares and the current 24.x line", () => {
+		expect(executable).toMatch(/node:\s*\[[^\]]*'22\.19\.0'[^\]]*\]/);
+		expect(executable).toMatch(/node:\s*\[[^\]]*'24\.x'[^\]]*\]/);
+		expect(executable).toMatch(/node-version:\s*\$\{\{\s*matrix\.node\s*\}\}/);
+	});
+
+	it("has a Linux leg in the test matrix", () => {
+		expect(executable).toMatch(/os:\s*\[[^\]]*ubuntu-latest[^\]]*\]/);
+	});
+
+	it("peels annotated tags in the pin audit instead of trusting the first object sha", () => {
+		expect(executable).toMatch(/\.object\.type/);
+		expect(executable).toMatch(/git\/tags\//);
+		expect(executable).toMatch(/while \[ "\$\{actual%% \*\}" = "tag" \]/);
 	});
 });

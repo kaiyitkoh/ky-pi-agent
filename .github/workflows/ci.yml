@@ -65,7 +65,12 @@ jobs:
           while read -r ref tag; do
             repo=${ref%@*}
             sha=${ref#*@}
-            actual=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.sha' 2>/dev/null || echo "")
+            actual=$(gh api "repos/$repo/git/ref/tags/$tag" --jq '.object.type + " " + .object.sha' 2>/dev/null || echo "")
+            # An annotated tag points at a tag object; peel it to the commit the SHA pin must equal.
+            while [ "${actual%% *}" = "tag" ]; do
+              actual=$(gh api "repos/$repo/git/tags/${actual#* }" --jq '.object.type + " " + .object.sha' 2>/dev/null || echo "")
+            done
+            actual=${actual#* }
             if [ -z "$actual" ]; then
               echo "::error::$repo has no tag $tag -- the comment names a release that does not exist"
               fail=1
@@ -80,20 +85,21 @@ jobs:
           exit $fail
 
   test:
-    name: test (${{ matrix.os }})
+    name: test (${{ matrix.os }}, node ${{ matrix.node }})
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [windows-latest, macos-latest, ubuntu-latest]
+        node: ['22.19.0', '24.x']
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      # 22.19.0 is the floor Pi's `engines` declares, not whatever the runner ships, so code needing
-      # a newer Node fails here rather than on a machine that meets the documented requirement.
+      # 22.19.0 is the floor Pi's `engines` declares and 24.x is the current line, so code needing a
+      # newer Node fails here rather than on a machine that meets the documented requirement.
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '22.19.0'
+          node-version: ${{ matrix.node }}
 
       # node rather than `grep -P` or `file`, which behave differently across the three platforms.
       - name: Assert every tracked shell script checked out with LF
