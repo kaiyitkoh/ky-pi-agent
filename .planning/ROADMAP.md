@@ -31,6 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause (completed 2026-10-12)
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
 - [x] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost (completed 2026-10-13)
+- [ ] **Phase 13: Zed Editor Front-end (optional)** - Use the harness from Zed via pi-acp; guard still enforced in Pi
 
 ## Phase Details
 
@@ -679,6 +680,22 @@ Plans:
 **Wave 3** *(blocked on Wave 2 completion)*
 
 - [x] 12-04-PLAN.md — Pre-authorised real install + user-level setup on this machine, docs/OPENSPEC.md (upgrade, uninstall, openspec-pi rejection), RUNBOOK Phase 12 + RB-12-01..04
+
+### Phase 13: Zed Editor Front-end (optional)
+
+**Goal:** The same Pi harness is usable from the Zed editor's agent panel via `pi-acp`, with the safety guard still enforced inside Pi and Windows quirks checked — free, optional, documented.
+**Requirements**: TBD (user decision 2026-10-13: separate optional phase after Phase 11)
+
+**Success Criteria:**
+1. `pi-acp` pinned to an exact source-reviewed version (0.0.34 at research time); confirm it only translates protocol and tool calls still pass through the guard.
+2. Windows path-with-spaces session-file bug checked; workaround or documented limitation.
+3. Safety confirm/select prompts proven to surface in Zed; terminal-only features (widgets, status, slash commands) documented.
+4. Setup + upgrade documented in docs/; no repo dependency added.
+**Depends on:** Phase 11
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 13 to break down)
 
 ---
 *Roadmap created: 2026-08-13 · Granularity: fine · Coverage: 107/107 v1 requirements mapped*
