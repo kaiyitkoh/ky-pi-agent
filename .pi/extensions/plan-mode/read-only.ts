@@ -14,7 +14,7 @@ const wordSet = (words: string): Set<string> => new Set(words.split(" "));
 /** Verbs with no exec-or-write escape reachable through ordinary flags, as {@link normaliseExecutable} spells them. */
 const ALWAYS_READ_ONLY = wordSet(
 	"cat head tail wc diff file stat du df which whereis type pwd cd echo printf printenv uname whoami id cal uptime ps free " +
-		"hostname ls grep bat eza jq basename dirname realpath readlink cut tr comm cmp nl tac rev seq md5sum sha1sum sha256sum true false",
+		"hostname ls grep eza jq basename dirname realpath readlink cut tr comm cmp nl tac rev seq md5sum sha1sum sha256sum true false",
 );
 
 /** An allowlist, so a git version that grows a mutating subcommand is denied by default. */
@@ -173,6 +173,7 @@ const ARGUMENT_RULES: Record<string, (args: readonly string[]) => string | undef
 		return bad === undefined ? undefined : `\`sort ${bad}\` writes a file`;
 	},
 	date: (args) => (hasBundledFlag(args, ["-s", "--set"]) === undefined ? undefined : "`date -s` sets the system clock"),
+	bat: (args) => (args.some((a) => a === "--pager" || a.startsWith("--pager=") || a === "--paging=always") ? "`bat` runs a pager, which can run commands" : undefined),
 };
 
 /** Every verb plan mode will consider at all. */

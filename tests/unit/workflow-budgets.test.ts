@@ -499,7 +499,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"09-03: DEVIATION 6 (the /plan -> /plan-mode rename, a genuine composition conflict with " +
 			"Phase 9's ceremonial /plan workflow) added its header paragraph to index.ts. Re-measured " +
 			"1235 raw lines across 3 files 2026-08-15 (index.ts 547 + read-only.ts 585 + utils.ts 103), " +
-			"rounded up to the next ten. Re-measured 1248 raw lines 2026-10-13 after the plan-mode write holes were closed (index.ts 547, read-only.ts 598, utils.ts 103), rounded up to the next ten. LOWERED 1250 -> 1210: read-only.ts imports that shared list instead of its own copy; 1206 raw lines. LOWERED 1210 -> 870: read-only.ts comments cut to short WHY notes with the analysis moved to docs/EXTENSIONS.md, and its tables compacted; 868 raw lines (index.ts 547, read-only.ts 218, utils.ts 103)",
+			"rounded up to the next ten. Re-measured 1248 raw lines 2026-10-13 after the plan-mode write holes were closed (index.ts 547, read-only.ts 598, utils.ts 103), rounded up to the next ten. LOWERED 1250 -> 1210: read-only.ts imports that shared list instead of its own copy; 1206 raw lines. LOWERED 1210 -> 870: read-only.ts comments cut to short WHY notes with the analysis moved to docs/EXTENSIONS.md, and its tables compacted; 868 raw lines (index.ts 547, read-only.ts 218, utils.ts 103). Unchanged at 870 after bat moved to the argument rules, which refuse --pager and --paging=always; 869 raw lines",
 	},
 	{
 		dir: ".pi/extensions/safety",
