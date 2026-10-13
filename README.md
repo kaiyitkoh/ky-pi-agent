@@ -34,7 +34,7 @@ pick one delivery path: the bootstrap stub or the git package, never both.
 **Path A — install as a Pi package, pinned to a release ref:**
 
 ```
-pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0
+pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.1
 ```
 
 A bare URL with no ref is not supported: `pi update` would not move it, and an

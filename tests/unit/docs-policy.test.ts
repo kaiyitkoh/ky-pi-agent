@@ -362,7 +362,7 @@ describe("Group A — README states what the supply-chain control does not cover
 /** The command each entry must name, so the reader has nothing to guess at. */
 const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-01-01": ["sh scripts/check-gh-unauthenticated.sh", "gh auth logout"],
-	"RB-01-02": ["pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0", "pi --list-models"],
+	"RB-01-02": ["pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.1", "pi --list-models"],
 	"RB-01-03": ["/reload"],
 	// Fragments, not whole command lines: each is short enough to survive a
 	// reflow of the surrounding markdown and specific enough that a rewrite

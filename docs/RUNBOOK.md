@@ -96,8 +96,8 @@ Install and load:
 4. RB-01-01 `/share` control: `sh scripts/check-gh-unauthenticated.sh` exits 1,
    `gh auth logout`, re-run exits 0, and `/share` in Pi aborts. Set up SSH for
    git first if this laptop pushes over HTTPS.
-5. RB-01-02 clean-profile install (after the `v1.0.0` tag exists):
-   `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0`,
+5. RB-01-02 clean-profile install (tag `v1.0.1`):
+   `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.1`,
    then `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi --list-models` shows
    `ky-harness-selftest`.
 6. RB-01-03 `/reload`: in this checkout, edit `SELFTEST_MODEL_ID` in
@@ -294,7 +294,7 @@ would exercise the update path rather than the first-install path.
 
 1. Start from a clean profile, or point Pi's agent directory at an empty one:
    `export PI_CODING_AGENT_DIR=/tmp/pi-clean-check`
-2. `pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0` (the tag is created at milestone archive; until it exists, use `@<commit>`)
+2. `pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.1`
 3. `pi --list-models`
 
 **Expected output:** the sentinel model id `ky-harness-selftest` appears in the
@@ -2105,7 +2105,7 @@ Loading the packages in a live session in another repository is RB-12-05 and sta
 ### Accepted residuals and deferrals
 
 - Double load: a user who also installs the git package globally double-loads the harness inside this repository (two absolute paths, no deduplication). The README one-path rule and the `--check-only` warning mitigate it; the stub plus a git package is a hard `--check-only` failure.
-- Release tag: README pins the git install to `v1.0.0`. Creating and pushing that tag at milestone archive is a user action; the harness never pushes. Until it exists the Path A command does not resolve.
+- Release tag: README pins the git install to `v1.0.1` (pushed 2026-10-14). Move the pin only with a new tag; never re-point a pushed one.
 - Transitive caret ranges: `pi-web-access` resolves some dependency ranges outside any lockfile at install time. Deferred: Pi installs into its own prefix and the repo cannot hold a lockfile for it.
 - Loop-police state: `pi update` resets a git-package clone and wipes the loop-police state file. Deferred: the state is advisory and rebuilt within a session.
 
