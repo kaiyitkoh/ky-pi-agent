@@ -61,16 +61,19 @@ if [ "$radius_found" -eq 1 ]; then
 	failed=1
 fi
 
+# gh prefers GH_TOKEN/GITHUB_TOKEN over its store, and `gh auth token` reads the
+# store without the network: `gh auth status` alone exits non-zero offline or
+# when another host's token is broken, reporting a usable token as absent.
 if ! command -v gh >/dev/null 2>&1; then
 	if [ "$failed" -eq 0 ]; then
 		echo "OK: gh is not installed; /share cannot upload."
 		exit 0
 	fi
-elif gh auth status >/dev/null 2>&1; then
+elif [ -n "${GH_TOKEN:-}" ] || [ -n "${GITHUB_TOKEN:-}" ] || gh auth token >/dev/null 2>&1 || gh auth status >/dev/null 2>&1; then
 	echo "gh IS authenticated. /share can upload this session to a GitHub gist." >&2
 	echo "  The transcript would be exported to the OS temp dir and posted as a" >&2
 	echo "  secret gist under the logged-in account. No extension can prevent it." >&2
-	echo "  Remedy (the only one): gh auth logout" >&2
+	echo "  Remedy: gh auth logout, and unset GH_TOKEN and GITHUB_TOKEN" >&2
 	failed=1
 fi
 

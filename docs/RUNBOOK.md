@@ -56,7 +56,10 @@ handler and dispatched before extension commands and before the `input` event.
 The one branch that stops it is Pi's own `gh auth status` check: when that
 exits non-zero, `/share` shows an error and returns *before* the transcript is
 written to disk. So `gh auth status` exiting non-zero **is** the entire
-control.
+control. `gh auth status` also exits non-zero offline or when another host's
+token is broken, so the check script asks whether a credential exists at all
+(`gh auth token`, `GH_TOKEN`, `GITHUB_TOKEN`) rather than whether it validates
+right now.
 
 **Procedure, on the work laptop:**
 

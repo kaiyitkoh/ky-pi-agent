@@ -116,7 +116,13 @@ interface CheckRun {
  * directory alone" -- the only honest way to simulate a machine without the
  * GitHub CLI while the real one sits on this machine's PATH.
  */
-function runCheck(opts: { ghExitCode: number | null; args?: string[]; radius?: boolean }): CheckRun {
+function runCheck(opts: {
+	ghExitCode: number | null;
+	args?: string[];
+	radius?: boolean;
+	tokenStored?: boolean;
+	envToken?: string;
+}): CheckRun {
 	const logDir = mkdtempSync(join(tmpdir(), "kypi-ghcalls-"));
 	const agentDir = mkdtempSync(join(tmpdir(), "kypi-ghagent-"));
 	if (opts.radius) {
@@ -125,11 +131,14 @@ function runCheck(opts: { ghExitCode: number | null; args?: string[]; radius?: b
 	const logTo = join(logDir, "calls.log");
 
 	try {
-		const stubs: Record<string, StubSpec> =
-			opts.ghExitCode === null ? {} : { gh: { exitCode: opts.ghExitCode, logTo } };
+		const match = opts.tokenStored === true ? [{ when: ["auth", "token"], exitCode: 0, stdout: "token" }] : [];
+		const stubs: Record<string, StubSpec> = opts.ghExitCode === null ? {} : { gh: { exitCode: opts.ghExitCode, logTo, match } };
 
 		return withStubBin(stubs, (env) => {
 			env.PI_CODING_AGENT_DIR = agentDir;
+			delete env.GH_TOKEN;
+			delete env.GITHUB_TOKEN;
+			if (opts.envToken !== undefined) env.GH_TOKEN = opts.envToken;
 			const key = pathKeyOf(env);
 			if (opts.ghExitCode === null) {
 				// withStubBin prepends its temp dir to the inherited PATH. Keep only
@@ -185,7 +194,7 @@ describe("SAFE-16 -- the /share control classifier", () => {
 		expect(run.stderr).toMatch(/gist/i);
 
 		// Provenance: the stub answered, not the developer's real GitHub CLI.
-		expect(run.ghCalls).toContain("gh auth status");
+		expect(run.ghCalls.some((c) => c.startsWith("gh auth"))).toBe(true);
 	}, TIMEOUT_MS);
 
 	it("case 2: unauthenticated passes and says /share aborts", () => {
@@ -198,7 +207,7 @@ describe("SAFE-16 -- the /share control classifier", () => {
 		expect(run.stdout).toMatch(/unauthenticated/);
 		expect(run.stdout).toMatch(/cannot upload/);
 
-		expect(run.ghCalls).toContain("gh auth status");
+		expect(run.ghCalls.some((c) => c.startsWith("gh auth"))).toBe(true);
 	}, TIMEOUT_MS);
 
 	it("case 3: authenticated + --warn-only exits 0 but still reports the risk", () => {
@@ -217,7 +226,7 @@ describe("SAFE-16 -- the /share control classifier", () => {
 		// verdicts, and this is not one of them.
 		expect(run.stdout).not.toMatch(/OK:/);
 
-		expect(run.ghCalls).toContain("gh auth status");
+		expect(run.ghCalls.some((c) => c.startsWith("gh auth"))).toBe(true);
 	}, TIMEOUT_MS);
 
 	it("case 4: no gh on PATH passes without invoking anything", () => {
@@ -263,6 +272,23 @@ stderr: ${run.stderr}`).toBe(1);
 		expect(run.status, `stdout: ${run.stdout}
 stderr: ${run.stderr}`).toBe(1);
 		expect(run.stderr).toMatch(/Radius IS configured/);
+	}, TIMEOUT_MS);
+
+	it("case 8: a stored token fails even when gh auth status cannot validate it (offline)", () => {
+		const run = runCheck({ ghExitCode: 1, tokenStored: true });
+
+		expect(run.status, `stdout: ${run.stdout}
+stderr: ${run.stderr}`).toBe(1);
+		expect(run.stderr).toMatch(/gh IS authenticated/);
+		expect(run.ghCalls).toContain("gh auth token");
+	}, TIMEOUT_MS);
+
+	it("case 9: GH_TOKEN in the environment fails even with nothing stored", () => {
+		const run = runCheck({ ghExitCode: 1, envToken: "x" });
+
+		expect(run.status, `stdout: ${run.stdout}
+stderr: ${run.stderr}`).toBe(1);
+		expect(run.stderr).toMatch(/GITHUB_TOKEN/);
 	}, TIMEOUT_MS);
 
 	it("case 7: a stored Radius credential with --warn-only reports and exits 0", () => {
