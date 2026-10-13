@@ -64,9 +64,9 @@ the whole claim being tested:
    not idle (`!ctx.isIdle()`). The second half of this condition exists
    because Pi queues a message typed mid-stream rather than rejecting it —
    without it, a `/quick` typed while an ORDINARY turn is still streaming
-   (not a second `/quick`) would silently arm anyway, and `agent_end` would
-   attribute that other turn's tool results (and its accept/reject verdict)
-   to a task `/quick` never actually commissioned.
+   (not a second `/quick`) would silently arm anyway, and the settle would
+   attribute that other turn's tool results (and its verdict) to a task
+   `/quick` never actually commissioned.
    The same step then adds `.pi/work/`, `.pi/logs/` and `.pi/state/` to the
    repo's `info/exclude` (as `/execute` does) and refuses a working tree with
    uncommitted or untracked changes, naming them: a cheap model's
@@ -103,16 +103,28 @@ the whole claim being tested:
    still produce a REJECT verdict and disarm the run, never leave `/quick`
    silently and permanently armed.
 
-Three Pi event handlers do the remaining work: one records every
-`tool_execution_end` seen while a run is armed (CR-01, iteration 3 -- not
+Five Pi event handlers do the remaining work. One records every
+`tool_execution_end` seen while a run is armed and started, not
 `tool_result`, which is never emitted for a call `prepareToolCall` resolves
 as `kind: "immediate"`: a call this repository's own safety layer blocked, a
 schema-validation failure, an unknown tool, or an abort. `tool_execution_end`
-fires for every finalized call, including all four of those); one calls
-`endRun` when `agent_settled` fires, reporting whatever verdict comes back and
-disarming the run either way; and one, on `session_start`, disarms any run
-left orphaned by a prior session that never reached `agent_settled` (WR-02,
-iteration 3) before pruning aged evidence logs.
+fires for every finalized call, including all four of those. One settles the
+run when `agent_settled` fires, writing exactly one evidence row and
+disarming the run either way. One, on `session_start`, disarms any run left
+orphaned by a prior session that never reached `agent_settled`, writes a
+reject row for it, and then prunes aged evidence logs.
+
+The last two, on `input` and `before_agent_start`, bind the run to its own
+prompt. `pi.sendUserMessage` is fire-and-forget, and Pi can drop the prompt
+before the agent starts: no model, expired auth (routine with Bedrock SSO),
+compaction in progress, or an `input` handler that refuses it. A run armed
+for that prompt is pending until a prompt containing its text reaches
+`before_agent_start`. While pending it records no tool call and no settle
+ends it, so a turn triggered some other way cannot be attributed to it. Any
+other prompt that reaches `input` or `before_agent_start` first disarms it,
+with no verdict and no row. A second `/quick` or `/execute` while a run is
+pending is refused with the in-flight message, which names `/reload` as the
+way to clear a prompt that failed to start. `/reload` fires `session_start`.
 
 These two facts — that a nested single-shot call cannot serve the executor,
 and that `waitForIdle` is a no-op in the shape every headless session in this
@@ -458,7 +470,7 @@ the model not to run a check it expects to fail. The
 shared workflows
 settle handler stands aside while an `/execute` run is armed, so the result
 does not depend on extension load order, which Pi takes from an unsorted
-directory listing. An `/execute` run whose `agent_end` never arrived is
+directory listing. An `/execute` run whose `agent_settled` never arrived is
 cleared at `session_start`, and `/quick` clears one before it arms, because
 an `/execute` slot with no shared run armed can only be a leak.
 

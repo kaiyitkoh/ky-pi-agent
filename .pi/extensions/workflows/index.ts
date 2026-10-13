@@ -8,7 +8,7 @@ import { deriveNeed } from "../routing/guard.ts";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { armQuickSettle, clearQuickSettle, settleQuickRun } from "./settle.ts";
+import { IN_FLIGHT, armQuickSettle, clearQuickSettle, notePrompt, settleQuickRun } from "./settle.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun, writeRunEvidence } from "./evidence.ts";
 import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext, uncommittedPaths } from "../execute/progress.ts";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
@@ -36,7 +36,7 @@ export default function (pi: ExtensionAPI): void {
 					{ currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES },
 				);
 				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
-				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
+				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify(`quick: ${IN_FLIGHT}`, "error");
 				disarmExecuteRun(); // with no shared run armed, an /execute slot is a leak that would otherwise settle this run
 
 				ensureHarnessIgnored(ctx.cwd); // the settle refuses a dirty tree, and harness logs must not count as dirt
@@ -48,13 +48,18 @@ export default function (pi: ExtensionAPI): void {
 				const baseTree = currentTree(ctx.cwd); // read in the same try, so a throw refuses via the catch and never arms a run
 				// A typecheck that already fails on the base cannot be blamed on the change.
 				armQuickSettle({ baseSha, baseTypecheckFailed: runTypecheckAt(ctx.cwd, ctx.isProjectTrusted()).status === "fail" });
-				startRun(ctx.cwd, baseSha, baseTree);
-				pi.sendUserMessage(`${task}\n\nEnd this work in exactly one atomic commit made with the bash tool, staging only the files you changed (git add <path>...).`);
+				const prompt = `${task}\n\nEnd this work in exactly one atomic commit made with the bash tool, staging only the files you changed (git add <path>...).`;
+				startRun(ctx.cwd, baseSha, baseTree, prompt);
+				pi.sendUserMessage(prompt);
 			} catch (err) {
 				ctx.ui.notify(err instanceof Error ? err.message : String(err), "error");
 			}
 		},
 	});
+
+	// sendUserMessage is fire-and-forget: a run whose own prompt never started is disarmed by the next prompt that does.
+	pi.on("input", (event) => notePrompt(event.text, false));
+	pi.on("before_agent_start", (event) => notePrompt(event.prompt, true));
 
 	pi.on("tool_execution_end", (event, ctx) => {
 		try {

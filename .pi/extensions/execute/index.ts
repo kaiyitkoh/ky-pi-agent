@@ -14,7 +14,8 @@ import { gateDepthFor } from "../quality/gates.ts";
 import { registeredToolNames, runChangeGateStage, runTypecheckAt } from "../quality/index.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { acceptedReason, disarmRun, endRun, isRunArmed, startRun, writeRunEvidence } from "../workflows/evidence.ts";
+import { acceptedReason, disarmRun, endRun, isRunArmed, isRunPending, startRun, writeRunEvidence } from "../workflows/evidence.ts";
+import { IN_FLIGHT, notePrompt } from "../workflows/settle.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, pinnedTasks, readLedger, renderTasks, tasksOf } from "./ledger.ts";
 import {
@@ -95,7 +96,7 @@ export default function (pi: ExtensionAPI): void {
 				const verificationCommand = (pinnedT ?? tasks).find((t) => t.id === task?.id)?.verificationCommand ?? undefined;
 				if (task === undefined || verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
-				if (isRunArmed() || !ctx.isIdle()) return fail("execute: a turn is already in flight -- wait for it to finish");
+				if (isRunArmed() || !ctx.isIdle()) return fail(`execute: ${IN_FLIGHT}`);
 
 				const prior = reset ? { attempts: 0, stalled: false } : attemptState(rows, task.id);
 				if (prior.attempts > REVISION_CAP || prior.stalled) {
@@ -127,10 +128,11 @@ export default function (pi: ExtensionAPI): void {
 				if (from === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, tasks, reason: "first /execute" });
 				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
 				baseSha = from ?? headSha;
-				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
+				const message = `${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${verificationCommand}\nFailed intermediate tool calls are logged, not fatal: the attempt passes when the one atomic commit lands and the verification command, run exactly as written on the committed HEAD, exits 0. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`;
+				startRun(ctx.cwd, headSha, currentTree(ctx.cwd), message);
 				claimWorkflow("execute");
 				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand, mode });
-				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${verificationCommand}\nFailed intermediate tool calls are logged, not fatal: the attempt passes when the one atomic commit lands and the verification command, run exactly as written on the committed HEAD, exits 0. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
+				pi.sendUserMessage(message);
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
 			}
@@ -139,6 +141,9 @@ export default function (pi: ExtensionAPI): void {
 
 	// A run whose agent_settled never arrived must not settle some later turn.
 	pi.on("session_start", () => disarmExecuteRun());
+
+	pi.on("input", (event) => notePrompt(event.text, false));
+	pi.on("before_agent_start", (event) => notePrompt(event.prompt, true));
 
 	pi.on("tool_execution_start", (event) => {
 		if (executeRunContext() !== undefined) noteToolStart(event.toolCallId, event.toolName, event.args);
@@ -153,7 +158,7 @@ export default function (pi: ExtensionAPI): void {
 
 	pi.on("agent_settled", async (event, ctx) => {
 		const run = executeRunContext();
-		if (run === undefined) return;
+		if (run === undefined || isRunPending()) return;
 		if (event.aborted) return void (disarmExecuteRun(), disarmRun()); // an aborted run records no verdict and consumes no attempt
 		const verification = verificationRecord();
 		disarmExecuteRun();

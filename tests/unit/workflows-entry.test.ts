@@ -21,8 +21,8 @@ import { describe, expect, it } from "vitest";
 
 import { logDir } from "../../.pi/lib/jsonl.ts";
 import workflows from "../../.pi/extensions/workflows/index.ts";
-import { isRunArmed, startRun } from "../../.pi/extensions/workflows/evidence.ts";
-import { armQuickSettle, settleQuickRun } from "../../.pi/extensions/workflows/settle.ts";
+import { endRun, isRunArmed, isRunPending, recordToolResult, startRun } from "../../.pi/extensions/workflows/evidence.ts";
+import { armQuickSettle, notePrompt, settleQuickRun } from "../../.pi/extensions/workflows/settle.ts";
 import { currentSha, currentTree } from "../../.pi/extensions/safety/git.ts";
 import { commitFile, makeTempRepo } from "../helpers/git.ts";
 import { logFilesIn, withTempLogCwd } from "../helpers/logs.ts";
@@ -59,13 +59,46 @@ describe("/quick's entry point registers exactly what it claims to", () => {
 		expect(commandNames).toEqual(["quick"]);
 	});
 
-	it("registers exactly three hooks: tool_execution_end, agent_settled, session_start", () => {
+	it("registers exactly five hooks: input, before_agent_start, tool_execution_end, agent_settled, session_start", () => {
 		expect(
 			hooks,
 			"an extra hook here is new surface this test did not expect; a missing session_start means " +
-				"WR-04's retention wiring silently stopped registering, and tool_result instead of " +
-				"tool_execution_end means CR-01 iteration 3's capture-point move regressed",
-		).toEqual(["tool_execution_end", "agent_settled", "session_start"]);
+				"WR-04's retention wiring silently stopped registering, tool_result instead of " +
+				"tool_execution_end means CR-01 iteration 3's capture-point move regressed, and a missing " +
+				"input/before_agent_start lets an unrelated turn settle a run whose prompt never started",
+		).toEqual(["input", "before_agent_start", "tool_execution_end", "agent_settled", "session_start"]);
+	});
+});
+
+describe("a run is bound to the prompt that starts it", () => {
+	const record = { ts: 0, toolName: "bash", command: "x", isError: false, sha: "s" };
+
+	it("records nothing until its own prompt starts, then records", () => {
+		startRun(".", "base", "tree", "do the task");
+		expect(isRunPending()).toBe(true);
+		recordToolResult(record);
+		notePrompt("do the task", false);
+		expect(isRunPending(), "input alone is not a start").toBe(true);
+		notePrompt("do the task", true);
+		expect(isRunPending()).toBe(false);
+		recordToolResult(record);
+		expect(endRun("", "")?.run.recordCount).toBe(1);
+	});
+
+	it("a different prompt reaching input or before_agent_start first disarms the pending run", () => {
+		for (const starting of [false, true]) {
+			startRun(".", "base", "tree", "do the task");
+			notePrompt("hi, what's the status", starting);
+			expect(isRunArmed(), `starting=${starting}`).toBe(false);
+		}
+	});
+
+	it("a started run ignores later prompts, such as a steer typed mid-run", () => {
+		startRun(".", "base", "tree", "do the task");
+		notePrompt("do the task", true);
+		notePrompt("also fix the typo", false);
+		expect(isRunArmed()).toBe(true);
+		endRun("", "");
 	});
 });
 

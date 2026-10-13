@@ -132,6 +132,9 @@ interface RunState {
 	/** The tree HEAD pointed at when armed; used to detect an empty commit. */
 	readonly baseTree: string;
 	readonly records: EvidenceRecord[];
+	/** The prompt that starts this run; until a prompt containing it starts, the run records and settles nothing. */
+	readonly prompt?: string;
+	started: boolean;
 }
 
 function runSlot(): RunState | undefined {
@@ -139,16 +142,16 @@ function runSlot(): RunState | undefined {
 	return raw as RunState | undefined;
 }
 
-/** Arm a run: clears any prior buffer and stores `{cwd, baseSha, baseTree, records: []}`. */
-export function startRun(cwd: string, sha: string, tree: string): void {
-	const state: RunState = { cwd, baseSha: sha, baseTree: tree, records: [] };
+/** Arm a run, replacing any prior one. With `prompt`, the run waits for that prompt to start; without, it counts as started. */
+export function startRun(cwd: string, sha: string, tree: string, prompt?: string): void {
+	const state: RunState = { cwd, baseSha: sha, baseTree: tree, records: [], prompt, started: prompt === undefined };
 	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = state;
 }
 
 /** Append one record to the armed run. No-op when no run is armed, so an ordinary session turn outside `/quick` records nothing. */
 export function recordToolResult(record: EvidenceRecord): void {
 	const state = runSlot();
-	if (state === undefined) {
+	if (state === undefined || !state.started) {
 		return;
 	}
 	state.records.push(record);
@@ -157,12 +160,33 @@ export function recordToolResult(record: EvidenceRecord): void {
 /** Push a synthetic failing record so a throwing capture is counted instead of vanishing. No-op when unarmed. */
 export function recordCaptureFailure(toolName: string): void {
 	const state = runSlot();
-	if (state !== undefined) state.records.push({ ts: Date.now(), toolName: `${toolName} (capture failed)`, command: "", isError: true, sha: "" });
+	if (state?.started === true) state.records.push({ ts: Date.now(), toolName: `${toolName} (capture failed)`, command: "", isError: true, sha: "" });
 }
 
 /** True when a run is currently armed. */
 export function isRunArmed(): boolean {
 	return runSlot() !== undefined;
+}
+
+/** True when a run is armed but the prompt that starts it has not started; such a run must not settle any turn. */
+export function isRunPending(): boolean {
+	return runSlot()?.started === false;
+}
+
+/**
+ * Bind the armed run to the prompt now being sent. Pi's sendUserMessage is fire-and-forget, so the run's own prompt can fail
+ * before it starts (no model, expired auth, a refused route); any other prompt reaching here first disarms the run.
+ * `starting` is true at before_agent_start; at `input` a match is not yet a start. Returns true when it disarmed.
+ */
+export function notePromptForRun(text: string, starting: boolean): boolean {
+	const state = runSlot();
+	if (state === undefined || state.started || state.prompt === undefined) return false;
+	if (text.includes(state.prompt)) {
+		if (starting) state.started = true;
+		return false;
+	}
+	disarmRun();
+	return true;
 }
 
 /** The cwd the armed run was armed against, or `undefined` when unarmed. */

@@ -91,7 +91,8 @@ function bytes(file: string): number {
 }
 
 /** Load both real extensions into one stand-in Pi, execute first so its settle handler sees the run. */
-function harness(opts: { plan?: string | null; spec?: string | null; branch?: string; order?: "execute-first" | "workflows-first" } = {}): Harness {
+/** `promptStarts: false` models a prompt Pi never starts (no model, expired auth, a refused route): no input or before_agent_start fires. */
+function harness(opts: { plan?: string | null; spec?: string | null; branch?: string; order?: "execute-first" | "workflows-first"; promptStarts?: boolean } = {}): Harness {
 	const repo = makeTempRepo("kypi-execute-");
 	repos.push(repo);
 	const dir = join(repo, ".pi", "work", SLUG);
@@ -111,7 +112,12 @@ function harness(opts: { plan?: string | null; spec?: string | null; branch?: st
 	const pi = {
 		registerCommand: (name: string, def: { handler: (args: string, ctx: unknown) => Promise<void> }) => void commands.set(name, def.handler),
 		on: (name: string, fn: Handler) => void handlers.set(name, [...(handlers.get(name) ?? []), fn]),
-		sendUserMessage: (text: string) => void sent.push(text),
+		sendUserMessage: (text: string) => {
+			sent.push(text);
+			if (opts.promptStarts === false) return;
+			for (const fn of handlers.get("input") ?? []) fn({ type: "input", text, source: "extension" }, ctx);
+			for (const fn of handlers.get("before_agent_start") ?? []) fn({ type: "before_agent_start", prompt: text }, ctx);
+		},
 		registerTool: () => {
 			throw new Error("execute and workflows must register no tool");
 		},
@@ -667,6 +673,35 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		}
 		expect(isRunArmed(), "a leaked shared run refuses every later /quick and /execute").toBe(false);
 		expect(h.notes.at(-1)?.level).toBe("error");
+	});
+
+	it("a prompt that never started: the next, unrelated prompt disarms the run, and its turn records nothing", async () => {
+		const h = harness({ promptStarts: false });
+		await h.command(SLUG);
+		expect(isRunArmed()).toBe(true);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h);
+		await h.fire("input", { type: "input", text: "hi, what's the status", source: "interactive" });
+		await h.fire("before_agent_start", { type: "before_agent_start", prompt: "hi, what's the status" });
+		await h.fire("agent_settled", { aborted: false });
+		expect(isRunArmed()).toBe(false);
+		expect(executeRunContext()).toBeUndefined();
+		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
+		expect(existsSync(logPath(h.repo, EVIDENCE_LOG_BASE)), "no verdict for a run that never started").toBe(false);
+	});
+
+	it("a pending run is not settled by a turn that skipped before_agent_start, and records no tool call meanwhile", async () => {
+		const h = harness({ promptStarts: false });
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h);
+		await h.fire("agent_settled", { aborted: false });
+		expect(isRunArmed(), "still waiting for its own prompt").toBe(true);
+		expect(readFileSync(progressFile(h), "utf-8")).not.toContain("## T001 @");
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("/reload");
+		await h.fire("session_start", {});
+		expect(isRunArmed()).toBe(false);
 	});
 
 	it("a run whose agent_settled never arrived is cleared at session_start, so it cannot settle a later turn", async () => {
