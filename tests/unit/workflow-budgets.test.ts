@@ -452,7 +452,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/plan-mode",
-		budget: 1210,
+		budget: 870,
 		why: "Phase 7 plan 07 (EXT-05/EXT-06)'s vendored Pi bundled example examples/extensions/plan-mode/ -- " +
 			"utils.ts never spells registerCommand( itself (pure helper functions) but counts toward this " +
 			"total per WR-03; measured 634 raw lines across 2 files 2026-08-15 (index.ts 460 + utils.ts 174, " +
@@ -499,7 +499,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"09-03: DEVIATION 6 (the /plan -> /plan-mode rename, a genuine composition conflict with " +
 			"Phase 9's ceremonial /plan workflow) added its header paragraph to index.ts. Re-measured " +
 			"1235 raw lines across 3 files 2026-08-15 (index.ts 547 + read-only.ts 585 + utils.ts 103), " +
-			"rounded up to the next ten. Re-measured 1248 raw lines 2026-10-13 after the plan-mode write holes were closed (index.ts 547, read-only.ts 598, utils.ts 103), rounded up to the next ten. LOWERED 1250 -> 1210: read-only.ts imports that shared list instead of its own copy; 1206 raw lines",
+			"rounded up to the next ten. Re-measured 1248 raw lines 2026-10-13 after the plan-mode write holes were closed (index.ts 547, read-only.ts 598, utils.ts 103), rounded up to the next ten. LOWERED 1250 -> 1210: read-only.ts imports that shared list instead of its own copy; 1206 raw lines. LOWERED 1210 -> 870: read-only.ts comments cut to short WHY notes with the analysis moved to docs/EXTENSIONS.md, and its tables compacted; 868 raw lines (index.ts 547, read-only.ts 218, utils.ts 103)",
 	},
 	{
 		dir: ".pi/extensions/safety",

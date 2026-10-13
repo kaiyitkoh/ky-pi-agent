@@ -816,6 +816,20 @@ Four pinned packages are not installed here. `pi-session-finder` is static: 0 to
 
 Toggling `/plan` changes the active tool list mid-session, which re-prices the cached prefix once. That cost is accepted because it is a deliberate user command, not something a profile or the model does. Whether the re-price happens as expected is checked live in `RB-10-02`.
 
+### Plan mode bash boundary
+
+`.pi/extensions/plan-mode/read-only.ts` is authored here, not vendored (`PROVENANCE.md` covers `index.ts` and `utils.ts` only), and replaces the vendored example's regex predicate, which judged only the first word: anything after `|`, `;`, `&&`, `$(...)`, `find -exec` or an interpreter's `-c` went unexamined. The decision, in order, all fail-closed:
+
+1. `safety/shell.ts#canonicalise` refuses (substitution, heredoc, background, unresolved expansion, shell runner, piped or generated script, unresolved wrapper, parse error): deny.
+2. Any redirect operator containing `>`: deny.
+3. No resolved invocation: deny.
+4. Reached through a package runner (`npx`, `bunx`, `pnpm dlx`, `npm exec`): deny.
+5. Every invocation's verb must be on the allowlist and pass its argument rule; one disallowed invocation denies the whole command.
+
+Removed from the upstream allowlist on purpose: `awk` (`system()`, `print > file`), `sed` (GNU `e` executes, `w` writes), bare `env`, `less`/`more`/`top`/`htop` (shell escapes), and `xargs` (a command runner). git is allowed only for listed read subcommands, with only listed global options before the subcommand, and never with an option from `safety/git-options.ts`. Short options are exploded before deny-flag matching, because `curl -sT file` is `-s -T file`; `find` primaries are matched whole, because `-maxdepth` contains an `x`. `rg` refuses `--pre`, `--pre-glob`, `--hostname-bin` (ripgrep 14 runs it for hyperlinks) and `-z`/`--search-zip` (decompressor programs).
+
+Network egress: the safety layer has no `curl`/`wget` policy (EV-36 in `docs/SAFETY.md`), so in plan mode this file is the only local control on egress, which is why the `curl` upload and body flags are denied here.
+
 ### `context` versus `context_with_system`
 
 A plain `context` rewrite cannot change the tools sent to the provider. A system-shaped message carrying `toolsRemoved` returned from a `context` handler can, so the lint in `tests/unit/context-hook-lint.test.ts` bans `context_with_system`, `toolsAdded` and `toolsRemoved` in tracked source. Tool changes go through `setActiveTools()` only.

@@ -87,7 +87,9 @@ export function findIdTokens(commentText: string): string[] {
 export const VENDORED_EXEMPT: readonly string[] = [
 	".pi/extensions/background-tasks/",
 	".pi/extensions/loop-police/",
-	".pi/extensions/plan-mode/",
+	// By file: plan-mode/read-only.ts is authored here and is not exempt.
+	".pi/extensions/plan-mode/index.ts",
+	".pi/extensions/plan-mode/utils.ts",
 	".pi/extensions/todo.ts",
 	".pi/extensions/questionnaire.ts",
 ];
