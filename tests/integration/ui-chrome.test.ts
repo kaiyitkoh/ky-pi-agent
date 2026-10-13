@@ -230,9 +230,14 @@ describe("ui extension in a session", () => {
 		});
 	});
 
-	it("omits the changed-file segment outside a git checkout", async () => {
-		const { rec, handle } = await open("tui", { agentsMd: false });
+	it("omits the changed-file segment outside a git checkout and stops probing after exit 128", async () => {
+		const { rec, handle } = await openSpied("tui");
 		await handle.session.prompt("hi");
+		await vi.waitFor(() => expect(gitCalls()[0]?.code).toBe(128), { timeout: 5000 });
+		await handle.session.prompt("again");
+		// Longer than the probe's 2 s minimum interval, so any retry would have spawned by now.
+		await new Promise((resolve) => setTimeout(resolve, 3000));
+		expect(gitCalls()).toHaveLength(1);
 		expect(rec.statuses("ky-statusline").some((s) => s?.includes("changed"))).toBe(false);
 	});
 
