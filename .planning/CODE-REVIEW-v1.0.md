@@ -66,7 +66,7 @@ Status of each finding after Phase 12.1. Commits are in `git log 0aeafd2..HEAD`;
 | I-3 | deferred | d451dc9 | Redaction of -u and -p fixed in d451dc9. The agent-writable log dir and the silent drop on a failed rename remain; the rotation race has no repro. |
 | I-4 | deferred | - | Not exploitable; callers pass paths only. |
 | I-5 | deferred | - | Cost accuracy only. |
-| I-6 | deferred | a144ab3 | NO_TOOL_CALLING prefixes fixed in a144ab3. Applying DEFAULT_MODE at start is a behaviour decision for the user. |
+| I-6 | fixed | a144ab3, cf5c5db | NO_TOOL_CALLING prefixes fixed in a144ab3. DEFAULT_MODE is applied at fresh start unless a model was chosen explicitly (cf5c5db). |
 | I-7 | deferred | - | registerVirtualModel would be a routing redesign. |
 | I-8 | fixed | 1bd7b5f, d451dc9, 55e05d4, 9310fa2 | - |
 | I-9 | fixed | 55e05d4 | - |
@@ -97,18 +97,20 @@ Info items still open:
 
 | ID | Status | Reason |
 |---|---|---|
-| IN-A-4 | deferred | Configurable protected branches need a settings schema and a decision on how it interacts with `PUSH_PROTECTED_BRANCHES` and the workflow commit checks. Not a bypass. |
-| IN-A2-2 / IN-A3-3 | deferred | `terraform -chdir=infra plan` asks for confirmation: a false positive, not a bypass. The fix belongs in the infra classifier with its own corpus rows. |
-| IN-B-05 | deferred | Aborted turns do not use up the `/grill` and `/plan` budgets. No gate is skipped; how to count aborts is a ceremony UX decision for the user. |
+| IN-A-4 | fixed | 644a043: add-only `safety.protectedBranches` and `safety.pushProtectedBranches` from user and project settings; `main` first; malformed values warn and keep the defaults. |
+| IN-A2-2 / IN-A3-3 | fixed | 72f5db0: terraform `-chdir`, `-version` and `-help` are skipped before the subcommand is classified; `apply` still confirms. |
+| IN-B-05 | decided (best practice) | Aborted turns stay uncounted: Esc is the user's interruption, the next settle re-gates whatever was written, and counting would let Esc presses spend the user's budget. The /grill and /plan off-by-one was unified (644a043): working turns plus one final write turn. |
 | IN-C-3 | deferred | CI pin-audit peel loop. CI-only hardening that cannot be verified offline. |
 | IN-C-4 | deferred | Traceability test crashes instead of reporting. Test ergonomics only; the test is green. |
 | IN-C-5 | deferred | README pinned install tag does not exist yet. The tag belongs to the release step; RUNBOOK records it. |
 | IN-C-6 | deferred | Eager `typescript` load and `tsc` from PATH. Touches the gate path just hardened by WR-B-11; needs its own change. |
-| IN-C-8 | deferred | Fallback hops skip the capability guard. A guard per hop changes fallback semantics and needs a decision on each hop's need. |
-| IN-C-9 | deferred | `/new` carries the previous mode and escalation. Product decision for the user. |
-| IN-BC2-4 | deferred | `/quick` refuses an overfull context where the backstop warns. Changes a refusal contract; decide together with IN-C-9. |
+| IN-C-8 | fixed | cf5c5db: every fallback hop runs the capability guard; a refused hop is skipped with its reason. |
+| IN-C-9 | decided (best practice), fixed | cf5c5db: `/new` and a fresh session reset to the default mode unescalated and apply its executor unless a model was chosen explicitly. |
+| IN-BC2-4 | fixed | cf5c5db: warn everywhere; `/quick` no longer refuses an overfull context. |
 | IN-BC2-9 | deferred | Base typecheck can leave a `.tsbuildinfo`. Every safe fix touches the gate path (`--incremental false` breaks composite projects). |
-| IN-BC3-4 | deferred | `/mode` and the planner pin use different pickers. Sharing one is a routing-policy decision; the cost today is a redundant re-run. |
+| IN-BC3-4 | fixed | cf5c5db: one picker for `/mode` and the planner pin. |
+| /review baseTypecheckFailed | fixed | cf5c5db: the merge-base typecheck runs lazily, only when HEAD fails, in a temporary worktree inside the git directory. |
+| Child guard fixed install path | fixed | 644a043: pi-subagents is resolved from the loaded subagent tool's source path, falling back to the two npm roots; with nothing found every launch is still refused. |
 | IN-BC3-7 | accepted | Verification output in the ledger and MR body stays name-redacted, because the ledger is a log on disk and an MR may be shared. |
 | IN-BC4-1 | deferred | The anchored JWT rule misses a token glued to `-`, `_` or an alphanumeric. Small impact; loosening it brings back the quadratic case. To be listed as a residual in DIAGNOSTICS.md. |
 | IN-BC4-2 | deferred | A line-ending-only SPEC change shows an empty diff on `--repin`. Cosmetic; no fix report yet. |
