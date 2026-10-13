@@ -422,7 +422,7 @@ Composed packages, quality, UI and context:
     never `UNAVAILABLE`).
 20. RB-08-03 reviewer as a real subagent, plus a live calibration run.
 21. RB-08-04 comment rules reach another project (answer begins
-    `Default to no comment`).
+    `Default to none`).
 22. RB-11-01 theme, header and statusline in a real terminal.
 23. RB-11-02 subagent widget and `N agent(s)` segment, blocking and background.
 24. RB-10-02 then RB-11-03 prompt cache: high turn-2 `cacheRead` ratio;
@@ -2135,7 +2135,7 @@ Steps:
 
 1. `cd` into a project without its own `## Code comments` heading.
 2. Run the exact command `pi -p "Quote the first bullet under the Code comments heading in your system prompt, verbatim."`
-3. Expected output begins `Default to no comment`.
+3. Expected output begins `Default to none`.
 4. Record the date and result.
 
 ## Phase 9 — Ceremonial Workflows
@@ -2541,3 +2541,44 @@ Loading the packages in a live session in another repository is RB-12-05 and sta
 **Expected output.** Two `yes` answers and exit 0.
 
 **Offline proxy:** `tests/integration/bootstrap-safety-stub.test.ts` generates the stub, breaks the target it imports and asserts every tool call is blocked. It cannot reach another machine's agent directory.
+
+## Remote access (optional, not set up, decide first)
+
+**Do not launch anything until discussed.** Nothing here is built or running. Research and prices: `.planning/research/ORCA-VM-NO-CLOUD.md`. Values in `<angle brackets>` are placeholders; never commit real ids or hosts.
+
+### Option A: Hyper-V VM on the laptop (free, no cloud hosting)
+
+1. Get IT approval to enable Hyper-V and to run an inbound listener on port 6768.
+2. Create an Ubuntu Server 24.04 VM: 2 vCPU, 4 GB, Default Switch (NAT), Enhanced Session off. Take a checkpoint.
+3. Inside the VM install Node >= 22.19, Pi 1.1.0 and the harness in its own `git clone`. Use a git token at Developer role that cannot push `main`. `auth.json` holds model keys only. No AWS admin credentials, no host `~/.aws`, no SSO browser profile.
+4. Install the Orca Linux build at a pinned version. Set `ORCA_TELEMETRY_DISABLED=1` and `DO_NOT_TRACK=1`; turn notifications off.
+5. Run `orca-ide serve --port 6768 --pairing-address <laptop-lan-or-vpn-ip> --mobile-pairing` under systemd. Restrict 6768 with ufw to `<host-or-vpn-subnet>`.
+6. On the host (admin): `netsh interface portproxy add v4tov4 listenport=6768 connectaddress=<vm-ip>`, plus a Windows Firewall inbound rule scoped to the LAN or VPN subnet.
+7. Pair the phone by scanning the QR in person with Relay off. Never forward 6768 to the internet.
+8. Test: a feature-branch push confirm from the phone, device-token revocation, and laptop sleep (agents stop while it sleeps).
+
+### Option B: EC2 in a separate sandbox account (always on, costs money)
+
+1. Use a dedicated sandbox account, never the auto-deploy account.
+2. Size: t4g.large (2 vCPU / 8 GiB, $0.0848/h: about $62/mo 24/7, $19/mo on a 10 h x 22 d schedule) or t4g.xlarge (4 / 16 GiB, $0.1696/h: about $124/mo 24/7, $37/mo scheduled). ap-southeast-1 on-demand, 2026-10.
+3. Disk: gp3 40 GiB, baseline IOPS ($3.84/mo, billed while stopped).
+4. Network: private subnet, no public IP, no inbound rules. IMDSv2 required, hop limit 1.
+5. Egress: a t4g.nano NAT instance (about $3.87/mo, self-patched) or a NAT gateway (about $43/mo + $0.059/GB, 24/7). VPC interface endpoints (bedrock-runtime, ssm, ssmmessages, ec2messages) cost about $38/mo in one AZ, also 24/7, and give no internet (no npm, git host or DeepSeek). Add the free S3 gateway endpoint either way.
+6. Instance role: `AmazonSSMManagedInstanceCore` plus `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on `<inference-profile-arns>` and their foundation-model ARNs only. No access keys, no admin.
+7. Access: SSM Session Manager for the shell; `aws ssm start-session --target <instance-id> --document-name AWS-StartPortForwardingSession --parameters portNumber=6768,localPortNumber=6768` for Orca.
+8. Operations: daily DLM snapshots, keep 7 (under $1/mo). EventBridge Scheduler start/stop on weekdays, plus an idle-CPU stop alarm. AWS Budgets alert at `<budget-usd>`.
+9. Total scheduled t4g.xlarge: about $46/mo with a NAT instance, $85/mo with a NAT gateway. This breaks "zero spend beyond tokens" unless the company pays.
+
+### Optional: Lark long-connection bot
+
+Runs in the VM or instance over an outbound WebSocket; no inbound port. **Lark sees all message content in plaintext**: every prompt, reply, diff, error output, approval click and your user id. It is not end-to-end encrypted.
+
+Mitigations: a fixed open_id allowlist (empty = deny), DMs only, ignore forwarded messages; every push, terraform or mutating `aws`/`kubectl` call confirms, with no "always allow" from the phone; redact secrets in bot output; start remote sessions read-only.
+
+### Open questions for the user
+
+1. Will IT enable Hyper-V and allow the listener and portproxy?
+2. What does "no cloud" mean: no hosting (Lark acceptable) or no third party (Lark out, push off)?
+3. Does the company VPN route phone-to-laptop (client-to-client), or to a sandbox VPC?
+4. Does the VM need any AWS access? If yes, read-only or a sandbox account only.
+5. Laptop awake and plugged in (free), or a funded always-on EC2?
