@@ -20,25 +20,19 @@
 #
 set -e
 
-# A second operand would be silently discarded by `case "${1:-}"`.
-if [ "$#" -gt 1 ]; then
-	printf 'FATAL: this script takes at most one argument; got %s: %s\n' "$#" "$*" >&2
-	printf 'Usage: sh scripts/check-gh-unauthenticated.sh [--warn-only]\n' >&2
+usage_error() {
+	printf 'FATAL: %s\nUsage: sh scripts/check-gh-unauthenticated.sh [--warn-only]\n' "$1" >&2
 	exit 2
-fi
+}
+
+# A second operand would be silently discarded by `case "${1:-}"`.
+[ "$#" -le 1 ] || usage_error "this script takes at most one argument; got $#: $*"
 
 warn_only=0
 case "${1:-}" in
-"")
-	;;
---warn-only)
-	warn_only=1
-	;;
-*)
-	printf 'FATAL: unknown argument: %s\n' "$1" >&2
-	printf 'Usage: sh scripts/check-gh-unauthenticated.sh [--warn-only]\n' >&2
-	exit 2
-	;;
+"") ;;
+--warn-only) warn_only=1 ;;
+*) usage_error "unknown argument: $1" ;;
 esac
 
 agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
