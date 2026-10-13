@@ -25,8 +25,7 @@
  *      Upstream's regex denied `>` too, so this is parity — now decided on the
  *      AST rather than on `/(^|[^<])>(?!>)/`.
  *   3. no resolved invocation → deny (nothing to check).
- *   4. an invocation reached through a package runner (`npx`, `bunx`,
- *      `pnpm dlx`, ...) → deny, whatever its binary is called.
+ *   4. reached through a package runner (`npx`, `bunx`, `pnpm dlx`) → deny.
  *   5. every invocation's verb must be on {@link READ_ONLY_VERBS} and pass its
  *      {@link ARGUMENT_RULES} entry. ONE disallowed node denies the whole
  *      command.
@@ -565,11 +564,8 @@ export function classifyPlanModeCommand(command: unknown): PlanModeVerdict {
 	}
 
 	for (const invocation of verdict.invocations) {
-		// `npx -y @evil/ls` resolves to `ls`, but it downloads and runs registry code first.
 		const packageRunner = invocation.wrappers.find((w) => PACKAGE_RUNNER_WRAPPERS.has(w));
-		if (packageRunner !== undefined) {
-			return { kind: "deny", reason: `\`${packageRunner}\` runs package code; plan mode is read-only` };
-		}
+		if (packageRunner !== undefined) return { kind: "deny", reason: `\`${packageRunner}\` runs package code; plan mode is read-only` };
 		const verb = normaliseExecutable(invocation.executable);
 		if (verb === "") {
 			// e.g. a bare `env`, which canonicalise resolves to an empty executable
