@@ -751,7 +751,7 @@ Notes. Phase 10 decided the first two bullets (see "Context budget and tool prof
 - Tool-renderer registry.
 - `agent_settled` now carries `aborted`; upstream git-checkpoint moved from `agent_end` to it.
 - Third-party loaders (`subagents_enable`, `web_enable`) and the `promptSnippet` cost they add per turn: measured under `RB-10-03`.
-- Pi's cache warmer (`cacheWarming`, docs/settings.md:19) replays the stable prefix; Phase 11's cost display should account for it.
+- Pi's cache warmer (`cacheWarming`, docs/settings.md:19) replays the stable prefix. The UI reuses Pi's footer cost, which already sums cache-warming usage entries (see docs/UI.md).
 
 ## Context budget and tool profiles
 

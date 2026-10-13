@@ -149,11 +149,11 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 
 ### Terminal UI
 
-- [ ] **UI-01**: A custom theme ships, conforming to Pi's theme schema
-- [ ] **UI-02**: A statusline shows model, provider, context remaining, session cost, git branch, and changed files — rendered in TUI chrome, never in the system prompt
-- [ ] **UI-03**: A custom startup header ships
-- [ ] **UI-04**: A live widget shows running subagents and their status
-- [x] **UI-05**: No UI element introduces a system-prompt cache invalidation, verified by watching `cacheRead` stay non-trivial
+- [x] **UI-01**: A custom theme ships, conforming to Pi's theme schema — *Proved by `tests/unit/ui-theme.test.ts`; visual check `RB-11-01`*
+- [x] **UI-02**: A statusline shows model, provider, context remaining, session cost, git branch, and changed files — rendered in TUI chrome, never in the system prompt — *Proved by `tests/unit/ui-statusline.test.ts` + `tests/integration/ui-chrome.test.ts`; visual check `RB-11-01`*
+- [x] **UI-03**: A custom startup header ships — *Proved by `tests/integration/ui-chrome.test.ts`; visual check `RB-11-01`*
+- [~] **UI-04**: A live widget shows running subagents and their status — *PARTIAL. Offline stub proof in `tests/integration/ui-chrome.test.ts` (event shapes from pi-subagents source, never executed). Not proved: a real run. Outstanding: `RB-11-02`*
+- [~] **UI-05**: No UI element introduces a system-prompt cache invalidation, verified by watching `cacheRead` stay non-trivial — *PARTIAL. Offline proof in `tests/integration/ui-prompt-stability.test.ts`. Not proved: a live `cacheRead` ratio. Outstanding: `RB-11-03`*
 
 ### Comment Discipline
 
@@ -338,11 +338,11 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | CTX-04 | Phase 10 | Complete |
 | CTX-05 | Phase 10 | Partial — offline proof only; not complete until `RB-10-01` runs |
 | CTX-06 | Phase 10 | Partial — local extensions measured; not complete until `RB-10-03` measures the four uninstalled packages |
-| UI-01 | Phase 11 | Pending |
-| UI-02 | Phase 11 | Pending |
-| UI-03 | Phase 11 | Pending |
-| UI-04 | Phase 11 | Pending |
-| UI-05 | Phase 11 | Complete |
+| UI-01 | Phase 11 | Complete — visual check `RB-11-01` outstanding |
+| UI-02 | Phase 11 | Complete — visual check `RB-11-01` outstanding |
+| UI-03 | Phase 11 | Complete — visual check `RB-11-01` outstanding |
+| UI-04 | Phase 11 | Partial — offline stub proof only; not complete until `RB-11-02` runs |
+| UI-05 | Phase 11 | Partial — offline proof only; not complete until `RB-11-03` runs |
 | CMT-01 | Phase 08.2 | Complete |
 | CMT-02 | Phase 08.2 | Complete offline - faux-session delivery proven by tests/unit/comment-rules-delivery.test.ts; live check RB-08-04, OUTSTANDING |
 | CMT-03 | Phase 08.2 | Complete |
