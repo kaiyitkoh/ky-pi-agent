@@ -7,12 +7,18 @@ import { createHash } from "node:crypto";
 import { afterAll, describe, expect, it } from "vitest";
 
 import { repoRoot } from "../helpers/git.ts";
-import { analyseWire, extractSystemText, turnRatios, verdict } from "../../scripts/ui-wire-check-core.ts";
+import { analyseWire, extractSystemText, extractToolText, turnRatios, verdict } from "../../scripts/ui-wire-check-core.ts";
 
 const sha = (s: string) => createHash("sha256").update(s).digest("hex");
 
-const req = (sessionId: string, system: string, kind = "main.request") =>
-	JSON.stringify({ kind, sessionId, corr: `${sessionId}#1`, payload: { messages: [{ role: "system", content: system }] } });
+const req = (sessionId: string, system: string, kind = "main.request", tools?: unknown) =>
+	JSON.stringify({
+		kind,
+		sessionId,
+		corr: `${sessionId}#1`,
+		payload: { messages: [{ role: "system", content: system }], ...(tools !== undefined ? { tools } : {}) },
+	});
+const tool = (description: string) => [{ type: "function", function: { name: "t", description, parameters: {} } }];
 
 describe("extractSystemText", () => {
 	it("reads an OpenAI system message", () => {
@@ -43,6 +49,15 @@ describe("extractSystemText", () => {
 	});
 });
 
+describe("extractToolText", () => {
+	it("serialises tools or Bedrock toolConfig, and null when absent", () => {
+		expect(extractToolText({ tools: [{ name: "a" }] })).toBe('[{"name":"a"}]');
+		expect(extractToolText({ toolConfig: { tools: [] } })).toBe('{"tools":[]}');
+		expect(extractToolText({ messages: [] })).toBe("null");
+		expect(extractToolText(7)).toBe("null");
+	});
+});
+
 describe("analyseWire", () => {
 	it("is stable when every system prompt matches", () => {
 		const w = analyseWire([req("s1", "same"), req("s1", "same"), req("s1", "same")], { probes: [] });
@@ -50,6 +65,15 @@ describe("analyseWire", () => {
 		expect(w.stable).toBe(true);
 		expect(w.hashes).toEqual([sha("same"), sha("same"), sha("same")]);
 		expect(w.sessionId).toBe("s1");
+	});
+	it("flags a tool list that changes while the system prompt does not", () => {
+		const w = analyseWire([req("s1", "a", undefined, tool("x")), req("s1", "a", undefined, tool("y"))], { probes: [] });
+		expect(w.stable).toBe(true);
+		expect(w.toolsStable).toBe(false);
+	});
+	it("finds a probe in a tool description", () => {
+		const w = analyseWire([req("s1", "a", undefined, tool("on ky-leak now"))], { probes: ["ky-leak"] });
+		expect(w.probeHits).toEqual([{ probe: "ky-leak", request: 1 }]);
 	});
 	it("is unstable when one differs", () => {
 		const w = analyseWire([req("s1", "a"), req("s1", "b"), req("s1", "a")], { probes: [] });
@@ -116,6 +140,12 @@ describe("verdict", () => {
 		const v = verdict(w, [{ corr: "c", ratio: 0.9 }], 0.5);
 		expect(v.status).toBe("FAIL");
 		expect(v.reasons.join(" ")).toContain("system prompt differs");
+	});
+	it("fails when the tool list changes", () => {
+		const w = analyseWire([req("s1", "a", undefined, tool("x")), req("s1", "a", undefined, tool("y"))], { probes: [] });
+		const v = verdict(w, [{ corr: "c", ratio: 0.9 }], 0.5);
+		expect(v.status).toBe("FAIL");
+		expect(v.reasons.join(" ")).toContain("tool list differs");
 	});
 	it("fails on a low ratio", () => {
 		expect(verdict(good, [{ corr: "c", ratio: 0.1 }], 0.5).status).toBe("FAIL");

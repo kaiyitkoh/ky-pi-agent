@@ -70,7 +70,7 @@ system prompt or the tool list. Offline proof:
 sh scripts/ui-wire-check.sh --probe <text>
 ```
 
-It reads the already-redacted `.pi/logs/` files, compares system-prompt hashes
-across requests, searches the requests for probe text, and reports the turn-2
+It reads the already-redacted `.pi/logs/` files, compares system-prompt and
+tool-list hashes across requests, searches both for probe text, and reports the turn-2
 `cacheRead` ratio. It sends nothing anywhere. Set `showCacheMissNotices: true` in
 your global settings for a run if you want Pi to flag a miss as it happens.

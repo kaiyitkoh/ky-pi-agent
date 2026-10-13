@@ -5,6 +5,8 @@ export interface WireAnalysis {
 	requests: number;
 	hashes: string[];
 	stable: boolean;
+	toolHashes: string[];
+	toolsStable: boolean;
 	truncated: boolean;
 	missing: number;
 	probeHits: { probe: string; request: number }[];
@@ -67,7 +69,15 @@ function parse(line: string): Record<string, unknown> | undefined {
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
 
-/** Hashes the system text of one session's main requests and looks for volatile probe strings. */
+/** Serialises the tool declarations of OpenAI-compatible, Responses, Anthropic (`tools`) or Bedrock (`toolConfig`) payloads. */
+export function extractToolText(payload: unknown): string {
+	if (!isRecord(payload)) {
+		return "null";
+	}
+	return JSON.stringify(payload.tools ?? payload.toolConfig ?? null);
+}
+
+/** Hashes the system text and tool list of one session's main requests and looks for volatile probe strings. */
 export function analyseWire(
 	lines: readonly string[],
 	opts: { sessionId?: string; last?: number; probes: readonly string[] },
@@ -93,6 +103,7 @@ export function analyseWire(
 	const probes = opts.probes.filter((p) => p.length > 0);
 
 	const hashes: string[] = [];
+	const toolHashes: string[] = [];
 	const probeHits: { probe: string; request: number }[] = [];
 	let truncated = false;
 	let missing = 0;
@@ -105,9 +116,11 @@ export function analyseWire(
 			missing += 1;
 			return;
 		}
+		const tools = extractToolText(rec.payload);
 		hashes.push(sha256(text));
+		toolHashes.push(sha256(tools));
 		for (const probe of probes) {
-			if (text.includes(probe)) {
+			if (text.includes(probe) || tools.includes(probe)) {
 				probeHits.push({ probe, request: i + 1 });
 			}
 		}
@@ -117,6 +130,8 @@ export function analyseWire(
 		requests: mine.length,
 		hashes,
 		stable: new Set(hashes).size <= 1,
+		toolHashes,
+		toolsStable: new Set(toolHashes).size <= 1,
 		truncated,
 		missing,
 		probeHits,
@@ -148,7 +163,7 @@ export function turnRatios(lines: readonly string[], sessionId: string): { corr:
 }
 
 export function verdict(
-	wire: Pick<WireAnalysis, "requests" | "stable" | "truncated" | "missing" | "probeHits">,
+	wire: Pick<WireAnalysis, "requests" | "stable" | "toolsStable" | "truncated" | "missing" | "probeHits">,
 	ratios: readonly { corr: string; ratio: number }[],
 	minRatio: number,
 ): Verdict {
@@ -162,8 +177,11 @@ export function verdict(
 	if (!wire.stable) {
 		reasons.push("system prompt differs between requests");
 	}
+	if (!wire.toolsStable) {
+		reasons.push("tool list differs between requests");
+	}
 	for (const hit of wire.probeHits) {
-		reasons.push(`probe "${hit.probe}" found in the system prompt of request ${hit.request}`);
+		reasons.push(`probe "${hit.probe}" found in the system prompt or tool list of request ${hit.request}`);
 	}
 	for (const r of ratios) {
 		if (r.ratio < minRatio) {
