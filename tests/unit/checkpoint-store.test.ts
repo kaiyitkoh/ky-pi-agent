@@ -21,6 +21,7 @@ import { pathToFileURL } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { repoRoot } from "../helpers/git.ts";
+import { CI_TIME_FACTOR } from "../helpers/timing.ts";
 import {
 	MAX_CHECKPOINT_ENTRIES,
 	pruneCheckpoints,
@@ -147,7 +148,10 @@ describe("WR-10 -- the index is bounded and pruning reports what it evicted", ()
 
 	it("never throws on an unwritable or absent store -- reports 'evicted nothing'", () => {
 		const root = join(tmpdir(), `kypi-cpstore-absent-${Math.random().toString(36).slice(2)}`);
+		const start = Date.now();
 		expect(pruneCheckpoints(root)).toEqual([]);
+		// A lock that can never be created must fail at once, not spin until the 35s wait deadline.
+		expect(Date.now() - start).toBeLessThan(2000 * CI_TIME_FACTOR);
 		expect(existsSync(root), "prune must not create the directory it was asked about").toBe(false);
 	});
 });

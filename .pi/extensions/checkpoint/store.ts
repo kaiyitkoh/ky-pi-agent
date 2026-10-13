@@ -124,7 +124,9 @@ function withLock<T>(file: string, body: () => T): T {
 			writeFileSync(lock, `${process.pid}\n`, { encoding: "utf-8", flag: "wx" });
 			held = true;
 			break;
-		} catch {
+		} catch (error) {
+			// A missing directory never heals; other codes retry (Windows reports a mid-delete lock as EPERM).
+			if ((error as NodeJS.ErrnoException).code === "ENOENT") throw error;
 			try {
 				if (Date.now() - statSync(lock).mtimeMs > LOCK_STALE_MS) {
 					rmSync(lock, { force: true });

@@ -312,7 +312,7 @@ describe("FLOW-11 -- workflow line budgets enforce, both directions", () => {
 			entry.budget,
 			`${entry.file} is ${actual} raw lines, so its budget must be ${expected} -- the next multiple of ` +
 				`ten, which is the rule every 'why' in this registry states. It is declared as ${entry.budget}. ` +
-				"Update the number AND the measured figure in its `why`, in the same commit as the change that " +
+				"Update the number in the same commit as the change that " +
 				"moved it",
 		).toBe(expected);
 	});
@@ -429,8 +429,8 @@ describe("FLOW-11 / WR-03 -- directory-level anti-offloading ratchets", () => {
 			entry.budget,
 			`${entry.dir} totals ${total} raw lines across ${files.length} files ` +
 				`(${files.map((f) => `${f.split("/").pop()} ${countRawLines(f)}`).join(", ") || "none"}), so its ` +
-				`budget must be ${expected}. It is declared as ${entry.budget}. Update the number AND the ` +
-				"measured figure in its `why`, in the same commit as the change that moved it",
+				`budget must be ${expected}. It is declared as ${entry.budget}. Update the number in the ` +
+				"same commit as the change that moved it",
 		).toBe(expected);
 	});
 
@@ -744,8 +744,8 @@ describe("Item 1 (D-12) -- RESOURCE_EDGES: the non-import resource-edge closure"
 		expect(
 			entry.budget,
 			`${entry.workflow}'s declared paths total ${total} raw lines, so its budget must be ${expected} -- ` +
-				`the next multiple of ten. It is declared as ${entry.budget}. Update the number AND the measured ` +
-				"figure in its `why`, in the same commit as the change that moved it",
+				`the next multiple of ten. It is declared as ${entry.budget}. Update the number in the ` +
+				"same commit as the change that moved it",
 		).toBe(expected);
 	});
 });
