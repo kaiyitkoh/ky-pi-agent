@@ -110,8 +110,13 @@ docstring for the structural argument). Concretely, it catches:
   or `../`) makes the branch count as protected. `cd ~`, `cd ~/x` and a bare `cd` go home. The
   same directory resolves every path argument and redirect: a path is
   classified in the session directory and in the `cd`/`pushd`/`env -C`
-  target, so `cd ~ && cat .ssh/id_rsa` blocks, and after a `cd` that cannot
-  be resolved any relative path argument (except to git and glab) is refused. `command -v X` is a lookup and runs
+  target, so `cd ~ && cat .ssh/id_rsa` blocks. A `cd "$HOME/x"` target
+  resolves like `cd ~/x`. After a `cd` that cannot be resolved, a relative
+  argument (except to git and glab) is refused when it is path-shaped (it
+  has a `.`, `/`, `\`, `~` or glob character), names a credentials file
+  (`id_*`, `credentials`, `config`, `known_hosts`, ...), is a write target or
+  a redirect, or is the implicit `.` of a recursive search; any other bare
+  word is not a path, so `cd "$D" && npm test` is allowed (EV-246). `command -v X` is a lookup and runs
   nothing. `watch` joins its operands into an `sh -c` string, so it is
   treated as a shell runner.
 - **Heredoc-to-script smuggling** (`<<EOF`, `<<-EOF`, `<<<`) — denied on the
@@ -463,6 +468,7 @@ the corpus does not know about.
 | EV-94 | task-runner-indirection | `yarn openspec update` | `yarn` and `pnpm` run a project script or package binary named by a bare word. Only their explicit `exec`/`dlx` subcommands are resolved as wrappers, so the guarded verb reaches `yarn`, which carries no policy. | GitLab server-side branch protection (SAFE-01); `openspec update` writes only agent config in the working tree, visible in `git status` |
 | EV-166 | opaque-script-file | `sh x.sh` (where an earlier `write` call created `x.sh` holding a push) | The guard classifies the command line, never the contents of a file it runs. Writing a script and running it in the same command is refused (`generated-script`), but a script written by an earlier, separate tool call and run later is opaque. | GitLab server-side branch protection (SAFE-01) |
 | EV-210 | environment-secret | `node -e "console.log(process.env)"` | Any program can print its own environment. The guard refuses the shell's own dumps (`env`, `printenv`, `set`, `echo $*TOKEN*`), but it does not read what an interpreter's code prints. | Nothing else on this machine; keep long-lived secrets out of the environment Pi runs in. |
+| EV-246 | cd-relative-read | `cd "$D" && cat mykey` | After a `cd` the guard cannot resolve, a bare word is treated as a path only when it is path-shaped or names a credentials file. A key file with a custom bare name in a directory such as `~/.ssh` is read. Refusing every bare word would refuse `cd "$D" && npm test`. | Nothing else on this machine; use a literal `cd` target. |
 | EV-42 | custom-tool | any extension-registered tool that shells out internally | `evaluate()` governs exactly `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` by name (a deliberate design boundary, not an oversight: a tool name the guard does not govern is allowed by construction while every input shape inside a governed tool is deny-shaped). An eighth tool name it does not recognise is allowed by construction. Since Phase 08.1 the `tool_call` hook (not `evaluate()`) additionally denies the named Pi 1.x tools and maps `bg_run` through the bash classifier (see "Pi 1.x tool paths" below); the generic hole remains for every OTHER extension-registered tool. | GitLab server-side branch protection (SAFE-01), for anything that eventually reaches a push; nothing local inspects an unknown tool's internal behaviour |
 | EV-65 | sensitive-read | `grep { pattern: "SECRET", glob: ".env*" }` | A glob WILDCARD defeats the exact-basename `isDotEnvFile` check — `.env*` is not `.env` and does not start with the `.env.` prefix that check requires. Deliberately not closed by CR-07: pattern-matching over glob syntax risks the false-positive-trains-the-user-to-disable-the-guard failure mode this project's own `<specifics>` names. | Nothing else on this machine — a genuine residual gap. |
 | EV-73 | sensitive-read | `grep { path: "\\\\localhost\\C$\\Users\\tester\\.aws" }` (UNC alias of the user's OWN `~/.aws`) | WR-14's `$HOME`-anchoring fix (`isSensitiveSearchRoot`) compares `rootedSegmentsOf().root` first — a UNC root never equals a drive-letter root, so a UNC spelling of the SAME real directory fails the home-anchored check outright, even though it resolves to the identical directory on disk. The single-FILE rule still fires for the file itself (`.../.aws/credentials`). | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |

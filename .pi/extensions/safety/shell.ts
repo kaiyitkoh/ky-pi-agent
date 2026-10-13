@@ -523,9 +523,12 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 		if (CD_COMMANDS.has(cdName)) {
 			// `popd`, `pushd` with no target or `+N`/`-N` (stack rotation), `cd -`, `cd ~user` and `cd "$D"` leave the directory unknowable here.
 			const stackMove = cdName === "popd" || (cdName === "pushd" && (args.length === 0 || /^[+-]\d+$/.test(args[0])));
-			const target = stackMove ? "-" : args.length === 0 ? "~" : args.length !== 1 || hasExpansionPart(words[resolved.index + 1]) ? "-" : args[0];
+			// `$HOME` is the one expansion a cd target may carry: the path classifier expands it like `~`.
+			const homeOnly = /^\$(HOME|\{HOME\})([/\\][^$`]*)?$/.test(args[0] ?? "");
+			const unreadable = args.length !== 1 || (hasExpansionPart(words[resolved.index + 1]) && !homeOnly);
+			const target = stackMove ? "-" : args.length === 0 ? "~" : unreadable ? "-" : args[0];
 			// bash resolves a relative target that does not start with `.` or `..` through CDPATH first.
-			const viaCdpath = cdpath && !/^([/\\~]|\.\.?([/\\]|$)|[A-Za-z]:)/.test(target);
+			const viaCdpath = cdpath && !/^([/\\~$]|\.\.?([/\\]|$)|[A-Za-z]:)/.test(target);
 			const literal = !viaCdpath && !target.startsWith("-") && (!target.startsWith("~") || /^~([/\\]|$)/.test(target));
 			cd = { dirs: [...(cd?.dirs ?? []), ...(literal ? [target] : [])], known: (cd?.known ?? true) && literal };
 		}

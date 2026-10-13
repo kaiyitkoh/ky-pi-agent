@@ -660,6 +660,16 @@ const ROWS: readonly Row[] = [
 		input: { command: "cd src && cat index.ts" },
 		expected: "allow",
 	},
+	{ name: "cd to an unreadable target, then npm test -- allow, test is not a path", toolName: "bash", input: { command: "cd \"$D\" && npm test" }, expected: "allow" },
+	{ name: "cd to an unreadable target, then echo -- allow", toolName: "bash", input: { command: "cd \"$D\" && echo done" }, expected: "allow" },
+	{ name: "cd to a $HOME path, then npm test -- allow", toolName: "bash", input: { command: "cd \"$HOME/projects/x\" && npm test" }, expected: "allow" },
+	{ name: "cd to a $HOME path, then a credentials read -- block, $HOME resolves", toolName: "bash", input: { command: "cd \"$HOME\" && cat .ssh/id_rsa" }, expected: "block" },
+	{ name: "cd to an unreadable target, then a dotted file -- block", toolName: "bash", input: { command: "cd \"$D\" && cat .env" }, reasonIncludes: "absolute path", expected: "block" },
+	{ name: "cd to an unreadable target, then a nested path -- block", toolName: "bash", input: { command: "cd \"$D\" && cat x/y" }, expected: "block" },
+	{ name: "cd to an unreadable target, then a bare write -- block", toolName: "bash", input: { command: "cd \"$D\" && touch pre-commit" }, expected: "block" },
+	{ name: "cd to an unreadable target, then a search with no path -- block", toolName: "bash", input: { command: "cd \"$D\" && rg token" }, expected: "block" },
+	{ name: "cd to an unreadable target, then a redirect -- block", toolName: "bash", input: { command: "cd \"$D\" && npm test > out.log" }, expected: "block" },
+	{ name: "cd to an unreadable target, then a credentials name -- block", toolName: "bash", input: { command: "cd \"$D\" && cp credentials /tmp/c" }, expected: "block" },
 ];
 
 describe("SAFE-03/SAFE-10 -- policy-compose.test.ts: table is non-empty (vacuous-pass guard)", () => {

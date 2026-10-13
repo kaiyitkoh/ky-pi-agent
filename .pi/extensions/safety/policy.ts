@@ -343,16 +343,24 @@ function patternOperands(executable: string, args: readonly string[]): Set<numbe
 	return new Set(at === -1 ? [] : [at]);
 }
 
+const PATH_SHAPED = /[./\\*?[~]/;
+const SECRET_BARE_NAME = /^(id_\w+|credentials|config|known_hosts|authorized_keys|environ|netrc|npmrc)$/i;
+
 /** Every path an invocation names, read-classified in the session cwd and in the directory its `cd`s lead to (a subshell `cd` does not persist). */
 function classifyInvocationPaths(invocation: CanonicalInvocation, executable: string, facts: PolicyFacts, requestKey: string): Verdict {
-	const relative = [...invocation.args.filter((a) => !a.startsWith("-")), ...(invocation.redirectReads ?? []), ...(invocation.redirectWrites ?? [])];
-	if (invocation.afterCd === "unknown" && executable !== "git" && executable !== "glab" && relative.some((a) => !CWD_INDEPENDENT.test(a))) {
-		return { kind: "block", reason: `"${invocation.rawSegment}" names a relative path after a cd/pushd/popd whose target is not a literal directory -- use an absolute path` };
+	const patterns = patternOperands(executable, invocation.args);
+	if (invocation.afterCd === "unknown" && executable !== "git" && executable !== "glab") {
+		// A bare word is a path only when it names a credentials file; `npm test` stays allowed.
+		const named = invocation.args.filter((a, i) => !a.startsWith("-") && !patterns.has(i)).flatMap(fileOperandsOf);
+		const io = [...(invocation.redirectReads ?? []), ...(invocation.redirectWrites ?? []), ...writeOperands(invocation), ...recursiveRoots(executable, invocation.args)];
+		const paths = [...named.filter((a) => PATH_SHAPED.test(a) || SECRET_BARE_NAME.test(a)), ...io];
+		if (paths.some((a) => !CWD_INDEPENDENT.test(a))) {
+			return { kind: "block", reason: `"${invocation.rawSegment}" names a relative path after a cd/pushd/popd whose target is not a literal directory -- use an absolute path` };
+		}
 	}
 	const pathFacts = pathFactsOf(facts);
 	const dir = invocationDir(invocation, facts);
 	const dirs = dir === facts.cwd ? [facts.cwd] : [facts.cwd, dir];
-	const patterns = patternOperands(executable, invocation.args);
 	const reads = [...invocation.args.filter((_, i) => !patterns.has(i)).flatMap(fileOperandsOf), ...(invocation.redirectReads ?? [])];
 	// git arguments are revisions as often as paths, and `HEAD~1` has the 8.3 shape; protected-name aliases still block.
 	const ignore = executable === "git" ? ["short-name-alias"] : [];
