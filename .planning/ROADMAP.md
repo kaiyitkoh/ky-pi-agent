@@ -29,7 +29,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 08.2: Comment Discipline & AGENTS.md** (INSERTED) - AGENTS.md comment rules shipped by the harness, ID-in-comment check, cleanup pass (completed 2026-10-12)
 - [x] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main` (completed 2026-10-12)
 - [x] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause (completed 2026-10-12)
-- [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
+- [x] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt (completed 2026-10-13)
 - [x] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost (completed 2026-10-13)
 - [ ] **Phase 13: Zed Editor Front-end (optional)** - Use the harness from Zed via pi-acp; guard still enforced in Pi
 
@@ -621,7 +621,7 @@ Plans:
 
 **Wave 4** *(blocked on Wave 3 completion)*
 
-- [ ] 11-07-PLAN.md — RB-11-01..03 runbook + docs-policy pins, docs/UI.md, requirements reconciliation, regression sweep
+- [x] 11-07-PLAN.md — RB-11-01..03 runbook + docs-policy pins, docs/UI.md, requirements reconciliation, regression sweep
 
 **Research**: Not needed — the theme format is exact (53 tokens, 51 required, 4 value formats, hot-reload on edit).
 **UI hint**: yes
@@ -671,7 +671,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 17/17 | Complete    | 2026-10-12 |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
-| 11. Terminal UI | 6/7 | In Progress|  |
+| 11. Terminal UI | 7/7 | Complete   | 2026-10-13 |
 
 ### Phase 12: OpenSpec Opt-in Skill
 
