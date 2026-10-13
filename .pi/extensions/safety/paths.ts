@@ -1,167 +1,90 @@
 /**
- * One path canonicalisation, three policies over it: sensitive-read blocking, out-of-project
- * write/delete blocking, deferred-detonation write-target blocking. Pure text manipulation: no
- * `realpath`, no fs, no `process.env`, no default export; `cwd`, `home`, `projectRoot` and
- * `kubeconfigEnv` are caller-supplied. Registers nothing and never spells the tool-registration
- * call, which a lint matches as a substring.
- *
- * Invariants:
- * - Normalises whatever arrives in `.text` and never reads `.value`. The bash caller currently passes
- *   `Word.value`, which eats an unquoted `C:\Users\x\.aws\credentials`'s backslashes as POSIX escapes,
- *   so that form is NOT blocked through bash (docs/SAFETY.md known bypasses).
- * - unbash expands neither `~` nor `$HOME`, so `home` is a parameter and expanded here.
- * - A leading UNC `\` pair is kept as a marker and server+share is pinned as an immutable root
- *   like a drive letter, so `\server\share\..\..\x` cannot climb off the share.
- * - Policy tables compare whole path SEGMENTS case-insensitively (NTFS), never `.includes()`:
- *   `docs/git-hooks-notes.md` and `docs/workflows.md` must not fire.
+ * One path canonicalisation and three policies over it: sensitive reads, out-of-project writes, deferred-detonation writes.
+ * Pure text, no fs or env; `~`/`$HOME` are expanded here because unbash expands neither. Tables compare whole segments
+ * case-insensitively (NTFS), never `.includes()`, so `docs/git-hooks-notes.md` does not fire. A UNC server+share is an
+ * immutable root like a drive letter, so `..` cannot climb off it. Never spells the tool-registration call (a lint matches it).
  */
 
-
-/** One path argument; `text` should be the raw source slice or tool parameter (bash args currently pass `Word.value`). `value` is never read by {@link canonicalisePathArg}. */
+/** One path argument; only `text` is read. bash passes `Word.value`, so an unquoted `C:\x` loses its backslashes (docs/SAFETY.md). */
 export interface PathWordArg {
 	readonly text: string;
 	readonly value: string;
 }
 
-/** `cwd` and `home` this module resolves relative/`~`/`$HOME` paths against — never read from the environment. */
+/** The `cwd` and `home` relative, `~` and `$HOME` paths resolve against; never read from the environment. */
 export interface PathResolutionContext {
 	readonly cwd: string;
 	readonly home: string;
 }
 
-
 function stripSurroundingQuotes(text: string): string {
-	if (text.length >= 2) {
-		const first = text[0];
-		const last = text[text.length - 1];
-		if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
-			return text.slice(1, -1);
-		}
-	}
-	return text;
+	const quoted = text.length >= 2 && (text[0] === '"' || text[0] === "'") && text[text.length - 1] === text[0];
+	return quoted ? text.slice(1, -1) : text;
 }
 
-// unbash expands none of `~`, `$HOME` or `${HOME}`.
+const HOME_PREFIX = /^(~|\$HOME|\$\{HOME\})(\/|$)/;
+
 function expandHome(path: string, home: string): string {
+	const match = HOME_PREFIX.exec(path);
+	if (match === null) return path;
 	const trimmedHome = home.replace(/[/\\]+$/, "");
-	const prefixes = ["~/", "$HOME/", "${HOME}/"];
-	for (const prefix of prefixes) {
-		if (path.startsWith(prefix)) {
-			return `${trimmedHome}/${path.slice(prefix.length)}`;
-		}
-	}
-	const bare = ["~", "$HOME", "${HOME}"];
-	for (const token of bare) {
-		if (path === token) {
-			return trimmedHome;
-		}
-	}
-	return path;
+	return match[2] === "" ? trimmedHome : `${trimmedHome}/${path.slice(match[0].length)}`;
 }
 
 function rewriteMsysDrivePrefix(path: string): string {
-	const cygdrive = /^\/cygdrive\/([A-Za-z])(\/.*)?$/.exec(path);
-	if (cygdrive !== undefined && cygdrive !== null) {
-		const [, letter, rest] = cygdrive;
-		return `${letter.toUpperCase()}:${rest ?? "/"}`;
-	}
-	const msys = /^\/([A-Za-z])(\/.*)?$/.exec(path);
-	if (msys !== undefined && msys !== null) {
-		const [, letter, rest] = msys;
-		return `${letter.toUpperCase()}:${rest ?? "/"}`;
-	}
-	return path;
+	const match = /^(?:\/cygdrive)?\/([A-Za-z])(\/.*)?$/.exec(path);
+	return match === null ? path : `${match[1].toUpperCase()}:${match[2] ?? "/"}`;
 }
 
-// Backslashes to slashes except a leading UNC `\` pair, which stays as the UNC marker.
+// Backslashes to slashes except a leading UNC `\\` pair, which stays as the UNC marker.
 function normalizeSlashes(path: string): string {
-	if (path.startsWith("\\\\")) {
-		return "\\\\" + path.slice(2).replace(/\\/g, "/");
-	}
-	return path.replace(/\\/g, "/");
+	return path.startsWith("\\\\") ? `\\\\${path.slice(2).replace(/\\/g, "/")}` : path.replace(/\\/g, "/");
 }
 
-// True if `path` is already rooted (drive letter, UNC in either spelling, or a bare leading slash).
-function isAbsolutePath(path: string): boolean {
-	if (/^[A-Za-z]:\//.test(path)) {
-		return true;
-	}
-	if (path.startsWith("\\\\") || path.startsWith("//")) {
-		return true;
-	}
-	return path.startsWith("/");
-}
+const isAbsolutePath = (path: string): boolean => /^([A-Za-z]:\/|\/)/.test(path) || path.startsWith("\\\\");
 
 interface RootedSegments {
 	/** The immutable root prefix: a drive (`C:`), a UNC server+share (`\\server/share`), or `/`. */
 	readonly root: string;
-	/** Every segment after the root, in order, never including the root's own components. */
 	readonly parts: string[];
 }
 
-// Split a slash-normalised absolute path into an immutable root (drive, or UNC server+share) that `..` cannot climb past, and the segments after it.
+const splitSegments = (path: string): string[] => path.split("/").filter((p) => p.length > 0);
+
 function rootedSegmentsOf(path: string): RootedSegments {
-	if (path.startsWith("\\\\")) {
-		const rest = path.slice(2).split("/").filter((p) => p.length > 0);
-		const root = `\\\\${rest.slice(0, 2).join("/")}`;
-		return { root, parts: rest.slice(2) };
+	// The forward-slash UNC spelling is accepted defensively.
+	const unc = /^(\\\\|\/\/)/.exec(path);
+	if (unc !== null) {
+		const rest = splitSegments(path.slice(2));
+		return { root: `${unc[1]}${rest.slice(0, 2).join("/")}`, parts: rest.slice(2) };
 	}
-	const driveMatch = /^([A-Za-z]):\//.exec(path);
-	if (driveMatch !== undefined && driveMatch !== null) {
-		const root = `${driveMatch[1].toUpperCase()}:`;
-		const rest = path.slice(driveMatch[0].length);
-		return { root, parts: rest.split("/").filter((p) => p.length > 0) };
-	}
-	// Forward-slash UNC, accepted defensively if a caller passes one in.
-	if (path.startsWith("//")) {
-		const rest = path.slice(2).split("/").filter((p) => p.length > 0);
-		const root = `//${rest.slice(0, 2).join("/")}`;
-		return { root, parts: rest.slice(2) };
-	}
-	return { root: "/", parts: path.split("/").filter((p) => p.length > 0) };
+	const drive = /^([A-Za-z]):\//.exec(path);
+	if (drive !== null) return { root: `${drive[1].toUpperCase()}:`, parts: splitSegments(path.slice(drive[0].length)) };
+	return { root: "/", parts: splitSegments(path) };
 }
 
-function joinRootAndParts(root: string, parts: readonly string[]): string {
-	if (root === "/") {
-		return `/${parts.join("/")}`;
-	}
-	return `${root}/${parts.join("/")}`;
-}
+const joinRootAndParts = (root: string, parts: readonly string[]): string => `${root === "/" ? "" : root}/${parts.join("/")}`;
 
 // Collapse `.` and `..` segments, uppercasing a leading drive letter in the same pass.
 function collapseSegments(path: string): string {
 	const { root, parts } = rootedSegmentsOf(path);
 	const collapsed: string[] = [];
 	for (const part of parts) {
-		if (part === ".") {
-			continue;
-		}
-		if (part === "..") {
-			if (collapsed.length > 0) {
-				collapsed.pop();
-			}
-			continue;
-		}
-		collapsed.push(part);
+		if (part === "..") collapsed.pop();
+		else if (part !== ".") collapsed.push(part);
 	}
 	return joinRootAndParts(root, collapsed);
-}
-
-function joinWithCwd(cwd: string, relative: string): string {
-	const normalizedCwd = normalizeSlashes(cwd).replace(/\/+$/, "");
-	return `${normalizedCwd}/${relative}`;
 }
 
 /** Canonical form of one path arg: quotes stripped, home expanded, slashes normalised, resolved against `cwd`, `.`/`..` collapsed, then the MSYS drive rewritten. */
 export function canonicalisePathArg(arg: PathWordArg, ctx: PathResolutionContext): string {
 	const slashNormalized = normalizeSlashes(expandHome(stripSurroundingQuotes(arg.text), ctx.home));
-	const rooted = isAbsolutePath(slashNormalized) ? slashNormalized : joinWithCwd(ctx.cwd, slashNormalized);
+	const rooted = isAbsolutePath(slashNormalized) ? slashNormalized : `${normalizeSlashes(ctx.cwd).replace(/\/+$/, "")}/${slashNormalized}`;
 	// The drive rewrite runs on the collapsed path, or `/./c/x` and `/tmp/../c/x` would keep root `/` and miss every home rule.
 	return collapseSegments(rewriteMsysDrivePrefix(collapseSegments(rooted)));
 }
 
-
-/** Discriminated verdict shape, mirroring `.pi/extensions/safety/shell.ts`'s `ShellVerdict`. */
+/** Discriminated verdict shape, mirroring shell.ts's `ShellVerdict`. */
 export type PathVerdict =
 	| { readonly kind: "allow" }
 	| { readonly kind: "block"; readonly reason: string }
@@ -182,63 +105,34 @@ interface PathPattern {
 	readonly reason: (canonicalPath: string) => string;
 }
 
-function basenameOf(canonicalPath: string): string {
-	const { parts } = rootedSegmentsOf(canonicalPath);
-	return parts.length > 0 ? parts[parts.length - 1] : "";
-}
+const basenameOf = (canonicalPath: string): string => rootedSegmentsOf(canonicalPath).parts.at(-1) ?? "";
 
-// Case-insensitive whole-path equality on root + segments, never a raw string compare.
-function sameCanonicalPath(a: string, b: string): boolean {
-	const left = rootedSegmentsOf(a);
-	const right = rootedSegmentsOf(b);
-	if (left.root.toLowerCase() !== right.root.toLowerCase()) {
-		return false;
-	}
-	if (left.parts.length !== right.parts.length) {
-		return false;
-	}
-	return left.parts.every((part, i) => part.toLowerCase() === right.parts[i].toLowerCase());
-}
+const parentDirOf = (canonicalPath: string): string => rootedSegmentsOf(canonicalPath).parts.at(-2) ?? "";
 
-// True when `target`'s segments start with every one of `root`'s segments, case-insensitively, under the same root.
+const lowerSegmentsOf = (canonicalPath: string): string[] => rootedSegmentsOf(canonicalPath).parts.map((p) => p.toLowerCase());
+
+// True when `target`'s segments start with every one of `root`'s, case-insensitively, under the same root.
 function isWithinRoot(target: string, root: string): boolean {
 	const t = rootedSegmentsOf(target);
 	const r = rootedSegmentsOf(root);
-	if (t.root.toLowerCase() !== r.root.toLowerCase()) {
-		return false;
-	}
-	if (t.parts.length < r.parts.length) {
-		return false;
-	}
+	if (t.root.toLowerCase() !== r.root.toLowerCase() || t.parts.length < r.parts.length) return false;
 	return r.parts.every((part, i) => part.toLowerCase() === t.parts[i].toLowerCase());
 }
 
-// `.env.example` and `.env.template` are a deliberate carve-out:
-// blocking documentation trains the user to disable the guard.
+const sameCanonicalPath = (a: string, b: string): boolean => isWithinRoot(a, b) && isWithinRoot(b, a);
+
+// `.env.example` and `.env.template` are a deliberate carve-out: blocking documentation trains the user to disable the guard.
 function isDotEnvFile(basename: string): boolean {
 	const lower = basename.toLowerCase();
-	if (lower === ".env") {
-		return true;
-	}
-	if (!lower.startsWith(".env.")) {
-		return false;
-	}
-	const suffix = lower.slice(".env.".length);
-	return suffix !== "example" && suffix !== "template";
+	return lower === ".env" || (lower.startsWith(".env.") && lower !== ".env.example" && lower !== ".env.template");
 }
 
 // NTFS resolves `name:stream` and `name::$DATA` to `name`, so the final segment is matched without its stream suffix.
 function stripStreamSuffix(canonicalPath: string): string {
 	const { root, parts } = rootedSegmentsOf(canonicalPath);
-	if (parts.length === 0) {
-		return canonicalPath;
-	}
-	const last = parts[parts.length - 1];
-	const colon = last.indexOf(":");
-	if (colon === -1) {
-		return canonicalPath;
-	}
-	return joinRootAndParts(root, [...parts.slice(0, -1), last.slice(0, colon)]);
+	const last = parts.at(-1);
+	if (last === undefined || !last.includes(":")) return canonicalPath;
+	return joinRootAndParts(root, [...parts.slice(0, -1), last.slice(0, last.indexOf(":"))]);
 }
 
 // Windows short-name alias shape (`DOTENV~1.LOC`): it names a long file the policy tables cannot see.
@@ -270,18 +164,16 @@ function aliasesProtectedName(segment: string): boolean {
 	return PROTECTED_SHORT_BASES.some((base) => base.startsWith(prefix) || (hashed && base.startsWith(prefix.slice(0, 2))));
 }
 
-function homePath(facts: PathPolicyFacts, ...segments: string[]): string {
-	return [facts.home.replace(/[/\\]+$/, ""), ...segments].join("/");
-}
+const under = (base: string, segments: readonly string[]): string => [base.replace(/[/\\]+$/, ""), ...segments].join("/");
+const homePath = (facts: PathPolicyFacts, ...segments: string[]): string => under(facts.home, segments);
+const projectPath = (facts: PathPolicyFacts, ...segments: string[]): string => under(facts.projectRoot, segments);
 
-function projectPath(facts: PathPolicyFacts, ...segments: string[]): string {
-	return [facts.projectRoot.replace(/[/\\]+$/, ""), ...segments].join("/");
-}
-
-function parentDirOf(canonicalPath: string): string {
-	const { parts } = rootedSegmentsOf(canonicalPath);
-	return parts.length >= 2 ? parts[parts.length - 2] : "";
-}
+// A pattern for one file directly at a home-relative path.
+const homeFile = (id: string, segments: readonly string[], what: string): PathPattern => ({
+	id,
+	match: (path, facts) => sameCanonicalPath(path, under(facts.home, segments)),
+	reason: (path) => `"${path}" ${what}`,
+});
 
 /** The git-dir subdirectory holding the harness's signed /execute ledger and key. */
 export const HARNESS_LEDGER_SEGMENT = "kypi-ledger";
@@ -296,28 +188,19 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 	},
 	{
 		id: "aws-credentials",
-		match: (path) => {
-			const base = basenameOf(path).toLowerCase();
-			return parentDirOf(path).toLowerCase() === ".aws" && (base === "credentials" || base === "config");
-		},
+		match: (path) => parentDirOf(path).toLowerCase() === ".aws" && ["credentials", "config"].includes(basenameOf(path).toLowerCase()),
 		reason: (path) => `"${path}" is an AWS credentials/config file under a ".aws" directory`,
 	},
 	{
 		id: "kubeconfig",
-		match: (path, facts) => {
-			const base = basenameOf(path).toLowerCase();
-			const isDefaultKubeconfig = parentDirOf(path).toLowerCase() === ".kube" && base === "config";
-			const isNamedKubeconfig = facts.kubeconfigEnv !== undefined && sameCanonicalPath(path, facts.kubeconfigEnv);
-			return isDefaultKubeconfig || isNamedKubeconfig;
-		},
+		match: (path, facts) =>
+			(parentDirOf(path).toLowerCase() === ".kube" && basenameOf(path).toLowerCase() === "config") ||
+			(facts.kubeconfigEnv !== undefined && sameCanonicalPath(path, facts.kubeconfigEnv)),
 		reason: (path) => `"${path}" is a kubeconfig file (default "~/.kube/config" location, or the caller-supplied KUBECONFIG path)`,
 	},
 	{
 		id: "tfstate",
-		match: (path) => {
-			const base = basenameOf(path).toLowerCase();
-			return base.endsWith(".tfstate") || base.endsWith(".tfstate.backup");
-		},
+		match: (path) => /\.tfstate(\.backup)?$/.test(basenameOf(path).toLowerCase()),
 		reason: (path) => `"${path}" is Terraform state, which holds plaintext secrets in its resource attributes`,
 	},
 	{
@@ -340,21 +223,9 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 		match: (path, facts) => isWithinRoot(path, homePath(facts, ".ssh")),
 		reason: (path) => `"${path}" is under ~/.ssh, which holds private keys`,
 	},
-	{
-		id: "git-credentials",
-		match: (path, facts) => sameCanonicalPath(path, homePath(facts, ".git-credentials")),
-		reason: (path) => `"${path}" is the git credential store`,
-	},
-	{
-		id: "docker-config",
-		match: (path, facts) => sameCanonicalPath(path, homePath(facts, ".docker", "config.json")),
-		reason: (path) => `"${path}" is the Docker client config, which can hold registry credentials`,
-	},
-	{
-		id: "pi-auth",
-		match: (path, facts) => sameCanonicalPath(path, homePath(facts, ".pi", "agent", "auth.json")),
-		reason: (path) => `"${path}" is Pi's credential store`,
-	},
+	homeFile("git-credentials", [".git-credentials"], "is the git credential store"),
+	homeFile("docker-config", [".docker", "config.json"], "is the Docker client config, which can hold registry credentials"),
+	homeFile("pi-auth", [".pi", "agent", "auth.json"], "is Pi's credential store"),
 	{
 		id: "home-credential-stores",
 		match: (path, facts) =>
@@ -373,28 +244,19 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 	},
 	{
 		id: "harness-ledger",
-		match: (path) => rootedSegmentsOf(path).parts.some((part) => part.toLowerCase() === HARNESS_LEDGER_SEGMENT),
+		match: (path) => lowerSegmentsOf(path).includes(HARNESS_LEDGER_SEGMENT),
 		reason: (path) => `"${path}" is the harness's signed /execute ledger or its key, which only the harness itself may read or write`,
 	},
 ];
 
 const HOOK_MANAGER_FILES = new Set([".pre-commit-config.yaml", ".pre-commit-config.yml", "lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml", "lefthook-local.yml"]);
 
-function hasSegmentPair(parts: readonly string[], first: string, second: string): number {
-	for (let i = 0; i < parts.length - 1; i += 1) {
-		if (parts[i].toLowerCase() === first && parts[i + 1].toLowerCase() === second) {
-			return i;
-		}
-	}
-	return -1;
-}
-
 /** Write/delete targets that are deferred detonation: a later benign command (git hook, new shell, CI run) executes the payload. Applies to the `write`/`edit` tools and to bash redirects and write operands. */
 export const DETONATION_TARGETS: readonly PathPattern[] = [
 	{
 		id: "git-hooks",
 		match: (path, facts) => {
-			const parts = rootedSegmentsOf(path).parts.map((p) => p.toLowerCase());
+			const parts = lowerSegmentsOf(path);
 			const git = parts.indexOf(".git");
 			const hooks = parts.indexOf("hooks", git + 1);
 			// Submodule hooks live under .git/modules/<name>/hooks; core.hooksPath can name any directory.
@@ -405,67 +267,41 @@ export const DETONATION_TARGETS: readonly PathPattern[] = [
 	{
 		id: "git-config",
 		match: (path) => {
-			const parts = rootedSegmentsOf(path).parts.map((p) => p.toLowerCase());
-			const base = parts[parts.length - 1];
-			return parts.slice(0, -1).includes(".git") && (base === "config" || base === "config.worktree");
+			const parts = lowerSegmentsOf(path);
+			return parts.slice(0, -1).includes(".git") && ["config", "config.worktree"].includes(parts.at(-1) ?? "");
 		},
 		reason: (path) => `"${path}" is a git config file — an [alias] entry there executes on the next ordinary git command`,
 	},
 	{
 		id: "hook-manager",
 		match: (path) => {
-			const parts = rootedSegmentsOf(path).parts.map((p) => p.toLowerCase());
-			const base = parts[parts.length - 1] ?? "";
-			return parts.slice(0, -1).includes(".husky") || HOOK_MANAGER_FILES.has(base);
+			const parts = lowerSegmentsOf(path);
+			return parts.slice(0, -1).includes(".husky") || HOOK_MANAGER_FILES.has(parts.at(-1) ?? "");
 		},
 		reason: (path) => `"${path}" configures a git hook manager (husky, pre-commit, lefthook) — the next commit or push runs it`,
 	},
-	{
-		id: "bashrc",
-		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.bashrc`),
-		reason: (path) => `"${path}" is the user's shell rc file — it executes on every new shell`,
-	},
-	{
-		id: "bash-profile",
-		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.bash_profile`),
-		reason: (path) => `"${path}" is the user's shell profile — it executes on every new login shell`,
-	},
-	{
-		id: "profile",
-		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.profile`),
-		reason: (path) => `"${path}" is the user's POSIX shell profile — it executes on every new login shell`,
-	},
-	{
-		id: "gitconfig",
-		match: (path, facts) => sameCanonicalPath(path, `${facts.home.replace(/[/\\]+$/, "")}/.gitconfig`),
-		reason: (path) => `"${path}" is the user's global git config — an [alias] entry there executes on the next ordinary git command`,
-	},
+	homeFile("bashrc", [".bashrc"], "is the user's shell rc file — it executes on every new shell"),
+	homeFile("bash-profile", [".bash_profile"], "is the user's shell profile — it executes on every new login shell"),
+	homeFile("profile", [".profile"], "is the user's POSIX shell profile — it executes on every new login shell"),
+	homeFile("gitconfig", [".gitconfig"], "is the user's global git config — an [alias] entry there executes on the next ordinary git command"),
 	{
 		id: "github-workflows",
 		match: (path) => {
-			const { parts } = rootedSegmentsOf(path);
-			const idx = hasSegmentPair(parts, ".github", "workflows");
-			if (idx === -1 || idx + 2 !== parts.length - 1) {
-				return false;
-			}
-			const file = parts[parts.length - 1].toLowerCase();
-			return file.endsWith(".yml") || file.endsWith(".yaml");
+			const parts = lowerSegmentsOf(path);
+			return parts.at(-3) === ".github" && parts.at(-2) === "workflows" && /\.ya?ml$/.test(parts.at(-1) ?? "");
 		},
 		reason: (path) => `"${path}" is a GitHub Actions workflow — it runs on the next push/PR event, on GitHub's infrastructure`,
 	},
 	{
 		id: "agent-definitions",
 		match: (path, facts) =>
-			isWithinRoot(path, projectPath(facts, ".pi", "agents")) ||
-			isWithinRoot(path, projectPath(facts, ".agents")) ||
-			isWithinRoot(path, homePath(facts, ".pi", "agent", "agents")),
+			[projectPath(facts, ".pi", "agents"), projectPath(facts, ".agents"), homePath(facts, ".pi", "agent", "agents")].some((root) => isWithinRoot(path, root)),
 		reason: (path) => `"${path}" is a subagent definition; agent definitions are edited by a human outside Pi`,
 	},
 	{
 		id: "pi-settings",
 		match: (path, facts) =>
-			sameCanonicalPath(path, homePath(facts, ".pi", "agent", "settings.json")) ||
-			sameCanonicalPath(path, projectPath(facts, ".pi", "settings.json")),
+			sameCanonicalPath(path, homePath(facts, ".pi", "agent", "settings.json")) || sameCanonicalPath(path, projectPath(facts, ".pi", "settings.json")),
 		reason: (path) => `"${path}" is a Pi settings file that points at agent definitions; it is edited by a human outside Pi`,
 	},
 	{
@@ -479,11 +315,10 @@ export const DETONATION_TARGETS: readonly PathPattern[] = [
 export const GUARD_CODE_TARGETS: readonly PathPattern[] = [
 	{
 		id: "extension-code",
-		match: (path, facts) => {
-			const roots = [projectPath(facts, ".pi", "extensions"), projectPath(facts, ".pi", "npm")];
-			roots.push(homePath(facts, ".pi", "agent", "extensions"), homePath(facts, ".pi", "agent", "npm"));
-			return roots.some((root) => isWithinRoot(path, root)) || sameCanonicalPath(path, homePath(facts, ".pi", "agent", "models.json"));
-		},
+		match: (path, facts) =>
+			[projectPath(facts, ".pi", "extensions"), projectPath(facts, ".pi", "npm"), homePath(facts, ".pi", "agent", "extensions"), homePath(facts, ".pi", "agent", "npm")].some(
+				(root) => isWithinRoot(path, root),
+			) || sameCanonicalPath(path, homePath(facts, ".pi", "agent", "models.json")),
 		reason: (path) => `"${path}" is extension code or provider config that Pi loads with full permissions, the safety guard included`,
 	},
 ];
@@ -491,29 +326,19 @@ export const GUARD_CODE_TARGETS: readonly PathPattern[] = [
 /** Block the sensitive read classes; allow their benign neighbours (`.env.example`, `src/config.ts`). `ignore` names pattern ids to skip. */
 export function classifyPathRead(canonicalPath: string, facts: PathPolicyFacts, ignore: readonly string[] = []): PathVerdict {
 	const target = stripStreamSuffix(canonicalPath);
-	for (const pattern of SENSITIVE_READ_PATTERNS) {
-		if (!ignore.includes(pattern.id) && pattern.match(target, facts)) {
-			return { kind: "block", reason: pattern.reason(canonicalPath) };
-		}
-	}
-	return { kind: "allow" };
+	const hit = SENSITIVE_READ_PATTERNS.find((pattern) => !ignore.includes(pattern.id) && pattern.match(target, facts));
+	return hit === undefined ? { kind: "allow" } : { kind: "block", reason: hit.reason(canonicalPath) };
 }
 
 /** Names a glob is probed against; a basename glob that can match any of them is treated as a secret read. */
 export const SENSITIVE_NAME_PROBES: readonly string[] = [
-	".env",
-	".env.local",
-	".env.production",
-	"credentials",
-	"id_rsa",
-	"id_ed25519",
-	".git-credentials",
-	"auth.json",
-	"terraform.tfstate",
+	".env", ".env.local", ".env.production", "credentials", "id_rsa", "id_ed25519", ".git-credentials", "auth.json", "terraform.tfstate",
 ];
 
 const GLOB_META = /[*?[{]/;
-const SENSITIVE_DIR_NAMES: readonly string[] = [".aws", ".kube", ".ssh", ".gnupg"];
+
+// Home-level directories holding credentials, matched as a search-root segment or a wildcard directory under home.
+const SENSITIVE_SEARCH_ROOT_SEGMENTS: readonly string[] = [".aws", ".kube", ".ssh", ".gnupg"];
 
 // Compile one glob segment (`*`, `?`, `[..]`, `{a,b}`) to a case-insensitive anchored regex.
 function globSegmentRegex(segment: string): RegExp {
@@ -561,9 +386,7 @@ function globSegmentRegex(segment: string): RegExp {
  * A glob without metacharacters is classified as a literal path.
  */
 export function classifyReadGlob(canonicalGlob: string, facts: PathPolicyFacts): PathVerdict {
-	if (!GLOB_META.test(canonicalGlob)) {
-		return classifyPathRead(canonicalGlob, facts);
-	}
+	if (!GLOB_META.test(canonicalGlob)) return classifyPathRead(canonicalGlob, facts);
 	const { root, parts } = rootedSegmentsOf(canonicalGlob);
 	const firstMeta = parts.findIndex((part) => GLOB_META.test(part));
 	const prefix = joinRootAndParts(root, parts.slice(0, firstMeta));
@@ -572,58 +395,43 @@ export function classifyReadGlob(canonicalGlob: string, facts: PathPolicyFacts):
 	}
 	if (firstMeta < parts.length - 1 && sameCanonicalPath(prefix, facts.home)) {
 		const re = globSegmentRegex(parts[firstMeta]);
-		if (SENSITIVE_DIR_NAMES.some((name) => re.test(name))) {
+		if (SENSITIVE_SEARCH_ROOT_SEGMENTS.some((name) => re.test(name))) {
 			return { kind: "block", reason: `"${canonicalGlob}" has a wildcard directory that can match a credentials directory` };
 		}
 	}
 	const base = parts[parts.length - 1];
-	if (GLOB_META.test(base)) {
-		const re = globSegmentRegex(base);
-		const hit = SENSITIVE_NAME_PROBES.find((name) => re.test(name));
-		if (hit !== undefined) {
-			return { kind: "block", reason: `"${canonicalGlob}" can match "${hit}", a secrets file` };
-		}
-	}
-	return { kind: "allow" };
+	const baseRe = GLOB_META.test(base) ? globSegmentRegex(base) : undefined;
+	const hit = baseRe === undefined ? undefined : SENSITIVE_NAME_PROBES.find((name) => baseRe.test(name));
+	return hit === undefined ? { kind: "allow" } : { kind: "block", reason: `"${canonicalGlob}" can match "${hit}", a secrets file` };
 }
-
-// Home-level directories holding credentials; matched as a SEARCH ROOT segment, case-insensitively.
-const SENSITIVE_SEARCH_ROOT_SEGMENTS = new Set([".aws", ".kube", ".ssh", ".gnupg"]);
 
 /**
- * True when a recursive SEARCH ROOT (`grep`/`find`/`ls` path) would reach a sensitive location.
- * `classifyPathRead` matches file basename + parent, so a directory like `~/.aws` slipped through
- * while grep recursed into it. Blocks when:
- * - the root is at or below `$HOME` and a segment is in {@link SENSITIVE_SEARCH_ROOT_SEGMENTS}
- *   (anchored to home: an unanchored match blocked `tests/fixtures/.ssh/` and `node_modules/x/.aws/`);
- * - the root is `$HOME` or an ancestor of it, which reaches every secret directory.
- * Not covered, published in docs/SAFETY.md: a `kubeconfigEnv` outside `$HOME`.
+ * True when a recursive search root reaches a credentials directory below `$HOME`, or is `$HOME` or an ancestor of it.
+ * Anchored to home, so `tests/fixtures/.ssh/` does not fire; a `kubeconfigEnv` outside home is a published gap (docs/SAFETY.md).
  */
 export function isSensitiveSearchRoot(canonicalPath: string, facts: PathPolicyFacts): boolean {
-	const { parts } = rootedSegmentsOf(canonicalPath);
-	if (isWithinRoot(canonicalPath, facts.home) && parts.some((part) => SENSITIVE_SEARCH_ROOT_SEGMENTS.has(part.toLowerCase()))) {
-		return true;
-	}
-	return isWithinRoot(facts.home, canonicalPath);
+	const belowHome = isWithinRoot(canonicalPath, facts.home) && lowerSegmentsOf(canonicalPath).some((part) => SENSITIVE_SEARCH_ROOT_SEGMENTS.includes(part));
+	return belowHome || isWithinRoot(facts.home, canonicalPath);
 }
+
+// Read classes that block a write too: the ledger, and an 8.3 segment that can alias a protected name.
+// Resolved at load, in this order, so a renamed id throws instead of silently allowing the write.
+const WRITE_BLOCKS: readonly PathPattern[] = [
+	...DETONATION_TARGETS,
+	...["harness-ledger", "short-name-protected"].map((id) => {
+		const pattern = SENSITIVE_READ_PATTERNS.find((p) => p.id === id);
+		if (pattern === undefined) throw new Error(`paths.ts: no sensitive-read pattern "${id}"`);
+		return pattern;
+	}),
+];
 
 /** Detonation targets block regardless of project containment, then writes outside the project and the caller's explicit `scratchRoots` block; extension code asks. */
 export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFacts, scratchRoots: readonly string[] = []): PathVerdict {
 	const canonicalPath = stripStreamSuffix(rawCanonicalPath);
-	for (const target of DETONATION_TARGETS) {
-		if (target.match(canonicalPath, facts)) {
-			return { kind: "block", reason: target.reason(canonicalPath) };
-		}
-	}
-	for (const id of ["harness-ledger", "short-name-protected"]) {
-		const pattern = SENSITIVE_READ_PATTERNS.find((p) => p.id === id);
-		if (pattern?.match(canonicalPath, facts) === true) return { kind: "block", reason: pattern.reason(canonicalPath) };
-	}
+	const blocked = WRITE_BLOCKS.find((target) => target.match(canonicalPath, facts));
+	if (blocked !== undefined) return { kind: "block", reason: blocked.reason(canonicalPath) };
 	if (![facts.projectRoot, ...scratchRoots].some((root) => isWithinRoot(canonicalPath, root))) {
-		return {
-			kind: "block",
-			reason: `"${canonicalPath}" resolves outside the project root "${facts.projectRoot}"`,
-		};
+		return { kind: "block", reason: `"${canonicalPath}" resolves outside the project root "${facts.projectRoot}"` };
 	}
 	const guardCode = GUARD_CODE_TARGETS.find((target) => target.match(canonicalPath, facts));
 	return guardCode !== undefined ? { kind: "ask", reason: guardCode.reason(canonicalPath) } : { kind: "allow" };
