@@ -502,6 +502,7 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 	// Backtick-decoded scripts index the decoded `ParsedScript.source`, not the caller's string.
 	const sourceText = script.source ?? command;
 	let cd: { readonly dirs: readonly string[]; readonly known: boolean } | undefined;
+	const cdpath = /\bCDPATH\b/.test(sourceText);
 	// An assignment-only statement (`g=push`) has no name and executes nothing.
 	return commands.flatMap((node) => {
 		if (node.name === undefined) return [];
@@ -518,11 +519,14 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 		const rawSegment = sourceText.slice(node.pos, node.end);
 		const assignmentWords = [...node.prefix.map((a) => a.text), ...values.slice(0, resolved.index).filter((w) => ASSIGNMENT_WORD.test(w))];
 		const afterCd = cd === undefined ? {} : { afterCd: cd.known ? ("known" as const) : ("unknown" as const) };
-		if (CD_COMMANDS.has(normaliseExecutable(executable))) {
-			// `popd`, `cd -`, `cd ~user` and `cd "$D"` leave the directory unknowable here; a bare `cd` goes home.
-			const bare = normaliseExecutable(executable) !== "popd" && args.length === 0;
-			const target = bare ? "~" : normaliseExecutable(executable) === "popd" || args.length !== 1 || hasExpansionPart(words[resolved.index + 1]) ? "-" : args[0];
-			const literal = !target.startsWith("-") && (!target.startsWith("~") || /^~([/\\]|$)/.test(target));
+		const cdName = normaliseExecutable(executable);
+		if (CD_COMMANDS.has(cdName)) {
+			// `popd`, `pushd` with no target or `+N`/`-N` (stack rotation), `cd -`, `cd ~user` and `cd "$D"` leave the directory unknowable here.
+			const stackMove = cdName === "popd" || (cdName === "pushd" && (args.length === 0 || /^[+-]\d+$/.test(args[0])));
+			const target = stackMove ? "-" : args.length === 0 ? "~" : args.length !== 1 || hasExpansionPart(words[resolved.index + 1]) ? "-" : args[0];
+			// bash resolves a relative target that does not start with `.` or `..` through CDPATH first.
+			const viaCdpath = cdpath && !/^([/\\~]|\.\.?([/\\]|$)|[A-Za-z]:)/.test(target);
+			const literal = !viaCdpath && !target.startsWith("-") && (!target.startsWith("~") || /^~([/\\]|$)/.test(target));
 			cd = { dirs: [...(cd?.dirs ?? []), ...(literal ? [target] : [])], known: (cd?.known ?? true) && literal };
 		}
 		return [

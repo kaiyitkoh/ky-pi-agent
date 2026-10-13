@@ -104,8 +104,10 @@ docstring for the structural argument). Concretely, it catches:
   the one before and an absolute one starting over (`env -C /other git -C .
   commit` reads `/other`). After a `cd` the session directory is checked
   too, because a `cd` in a subshell does not persist, and a `cd` whose target
-  is not a literal directory (`cd "$D"`, `cd -`, `cd ~user`, `popd`) makes the
-  branch count as protected. `cd ~`, `cd ~/x` and a bare `cd` go home. The
+  is not a literal directory (`cd "$D"`, `cd -`, `cd ~user`, `popd`, a bare
+  `pushd`, `pushd +N`/`-N`, or, when `CDPATH` is assigned or exported
+  anywhere in the command, a relative target that does not start with `./`
+  or `../`) makes the branch count as protected. `cd ~`, `cd ~/x` and a bare `cd` go home. The
   same directory resolves every path argument and redirect: a path is
   classified in the session directory and in the `cd`/`pushd`/`env -C`
   target, so `cd ~ && cat .ssh/id_rsa` blocks, and after a `cd` that cannot
