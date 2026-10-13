@@ -148,6 +148,9 @@ const PHASE_FIVE_IDS = ["RB-05-01"] as const;
  */
 const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02", "RB-07-03"] as const;
 
+/** Entries a human has completed; each must carry a date-stamped PASSED instead of OUTSTANDING. */
+const PASSED_IDS: ReadonlySet<string> = new Set(["RB-07-03"]);
+
 /**
  * The Phase 8 entries this file governs.
  *
@@ -621,11 +624,16 @@ describe("Group B — the runbook is structurally complete", () => {
 	const runbook = readFileSync(RUNBOOK_PATH, "utf-8");
 
 	for (const id of ALL_IDS) {
-		it(`declares ${id} in a summary-table row marked OUTSTANDING`, () => {
+		const want = PASSED_IDS.has(id) ? "PASSED" : "OUTSTANDING";
+		it(`declares ${id} in a summary-table row marked ${want}`, () => {
 			const row = runbook
 				.split("\n")
 				.find((line) => line.trimStart().startsWith("|") && line.includes(id));
 			expect(row, `no summary-table row for ${id}`).toBeDefined();
+			if (want === "PASSED") {
+				expect(row).toContain("PASSED");
+				return;
+			}
 			expect(
 				row,
 				`the ${id} table row must carry OUTSTANDING — the table is what a reader skims, so a stale ` +
@@ -1095,6 +1103,10 @@ describe("Group C — every live check is still OUTSTANDING", () => {
 	const statuses = runbookEntryStatuses(readFileSync(RUNBOOK_PATH, "utf-8"));
 
 	for (const id of ALL_IDS) {
+		if (PASSED_IDS.has(id)) {
+			it(`${id} is PASSED`, () => expect(statuses[id]).toBe("PASSED"));
+			continue;
+		}
 		it(`${id} is OUTSTANDING`, () => {
 			expect(
 				statuses[id],

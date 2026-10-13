@@ -8,11 +8,10 @@ procedure; record results there, flipping the summary row and the `**Status:**`
 line together. Never paste a key, account id, profile name or work hostname
 into this repository.
 
-### 0. Before the first push (development machine)
+### 0. Account identifiers (done)
 
-RB-07-03 is still open: unpushed history carries an AWS account id, an IAM ARN
-and an admin profile name that the working tree no longer does. Decide rewrite
-or accept, per that entry, before `git push`.
+RB-07-03 is PASSED: the unpushed history was rewritten before the first push, so
+no account id, IAM ARN or admin profile name reached the remote.
 
 ### 1. Prerequisites
 
@@ -752,12 +751,13 @@ also prove that a real session authenticates.
    sets no environment variable at all, so with nothing in `AWS_PROFILE` Pi
    reports no Bedrock credentials even though the AWS SDK itself would resolve
    fine. A single `[default]` SSO profile does not help.
-2. Configure the persisting form: `pi auth login` → **Amazon Bedrock** → **"AWS
-   profile"**, and enter that same profile name. Never choose **"Existing AWS
-   credential chain"** — that branch stores `{ "type": "api_key" }` with no
-   `key` and no `env`. It is a no-op that looks like configuration, and it is
-   the single most likely way this check is reported as done while nothing was
-   configured.
+2. Configure the persisting form by hand: Pi 1.1.0 has no `pi auth login` (its
+   CLI has only `pi auth check|print-api-key|print-bearer-token`, and `/login`
+   asks for a Bedrock API key). Add to `~/.pi/agent/auth.json`:
+   `"amazon-bedrock": { "type": "api_key", "env": { "AWS_PROFILE": "<profile>" } }`,
+   then confirm with `pi auth check --provider amazon-bedrock`. An entry of
+   `{ "type": "api_key" }` with no `key` and no `env` is a no-op that looks like
+   configuration.
 
    `bin/bootstrap.sh` deliberately does **not** install this entry. The
    template `.pi/templates/auth-template.json` carries
@@ -770,8 +770,8 @@ also prove that a real session authenticates.
    step 1 above tells you to check. The run prints which entries it withheld
    and why. A fresh `PI_CODING_AGENT_DIR` therefore gets an `auth.json` holding
    `dashscope` and `deepseek` and **no** `amazon-bedrock` key — that is
-   correct, not a failed bootstrap. `pi auth login` writes the real entry, and
-   an existing `amazon-bedrock` entry is never touched, so a hand-configured
+   correct, not a failed bootstrap. Writing the entry by hand (step 2) is the real
+   configuration, and an existing `amazon-bedrock` entry is never touched, so a hand-configured
    one is never clobbered.
 3. Open a **new** shell, export nothing, select a Bedrock Claude model and run
    one ordinary turn.
@@ -1264,7 +1264,7 @@ the two is reported as `INCONSISTENT`, which is never an acceptable status.
 |----|-------|--------|
 | RB-07-01 | EXT-09 — the composed smoke ritual: one turn per provider, one subagent spawn, one blocked command, one wire dump | OUTSTANDING |
 | RB-07-02 | install the five pinned specs and reconcile `pi list` against `.pi/settings.json` | OUTSTANDING |
-| RB-07-03 | decide, before the first `git push`, what to do about the account identifiers still present in unpushed local history | OUTSTANDING |
+| RB-07-03 | decide, before the first `git push`, what to do about the account identifiers still present in unpushed local history | PASSED |
 
 ### RB-07-01 — EXT-09: the composed smoke ritual, run after any version bump
 
@@ -1447,7 +1447,14 @@ lockfile-comparison mechanism is sound. It does not prove `pi install` and
 
 ### RB-07-03 — the account identifiers redacted from the working tree are still in local history
 
-**Status:** OUTSTANDING
+**Status:** PASSED — 2026-10-13
+
+**Resolution.** Rewritten, not accepted. `git filter-repo` (2.47.0) replaced the
+identifiers with placeholders in file contents and commit messages across the
+unpushed range only (`origin/main..main`); pushed commits kept their hashes and
+`HEAD`'s tree was byte-identical before and after. `git log -p origin/main..main`
+then matched none of the identifiers. Rotate the static admin keys on the
+development machine anyway; that is outside this repository.
 
 **What happened.** Plan 07-10 verified the install gate's pre-authorisation
 ground (a) — "this dev machine has no credentials" — by actually running

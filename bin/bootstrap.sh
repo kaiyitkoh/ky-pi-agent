@@ -756,7 +756,7 @@ for (const key of Object.keys(tpl)) {
 if (skipped.length > 0) {
   console.log("  auth.json entries NOT installed (still hold a " + SENTINEL + " placeholder): " + skipped.join(", "));
   console.log("       installing one would SHADOW a working ambient value, so it is left out on purpose.");
-  console.log("       Configure it with `pi auth login` (choose \"AWS profile\"), or add the entry to");
+  console.log("       Add the entry by hand (Pi 1.1.0 has no `pi auth login`) to");
   console.log("       " + dst + " by hand. See RB-03-03 in docs/RUNBOOK.md.");
 }
 if (added.length === 0) {
