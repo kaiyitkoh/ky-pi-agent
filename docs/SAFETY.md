@@ -258,8 +258,10 @@ Branch lists are add-only. `safety.protectedBranches` (protected for commits
 and pushes) and `safety.pushProtectedBranches` (pushes only) in the user
 settings file and the project `.pi/settings.json` add names to the built-in
 `main`, `master` and `staging`; `main` stays first and nothing can remove a
-built-in. A value that is not an array, or a file that does not parse, keeps
-the defaults and shows a warning plus an audit row. Both files are read
+built-in. A leading UTF-8 BOM is stripped, as Pi does. A value that is not an
+array, or a file that does not parse, keeps the list that file last gave this
+process (the defaults if it never parsed) and shows a warning plus an audit
+row, once per distinct warning, including mid-session. Both files are read
 directly, even for an untrusted project, because Pi's settings merge replaces
 arrays and a hostile project file can only add branches here.
 For example, `{ "safety": { "protectedBranches": ["release"] } }` protects

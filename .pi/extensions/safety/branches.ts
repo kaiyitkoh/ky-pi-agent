@@ -26,18 +26,26 @@ function dedupe(names: readonly string[]): string[] {
 }
 
 // Files are read directly because Pi's settings merge replaces arrays and drops untrusted project settings; add-only lists can only tighten.
+// A file that stops parsing mid-session (often mid-edit) keeps the list it last gave this process rather than dropping to the built-ins.
+const lastGood = new Map<string, string[]>();
+
 function listFrom(path: string, key: string, warnings: string[]): string[] {
 	const read = readSettingValue(path, ["safety", key]);
+	const cacheKey = `${key}:${path}`;
+	const kept = lastGood.get(cacheKey);
+	const fallback = kept === undefined ? "built-in branches only" : `keeping the branches last read from it (${kept.join(", ") || "none"})`;
 	if (!read.ok) {
-		warnings.push(`${path}: safety.${key} ignored, the file does not parse (${read.reason}); built-in branches only`);
-		return [];
+		warnings.push(`${path}: safety.${key} ignored, the file does not parse (${read.reason}); ${fallback}`);
+		return kept ?? [];
 	}
-	if (read.value === undefined) return [];
-	if (!Array.isArray(read.value)) {
-		warnings.push(`${path}: safety.${key} must be an array of branch names; ignored, built-in branches only`);
-		return [];
+	if (read.value !== undefined && !Array.isArray(read.value)) {
+		warnings.push(`${path}: safety.${key} must be an array of branch names; ignored, ${fallback}`);
+		return kept ?? [];
 	}
-	return read.value.flatMap((v) => (typeof v === "string" && v.trim() !== "" ? [v.trim()] : []));
+	const values: unknown[] = Array.isArray(read.value) ? read.value : [];
+	const list = values.flatMap((v) => (typeof v === "string" && v.trim() !== "" ? [v.trim()] : []));
+	lastGood.set(cacheKey, list);
+	return list;
 }
 
 /** Built-in branches plus those added in the user and project settings files; nothing can be removed and `main` stays first. */

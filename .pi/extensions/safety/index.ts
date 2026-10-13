@@ -79,10 +79,24 @@ function toCanonicalRoot(absolutePath: string): string {
 	return canonicalisePathArg({ text: absolutePath, value: absolutePath }, { cwd: absolutePath, home: absolutePath });
 }
 
+// Settings are re-read on every call, so a file broken mid-session is reported once per distinct warning, not once per call.
+const reportedBranchWarnings = new Set<string>();
+
+function reportBranchWarnings(ctx: ExtensionContext, warnings: readonly string[], always: boolean): void {
+	if (warnings.length === 0) reportedBranchWarnings.clear();
+	for (const warning of warnings) {
+		if (!always && reportedBranchWarnings.has(warning)) continue;
+		reportedBranchWarnings.add(warning);
+		writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool: "settings", command: "", cwd: ctx.cwd, verdict: "block", reason: warning });
+		if (ctx.hasUI) ctx.ui.notify(warning, "warning");
+	}
+}
+
 /** Plain-data facts for evaluate(); the one place impure ctx.cwd, homedir() and KUBECONFIG are read. */
 function buildFacts(ctx: ExtensionContext): PolicyFacts {
 	const cwd = toCanonicalRoot(ctx.cwd);
 	const branches = effectiveBranches(ctx.cwd);
+	reportBranchWarnings(ctx, branches.warnings, false);
 	return {
 		cwd,
 		projectRoot: cwd,
@@ -509,10 +523,7 @@ export default function (pi: ExtensionAPI): void {
 		} catch {
 			// Swallowed deliberately.
 		}
-		for (const warning of effectiveBranches(ctx.cwd).warnings) {
-			writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool: "settings", command: "", cwd: ctx.cwd, verdict: "block", reason: warning });
-			if (ctx.hasUI) ctx.ui.notify(warning, "warning");
-		}
+		reportBranchWarnings(ctx, effectiveBranches(ctx.cwd).warnings, true);
 		const sessionId = sessionIdOf(ctx);
 		if (sessionId !== undefined) {
 			// Not fatal: the subagent launch branch fails closed on its own, but the cause is recorded and shown.

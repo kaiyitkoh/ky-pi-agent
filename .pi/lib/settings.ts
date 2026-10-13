@@ -9,7 +9,9 @@ export function readSettingValue(path: string, keys: readonly string[]): Setting
 	if (!existsSync(path)) return { ok: true, value: undefined };
 	let node: unknown;
 	try {
-		node = JSON.parse(readFileSync(path, "utf-8"));
+		// Pi strips a leading BOM too: pi-coding-agent dist/core/settings-manager.js:269 JSON.parse(stripBom(content)).
+		const text = readFileSync(path, "utf-8");
+		node = JSON.parse(text.charCodeAt(0) === 0xfeff ? text.slice(1) : text);
 	} catch (err) {
 		return { ok: false, reason: err instanceof Error ? err.message : String(err) };
 	}

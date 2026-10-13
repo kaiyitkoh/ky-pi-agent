@@ -73,7 +73,30 @@ describe("effectiveBranches", () => {
 		const r = effectiveBranches(project, agentDir);
 		expect(r.protectedBranches).toEqual(["main", "master"]);
 		expect(r.warnings.length).toBeGreaterThan(0);
+		expect(r.warnings[0]).toContain("built-in branches only");
 	});
+
+	it("reads a settings file saved with a UTF-8 BOM, as Pi does", () => {
+		write(agentDir, `${String.fromCharCode(0xfeff)}${JSON.stringify({ safety: { protectedBranches: ["production"] } })}`);
+		const r = effectiveBranches(project, agentDir);
+		expect(r.protectedBranches).toEqual(["main", "master", "production"]);
+		expect(r.warnings).toEqual([]);
+	});
+
+	it.each([["does not parse", "{ nope"], ["holds a non-array", JSON.stringify({ safety: { protectedBranches: "x" } })]])(
+		"keeps the last list read from a file that later %s, and warns",
+		(_label, broken) => {
+			user({ protectedBranches: ["production"], pushProtectedBranches: ["develop"] });
+			expect(effectiveBranches(project, agentDir).protectedBranches).toEqual(["main", "master", "production"]);
+			write(agentDir, broken);
+			const r = effectiveBranches(project, agentDir);
+			expect(r.protectedBranches).toEqual(["main", "master", "production"]);
+			expect(r.protectedBranches[0]).toBe("main");
+			expect(r.warnings.some((w) => w.includes("keeping the branches last read from it (production)"))).toBe(true);
+			user({ protectedBranches: [] });
+			expect(effectiveBranches(project, agentDir).protectedBranches).toEqual(["main", "master"]);
+		},
+	);
 
 	it("never moves main from index 0 and has no removal syntax", () => {
 		user({ protectedBranches: ["MAIN", "-main", "!master"] });
