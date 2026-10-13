@@ -9,7 +9,7 @@
  * Not re-proven here: gateCompletion's own predicate table (unit test).
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 
 import type { AssistantMessage, Context, FauxResponseStep } from "@earendil-works/pi-ai";
@@ -642,6 +642,19 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		const text = readFileSync(progressFile(h), "utf-8");
 		expect(text).toContain("degraded (ordinary prompt loop)");
 		expect(text).not.toMatch(/\bdelegated\b/);
+	});
+
+	it("an unreadable HEAD at settle still ends the shared run, so the next /execute is not refused as in flight", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		renameSync(join(h.repo, ".git"), join(h.repo, ".git-away"));
+		try {
+			await h.fire("agent_settled", { aborted: false });
+		} finally {
+			renameSync(join(h.repo, ".git-away"), join(h.repo, ".git"));
+		}
+		expect(isRunArmed(), "a leaked shared run refuses every later /quick and /execute").toBe(false);
+		expect(h.notes.at(-1)?.level).toBe("error");
 	});
 
 	it("a run whose agent_settled never arrived is cleared at session_start, so it cannot settle a later turn", async () => {

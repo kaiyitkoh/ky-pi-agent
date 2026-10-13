@@ -157,10 +157,15 @@ export default function (pi: ExtensionAPI): void {
 		if (event.aborted) return void (disarmExecuteRun(), disarmRun()); // an aborted run records no verdict and consumes no attempt
 		const verification = verificationRecord();
 		disarmExecuteRun();
+		const cwd = run.cwd;
+		let tree = "";
 		try {
-			const cwd = run.cwd;
-			const sha = currentSha(cwd);
-			const ended = endRun(sha, currentTree(cwd));
+			tree = currentTree(cwd);
+		} catch {
+			// An unknown tree never matches, so the gate rejects; ending the run here is what keeps it from staying armed.
+		}
+		const ended = endRun(headShaOrEmpty(cwd), tree);
+		try {
 			const checked = ended?.ok === true ? checkVerification(verification, run.verificationCommand, ended.sha) : undefined;
 			const verdict = ended?.ok === true && checked?.ok === false ? { ok: false as const, reason: checked.reason } : ended;
 			// Unarmed means another settle handler consumed the run; no verdict, so nothing is written.
