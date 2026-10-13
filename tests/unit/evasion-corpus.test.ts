@@ -35,7 +35,7 @@ const SAFETY_DOC_PATH = join(ROOT, "docs", "SAFETY.md");
 
 const HEADS = ["feat", "main"] as const;
 
-/** Facts with HEAD on `head` and config/branch lookups supplied, so config-driven push planning has something to read. */
+/** Facts with HEAD on `head`, an `origin` remote and branch lookups, so a push row reaches the destination check instead of blocking on an unknown remote. */
 function factsFor(head: (typeof HEADS)[number]): PolicyFacts {
 	return {
 		cwd: "C:/repo",
@@ -43,8 +43,8 @@ function factsFor(head: (typeof HEADS)[number]): PolicyFacts {
 		home: "C:/Users/tester",
 		currentBranchFor: () => head,
 		protectedBranches: ["main"],
-		gitConfigFor: () => [],
-		gitBranchFor: (_cwd, rev) => (rev === "HEAD" ? head : undefined),
+		gitConfigFor: (_cwd, key) => (key === "remote.origin.url" ? ["git@example.invalid:o/r.git"] : []),
+		gitBranchFor: (_cwd, rev) => (rev === "HEAD" ? head : /^[\w./-]+$/.test(rev) ? rev : undefined),
 	};
 }
 
@@ -86,7 +86,7 @@ describe("Group A -- every BLOCKED row returns its exact verdict through the rea
 	for (const head of HEADS) {
 		describe(`with HEAD on ${head}`, () => {
 			for (const row of BLOCKED_ROWS) {
-				const expected = row.verdict ?? "block";
+				const expected = (head === "feat" ? row.verdictOnFeature : undefined) ?? row.verdict ?? "block";
 				it(`${row.id} (${row.class}): ${JSON.stringify(row.input)} -> ${expected}`, () => {
 					const verdict = evaluate(row.tool, row.input, factsFor(head));
 					expect(
@@ -94,6 +94,12 @@ describe("Group A -- every BLOCKED row returns its exact verdict through the rea
 						`${row.id} (${row.class}) expected "${expected}" from evaluate("${row.tool}", ` +
 							`${JSON.stringify(row.input)}, ...) with HEAD on ${head} but got "${verdict.kind}". ${row.why}`,
 					).toBe(expected);
+					if (verdict.kind === "block") {
+						expect(verdict.reason, `${row.id} must block for its own reason, not because origin is unconfigured`).not.toContain(
+							"is not a remote configured",
+						);
+						if (row.reason !== undefined) expect(verdict.reason, `${row.id} blocked for the wrong reason`).toContain(row.reason);
+					}
 				});
 			}
 		});

@@ -221,8 +221,8 @@ describe("tool_call hook: ask confirms in the TUI and RPC only, and the wrapper 
 			initRepo(cwd);
 			let asked = 0;
 			const confirm = async (): Promise<boolean> => (asked++, true);
-			for (const [hasUI, mode] of [[false, "json"], [false, "print"], [false, "rpc"]] as const) {
-				const result = await hook({ toolName: "bash", input: { command: "git push origin feat" }, toolCallId: `tc-${mode}` }, ctxOf(cwd, { hasUI, mode, confirm }));
+			for (const [hasUI, mode] of [[false, "json"], [false, "print"], [false, "rpc"], [true, "json"], [true, "print"]] as const) {
+				const result = await hook({ toolName: "bash", input: { command: "git push origin feat" }, toolCallId: `tc-${mode}-${hasUI}` }, ctxOf(cwd, { hasUI, mode, confirm }));
 				expect(result?.block, `${mode} must refuse`).toBe(true);
 			}
 			expect(asked).toBe(0);

@@ -82,6 +82,10 @@ export interface EvasionCase {
 	readonly reference: string;
 	/** Exact verdict a `BLOCKED` row must return; absent means `block`. `terraform apply` is `confirm`, not `block`. */
 	readonly verdict?: "block" | "confirm" | "ask";
+	/** Verdict with HEAD on a feature branch when it differs: a plain push there asks a human instead of blocking. */
+	readonly verdictOnFeature?: "block" | "confirm" | "ask";
+	/** Text the block reason must contain, so a row cannot pass by blocking for an unrelated cause. */
+	readonly reason?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -227,6 +231,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: "git -C /c/other/repo push" },
 		expect: "BLOCKED",
+		verdictOnFeature: "ask",
 		why: "the -C flag lands in git.ts's subcommand-lookup slot instead of the real subcommand, so this resolves as an unclassified subcommand and fails closed -- still non-allow, but via the fail-closed default rather than a proper cwd-resolved push-write classification (a precision gap, not a security one, since the direction is still toward block).",
 		reference: "PITFALLS.md:459 (different repo, POSIX Git Bash path form)",
 	},
@@ -236,6 +241,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: WIN_DIFFERENT_REPO },
 		expect: "BLOCKED",
+		verdictOnFeature: "ask",
 		why: "same fail-closed unclassified-subcommand path as EV-12, in the Windows backslash spelling -- the printed reason shows the path mangled (backslashes stripped by Word.value's POSIX-escape handling, the same known limitation documented in policy.ts), but the mangling does not change the block outcome here.",
 		reference: "PITFALLS.md:459 (different repo, Windows path form); policy.ts module docstring 'a bash argument reaches canonicalisePathArg as Word.value-resolved'",
 	},
@@ -442,6 +448,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: "git.exe push" },
 		expect: "BLOCKED",
+		verdictOnFeature: "ask",
 		why: "confirmed by execution: exact-string `=== \"git\"` matching let `git.exe push` through as `allow` on protected main -- `git.exe` is not adversarial, it is what Git for Windows installs. Fixed by `shell.ts#normaliseExecutable` (basename, lower-cased, PATHEXT suffix stripped), used by both `policy.ts` and `infra.ts`.",
 		reference: "CR-03; shell.ts#normaliseExecutable",
 	},
@@ -451,6 +458,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: "/usr/bin/git push" },
 		expect: "BLOCKED",
+		verdictOnFeature: "ask",
 		why: "a path-qualified invocation resolves to the same basename `git` and must classify identically to the bare verb.",
 		reference: "CR-03; shell.ts#normaliseExecutable",
 	},
@@ -460,6 +468,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: "./git push" },
 		expect: "BLOCKED",
+		verdictOnFeature: "ask",
 		why: "a `./`-relative invocation resolves to the same basename `git` and must classify identically to the bare verb.",
 		reference: "CR-03; shell.ts#normaliseExecutable",
 	},
@@ -827,6 +836,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: `g"i"t p'u'sh` },
 		expect: "BLOCKED",
+		verdictOnFeature: "ask",
 		why: "unbash resolves the split quoting into Word.value = \"git\"/\"push\" the same as an unquoted invocation, so this classifies and blocks identically to plain `git push`.",
 		reference: "PITFALLS.md:464 (quoting/whitespace, split-quote form)",
 	},
@@ -845,6 +855,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: LINE_CONTINUATION },
 		expect: "BLOCKED",
+		verdictOnFeature: "ask",
 		why: "a real backslash-newline line continuation is reassembled by unbash into one `git push` command before this guard ever sees it, so it classifies and blocks normally.",
 		reference: "PITFALLS.md:464 (quoting/whitespace, line-continuation form)",
 	},
@@ -1455,6 +1466,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: {"command": "git-push origin main"},
 		expect: "BLOCKED",
+		reason: "protected",
 		why: "a git alias, config override, environment variable or alternate entry point reaches a push without the push checks; unlisted subcommands and options block on every branch.",
 		reference: "safety/shell.ts, git.ts, policy.ts, infra.ts",
 	},
@@ -1500,6 +1512,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: {"command": "git push origin HEAD:main"},
 		expect: "BLOCKED",
+		reason: "protected",
 		why: "a git alias, config override, environment variable or alternate entry point reaches a push without the push checks; unlisted subcommands and options block on every branch.",
 		reference: "safety/shell.ts, git.ts, policy.ts, infra.ts",
 	},
