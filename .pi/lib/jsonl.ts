@@ -257,16 +257,21 @@ function escapeForRegExp(literal: string): string {
  *
  * Takes `cwd` so it is confined like `logPath`: it reads, renames and unlinks
  * relative to `file`'s directory, so `file` must sit inside `logDir(cwd)` too.
+ *
+ * `due` is re-asked before anything moves: a sibling process may have rotated since the caller's stat, and
+ * rotating its near-empty successor again would spend a retention slot and evict a full file.
  */
 export function rotate(
 	cwd: string,
 	file: string,
 	maxRotated: number = DEFAULT_MAX_ROTATED_FILES,
 	renameFile: typeof renameSync = renameSync,
+	due: () => boolean = () => true,
 ): boolean {
 	// The same second line of defence `logPath` applies, for the entry point a
 	// caller can reach with a path it built itself.
 	assertInsideLogDir(cwd, file);
+	if (!due()) return true;
 	const stem = file.slice(0, -EXT.length);
 	const dir = stem.slice(0, stem.lastIndexOf(sep) + 1);
 	const prefix = stem.slice(stem.lastIndexOf(sep) + 1);
@@ -303,7 +308,7 @@ export function rotate(
 		}
 	}
 
-	if (maxRotated >= 1 && isRegularFile(file)) {
+	if (maxRotated >= 1 && isRegularFile(file) && due()) {
 		const dst = rotatedPath(file, 1);
 		// Another process rotated in between and its `.1` is still in place; the live file it left behind is new.
 		if (existsSync(dst)) return true;
@@ -389,7 +394,11 @@ export function appendJsonl(
 		const backoff = rotateBackoffSlot();
 		const state = backoff.get(file);
 		if (state === undefined || nowMs >= state.retryAt) {
-			const rotated = rotate(cwd, file, maxRotated, opts.renameFile);
+			const overCap = (): boolean => {
+				const live = regularFileSize(file);
+				return live > 0 && live + bytes > cap;
+			};
+			const rotated = rotate(cwd, file, maxRotated, opts.renameFile, overCap);
 			const fresh = regularFileSize(file);
 			// A rotation skipped to avoid overwriting another process's file counts as a failure while the live file is still over.
 			if (rotated && !(fresh > 0 && fresh + bytes > cap)) {
