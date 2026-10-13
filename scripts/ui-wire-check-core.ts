@@ -6,6 +6,7 @@ export interface WireAnalysis {
 	hashes: string[];
 	stable: boolean;
 	truncated: boolean;
+	missing: number;
 	probeHits: { probe: string; request: number }[];
 	skipped: number;
 }
@@ -94,14 +95,19 @@ export function analyseWire(
 	const hashes: string[] = [];
 	const probeHits: { probe: string; request: number }[] = [];
 	let truncated = false;
+	let missing = 0;
 	mine.forEach((rec, i) => {
 		const text = extractSystemText(rec.payload);
 		if (text === undefined || text.includes(TRUNCATED_MARKER)) {
 			truncated = true;
 		}
-		hashes.push(sha256(text ?? ""));
+		if (text === undefined || text.trim() === TRUNCATED_MARKER) {
+			missing += 1;
+			return;
+		}
+		hashes.push(sha256(text));
 		for (const probe of probes) {
-			if (text?.includes(probe)) {
+			if (text.includes(probe)) {
 				probeHits.push({ probe, request: i + 1 });
 			}
 		}
@@ -112,6 +118,7 @@ export function analyseWire(
 		hashes,
 		stable: new Set(hashes).size <= 1,
 		truncated,
+		missing,
 		probeHits,
 		skipped,
 	};
@@ -141,7 +148,7 @@ export function turnRatios(lines: readonly string[], sessionId: string): { corr:
 }
 
 export function verdict(
-	wire: Pick<WireAnalysis, "requests" | "stable" | "truncated" | "probeHits">,
+	wire: Pick<WireAnalysis, "requests" | "stable" | "truncated" | "missing" | "probeHits">,
 	ratios: readonly { corr: string; ratio: number }[],
 	minRatio: number,
 ): Verdict {
@@ -167,5 +174,12 @@ export function verdict(
 		reasons.push("system text truncated by redaction; hash comparison is best-effort");
 	}
 	const failed = reasons.filter((r) => !r.startsWith("system text truncated"));
-	return { status: failed.length > 0 ? "FAIL" : "PASS", reasons };
+	if (failed.length > 0) {
+		return { status: "FAIL", reasons };
+	}
+	// Without system text there is nothing to compare, so a clean result proves nothing.
+	if (wire.missing > 0) {
+		return { status: "INSUFFICIENT", reasons: [...reasons, `${wire.missing} request(s) had no extractable system text`] };
+	}
+	return { status: "PASS", reasons };
 }

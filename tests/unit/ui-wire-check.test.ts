@@ -73,9 +73,17 @@ describe("analyseWire", () => {
 		expect(w.requests).toBe(2);
 		expect(w.stable).toBe(true);
 	});
-	it("flags truncation by redaction", () => {
+	it("flags truncation by redaction and counts a fully truncated prompt as missing", () => {
 		const w = analyseWire([req("s1", "[redacted:truncated]"), req("s1", "[redacted:truncated]")], { probes: [] });
 		expect(w.truncated).toBe(true);
+		expect(w.missing).toBe(2);
+		expect(w.hashes).toEqual([]);
+	});
+	it("counts requests with no system text as missing", () => {
+		const noSystem = JSON.stringify({ kind: "main.request", sessionId: "s1", payload: { messages: [{ role: "user", content: "u" }] } });
+		const w = analyseWire([noSystem, noSystem], { probes: ["u"] });
+		expect(w.missing).toBe(2);
+		expect(w.probeHits).toEqual([]);
 	});
 });
 
@@ -114,6 +122,17 @@ describe("verdict", () => {
 	});
 	it("is insufficient with one request", () => {
 		const w = analyseWire([req("s1", "a")], { probes: [] });
+		expect(verdict(w, [{ corr: "c", ratio: 0.9 }], 0.5).status).toBe("INSUFFICIENT");
+	});
+	it("is insufficient, never a pass, when no system text was extracted", () => {
+		const noSystem = JSON.stringify({ kind: "main.request", sessionId: "s1", payload: { contents: [] } });
+		const w = analyseWire([noSystem, noSystem], { probes: ["ky-leak"] });
+		const v = verdict(w, [{ corr: "c", ratio: 0.9 }], 0.5);
+		expect(v.status).toBe("INSUFFICIENT");
+		expect(v.reasons.join(" ")).toContain("no extractable system text");
+	});
+	it("is insufficient when redaction truncated the whole system prompt", () => {
+		const w = analyseWire([req("s1", "[redacted:truncated]"), req("s1", "[redacted:truncated]")], { probes: [] });
 		expect(verdict(w, [{ corr: "c", ratio: 0.9 }], 0.5).status).toBe("INSUFFICIENT");
 	});
 	it("is insufficient with no turn-2 ratio", () => {

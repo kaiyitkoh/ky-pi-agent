@@ -66,6 +66,7 @@ out.push(`session: ${wire.sessionId ?? "(none)"}`);
 out.push(`requests: ${wire.requests}`);
 out.push(`distinct system hashes: ${new Set(wire.hashes).size} (${[...new Set(wire.hashes)].map((h) => h.slice(0, 12)).join(", ")})`);
 if (wire.skipped > 0) out.push(`malformed lines skipped: ${wire.skipped}`);
+if (wire.missing > 0) out.push(`requests without system text: ${wire.missing}`);
 for (const hit of wire.probeHits) out.push(`probe hit: "${hit.probe}" in request ${hit.request}`);
 for (const r of ratios) out.push(`cacheRead ratio ${r.corr}: ${r.ratio.toFixed(2)}`);
 out.push(`ui-wire-check: ${result.status}`);
