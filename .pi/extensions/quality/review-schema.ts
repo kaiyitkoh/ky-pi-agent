@@ -431,7 +431,7 @@ export function renderReviewMarkdown(review: ReviewArtifact): string {
 	lines.push("");
 	const design = review.designPass;
 	if (design === undefined) {
-		lines.push("Design pass NOT COMPUTED.");
+		lines.push("No design-pass record was supplied.");
 	} else {
 		const signalText = Object.entries(design.signals).map(([k, v]) => `${k}=${String(v)}`).join(", ");
 		lines.push(`${design.ran ? "Ran" : "Did not fire"}: ${design.note} (${signalText}).`);

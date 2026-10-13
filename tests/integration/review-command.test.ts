@@ -12,19 +12,24 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { allowanceOf, appendLedger, ledgerFile } from "../../.pi/extensions/execute/ledger.ts";
 import { renderProgressAppend } from "../../.pi/extensions/execute/progress.ts";
 import { renderSpecMarkdown, type SpecArtifact } from "../../.pi/extensions/grill/spec-schema.ts";
+import { buildReviewerContext } from "../../.pi/extensions/quality/reviewer.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
 import { commitFile, makeTempRepo } from "../helpers/git.ts";
 
 const mocks = vi.hoisted(() => ({
 	review: undefined as unknown,
 	designCalls: 0,
+	context: "",
 	calls: [] as { args: string[]; reviewWritten: boolean }[],
 	reviewPath: "",
 }));
 
 vi.mock("../../.pi/extensions/quality/reviewer.ts", async (importOriginal) => ({
 	...(await importOriginal<object>()),
-	runReview: async () => ({ ok: true, review: mocks.review }),
+	runReview: async (_ctx: unknown, input: { contract: Parameters<typeof buildReviewerContext>[0] }) => {
+		mocks.context = buildReviewerContext(input.contract);
+		return { ok: true, review: mocks.review };
+	},
 }));
 vi.mock("../../.pi/extensions/quality/design-review.ts", async (importOriginal) => ({
 	...(await importOriginal<object>()),
@@ -83,16 +88,25 @@ afterEach(() => {
 const git = (repo: string, args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
 
 /** A repo whose HEAD is one recorded, pushed task commit on top of `staging`; `extra` lands in the same commit. */
-function setup(extra?: string, aSource = "export const a = 1;\n") {
+function setup(extra?: string, aSource = "export const a = 1;\n", opts: { aName?: string; deleteOld?: boolean } = {}) {
+	const aName = opts.aName ?? "a.ts";
 	const extras = extra === undefined ? [] : extra.split(",");
 	const repo = makeTempRepo("kypi-review-");
 	repos.push(repo);
 	const baseSha = commitFile(repo, "README.md", "base\n", "base");
-	git(repo, ["branch", "staging"]);
 	mkdirSync(join(repo, "src"), { recursive: true });
-	writeFileSync(join(repo, "src", "a.ts"), aSource);
+	if (opts.deleteOld) commitFile(repo, "src/old.ts", "old\n", "old");
+	git(repo, ["branch", "staging"]);
+	if (!opts.deleteOld) writeFileSync(join(repo, "src", aName), aSource);
 	for (const e of extras) writeFileSync(join(repo, "src", e), "const x = 1;\n");
-	const sha = commitFile(repo, "src/a.ts", aSource, "task");
+	let sha: string;
+	if (opts.deleteOld) {
+		git(repo, ["rm", "-q", "--", "src/old.ts"]);
+		git(repo, ["commit", "-q", "-m", "task"]);
+		sha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf-8" }).trim();
+	} else {
+		sha = commitFile(repo, `src/${aName}`, aSource, "task");
+	}
 	if (extras.length > 0) {
 		git(repo, ["add", "--", ...extras.map((e) => `src/${e}`)]);
 		git(repo, ["commit", "--amend", "--no-edit"]);
@@ -127,6 +141,57 @@ function setup(extra?: string, aSource = "export const a = 1;\n") {
 }
 
 describe("/review -- the real handler", () => {
+	it("a Terraform-only change reviews through to REVIEW.md with the import graph marked empty", async () => {
+		const h = setup(undefined, 'resource "null_resource" "a" {}\n', { aName: "main.tf" });
+		await h.run(SLUG);
+		expect(existsSync(mocks.reviewPath), h.notes.map((n) => n.text).join("; ")).toBe(true);
+		expect(mocks.context).toContain("none: no JavaScript or TypeScript file changed");
+	});
+
+	it("a deletion-only change reviews through to REVIEW.md with the deleted path listed", async () => {
+		const h = setup(undefined, "", { deleteOld: true });
+		await h.run(SLUG);
+		expect(existsSync(mocks.reviewPath), h.notes.map((n) => n.text).join("; ")).toBe(true);
+		expect(mocks.context).toContain("(deleted in this change)");
+	});
+
+	it("refuses with the branch name and a fetch hint when staging exists nowhere", async () => {
+		const h = setup();
+		git(h.repo, ["branch", "-D", "staging"]);
+		await h.run(SLUG);
+		expect(existsSync(mocks.reviewPath)).toBe(false);
+		const last = h.notes.at(-1);
+		expect(last?.level).toBe("error");
+		expect(last?.text).toContain('"staging"');
+		expect(last?.text).toContain("git fetch");
+	});
+
+	it("measures against the remote-tracking staging ref, not a stale local branch", async () => {
+		const h = setup();
+		git(h.repo, ["update-ref", "refs/remotes/origin/staging", "HEAD"]);
+		await h.run(SLUG);
+		expect(existsSync(mocks.reviewPath), "origin/staging is HEAD, so nothing changed against it; a local-branch base would have reviewed a.ts").toBe(false);
+		expect(mocks.calls).toHaveLength(0);
+	});
+
+	it("a Missing requirement verdict needs approval, and a decline opens nothing", async () => {
+		mocks.review = { ...CLEAN, verdicts: [{ requirementId: "R1", status: "Missing", evidence: "src/a.ts:1" }] };
+		const h = setup();
+		h.setApprove(false);
+		await h.run(SLUG);
+		expect(h.confirms.join("\n")).toContain("R1: Missing");
+		expect(mocks.calls).toHaveLength(0);
+	});
+
+	it("an approved Missing verdict opens the MR and the body lists the verdict", async () => {
+		mocks.review = { ...CLEAN, verdicts: [{ requirementId: "R1", status: "Partial", evidence: "src/a.ts:1" }] };
+		const h = setup();
+		await h.run(SLUG);
+		expect(mocks.calls).toHaveLength(1);
+		const body = mocks.calls[0]?.args.at(-1) ?? "";
+		expect(body).toContain("- R1: Partial (src/a.ts:1)");
+	});
+
 	it("an eight-file change runs the design pass once and REVIEW.md carries its section and findings", async () => {
 		const h = setup("b.ts,c.ts,d.ts,e.ts,f.ts,g.ts,h.ts", "const a = 1;\n");
 		await h.run(SLUG);

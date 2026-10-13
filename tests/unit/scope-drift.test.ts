@@ -1,6 +1,12 @@
-import { describe, expect, it } from "vitest";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
-import { compareScope } from "../../.pi/extensions/review/scope-drift.ts";
+import { afterEach, describe, expect, it } from "vitest";
+
+import { MAX_TOUCHED_FILE_BYTES, compareScope, readTouchedFiles, resolveBaseRef } from "../../.pi/extensions/review/scope-drift.ts";
+import { commitFile, headSha, makeTempRepo } from "../helpers/git.ts";
 
 interface Row {
 	readonly name: string;
@@ -95,4 +101,81 @@ describe("compareScope", () => {
 			expect(report.undelivered).toEqual(row.undelivered);
 		});
 	}
+});
+
+const scratch: string[] = [];
+afterEach(() => {
+	for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true });
+});
+const git = (repo: string, args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
+
+describe("resolveBaseRef", () => {
+	it("prefers the remote-tracking staging ref over a stale local branch", () => {
+		const repo = makeTempRepo("kypi-base-");
+		scratch.push(repo);
+		commitFile(repo, "a.txt", "1", "one");
+		git(repo, ["branch", "staging"]);
+		commitFile(repo, "a.txt", "2", "two");
+		git(repo, ["update-ref", "refs/remotes/origin/staging", headSha(repo)]);
+		expect(resolveBaseRef(repo, "staging")).toEqual({ ok: true, ref: "refs/remotes/origin/staging" });
+	});
+
+	it("falls back to a local staging branch when there is no remote-tracking ref", () => {
+		const repo = makeTempRepo("kypi-base-");
+		scratch.push(repo);
+		commitFile(repo, "a.txt", "1", "one");
+		git(repo, ["branch", "staging"]);
+		expect(resolveBaseRef(repo, "staging")).toEqual({ ok: true, ref: "refs/heads/staging" });
+	});
+
+	it("refuses with the branch name and the fetch command when staging exists nowhere", () => {
+		const repo = makeTempRepo("kypi-base-");
+		scratch.push(repo);
+		commitFile(repo, "a.txt", "1", "one");
+		const r = resolveBaseRef(repo, "staging");
+		expect(r.ok).toBe(false);
+		if (!r.ok) {
+			expect(r.reason).toContain('"staging"');
+			expect(r.reason).toContain("git fetch origin staging");
+		}
+	});
+});
+
+describe("readTouchedFiles", () => {
+	function dir(): string {
+		const d = mkdtempSync(join(tmpdir(), "kypi-touched-"));
+		scratch.push(d);
+		return d;
+	}
+
+	it("returns text in full and notes a deleted path instead of throwing", () => {
+		const d = dir();
+		writeFileSync(join(d, "a.ts"), "const a = 1;\n");
+		const [a, gone] = readTouchedFiles(d, ["a.ts", "gone.ts"]);
+		expect(a).toEqual({ path: "a.ts", contents: "const a = 1;\n" });
+		expect(gone?.contents).toContain("deleted");
+	});
+
+	it("omits a binary file's bytes and says so with its size", () => {
+		const d = dir();
+		writeFileSync(join(d, "img.bin"), Buffer.from([1, 2, 0, 3, 4]));
+		const [bin] = readTouchedFiles(d, ["img.bin"]);
+		expect(bin?.contents).toBe("(content omitted: binary, 5 bytes)");
+	});
+
+	it.each(["package-lock.json", "pnpm-lock.yaml", "yarn.lock", "Cargo.lock", "poetry.lock"])("omits the %s lockfile", (name) => {
+		const d = dir();
+		mkdirSync(join(d, "sub"));
+		writeFileSync(join(d, "sub", name), "x".repeat(50));
+		const [lock] = readTouchedFiles(d, [`sub/${name}`]);
+		expect(lock?.contents).toBe("(content omitted: lockfile, 50 bytes)");
+	});
+
+	it("cuts a text file over the cap and marks the cut", () => {
+		const d = dir();
+		writeFileSync(join(d, "big.txt"), "y".repeat(MAX_TOUCHED_FILE_BYTES + 500));
+		const [big] = readTouchedFiles(d, ["big.txt"]);
+		expect(big?.contents.length).toBeLessThan(MAX_TOUCHED_FILE_BYTES + 200);
+		expect(big?.contents).toContain(`truncated: first ${MAX_TOUCHED_FILE_BYTES} of ${MAX_TOUCHED_FILE_BYTES + 500} bytes`);
+	});
 });

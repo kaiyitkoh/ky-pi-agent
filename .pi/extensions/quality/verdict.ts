@@ -9,6 +9,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
+import { deriveNeed } from "../routing/guard.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 import type { ReviewArtifact, ReviewFinding } from "./review-schema.ts";
 import { buildReviewerContext, type ReviewerContractInput } from "./reviewer.ts";
@@ -23,7 +24,8 @@ export type WorkflowStop =
  *   (1) symptomatic -> stop with needsApproval, even with zero findings (the change's nature is the problem).
  *   (2) workaround -> stop with needsApproval, quoting properFix and deferralReason so the debt is in the message.
  *   (3) any surviving BLOCKER -> stop without approval; after (1) and (2) so a symptomatic fix with no BLOCKER still needs approval.
- *   (4) otherwise no stop; WARNING and NIT never stop.
+ *   (4) any Partial or Missing requirement verdict -> stop with needsApproval, naming each requirement.
+ *   (5) otherwise no stop; WARNING and NIT never stop.
  */
 export function decideWorkflowStop(review: ReviewArtifact): WorkflowStop {
 	if (review.classification === "symptomatic") {
@@ -31,7 +33,7 @@ export function decideWorkflowStop(review: ReviewArtifact): WorkflowStop {
 			stop: true,
 			needsApproval: true,
 			reason:
-				`this change is classified "symptomatic" (QUAL-05) -- ${review.classificationJustification}`,
+				`this change is classified "symptomatic" -- ${review.classificationJustification}`,
 		};
 	}
 
@@ -40,7 +42,7 @@ export function decideWorkflowStop(review: ReviewArtifact): WorkflowStop {
 			stop: true,
 			needsApproval: true,
 			reason:
-				`this change is classified "workaround" (QUAL-05) -- ${review.classificationJustification}. ` +
+				`this change is classified "workaround" -- ${review.classificationJustification}. ` +
 				`Proper fix: ${review.properFix ?? ""}. Deferred because: ${review.deferralReason ?? ""}.`,
 		};
 	}
@@ -52,7 +54,16 @@ export function decideWorkflowStop(review: ReviewArtifact): WorkflowStop {
 			stop: true,
 			needsApproval: false,
 			reason:
-				`${survivingBlockers.length} BLOCKER finding(s) survived refutation (GATE-06) -- ${names}`,
+				`${survivingBlockers.length} BLOCKER finding(s) survived refutation -- ${names}`,
+		};
+	}
+
+	const unmet = review.verdicts.filter((verdict) => verdict.status !== "Implemented");
+	if (unmet.length > 0) {
+		return {
+			stop: true,
+			needsApproval: true,
+			reason: `requirement(s) not fully implemented -- ${unmet.map((v) => `${v.requirementId}: ${v.status} (${v.evidence})`).join("; ")}`,
 		};
 	}
 
@@ -171,16 +182,15 @@ export async function runRefuteOrPromote(
 	];
 
 	for (const finding of blockers) {
-		const messages: Message[] = [
-			{ role: "user", content: buildRefutationMessage(finding, context), timestamp: Date.now() },
-		];
+		const prompt = buildRefutationMessage(finding, context);
+		const messages: Message[] = [{ role: "user", content: prompt, timestamp: Date.now() }];
 
 		const start = process.hrtime.bigint();
 		const message: AssistantMessage = await runSingleShotRole(ctx, {
 			role: "reviewer",
 			systemPrompt: REFUTATION_SYSTEM_PROMPT,
 			messages,
-			need: {},
+			need: deriveNeed(ctx, { promptChars: prompt.length + REFUTATION_SYSTEM_PROMPT.length }),
 			tools,
 		});
 		const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;

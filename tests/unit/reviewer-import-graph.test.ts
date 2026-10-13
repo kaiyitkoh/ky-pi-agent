@@ -11,7 +11,7 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { buildImportGraph } from "../../.pi/extensions/quality/reviewer.ts";
+import { buildImportGraph, buildReviewerContext } from "../../.pi/extensions/quality/reviewer.ts";
 
 describe("buildImportGraph -- import ... from, proved first (paired positive)", () => {
 	it("an ordinary import is recorded", () => {
@@ -72,5 +72,24 @@ describe("buildImportGraph -- still out of scope, deliberately (unchanged by WR-
 		const text = 'const mod = await import("./dynamic.ts");\n';
 		const graph = buildImportGraph([{ path: "src/a.ts", text }]);
 		expect(graph).toEqual([{ from: "src/a.ts", to: [] }]);
+	});
+});
+
+describe("buildReviewerContext -- an empty import graph", () => {
+	const base = {
+		diff: "diff --git a/main.tf b/main.tf\n+resource {}\n",
+		touchedFiles: [{ path: "main.tf", contents: "resource {}\n" }],
+		gateReport: "typecheck: UNAVAILABLE",
+		requirements: [{ id: "R1", text: "t" }],
+		filesTouchedUnion: ["main.tf"],
+	};
+
+	it("renders an explicit none line instead of throwing", () => {
+		const out = buildReviewerContext({ ...base, importGraph: [] });
+		expect(out).toContain("none: no JavaScript or TypeScript file changed");
+	});
+
+	it("still throws for the other absent elements", () => {
+		expect(() => buildReviewerContext({ ...base, importGraph: [], touchedFiles: [] })).toThrow(/touchedFiles/);
 	});
 });

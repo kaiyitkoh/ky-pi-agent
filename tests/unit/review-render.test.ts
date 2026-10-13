@@ -63,3 +63,22 @@ describe("the model cannot supply drift", () => {
 		expect(Object.keys(submitReviewParameters.properties).filter((k) => /drift/i.test(k))).toEqual([]);
 	});
 });
+
+describe("REVIEW.md Design review section", () => {
+	const SIGNALS = { filesTouched: 1, loopWrapsQuery: false };
+
+	it("says the pass did not fire and shows the signals", () => {
+		const md = renderReviewMarkdown(artifact({ designPass: { ran: false, note: "no signal fired", signals: SIGNALS } }));
+		expect(md).toContain("## Design review");
+		expect(md).toContain("Did not fire: no signal fired (filesTouched=1, loopWrapsQuery=false).");
+	});
+
+	it("says the pass ran", () => {
+		const md = renderReviewMarkdown(artifact({ designPass: { ran: true, note: "2 finding(s) added", signals: SIGNALS } }));
+		expect(md).toContain("Ran: 2 finding(s) added");
+	});
+
+	it("is never silently absent", () => {
+		expect(renderReviewMarkdown(artifact())).toContain("No design-pass record was supplied.");
+	});
+});

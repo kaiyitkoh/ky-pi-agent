@@ -421,3 +421,26 @@ describe("GATE-06 / QUAL-05 — refute-or-promote, the bounded loop, and the pur
 		);
 	});
 });
+
+describe("decideWorkflowStop -- requirement verdicts", () => {
+	const verdict = (status: "Implemented" | "Partial" | "Missing", id = "R1") => ({ requirementId: id, status, evidence: "src/a.ts:1" });
+
+	it.each(["Missing", "Partial"] as const)("a %s verdict with no BLOCKER stops for approval and names the requirement", (status) => {
+		const stop = decideWorkflowStop(reviewWithFindings([], { verdicts: [verdict("Implemented", "R0"), verdict(status, "R7")] }));
+		expect(stop.stop).toBe(true);
+		if (stop.stop) {
+			expect(stop.needsApproval).toBe(true);
+			expect(stop.reason).toContain("R7: " + status);
+			expect(stop.reason).not.toContain("R0");
+		}
+	});
+
+	it("all-Implemented verdicts do not stop", () => {
+		expect(decideWorkflowStop(reviewWithFindings([], { verdicts: [verdict("Implemented")] }))).toEqual({ stop: false });
+	});
+
+	it("a surviving BLOCKER still stops without approval even when a verdict is Missing", () => {
+		const stop = decideWorkflowStop(reviewWithFindings([blockerFinding()], { verdicts: [verdict("Missing")] }));
+		expect(stop.stop && stop.needsApproval).toBe(false);
+	});
+});

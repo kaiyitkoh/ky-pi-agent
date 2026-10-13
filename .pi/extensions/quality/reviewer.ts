@@ -8,6 +8,8 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
 import { redactString } from "../diagnostics/redact.ts";
+import { isProseToolCall } from "../diagnostics/prose.ts";
+import { deriveNeed } from "../routing/guard.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 import {
 	NIT_CAP,
@@ -93,6 +95,7 @@ function renderFilesTouchedUnion(paths: readonly string[]): string {
 
 /** One line per declared target, or "(no declared imports)"; an entry with empty `to` is a real measurement. */
 function renderImportGraph(entries: readonly ImportGraphEntry[]): string {
+	if (entries.length === 0) return "none: no JavaScript or TypeScript file changed";
 	return entries
 		.map((entry) =>
 			entry.to.length === 0
@@ -103,8 +106,8 @@ function renderImportGraph(entries: readonly ImportGraphEntry[]): string {
 }
 
 /**
- * Renders the six sections in contract order; throws when any element is absent. For `importGraph` that means
- * the array of per-file entries, not any entry's `to`. The whole string passes through `redactString`, since
+ * Renders the six sections in contract order; throws when any other element is absent. An empty `importGraph`
+ * is valid: a change with no JavaScript or TypeScript file has no edges. The whole string passes through `redactString`, since
  * diffs and file contents can surface credentials read earlier in the session.
  */
 export function buildReviewerContext(input: ReviewerContractInput): string {
@@ -113,7 +116,6 @@ export function buildReviewerContext(input: ReviewerContractInput): string {
 	requireNonEmptyString("gateReport", input.gateReport);
 	requireNonEmptyArray("requirements", input.requirements);
 	requireNonEmptyArray("filesTouchedUnion", input.filesTouchedUnion);
-	requireNonEmptyArray("importGraph", input.importGraph);
 
 	const sections = [
 		`# Diff\n\n${fenced(input.diff, "diff")}`,
@@ -151,7 +153,6 @@ export function buildImportGraph(sources: readonly { path: string; text: string 
 
 /**
  * Delivers the anti-review-theatre rules; enforcement is `validateReview`, whatever this says.
- * Kept in step with `.pi/agents/reviewer.md` by tests/integration/reviewer-contract.test.ts.
  */
 export const REVIEWER_SYSTEM_PROMPT = `You are the adversarial code reviewer for ky-pi-agent. You review with FRESH CONTEXT: you did not write this change and you were not given the implementer's own reasoning about it. That is deliberate -- an implementer's rationale, read before the code, primes a reviewer to agree with it rather than check it.
 
@@ -192,18 +193,26 @@ export async function runReview(ctx: ExtensionContext, input: RunReviewInput): P
 	];
 
 	const messages: Message[] = [{ role: "user", content: context, timestamp: Date.now() }];
+	const need = deriveNeed(ctx, { promptChars: context.length + REVIEWER_SYSTEM_PROMPT.length });
 
-	// A thrown guard refusal never reaches a model, so nothing is charged and it propagates.
-	const start = process.hrtime.bigint();
-	const message: AssistantMessage = await runSingleShotRole(ctx, {
-		role: "reviewer",
-		systemPrompt: REVIEWER_SYSTEM_PROMPT,
-		messages,
-		need: {},
-		tools,
-	});
-	const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
-	addQualityCost({ ms: elapsedMs, tokens: message.usage.totalTokens });
+	const callOnce = async (): Promise<AssistantMessage> => {
+		// A thrown guard refusal never reaches a model, so nothing is charged and it propagates.
+		const start = process.hrtime.bigint();
+		const reply = await runSingleShotRole(ctx, { role: "reviewer", systemPrompt: REVIEWER_SYSTEM_PROMPT, messages, need, tools });
+		addQualityCost({ ms: Number(process.hrtime.bigint() - start) / 1_000_000, tokens: reply.usage.totalTokens });
+		return reply;
+	};
+
+	let message = await callOnce();
+	// A cheap model that writes the call out as text gets one corrective turn; a second miss fails closed below.
+	if (isProseToolCall(message, [SUBMIT_REVIEW_TOOL_NAME])) {
+		messages.push(message, {
+			role: "user",
+			content: `You wrote the ${SUBMIT_REVIEW_TOOL_NAME} call as text, which is discarded. Make the real ${SUBMIT_REVIEW_TOOL_NAME} tool call now.`,
+			timestamp: Date.now(),
+		});
+		message = await callOnce();
+	}
 
 	const toolCall = message.content.find(
 		(block): block is Extract<AssistantMessage["content"][number], { type: "toolCall" }> =>
