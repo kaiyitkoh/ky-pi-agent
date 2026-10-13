@@ -10,7 +10,7 @@ import { classifyGitInvocation, currentBranch, currentSha, currentTree } from ".
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { armQuickSettle, clearQuickSettle, settleQuickRun } from "./settle.ts";
 import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
-import { disarmExecuteRun, executeRunContext } from "../execute/progress.ts";
+import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext } from "../execute/progress.ts";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 
 export default function (pi: ExtensionAPI): void {
@@ -39,6 +39,7 @@ export default function (pi: ExtensionAPI): void {
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify("quick: a turn is already in flight -- wait for it to finish", "error");
 				disarmExecuteRun(); // with no shared run armed, an /execute slot is a leak that would otherwise settle this run
 
+				ensureHarnessIgnored(ctx.cwd); // the settle refuses a dirty tree, and harness logs must not count as dirt
 				claimWorkflow("quick");
 				const baseSha = currentSha(ctx.cwd);
 				const baseTree = currentTree(ctx.cwd); // read in the same try, so a throw refuses via the catch and never arms a run

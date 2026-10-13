@@ -1414,6 +1414,11 @@ async function quickRun(
 			await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
 			await waitForConfiguredAuth(modelRuntime, candidate.provider);
 			gitInit(cwd, "work");
+			// Planted files are committed: /quick gates a clean tree, so a leftover file would be the change under test.
+			if (opts.cwdFiles !== undefined) {
+				runGit(["add", "-A"], cwd);
+				runGit(["commit", "-m", "planted files"], cwd);
+			}
 			const ctx = session.extensionRunner.createCommandContext();
 			const command = session.extensionRunner.getCommand("quick");
 			if (command === undefined) throw new Error('getCommand("quick") returned undefined');
@@ -1478,6 +1483,18 @@ describe("/quick gates its own change at agent_settled, in the target repo", () 
 				expect(rows[0]?.verdict, JSON.stringify(rows)).toBe("accept");
 				expect(rows[0]?.failedToolCalls).toBe(1);
 				expect(notifications.at(-1)?.text).toContain("1 failed tool call(s) logged");
+			},
+		);
+	});
+
+	it("a commit that fails the gate, then fixed on disk without amending, is rejected: the gate checks the commit, not the working tree", async () => {
+		await quickRun(
+			{ responses: [bashCall(commitCommand("src/x.ts", SWALLOW)), bashCall('echo "export const ok = 1;" > src/x.ts'), stop()], expectRows: 2 },
+			({ rows, notifications }) => {
+				expect(rows.at(-1)?.verdict, JSON.stringify(rows)).toBe("reject");
+				expect(rows.at(-1)?.reason).toContain("not the commit");
+				expect(notifications.at(-1)?.level).toBe("error");
+				expect(notifications.at(-1)?.text).toContain("src/x.ts");
 			},
 		);
 	});

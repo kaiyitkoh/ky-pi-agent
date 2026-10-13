@@ -1,9 +1,9 @@
 /**
- * /quick settle: a run passes when it produced a commit and the deterministic change gate finds no failing leg on base..HEAD.
- * Runs once per run, at agent_settled, in the repo the run was armed against.
+ * /quick settle: a run passes when it produced a commit, the working tree is that commit, and the deterministic change gate
+ * finds no failing leg on base..HEAD. Runs once per run, at agent_settled, in the repo the run was armed against.
  */
 import { runChangeGateStage } from "../quality/index.ts";
-import { changedFiles } from "../execute/progress.ts";
+import { changedFiles, uncommittedPaths } from "../execute/progress.ts";
 import { currentSha, currentTree } from "../safety/git.ts";
 import { armedCwd, disarmRun, endRun, writeEvidenceRow } from "./evidence.ts";
 
@@ -49,6 +49,13 @@ export function settleQuickRun(input: QuickSettleInput): void {
 	if (verdict === undefined) return;
 	if (!verdict.ok) return input.notify(verdict.reason, "error");
 	try {
+		// The gate legs read files from disk, so a tree that differs from the commit would gate the wrong content.
+		const dirty = uncommittedPaths(cwd);
+		if (dirty !== "") {
+			const reason = `the working tree is not the commit (uncommitted or untracked: ${dirty}), so the gate would not check what was committed`;
+			writeEvidenceRow(cwd, { verdict: "reject", reason, baseSha: base.baseSha, headSha: verdict.sha, recordCount: 0, tools: [], failedToolCalls: verdict.failedToolCalls });
+			return input.notify(`quick: ${reason}`, "error");
+		}
 		const changed = changedFiles(cwd, base.baseSha, verdict.sha);
 		const gate = runChangeGateStage({ cwd, projectTrusted: input.projectTrusted, baseSha: base.baseSha, changed, baseTypecheckFailed: base.baseTypecheckFailed });
 		if (gate.failed) {

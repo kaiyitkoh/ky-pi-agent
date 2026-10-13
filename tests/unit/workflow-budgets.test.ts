@@ -178,8 +178,8 @@ const WORKFLOW_BUDGETS: readonly { file: string; budget: number; why: string }[]
 	},
 	{
 		file: ".pi/extensions/workflows/settle.ts",
-		budget: 70,
-		why: "the /quick change gate placement: runs the deterministic change gate on base..HEAD once on agent_settled, with the aborted-turn rule. Measured 65 raw lines 2026-10-13 with countRawLines, rounded up to the next ten",
+		budget: 80,
+		why: "the /quick change gate placement: runs the deterministic change gate on base..HEAD once on agent_settled, with the aborted-turn rule. Measured 65 raw lines 2026-10-13 with countRawLines, rounded up to the next ten Re-measured 72 raw lines 2026-10-13 after the settle began refusing a working tree that is not the commit, rounded up to the next ten.",
 	},
 	// WR-05: these three are NOT under workflows/ -- discovered because they contain
 	// COMMAND_MARKER (isCommandSource). Declared here so the completeness check
@@ -343,7 +343,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: WORKFLOWS_DIR,
-		budget: 410,
+		budget: 420,
 		why: "D-11's original ratchet -- /quick's own directory; measured 415 raw lines 2026-08-15 " +
 			"(index.ts 79 + evidence.ts 336) after iteration 3's CR-01/WR-02, rounded up to the next ten. " +
 			"RAISED 420 -> 430 by plan 08-11 (GATE-01 wiring) -- see the per-file entry above for what grew. " +
@@ -351,7 +351,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"of ten. RAISED 430 -> 480 by plan 08-12 (GATE-01's tree-comparison branch) -- see both per-file " +
 			"entries above for what grew. Re-measured 476 raw lines 2026-08-15 (index.ts 95 + evidence.ts 381), " +
 			"rounded up to the next ten. Code-review fix pass WR-06 (see the per-file entry above): re-measured " +
-			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381). Re-measured 326 raw lines 2026-10-13 (index.ts 84 + evidence.ts 242), rounded up to the next ten. Re-measured 328 raw lines after index.ts began deferring to an armed /execute run, rounded up to the next ten. Re-measured 332 raw lines after /quick began clearing a leaked /execute run and claiming the session, rounded up to the next ten. Re-measured 386 raw lines 2026-10-13 after settle.ts was added (index.ts 83, evidence.ts 238, settle.ts 65), rounded up to the next ten Re-measured 406 raw lines 2026-10-13 (evidence.ts 258, index.ts 83, settle.ts 65) after the ancestry check, rounded up to the next ten.",
+			"477 raw lines 2026-08-15 (index.ts 96 + evidence.ts 381). Re-measured 326 raw lines 2026-10-13 (index.ts 84 + evidence.ts 242), rounded up to the next ten. Re-measured 328 raw lines after index.ts began deferring to an armed /execute run, rounded up to the next ten. Re-measured 332 raw lines after /quick began clearing a leaked /execute run and claiming the session, rounded up to the next ten. Re-measured 386 raw lines 2026-10-13 after settle.ts was added (index.ts 83, evidence.ts 238, settle.ts 65), rounded up to the next ten Re-measured 406 raw lines 2026-10-13 (evidence.ts 258, index.ts 83, settle.ts 65) after the ancestry check, rounded up to the next ten. Re-measured 414 raw lines 2026-10-13 (evidence.ts 258, index.ts 84, settle.ts 72) after the dirty-tree refusal, rounded up to the next ten.",
 	},
 	{
 		dir: ".pi/extensions/routing",
@@ -1548,7 +1548,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		commandFile: ".pi/extensions/workflows/index.ts",
 		bodies: [],
 		budget: 100,
-		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 83 raw lines " +
+		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 84 raw lines " +
 			"2026-10-13 with countRawLines, inside 100 -- the independent greppable assertion on " +
 			"workflows/index.ts still holds",
 	},
