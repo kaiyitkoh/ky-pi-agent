@@ -31,7 +31,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause (completed 2026-10-12)
 - [x] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt (completed 2026-10-13)
 - [x] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost (completed 2026-10-13)
-- [ ] **Phase 13: Zed Editor Front-end (optional)** - Use the harness from Zed via pi-acp; guard still enforced in Pi
+- [ ] **Phase 13: Orca Desktop Front-end** - Run the whole harness inside Orca on the work laptop (terminal mode first); supersedes the Zed plan — awaiting user discussion
 
 ## Phase Details
 
@@ -702,24 +702,20 @@ Plans:
 
 - [x] 12-04-PLAN.md — Pre-authorised real install + user-level setup on this machine, docs/OPENSPEC.md (upgrade, uninstall, openspec-pi rejection), RUNBOOK Phase 12 + RB-12-01..04
 
-### Phase 13: Zed Editor Front-end (optional)
+### Phase 13: Orca Desktop Front-end
 
-**Goal:** The same Pi harness is usable from the Zed editor's agent panel via `pi-acp`, with the safety guard still enforced inside Pi and Windows quirks checked — free, optional, documented.
-**Requirements**: TBD (user decision 2026-10-13: separate optional phase after Phase 11)
-
-**Success Criteria:**
-
-1. `pi-acp` pinned to an exact source-reviewed version (0.0.34 at research time); confirm it only translates protocol and tool calls still pass through the guard.
-2. Windows path-with-spaces session-file bug checked; workaround or documented limitation.
-3. Safety confirm/select prompts proven to surface in Zed; terminal-only features (widgets, status, slash commands) documented.
-4. Setup + upgrade documented in docs/; no repo dependency added.
-
+**Goal:** The user's whole Pi harness runs inside Orca (stablyai/orca) on the work laptop — terminal mode first, chat mode when mature — with privacy hardened and no new path around the safety guard. Phone access (Orca mobile or an authored Lark bot) is a later, separate decision.
+**Requirements**: TBD — awaiting user discussion (decision 2026-10-13: Orca replaces Zed; desktop first; Lark international for any future bot)
 **Depends on:** Phase 11
 **Plans:** 0 plans
 
+**Research:** .planning/research/ORCA-DESKTOP-SETUP.md, .planning/research/REMOTE-ORCA-LARK.md
+
+**Draft success criteria (confirm with user):**
+1. Setup checklist executed on the work laptop with a pinned, signature-verified Orca; telemetry/diagnostics off; harness config available in every Orca worktree.
+2. Push guard allows confirm in RPC mode (cards) while json/print/subagents still refuse; questionnaire has an RPC fallback; important prompts use confirm/select.
+3. Orca's own git push/merge buttons are documented as outside the guard, with server-side protection on `main` verified.
+4. Uninstall/cleanup of Orca's injected Pi extensions documented.
+
 Plans:
-
-- [ ] TBD (run /gsd-plan-phase 13 to break down)
-
----
-*Roadmap created: 2026-08-13 · Granularity: fine · Coverage: 107/107 v1 requirements mapped*
+- [ ] TBD
