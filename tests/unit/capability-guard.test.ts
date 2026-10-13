@@ -291,15 +291,12 @@ describe("isAnthropicClaudeModel -- the three branches of the borrowed predicate
 });
 
 describe("deriveNeed", () => {
-	function ctxOf(opts: { tokens?: number | null; thinking?: string; branch?: unknown[] }) {
+	function ctxOf(opts: { tokens?: number | null; thinking?: string }) {
 		return {
 			getContextUsage: () => (opts.tokens === undefined ? undefined : { tokens: opts.tokens }),
 			thinkingLevel: opts.thinking,
-			sessionManager: { getBranch: () => opts.branch ?? [] },
 		};
 	}
-	const imageEntry = { type: "message", message: { role: "user", content: [{ type: "text", text: "x" }, { type: "image", data: "", mimeType: "image/png" }] } };
-	const textEntry = { type: "message", message: { role: "user", content: [{ type: "text", text: "x" }] } };
 
 	it("context usage above the window makes a 393216-window model refuse, naming the window", () => {
 		const need = deriveNeed(ctxOf({ tokens: 400000 }));
@@ -319,11 +316,12 @@ describe("deriveNeed", () => {
 		expect(deriveNeed(ctxOf({})).estimatedInputTokens).toBe(0);
 	});
 
-	it("an image block anywhere in the branch sets image, and a text-only model refuses", () => {
-		const need = deriveNeed(ctxOf({ branch: [textEntry, imageEntry] }));
+	it("image comes only from the current prompt's attachments, never from session history", () => {
+		const need = deriveNeed(ctxOf({}), { image: true });
 		expect(need.image).toBe(true);
 		expect(guardRoute(dashscopeFlash, "executor", need).ok).toBe(false);
-		expect(deriveNeed(ctxOf({ branch: [textEntry] })).image).toBe(false);
+		expect(deriveNeed(ctxOf({})).image).toBe(false);
+		expect(guardRoute(dashscopeFlash, "executor", deriveNeed(ctxOf({}), { usesToolLoop: true })).ok).toBe(true);
 	});
 
 	it("thinking level off is not a request, any other level is", () => {

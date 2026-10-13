@@ -196,12 +196,15 @@ read and act on — never a substituted model, never a downgrade.
 
 ### Where the guard runs
 
-`deriveNeed(ctx, extra)` in `routing/guard.ts` builds the guard's input from
-the live session: estimated tokens (current context usage plus the prompt
-length divided by four plus any extra), an image block anywhere on the
-branch, whether the thinking level is anything but `off`, and the tool-loop
-flag. The mode commands and `/escalate` check the candidate with it before
-switching.
+`deriveNeed(ctx, extra)` in `routing/guard.ts` builds the executor's guard
+input from the live session: estimated tokens (current context usage plus the
+prompt length divided by four plus any extra), whether the thinking level is
+anything but `off`, and the tool-loop flag. The image need comes only from the
+images attached to the prompt being sent, never from session history: for a
+text-only model pi-ai already replaces earlier images with a placeholder
+(pi-ai 1.1.0 `dist/api/transform-messages.js`), so an old screenshot never
+blocks a mode switch. The mode commands and `/escalate` check the candidate
+with it before switching.
 
 The built-in `/model` picker and `Ctrl+P` bypass those commands, and Pi's
 `model_select` event is notification-only in Pi 1.1.0 (`types.d.ts:859-866`):

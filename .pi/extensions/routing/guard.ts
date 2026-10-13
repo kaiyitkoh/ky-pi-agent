@@ -53,26 +53,21 @@ export function isAnthropicClaudeModel(model: Model<Api>): boolean {
 export interface NeedContext {
 	getContextUsage(): { tokens: number | null } | undefined;
 	readonly thinkingLevel?: string;
-	readonly sessionManager: { getBranch(): readonly unknown[] };
 }
 
-function branchHasImage(branch: readonly unknown[]): boolean {
-	return branch.some((entry) => {
-		const message = (entry as { type?: unknown; message?: { content?: unknown } } | null)?.message;
-		const content = message?.content;
-		return Array.isArray(content) && content.some((block) => (block as { type?: unknown } | null)?.type === "image");
-	});
-}
-
-/** Builds a {@link GuardNeed} from the live session: context usage plus extra prompt size, image blocks in the branch, and the thinking level. */
+/**
+ * Builds the executor's {@link GuardNeed} from the live session: context usage plus extra prompt size, and the thinking level.
+ * `image` comes only from `extra.image`, the images attached to this prompt: pi-ai 1.1.0 `dist/api/transform-messages.js:19-38`
+ * already replaces history images with a placeholder for a text-only model, so past images never block a switch.
+ */
 export function deriveNeed(
 	ctx: NeedContext,
-	extra: { promptChars?: number; extraTokens?: number; usesToolLoop?: boolean } = {},
+	extra: { promptChars?: number; extraTokens?: number; usesToolLoop?: boolean; image?: boolean } = {},
 ): GuardNeed {
 	const used = ctx.getContextUsage()?.tokens ?? 0;
 	const level = ctx.thinkingLevel;
 	return {
-		image: branchHasImage(ctx.sessionManager.getBranch()),
+		image: extra.image === true,
 		estimatedInputTokens: used + Math.ceil((extra.promptChars ?? 0) / 4) + (extra.extraTokens ?? 0),
 		thinkingRequested: level !== undefined && level !== "off",
 		usesToolLoop: extra.usesToolLoop,

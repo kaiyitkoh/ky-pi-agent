@@ -330,7 +330,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.on("input", (event, ctx) => {
 		try {
 			if (ctx.model === undefined) return;
-			const verdict = guardRoute(ctx.model, "executor", deriveNeed(ctx, { usesToolLoop: true, promptChars: event.text.length }));
+			const verdict = guardRoute(ctx.model, "executor", deriveNeed(ctx, { usesToolLoop: true, promptChars: event.text.length, image: (event.images?.length ?? 0) > 0 }));
 			if (verdict.ok) return;
 			ctx.ui.notify(`${verdict.reason}. Prompt not sent; switch with /cheap, /balanced or /max.`, "error");
 			return { action: "handled" as const };

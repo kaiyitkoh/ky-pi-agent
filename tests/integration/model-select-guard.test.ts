@@ -12,6 +12,7 @@ const LOG_KEY = "__kypiModelSelectGuardLog";
 const CAPABLE = "faux-flash";
 const R1 = "deepseek.r1-v1:0";
 const R1_US = "us.deepseek.r1-v1:0";
+const IMAGE = { type: "image" as const, data: "", mimeType: "image/png" };
 
 const PROBE = [
 	"export default function (pi) {",
@@ -26,12 +27,13 @@ interface Setup {
 
 let open: HarnessHandle | undefined;
 
-async function setup(fauxModels: string[]): Promise<Setup> {
+async function setup(fauxModels: string[], textOnly = false): Promise<Setup> {
 	(globalThis as Record<string, unknown>)[LOG_KEY] = [];
 	const recording = createRecordingUI();
 	const handle = await createHarnessSession({
 		entryPoints: [".pi/extensions/routing/index.ts"],
 		fauxModels,
+		textOnly,
 		extraExtensionSource: PROBE,
 		uiContext: recording.ui,
 		agentsMd: false,
@@ -136,6 +138,23 @@ describe("input backstop", () => {
 
 	it("lets a prompt through on a capable model", async () => {
 		const { handle, calls } = await setup([CAPABLE]);
+		await handle.session.prompt("hello");
+
+		expect(handle.captured).toHaveLength(1);
+		expect(errors(calls)).toEqual([]);
+	});
+
+	it("refuses a prompt that attaches an image to a text-only model", async () => {
+		const { handle, calls } = await setup([CAPABLE], true);
+		await handle.session.prompt("what is this", { images: [IMAGE] });
+
+		expect(handle.captured).toHaveLength(0);
+		expect(errors(calls).join("\n")).toContain("needs image input");
+	});
+
+	it("an image earlier in the session never blocks a later text prompt on a text-only model", async () => {
+		const { handle, calls } = await setup([CAPABLE], true);
+		handle.session.sessionManager.appendMessage({ role: "user", content: [{ type: "text", text: "see" }, IMAGE], timestamp: Date.now() });
 		await handle.session.prompt("hello");
 
 		expect(handle.captured).toHaveLength(1);

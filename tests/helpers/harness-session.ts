@@ -86,6 +86,8 @@ export interface HarnessSessionOptions {
 	mode?: BindExtensionsOptions["mode"];
 	/** Faux model ids, all reasoning-capable; the first is the session model. Default: ["faux-flash"]. */
 	fauxModels?: readonly string[];
+	/** Declare every faux model text-only (`input: ["text"]`); faux models accept images by default. */
+	textOnly?: boolean;
 }
 
 export interface HarnessHandle {
@@ -210,7 +212,7 @@ export async function createHarnessSession(
 		const primaryModelId = fauxModelIds[0];
 		if (primaryModelId === undefined) throw new Error("createHarnessSession: fauxModels must not be empty");
 		const faux = fauxProvider({
-			models: fauxModelIds.map((id) => ({ id, reasoning: true })),
+			models: fauxModelIds.map((id) => ({ id, reasoning: true, ...(opts.textOnly === true ? { input: ["text" as const] } : {}) })),
 		});
 		faux.setResponses(opts.responses ?? [capture]);
 
