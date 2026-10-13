@@ -2638,4 +2638,13 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		why: "a writer under xargs writes files named by its input, so it needs confirmation.",
 		reference: "safety/policy.ts#evaluateInvocation",
 	},
+	{
+		id: "EV-257",
+		class: "sensitive-read",
+		tool: "bash",
+		input: {"command":"git show HEAD:.env"},
+		expect: "BLOCKED",
+		why: "the path after a revision's colon is read-classified, so a committed .env is not printed.",
+		reference: "safety/policy.ts#classifyInvocationPaths",
+	},
 ];

@@ -375,6 +375,8 @@ Read classification also covers the following. A destination that `cp`,
 so `cp .env.example .env` is allowed; the write classifier still checks it.
 
 - redirect targets: `cat < .env`, `cat <> .env`, and `<&` onto a file;
+- the path after a git revision's colon: `git show HEAD:.env` and
+  `git show :.env` read the committed or staged file;
 - `@file` operands and `key=@file` values (`curl -F file=@.env`,
   `curl --data-binary @.env`, `curl -d @~/.aws/credentials`);
 - glob arguments: a glob whose directory part is inside a credentials

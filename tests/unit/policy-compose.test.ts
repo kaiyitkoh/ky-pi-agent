@@ -693,6 +693,10 @@ const ROWS: readonly Row[] = [
 	{ name: "touch .env.local -- allow", toolName: "bash", input: { command: "touch .env.local" }, expected: "allow" },
 	{ name: "cp .env out -- block, the source is a secret read", toolName: "bash", input: { command: "cp .env /tmp/x" }, expected: "block" },
 	{ name: "cat .env -- block (control)", toolName: "bash", input: { command: "cat .env" }, expected: "block" },
+	{ name: "git show HEAD:.env -- block, a committed secrets file", toolName: "bash", input: { command: "git show HEAD:.env" }, expected: "block" },
+	{ name: "git show :.env -- block, the staged secrets file", toolName: "bash", input: { command: "git show :.env" }, expected: "block" },
+	{ name: "git show HEAD:package.json -- allow", toolName: "bash", input: { command: "git show HEAD:package.json" }, expected: "allow" },
+	{ name: "git fetch origin feat:feat -- allow, a refspec is not a secret path", toolName: "bash", input: { command: "git fetch origin feat:feat" }, expected: "allow" },
 ];
 
 describe("SAFE-03/SAFE-10 -- policy-compose.test.ts: table is non-empty (vacuous-pass guard)", () => {
