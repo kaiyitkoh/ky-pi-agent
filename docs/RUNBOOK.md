@@ -1672,6 +1672,72 @@ Phase 10 measured the per-turn floor, added `--ky-profile` tool profiles, and bu
 
 **Offline proxy:** `tests/integration/context-floor.test.ts` proves the floor arithmetic for every local extension and Pi built-in. It cannot see a package that is not installed.
 
+## Phase 11 — Terminal UI
+
+Phase 11 shipped the `ky` theme, the startup header, the `ky-statusline` footer key and an offline proof that no UI element reaches the system prompt. Three checks need a TTY or live inference and are governed here. `docs/UI.md` holds the design; it is cited, not repeated.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-11-01 | UI-01 — theme, header and footer visual check in an interactive terminal | OUTSTANDING |
+| RB-11-02 | UI-04 — the pi-subagents widget and the statusline agents segment during a real subagent run | OUTSTANDING |
+| RB-11-03 | UI-05 — a live `cacheRead` check and the `ui-wire-check` script across mode switches | OUTSTANDING |
+
+### RB-11-01 — UI-01: theme, header and footer visual
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs an interactive terminal to look at; the offline tests assert strings and colour tokens, not what a human sees.
+
+**Procedure, on the work laptop.**
+
+1. Start `pi --use-theme ky` (or plain `pi` inside this repo, where the project setting selects it).
+2. Confirm the ky header lines show and no theme diagnostic prints at startup.
+3. Run `/settings` and confirm `ky` is listed as a theme.
+4. Confirm footer line 3 shows the ky-statusline segments, with muted colours and colour only on status.
+5. Edit `ky.json`, run `/reload`, and confirm the change shows.
+6. Record the result: `echo "RB-11-01 theme ky listed=<yes|no>, header=<yes|no>, ky-statusline segments=<text>, $(date -u +%FT%TZ)" >> RB-11-01-RESULT.md`
+
+**Expected output.** Header, theme and statusline all visible; the recorded line.
+
+**Offline proxy:** `tests/unit/ui-theme.test.ts` and `tests/integration/ui-chrome.test.ts` prove the theme against Pi's schema and the chrome calls against a recording UI. Nothing has been rendered in a real terminal.
+
+### RB-11-02 — UI-04: subagent widget and agents segment
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** `pi-subagents` is pinned but not installed here, and a real run needs inference.
+
+**Precondition.** `RB-07-02` (install the pinned specs with a human present for the package-legitimacy gate) must complete FIRST.
+
+**Procedure, on the work laptop, after `RB-07-02`.**
+
+1. Run one foreground and one async subagent.
+2. Confirm the `pi-subagents` widget appears and the statusline shows the `N agent(s)` segment.
+3. Confirm the segment clears when the runs finish.
+4. Record the result: `echo "RB-11-02 pi-subagents widget seen=<yes|no>, statusline agents peak=<n> back to none=<yes|no>, $(date -u +%FT%TZ)" >> RB-11-02-RESULT.md`
+
+**Expected output.** Both indicators appear during the runs and clear afterwards.
+
+**Offline proxy:** `tests/integration/ui-chrome.test.ts` drives the segment with event shapes stubbed from `pi-subagents@0.76.1` source. That package has never been executed here.
+
+### RB-11-03 — UI-05: live cache hit across UI activity
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Cache hits are reported by the provider on a real request, and no inference key is configured on this machine.
+
+**Procedure, on the work laptop.**
+
+1. Optionally set `showCacheMissNotices: true` in your GLOBAL settings for this run only; do not commit it.
+2. Start a fresh session and send two plain turns.
+3. Switch mode (`/cheap`, then `/balanced`), edit a file, run a subagent, and send one more turn. Do not toggle `/plan`; that is a sanctioned prompt change (`RB-10-02`).
+4. Run the check, probing for a name you changed: `sh scripts/ui-wire-check.sh --probe "$(git branch --show-current)"` (add `--probe <changed-file-name>` as well).
+5. Record the result: `echo "RB-11-03 ui-wire-check <PASS|FAIL|INSUFFICIENT>, turn-2 cacheRead ratio: <ratio>, $(date -u +%FT%TZ)" >> RB-11-03-RESULT.md`
+
+**Expected output.** PASS, identical system-prompt hashes across requests, no probe hits, and a high turn-2 ratio.
+
+**Offline proxy:** `tests/integration/ui-prompt-stability.test.ts` and `tests/unit/ui-wire-check.test.ts` prove the system prompt is byte-stable across UI state and the script's analysis. They do not prove the provider caches it.
+
 ## Phase 12 — OpenSpec Opt-in Skill
 
 Phase 12 added opt-in OpenSpec skills at user level at zero per-turn cost, proved offline. `docs/OPENSPEC.md` holds the model, install, upgrade, uninstall and the `openspec-pi` rejection; it is cited, not repeated. Four checks need a second machine or a live session and are governed here.
