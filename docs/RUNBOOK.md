@@ -1711,10 +1711,10 @@ Phase 11 shipped the `ky` theme, the startup header, the `ky-statusline` footer 
 
 **Procedure, on the work laptop, after `RB-07-02`.**
 
-1. Run one foreground and one async subagent.
+1. Ask for one subagent call with `async: false` (blocking), then one with no `async` argument (background). A plain call is async by default, so only the first exercises the foreground path.
 2. Confirm the `pi-subagents` widget appears and the statusline shows the `N agent(s)` segment.
 3. Confirm the segment clears when the runs finish.
-4. Record the result: `echo "RB-11-02 pi-subagents widget seen=<yes|no>, statusline agents peak=<n> back to none=<yes|no>, $(date -u +%FT%TZ)" >> RB-11-02-RESULT.md`
+4. Record the result: `echo "RB-11-02 pi-subagents widget seen=<yes|no>, blocking run agents=<n>, background run agents=<n>, back to none=<yes|no>, $(date -u +%FT%TZ)" >> RB-11-02-RESULT.md`
 
 **Expected output.** Both indicators appear during the runs and clear afterwards.
 

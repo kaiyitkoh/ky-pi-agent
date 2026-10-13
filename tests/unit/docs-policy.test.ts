@@ -556,7 +556,7 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		'echo "RB-11-01 theme ky listed=<yes|no>, header=<yes|no>, ky-statusline segments=<text>, $(date -u +%FT%TZ)" >> RB-11-01-RESULT.md',
 	],
 	"RB-11-02": [
-		'echo "RB-11-02 pi-subagents widget seen=<yes|no>, statusline agents peak=<n> back to none=<yes|no>, $(date -u +%FT%TZ)" >> RB-11-02-RESULT.md',
+		'echo "RB-11-02 pi-subagents widget seen=<yes|no>, blocking run agents=<n>, background run agents=<n>, back to none=<yes|no>, $(date -u +%FT%TZ)" >> RB-11-02-RESULT.md',
 	],
 	"RB-11-03": [
 		'probe="ky-probe-$(date +%s)" && git switch -c "$probe" && echo x > "$probe.txt"',
