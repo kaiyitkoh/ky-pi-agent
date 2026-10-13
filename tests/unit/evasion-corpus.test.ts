@@ -5,7 +5,7 @@
  * THREE GROUPS.
  *   A. Every `BLOCKED` row goes through the REAL `evaluate()` from
  *      `.pi/extensions/safety/policy.ts` — never a re-derived mini-parser —
- *      and its verdict is asserted NOT `allow`.
+ *      and its exact verdict kind is asserted with HEAD on a feature branch and on main.
  *   B. Every `OUT-OF-SCOPE` row is cross-checked against the published table
  *      in `docs/SAFETY.md`: the doc's row count and row identities are
  *      DERIVED from the corpus (never a hand-typed number, following
@@ -33,13 +33,22 @@ const SAFETY_DOC_PATH = join(ROOT, "docs", "SAFETY.md");
 // `policy-compose.test.ts` table uses.
 // ---------------------------------------------------------------------------
 
-const FACTS: PolicyFacts = {
-	cwd: "C:/repo",
-	projectRoot: "C:/repo",
-	home: "C:/Users/tester",
-	currentBranchFor: () => "main",
-	protectedBranches: ["main"],
-};
+const HEADS = ["feat", "main"] as const;
+
+/** Facts with HEAD on `head` and config/branch lookups supplied, so config-driven push planning has something to read. */
+function factsFor(head: (typeof HEADS)[number]): PolicyFacts {
+	return {
+		cwd: "C:/repo",
+		projectRoot: "C:/repo",
+		home: "C:/Users/tester",
+		currentBranchFor: () => head,
+		protectedBranches: ["main"],
+		gitConfigFor: () => [],
+		gitBranchFor: (_cwd, rev) => (rev === "HEAD" ? head : undefined),
+	};
+}
+
+const FACTS: PolicyFacts = factsFor("main");
 
 // ---------------------------------------------------------------------------
 // The 14 PITFALLS.md classes this corpus must cover, by name, not by count.
@@ -69,19 +78,24 @@ const OUT_OF_SCOPE_ROWS = EVASION_CORPUS.filter((c) => c.expect === "OUT-OF-SCOP
 // Group A — every BLOCKED row through the real evaluate()
 // ---------------------------------------------------------------------------
 
-describe("Group A -- every BLOCKED row is non-allow through the real evaluate()", () => {
+describe("Group A -- every BLOCKED row returns its exact verdict through the real evaluate()", () => {
 	it("the BLOCKED bucket is non-empty (vacuous-pass guard)", () => {
 		expect(BLOCKED_ROWS.length, "no BLOCKED rows found -- Group A would otherwise pass vacuously").toBeGreaterThan(0);
 	});
 
-	for (const row of BLOCKED_ROWS) {
-		it(`${row.id} (${row.class}): ${JSON.stringify(row.input)} -> not allow`, () => {
-			const verdict = evaluate(row.tool, row.input, FACTS);
-			expect(
-				verdict.kind,
-				`${row.id} (${row.class}) expected a non-allow verdict from evaluate("${row.tool}", ` +
-					`${JSON.stringify(row.input)}, ...) but got "${verdict.kind}". ${row.why}`,
-			).not.toBe("allow");
+	for (const head of HEADS) {
+		describe(`with HEAD on ${head}`, () => {
+			for (const row of BLOCKED_ROWS) {
+				const expected = row.verdict ?? "block";
+				it(`${row.id} (${row.class}): ${JSON.stringify(row.input)} -> ${expected}`, () => {
+					const verdict = evaluate(row.tool, row.input, factsFor(head));
+					expect(
+						verdict.kind,
+						`${row.id} (${row.class}) expected "${expected}" from evaluate("${row.tool}", ` +
+							`${JSON.stringify(row.input)}, ...) with HEAD on ${head} but got "${verdict.kind}". ${row.why}`,
+					).toBe(expected);
+				});
+			}
 		});
 	}
 });

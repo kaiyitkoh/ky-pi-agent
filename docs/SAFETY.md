@@ -166,9 +166,10 @@ Every `git push` resolves to one of three outcomes, checked on any branch:
   one-shot grant, keyed on the command and the resolved destination and
   valid for 30 seconds, that the bash wrapper consumes; deny blocks.
 - **Refuse when nobody can be asked**: an `ask` blocks unless
-  `ctx.hasUI` is true and `ctx.mode` is `"tui"`, so print, json, rpc and
-  subagent children fail closed. `bg_run` always blocks it (no wrapper to
-  consume a grant).
+  `ctx.hasUI` is true and `ctx.mode` is `"tui"` or `"rpc"`, so print, json and
+  subagent children fail closed. The confirm waits at most 300000 ms (5
+  minutes); a timeout or a cancel refuses. `bg_run` always blocks it (no
+  wrapper to consume a grant).
 
 How the destination is resolved:
 
@@ -198,6 +199,102 @@ one grant cannot cover both. Residuals: config changed by a concurrent
 process between the read and the push is not seen, and the resolver mirrors
 git's rules rather than asking git for its push plan; GitLab's server-side
 protection still refuses a protected branch.
+
+### Command names must be literal
+
+A command name, or a wrapper word in front of it, is refused (cause
+`non-literal-command-name`) when bash would rewrite it after the guard has read
+it: a brace expansion (`{git,push} origin HEAD:main`), a glob (`gi? push`,
+`/usr/bin/gi[t] push`), a tilde (`~/bin/git push`), or whitespace inside the
+name (`git$' 'push`). The check is an allow-list over the parser's word-part
+types (plain text, single quotes, ANSI-C quotes, and double quotes holding only
+plain text), so a part type added to the parser later is refused until it is
+listed. A guarded verb's own arguments are refused when they carry a brace
+expansion or extended glob (`git push{,} origin main`). `[`, `'git' status` and
+`"git" status` still pass. Known false positive: a script run as `~/script.sh`
+must be spelled with its full path.
+
+`trap`, `source`, `.`, `hash`, `alias`, `unalias`, `enable`, `fc`, `bind`,
+`complete` and `coproc` are shell runners. Their first argument is command
+text, so a guarded verb anywhere in it is refused, and any script that uses
+`trap`, `alias`, `hash`, `enable`, `fc`, `source` or `.` is refused when a
+guarded verb appears anywhere in the same script, because those builtins can
+carry a verb into a later segment (`alias p=push; git p`). Known false positive:
+`source ./env.sh && git status` is refused; run the two as separate commands.
+
+### git on every branch
+
+Only the subcommands in `GIT_KNOWN_SUBCOMMANDS` run, whatever `HEAD` is. An
+alias, a name that is not listed and `subtree` block, because any of them may
+expand to a push. `send-pack`, `receive-pack`, `upload-pack`, `http-push`,
+`remote-ext` and `daemon` always block, and so does `git-<x>` run as its own
+executable (`git-push` is classified as `git push`). Some subcommands are
+admitted only in a restricted form: `config` reads only (a write form, or an
+`alias.*`, `core.sshCommand|fsmonitor|pager|editor|hooksPath`, `credential.*`,
+`include.*`, `url.*` or `remote.*.push|url|pushurl|receivepack|uploadpack` key
+being written, blocks); `symbolic-ref` reads only; `format-patch` refuses mail
+options and an output directory outside the project; `archive` refuses
+`--remote` and `--exec`; `notes` allows `list` and `show`; `sparse-checkout`
+allows `list`.
+
+Global options before the subcommand are parsed against a list. `-c` is allowed
+only for `core.quotepath` and `color.ui`. `--config-env`, `--exec-path`,
+`--super-prefix` and any unknown global option mark the invocation unparsed, and
+it blocks on every branch. Any `GIT_*` assignment in front of a git command
+(`GIT_SSH_COMMAND=x git fetch`, `env GIT_DIR=x git ...`) blocks, except
+`GIT_PAGER=cat` and `GIT_TERMINAL_PROMPT=0`. The protected-branch write table
+still applies on top when `HEAD` is protected.
+
+### Reads that do not arrive as a plain argument
+
+Read classification also covers:
+
+- redirect targets: `cat < .env`, `cat <> .env`, and `<&` onto a file;
+- `@file` operands and `key=@file` values (`curl -F file=@.env`,
+  `curl --data-binary @.env`, `curl -d @~/.aws/credentials`);
+- glob arguments: a glob whose directory part is inside a credentials
+  directory, or whose basename starts with a literal and can match a secrets
+  file name (`cat .en?`, `cat ~/.aws/cred*`). A basename starting with a
+  wildcard is judged by its directory part only, because the shell never matches
+  a dotfile with a leading wildcard; the residual is a wildcard-led pattern
+  that matches a non-dot secrets file such as `*_rsa`. A pattern that looks
+  like such a glob is also refused when it is only a regular expression
+  (`rg '.e*'`), a deliberate false positive;
+- case variants of `.env*`, NTFS `name:stream` suffixes and 8.3 short names
+  (refused; use the long name), and the home credential files `~/.aws/**`,
+  `~/.ssh/**`, `~/.git-credentials`, `~/.docker/config.json` and
+  `~/.pi/agent/auth.json`.
+
+Infra reads that print secrets are blocked, with no approval path:
+`terraform show -json`, `terraform output -raw|-json`,
+`kubectl get|describe secret(s)` (including `cm,secret` lists) and
+`kubectl config view --raw`. Plain `terraform output` and `terraform show`
+(which mask sensitive values) and `kubectl get pods` stay allowed.
+
+### Subagents
+
+Every `pi-subagents` child loads this guard. On `session_start` the safety entry
+file is registered as the required child extension `ky-safety` with
+`requireForAllRunners: true`, so a child gets it whatever the agent's own
+`extensions` list says, and external-CLI runners are rejected by `pi-subagents`.
+A `subagent` launch is blocked unless that registration succeeded for the
+current session id; `session_shutdown` disposes it. Management actions need a
+confirm and are refused with no UI; only these read-only actions run without
+one: `guide`, `list`, `get`, `models`, `status`, `children.list`, `validate`,
+`doctor`, `inspector.status`, `project.status`, `steer`, `resume`, `stop`.
+Unknown or non-string actions count as management. Writes to agent definitions
+and settings are blocked: `<project>/.pi/agents/**`, `<project>/.agents/**`,
+`~/.pi/agent/agents/**`, `~/.pi/agent/settings.json` and
+`<project>/.pi/settings.json`.
+
+### One delivery path per machine
+
+The guard must reach a machine by exactly one route: the bootstrap stub on the
+owner machine, or the git package for anyone else, never both (see README
+"Install"). Two copies loading in one process is accepted below only as an
+unintended state, not a supported one. A failing `tool_call` handler blocks the
+tool in Pi 1.1.0 (`docs/extensions.md`, "Errors and cleanup"), so a crash in
+this guard fails closed.
 
 ## What this guard does not register (WR-09)
 
@@ -249,8 +346,6 @@ the corpus does not know about.
 | EV-94 | task-runner-indirection | `yarn openspec update` | `yarn` and `pnpm` run a project script or package binary named by a bare word. Only their explicit `exec`/`dlx` subcommands are resolved as wrappers, so the guarded verb reaches `yarn`, which carries no policy. | GitLab server-side branch protection (SAFE-01); `openspec update` writes only agent config in the working tree, visible in `git status` |
 | EV-41 | encoding | `echo Z2l0IHB1c2g= \| base64 -d \| sh` | Confirmed by direct execution: this is **not** caught even incidentally by the shell-runner rule. The final pipeline segment's own raw text is just `sh` with no arguments — `git` exists only inside the base64 payload at runtime, never in any parsed segment's source text. | GitLab server-side branch protection (SAFE-01) |
 | EV-42 | custom-tool | any extension-registered tool that shells out internally | `evaluate()` governs exactly `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` by name (a deliberate design boundary, not an oversight: a tool name the guard does not govern is allowed by construction while every input shape inside a governed tool is deny-shaped). An eighth tool name it does not recognise is allowed by construction. Since Phase 08.1 the `tool_call` hook (not `evaluate()`) additionally denies the named Pi 1.x tools and maps `bg_run` through the bash classifier (see "Pi 1.x tool paths" below); the generic hole remains for every OTHER extension-registered tool. | GitLab server-side branch protection (SAFE-01), for anything that eventually reaches a push; nothing local inspects an unknown tool's internal behaviour |
-| EV-56 | sensitive-read | `read { path: ".env::$DATA" }` (NTFS alternate data stream) | `canonicalisePathArg` is deliberately pure text manipulation, no `realpath`/filesystem canonicalisation (`paths.ts`'s own module docstring) — the `::$DATA` suffix survives untouched and never matches `isDotEnvFile`'s exact `.env` check, while the OS resolves the SAME underlying file's contents through the stream name. Confirmed by direct execution on the development machine. | Nothing else on this machine — a genuine residual gap. Adversarial rather than confused-model shaped, consistent with the "mistake-catcher" ceiling. |
-| EV-57 | sensitive-read | `read { path: "ENV~1" }` (NTFS 8.3 short name) | Same root cause as EV-56 — no filesystem canonicalisation means an 8.3 short name (generation enabled on this machine's `C:` drive) resolves to the real `.env` file without ever matching any `SENSITIVE_READ_PATTERNS` entry. Confirmed by direct execution. | Nothing else on this machine — a genuine residual gap. Adversarial rather than confused-model shaped. |
 | EV-65 | sensitive-read | `grep { pattern: "SECRET", glob: ".env*" }` | A glob WILDCARD defeats the exact-basename `isDotEnvFile` check — `.env*` is not `.env` and does not start with the `.env.` prefix that check requires. Deliberately not closed by CR-07: pattern-matching over glob syntax risks the false-positive-trains-the-user-to-disable-the-guard failure mode this project's own `<specifics>` names. | Nothing else on this machine — a genuine residual gap. |
 | EV-73 | sensitive-read | `grep { path: "\\\\localhost\\C$\\Users\\tester\\.aws" }` (UNC alias of the user's OWN `~/.aws`) | WR-14's `$HOME`-anchoring fix (`isSensitiveSearchRoot`) compares `rootedSegmentsOf().root` first — a UNC root never equals a drive-letter root, so a UNC spelling of the SAME real directory fails the home-anchored check outright, even though it resolves to the identical directory on disk. The single-FILE rule still fires for the file itself (`.../.aws/credentials`). | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |
 | EV-74 | sensitive-read | `grep { path: "C:/Users/otheruser/.aws" }` (a DIFFERENT profile's credentials dir) | Before WR-14, the segment check matched `.aws`/`.kube`/`.ssh`/`.gnupg` ANYWHERE, unanchored, so this blocked incidentally. WR-14 anchored the check to the fixture's own `$HOME` to fix a real false positive (an in-project path merely containing one of those segment names); a genuinely different user profile's own secrets directory shares neither the fixture home's root nor reaches it, so it is no longer caught. | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |
@@ -265,7 +360,7 @@ Verified against pi 1.1.0 source. These controls live in `registerToolCallHook` 
 - **Deny list (fail closed, audited, even on malformed input):** `powershell` (unbash cannot parse PowerShell; `types.d.ts:922-925`; it must never be added to `defaultTools`), `codemode` (`extensions/codemode/tool.js:31`), `tool_search` (`extensions/tool-search/tool.js:11`), the MCP resource tools `list_mcp_resources` / `list_mcp_resource_templates` / `read_mcp_resource` (`extensions/mcp/resources.js`), anything starting `mcp__` (`extensions/mcp/tools.js:46`), and the pi-background-tasks@2.6.9 tools outside its `process` feature (`bg_run_pi_attested`, `bg_delegate`, `delegate_read_artifact`, `fusion_*`), which take prompts or argv the guard cannot classify.
 - **`bg_run` is classified as `bash`** with the same command through the same `evaluate()` path (audited as tool `bg_run`). A missing or non-string command blocks. A `confirm` or `ask` verdict BLOCKS for `bg_run`: the approve-and-reissue protocol consumes grants in the bash wrapper, which `bg_run` does not have. `bg_run` has no cwd parameter. `bg_status`, `bg_logs`, `bg_kill` carry only task ids and need no mapping.
 - **bg_run enforcement (08.1 review fixes).** One policy, `guardBgRun`, runs at the hook AND inside the vendored `bg_run` `execute()` (local patch, PROVENANCE deviation 8). It blocks `isAgent` other than `false` (a child `pi` may start without this guard), and blocks whenever the effective background shell is not bash/POSIX: the vendored policy now defaults to Git Bash on Windows (PROVENANCE deviation 7), so the executed shell is the parsed shell; `PI_BG_SHELL=cmd` makes `bg_run` fail closed.
-- **`lsp_fix` and other extension tools stay outside the deny table (WR-03, accepted).** `@narumitw/pi-lsp` applies edits through its own file writes, which neither the hook nor a wrapper sees, so path-detonation rules do not cover it. This is the EV-42 class, not new; a name-based deny would only cover tools we already know, and enumerating future tools is the maintenance tax the project avoids. Mitigations: lsp_fix is not in the default active tool set, and `.git/hooks`-style payloads still need a later command that the guard sees.
+- **`lsp_fix` and other extension tools stay outside the deny table (WR-03, accepted).** `@narumitw/pi-lsp` applies edits through its own file writes, which neither the hook nor a wrapper sees, so path-detonation rules do not cover it. This is the EV-42 class, not new; a name-based deny would only cover tools we already know, and enumerating future tools is the maintenance tax the project avoids. Mitigations: `lsp_fix` is active only in the opt-in `full` tool profile and stays unguarded there (accepted residual: its edits bypass both the hook and the wrappers, and guarding one named tool would not cover the next); `.git/hooks`-style payloads still need a later command that the guard sees.
 - **Audit redaction (WR-04).** `writeAuditRow` redacts obvious credential shapes (AWS key ids, `sk-`/`ghp_`/`glpat-` tokens, `Bearer` values, `token=`/`password:`-style pairs) from `command` and `reason`, and denied tools without a `command` string log only their input key names. Best effort, not a guarantee.
 - **Settings disables are defence in depth only.** `.pi/settings.json` sets `-builtin:mcp`, `-builtin:llama.cpp`, `-builtin:codemode`, `-builtin:tool-search`. Project settings are ignored for an untrusted project, so the hook is the load-bearing control.
 
