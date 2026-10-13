@@ -13,10 +13,12 @@ import { getCurrentTools } from "@earendil-works/pi-ai";
 
 import { appendJsonl } from "../../lib/jsonl.ts";
 import { agentOverridesFor, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
-import { guardRoute } from "./guard.ts";
+import { deriveNeed, guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
+
+const REVERTING_KEY = "__kypiRoutingReverting";
 
 /** Test-only seam threaded to `agentOverridesFor` so integration tests can inject a guard-blocked planner. */
 export interface RoutingTestOptions {
@@ -48,7 +50,7 @@ async function applyMode(
 		return;
 	}
 
-	const guardVerdict = guardRoute(candidate.model, "executor", { usesToolLoop: true });
+	const guardVerdict = guardRoute(candidate.model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
 	if (!guardVerdict.ok) {
 		ctx.ui.notify(guardVerdict.reason, "error");
 		return;
@@ -153,7 +155,7 @@ async function applyEscalate(pi: ExtensionAPI, ctx: ExtensionCommandContext, esc
 		return;
 	}
 
-	const guardVerdict = guardRoute(candidate.model, "executor", { usesToolLoop: true });
+	const guardVerdict = guardRoute(candidate.model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
 	if (!guardVerdict.ok) {
 		ctx.ui.notify(guardVerdict.reason, "error");
 		return;
@@ -304,6 +306,41 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 		},
 	});
 
+	// Pi fires model_select after the switch and ignores the return value, so enforcement is undo plus refuse.
+	pi.on("model_select", async (event, ctx) => {
+		const slot = globalThis as Record<string, unknown>;
+		if (slot[REVERTING_KEY] === true || event.source === "restore") return;
+		try {
+			const verdict = guardRoute(event.model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
+			if (verdict.ok) return;
+			const previous = event.previousModel;
+			if (previous === undefined || !guardRoute(previous, "executor", deriveNeed(ctx, { usesToolLoop: true })).ok) {
+				ctx.ui.notify(`${verdict.reason}. Switch to a capable model with /cheap, /balanced or /max.`, "error");
+				return;
+			}
+			ctx.ui.notify(`${verdict.reason}. Reverting to ${previous.provider}/${previous.id}.`, "error");
+			slot[REVERTING_KEY] = true;
+			try {
+				await pi.setModel(previous);
+			} finally {
+				slot[REVERTING_KEY] = false;
+			}
+		} catch {
+			// A guard bug must not break a model switch Pi already completed.
+		}
+	});
+	// Covers a restored session whose model fails the guard, and any switch the revert could not undo.
+	pi.on("input", (event, ctx) => {
+		try {
+			if (ctx.model === undefined) return;
+			const verdict = guardRoute(ctx.model, "executor", deriveNeed(ctx, { usesToolLoop: true, promptChars: event.text.length }));
+			if (verdict.ok) return;
+			ctx.ui.notify(`${verdict.reason}. Prompt not sent; switch with /cheap, /balanced or /max.`, "error");
+			return { action: "handled" as const };
+		} catch {
+			return;
+		}
+	});
 	// Best-effort like safety/index.ts's session_start prune: a bad payload must not stop session start.
 	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
 	// Pi gives extensions no view of a `--tools` allowlist, so read argv; the user's named tools must never be narrowed.

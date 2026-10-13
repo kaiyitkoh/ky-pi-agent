@@ -1,7 +1,7 @@
 /**
  * Capability guard: four hard refusals as pure predicates over a resolved `Model<Api>` (no `ctx`, env or fs).
  * Returns a verdict, never a substituted model. Blocks run in order and the first match returns: image against text-only,
- * request over `contextWindow`, thinking on non-Claude Bedrock (Pi drops it silently, `bedrock-converse-stream.js#buildAdditionalModelRequestFields`),
+ * request over `contextWindow`, thinking on a Bedrock reasoning model whose request builder sends none (pi-ai 1.1.0 `dist/api/bedrock-converse-stream.js:1011`),
  * and a tool-loop role on Bedrock DeepSeek R1. Contributing-boundary and chokepoint-lint scan comments, so those calls are not named here.
  */
 import type { Api, Model } from "@earendil-works/pi-ai";
@@ -21,12 +21,19 @@ export interface GuardNeed {
 	readonly usesToolLoop?: boolean;
 }
 
-/** Bedrock DeepSeek R1 ids (lower-cased). `Model<Api>` (`pi-ai dist/types.d.ts`) has no tool-calling field, so this cannot be a catalogue predicate. */
-export const NO_TOOL_CALLING_MODEL_IDS: readonly string[] = ["deepseek.r1-v1:0", "us.deepseek.r1-v1:0"];
+/** Matches Bedrock DeepSeek R1 under any inference-profile prefix. `Model<Api>` has no tool-calling field, so this cannot be a catalogue predicate. */
+const NO_TOOL_CALLING_ID = /(^|\.)deepseek\.r1-v1:0$/i;
 
 function isNoToolCallingModel(model: Model<Api>): boolean {
+	return NO_TOOL_CALLING_ID.test(model.id);
+}
+
+/** Whether pi-ai's Bedrock request builder emits a thinking field: Claude, and ids containing `gpt-` (pi-ai 1.1.0 `bedrock-converse-stream.js:1011-1068`). */
+function bedrockSendsThinking(model: Model<Api>): boolean {
+	if (isAnthropicClaudeModel(model)) return true;
 	const id = model.id.toLowerCase();
-	return NO_TOOL_CALLING_MODEL_IDS.some((denied) => id === denied);
+	const name = model.name.toLowerCase();
+	return id.includes("gpt-") || name.includes("gpt-");
 }
 
 /** Local copy of pi-ai's unexported `isAnthropicClaudeModel` (pi-ai 1.1.0 `bedrock-converse-stream.js:650`); it diverges silently if Pi changes it. */
@@ -40,6 +47,36 @@ export function isAnthropicClaudeModel(model: Model<Api>): boolean {
 		name.includes("anthropic/claude") ||
 		name.includes("claude")
 	);
+}
+
+/** The slice of `ExtensionContext` that {@link deriveNeed} reads. */
+export interface NeedContext {
+	getContextUsage(): { tokens: number | null } | undefined;
+	readonly thinkingLevel?: string;
+	readonly sessionManager: { getBranch(): readonly unknown[] };
+}
+
+function branchHasImage(branch: readonly unknown[]): boolean {
+	return branch.some((entry) => {
+		const message = (entry as { type?: unknown; message?: { content?: unknown } } | null)?.message;
+		const content = message?.content;
+		return Array.isArray(content) && content.some((block) => (block as { type?: unknown } | null)?.type === "image");
+	});
+}
+
+/** Builds a {@link GuardNeed} from the live session: context usage plus extra prompt size, image blocks in the branch, and the thinking level. */
+export function deriveNeed(
+	ctx: NeedContext,
+	extra: { promptChars?: number; extraTokens?: number; usesToolLoop?: boolean } = {},
+): GuardNeed {
+	const used = ctx.getContextUsage()?.tokens ?? 0;
+	const level = ctx.thinkingLevel;
+	return {
+		image: branchHasImage(ctx.sessionManager.getBranch()),
+		estimatedInputTokens: used + Math.ceil((extra.promptChars ?? 0) / 4) + (extra.extraTokens ?? 0),
+		thinkingRequested: level !== undefined && level !== "off",
+		usesToolLoop: extra.usesToolLoop,
+	};
 }
 
 /** Evaluates the four blocks in order for one `(model, role, need)`; the R1 block is scoped by `need.usesToolLoop`, not `role`. */
@@ -66,17 +103,16 @@ export function guardRoute(model: Model<Api>, role: string, need: GuardNeed): Gu
 	if (
 		model.provider === "amazon-bedrock" &&
 		model.reasoning === true &&
-		!isAnthropicClaudeModel(model) &&
+		!bedrockSendsThinking(model) &&
 		need.thinkingRequested === true
 	) {
 		return {
 			ok: false,
 			reason:
-				`${model.provider}/${model.id} silently DROPS thinking configuration on non-Claude ` +
-				"Bedrock models — the request builder returns no thinking field at all for this " +
-				"combination (pi-ai bedrock-converse-stream.js:889-927), even though the UI still " +
-				"offers a thinking level because it gates on model.reasoning alone. This is not a " +
-				"vendor rejection; it is a configuration silently dropped in transit.",
+				`${model.provider}/${model.id} silently DROPS thinking configuration: the Bedrock ` +
+				"request builder emits no thinking field for this model (pi-ai 1.1.0 " +
+				"dist/api/bedrock-converse-stream.js:1011), even though the UI still offers a thinking " +
+				"level because it gates on model.reasoning alone. Set thinking to off or pick another model.",
 		};
 	}
 

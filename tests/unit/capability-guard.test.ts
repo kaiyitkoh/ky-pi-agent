@@ -30,7 +30,7 @@
  *   amazon-bedrock/deepseek.r1-v1:0         input:["text"]  reasoning:true  contextWindow:128000
  *   amazon-bedrock/us.deepseek.r1-v1:0      same shape, region-qualified id
  *   amazon-bedrock/deepseek.v3-v1:0         input:["text"]  reasoning:true  contextWindow:163840
- *     — Bedrock, non-Claude, reasoning:true, and NOT on `NO_TOOL_CALLING_MODEL_IDS`.
+ *     — Bedrock, non-Claude, reasoning:true, and NOT on the R1 deny rule.
  *     This is the ROUTE-07 positive AND the "deny-list is not a blanket
  *     Bedrock block" negative control for ROUTE-08 — the same model proves
  *     both, because both blocks need a non-Claude reasoning Bedrock model
@@ -55,7 +55,7 @@ import { withModelsConfig } from "../helpers/models.ts";
 import {
 	guardRoute,
 	isAnthropicClaudeModel,
-	NO_TOOL_CALLING_MODEL_IDS,
+	deriveNeed,
 	type GuardNeed,
 	type GuardVerdict,
 } from "../../.pi/extensions/routing/guard.ts";
@@ -66,6 +66,9 @@ let dashscopeFlash: Model<Api>;
 let bedrockClaude: Model<Api>;
 let bedrockR1: Model<Api>;
 let bedrockR1Us: Model<Api>;
+let bedrockR1Global: Model<Api>;
+let bedrockR1Eu: Model<Api>;
+let bedrockGptOss: Model<Api>;
 /** Bedrock, non-Claude, reasoning:true, NOT on the deny-list — see file docstring. */
 let bedrockNonClaudeReasoning: Model<Api>;
 
@@ -81,6 +84,9 @@ beforeAll(async () => {
 		// locally: same shape as the former catalogue entries (text-only, reasoning).
 		const r1Shape = { ...bedrockNonClaudeReasoning, input: ["text"], reasoning: true, contextWindow: 128000 };
 		bedrockR1 = { ...r1Shape, id: "deepseek.r1-v1:0", name: "DeepSeek-R1" } as Model<Api>;
+		bedrockR1Global = { ...r1Shape, id: "global.deepseek.r1-v1:0", name: "DeepSeek-R1 (Global)" } as Model<Api>;
+		bedrockR1Eu = { ...r1Shape, id: "eu.deepseek.r1-v1:0", name: "DeepSeek-R1 (EU)" } as Model<Api>;
+		bedrockGptOss = handle.requireModel("amazon-bedrock", "openai.gpt-oss-120b-1:0");
 		bedrockR1Us = { ...r1Shape, id: "us.deepseek.r1-v1:0", name: "DeepSeek-R1 (US)" } as Model<Api>;
 	});
 });
@@ -128,7 +134,7 @@ const ROWS: readonly Row[] = [
 		role: "reviewer",
 		need: { thinkingRequested: true },
 		expected: "block",
-		reasonIncludes: ["silently", "bedrock-converse-stream.js:889-927"],
+		reasonIncludes: ["silently", "bedrock-converse-stream.js:1011"],
 	},
 	{
 		name: "same Bedrock non-Claude model, thinkingRequested:false -- ok (paired negative control)",
@@ -176,6 +182,29 @@ const ROWS: readonly Row[] = [
 		model: () => bedrockR1Us,
 		role: "summariser",
 		need: { usesToolLoop: false },
+		expected: "ok",
+	},
+	{
+		name: "global.deepseek.r1-v1:0 as executor -- block (any inference-profile prefix is covered)",
+		model: () => bedrockR1Global,
+		role: "executor",
+		need: { usesToolLoop: true },
+		expected: "block",
+		reasonIncludes: ["tool calling"],
+	},
+	{
+		name: "eu.deepseek.r1-v1:0 as executor -- block",
+		model: () => bedrockR1Eu,
+		role: "executor",
+		need: { usesToolLoop: true },
+		expected: "block",
+		reasonIncludes: ["tool calling"],
+	},
+	{
+		name: "Bedrock gpt-oss with thinking requested -- ok (the request builder sends reasoning_effort for it)",
+		model: () => bedrockGptOss,
+		role: "reviewer",
+		need: { thinkingRequested: true },
 		expected: "ok",
 	},
 	{
@@ -261,9 +290,49 @@ describe("isAnthropicClaudeModel -- the three branches of the borrowed predicate
 	});
 });
 
-describe("NO_TOOL_CALLING_MODEL_IDS -- the deny-list contents", () => {
-	it("contains both deepseek.r1-v1:0 and us.deepseek.r1-v1:0", () => {
-		expect(NO_TOOL_CALLING_MODEL_IDS).toContain("deepseek.r1-v1:0");
-		expect(NO_TOOL_CALLING_MODEL_IDS).toContain("us.deepseek.r1-v1:0");
+describe("deriveNeed", () => {
+	function ctxOf(opts: { tokens?: number | null; thinking?: string; branch?: unknown[] }) {
+		return {
+			getContextUsage: () => (opts.tokens === undefined ? undefined : { tokens: opts.tokens }),
+			thinkingLevel: opts.thinking,
+			sessionManager: { getBranch: () => opts.branch ?? [] },
+		};
+	}
+	const imageEntry = { type: "message", message: { role: "user", content: [{ type: "text", text: "x" }, { type: "image", data: "", mimeType: "image/png" }] } };
+	const textEntry = { type: "message", message: { role: "user", content: [{ type: "text", text: "x" }] } };
+
+	it("context usage above the window makes a 393216-window model refuse, naming the window", () => {
+		const need = deriveNeed(ctxOf({ tokens: 400000 }));
+		expect(need.estimatedInputTokens).toBeGreaterThanOrEqual(400000);
+		const verdict = guardRoute(dashscopeFlash, "executor", need);
+		expect(verdict.ok).toBe(false);
+		if (!verdict.ok) expect(verdict.reason).toContain("393216");
+	});
+
+	it("adds prompt chars (4 per token) and extra tokens to the usage", () => {
+		const need = deriveNeed(ctxOf({ tokens: 100 }), { promptChars: 40, extraTokens: 5 });
+		expect(need.estimatedInputTokens).toBe(115);
+	});
+
+	it("unknown usage counts as zero", () => {
+		expect(deriveNeed(ctxOf({ tokens: null })).estimatedInputTokens).toBe(0);
+		expect(deriveNeed(ctxOf({})).estimatedInputTokens).toBe(0);
+	});
+
+	it("an image block anywhere in the branch sets image, and a text-only model refuses", () => {
+		const need = deriveNeed(ctxOf({ branch: [textEntry, imageEntry] }));
+		expect(need.image).toBe(true);
+		expect(guardRoute(dashscopeFlash, "executor", need).ok).toBe(false);
+		expect(deriveNeed(ctxOf({ branch: [textEntry] })).image).toBe(false);
+	});
+
+	it("thinking level off is not a request, any other level is", () => {
+		expect(deriveNeed(ctxOf({ thinking: "off" })).thinkingRequested).toBe(false);
+		expect(deriveNeed(ctxOf({ thinking: "high" })).thinkingRequested).toBe(true);
+		expect(deriveNeed(ctxOf({})).thinkingRequested).toBe(false);
+	});
+
+	it("passes usesToolLoop through", () => {
+		expect(deriveNeed(ctxOf({}), { usesToolLoop: true }).usesToolLoop).toBe(true);
 	});
 });
