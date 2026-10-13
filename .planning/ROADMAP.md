@@ -30,7 +30,7 @@ Decimal phases appear between their surrounding integers in numeric order.
 - [x] **Phase 9: Ceremonial Workflows** - `/grill` → `/plan` → `/execute` → `/review`, evidence-bearing artifacts, MR to staging never `main` (completed 2026-10-12)
 - [x] **Phase 10: Context Budget & Progressive Disclosure** - Measure the per-turn floor, cut it, and settle whether context pollution is actually a cause (completed 2026-10-12)
 - [ ] **Phase 11: Terminal UI** - Theme, statusline, header, and subagent widget — all volatile content in TUI chrome, never the system prompt
-- [ ] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost
+- [x] **Phase 12: OpenSpec Opt-in Skill** - Official OpenSpec skills on demand at user level, pinned CLI, telemetry off, zero per-turn cost (completed 2026-10-13)
 
 ## Phase Details
 
@@ -664,7 +664,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 4. Bootstrap/runbook documents install + upgrade; third-party wrapper `openspec-pi` evaluated and rejected or vendored with justification.
 
 **Depends on:** Phase 9 (runs before Phase 11, which awaits a user decision on terminal vs GUI front-end)
-**Plans:** 3/4 plans executed
+**Plans:** 4/4 plans complete
 
 Plans:
 **Wave 1**
@@ -678,7 +678,7 @@ Plans:
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
-- [ ] 12-04-PLAN.md — Pre-authorised real install + user-level setup on this machine, docs/OPENSPEC.md (upgrade, uninstall, openspec-pi rejection), RUNBOOK Phase 12 + RB-12-01..04
+- [x] 12-04-PLAN.md — Pre-authorised real install + user-level setup on this machine, docs/OPENSPEC.md (upgrade, uninstall, openspec-pi rejection), RUNBOOK Phase 12 + RB-12-01..04
 
 ---
 *Roadmap created: 2026-08-13 · Granularity: fine · Coverage: 107/107 v1 requirements mapped*
