@@ -234,6 +234,21 @@ function fileOperandsOf(arg: string): string[] {
 	return operands;
 }
 
+const SECRET_NAME = /(SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_KEY|ACCESS_KEY|API_KEY|CREDENTIAL)/i;
+const SECRET_EXPANSION = /\$\{?[A-Za-z0-9_]*(SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_KEY|ACCESS_KEY|API_KEY|CREDENTIAL)/i;
+
+/** Why an invocation prints the environment or a secret-named variable into the model's context, or undefined. */
+function environmentDump(invocation: CanonicalInvocation): string | undefined {
+	const executable = normaliseExecutable(invocation.executable);
+	const named = invocation.args.filter((a) => !a.startsWith("-"));
+	if (executable === "" && invocation.wrappers.includes("env")) return "prints every environment variable";
+	if (executable === "printenv" && (named.length === 0 || named.some((n) => SECRET_NAME.test(n)))) return "prints secret environment variables";
+	if (executable === "set" && invocation.args.length === 0) return "prints every shell variable";
+	if ((executable === "export" || executable === "declare" || executable === "typeset") && named.length === 0) return "prints exported variables";
+	const printer = executable === "echo" || executable === "printf";
+	return printer && invocation.args.some((a) => SECRET_EXPANSION.test(a)) ? "prints a secret-named variable" : undefined;
+}
+
 /** One invocation's strongest verdict across git/glab, infra and path classification; `sole` means it is the command's only invocation. */
 /** `switched` is set when an earlier `checkout`/`switch` in the command may have moved HEAD onto a protected branch. */
 function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string, sole: boolean, switched = false): Verdict {
@@ -275,6 +290,8 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 	}
 
 	strongest = strongerOf(strongest, fromInfraVerdict(classifyInfraInvocation(invocation), requestKey));
+	const dump = environmentDump(invocation);
+	if (dump !== undefined) return { kind: "block", reason: `"${invocation.rawSegment}" ${dump}; approving cannot take a secret back out of the context` };
 
 	return strongerOf(strongest, classifyInvocationPaths(invocation, executable, facts, requestKey));
 }

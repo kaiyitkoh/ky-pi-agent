@@ -359,6 +359,22 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 		reason: (path) => `"${path}" is Pi's credential store`,
 	},
 	{
+		id: "home-credential-stores",
+		match: (path, facts) =>
+			[[".netrc"], [".npmrc"], [".terraform.d", "credentials.tfrc.json"], [".config", "gh", "hosts.yml"]].some((segments) =>
+				sameCanonicalPath(path, homePath(facts, ...segments)),
+			) || [[".gnupg"], [".kube"], [".config", "glab-cli"]].some((segments) => isWithinRoot(path, homePath(facts, ...segments))),
+		reason: (path) => `"${path}" is a credential store (netrc, npm, Terraform, gh, glab, GnuPG or kube cache)`,
+	},
+	{
+		id: "process-environment",
+		match: (path) => {
+			const { root, parts } = rootedSegmentsOf(path);
+			return root === "/" && parts.length === 3 && parts[0] === "proc" && parts[2].toLowerCase() === "environ";
+		},
+		reason: (path) => `"${path}" is a process environment, which holds secret variables`,
+	},
+	{
 		id: "harness-ledger",
 		match: (path) => rootedSegmentsOf(path).parts.some((part) => part.toLowerCase() === HARNESS_LEDGER_SEGMENT),
 		reason: (path) => `"${path}" is the harness's signed /execute ledger or its key, which only the harness itself may read or write`,

@@ -329,8 +329,18 @@ Read classification also covers:
   `SSH~1`, `GIT~1`, and the hashed form `PIC454~1` for `.pi`), for reads and
   writes. A git argument is exempt from the file-name rule only, because
   `HEAD~1`, `main~2` and `origin/main~2` are revisions, and the home credential files `~/.aws/**`,
-  `~/.ssh/**`, `~/.git-credentials`, `~/.docker/config.json` and
-  `~/.pi/agent/auth.json`.
+  `~/.ssh/**`, `~/.git-credentials`, `~/.docker/config.json`,
+  `~/.pi/agent/auth.json`, `~/.netrc`, `~/.npmrc`,
+  `~/.terraform.d/credentials.tfrc.json`, `~/.config/gh/hosts.yml`,
+  `~/.config/glab-cli/**`, `~/.gnupg/**` and `~/.kube/**`, and
+  `/proc/<pid>/environ`;
+- environment dumps: bare `env`, `printenv` with no name or a secret-shaped
+  name (`*SECRET*`, `*TOKEN*`, `*PASSWORD*`, `*ACCESS_KEY*`, `*API_KEY*`,
+  `*PRIVATE_KEY*`, `*CREDENTIAL*`), bare `set`, bare `export`/`declare`/
+  `typeset`, and `echo`/`printf` of a secret-shaped variable. A variable used
+  as an argument (`curl -H "PRIVATE-TOKEN: $GITLAB_TOKEN"`) is sent, not
+  printed, and stays allowed; any other program printing its environment is a
+  published gap (EV-210).
 
 Infra reads that print secrets are blocked, with no approval path:
 `terraform show -json`, `terraform output -raw|-json`,
@@ -414,6 +424,7 @@ the corpus does not know about.
 | EV-40 | task-runner-indirection | `make deploy` | Same class as EV-39 — the dangerous verb lives inside a `Makefile` target this guard never reads. | GitLab server-side branch protection (SAFE-01) |
 | EV-94 | task-runner-indirection | `yarn openspec update` | `yarn` and `pnpm` run a project script or package binary named by a bare word. Only their explicit `exec`/`dlx` subcommands are resolved as wrappers, so the guarded verb reaches `yarn`, which carries no policy. | GitLab server-side branch protection (SAFE-01); `openspec update` writes only agent config in the working tree, visible in `git status` |
 | EV-166 | opaque-script-file | `sh x.sh` (where an earlier `write` call created `x.sh` holding a push) | The guard classifies the command line, never the contents of a file it runs. Writing a script and running it in the same command is refused (`generated-script`), but a script written by an earlier, separate tool call and run later is opaque. | GitLab server-side branch protection (SAFE-01) |
+| EV-210 | environment-secret | `node -e "console.log(process.env)"` | Any program can print its own environment. The guard refuses the shell's own dumps (`env`, `printenv`, `set`, `echo $*TOKEN*`), but it does not read what an interpreter's code prints. | Nothing else on this machine; keep long-lived secrets out of the environment Pi runs in. |
 | EV-42 | custom-tool | any extension-registered tool that shells out internally | `evaluate()` governs exactly `bash`/`read`/`write`/`edit`/`grep`/`find`/`ls` by name (a deliberate design boundary, not an oversight: a tool name the guard does not govern is allowed by construction while every input shape inside a governed tool is deny-shaped). An eighth tool name it does not recognise is allowed by construction. Since Phase 08.1 the `tool_call` hook (not `evaluate()`) additionally denies the named Pi 1.x tools and maps `bg_run` through the bash classifier (see "Pi 1.x tool paths" below); the generic hole remains for every OTHER extension-registered tool. | GitLab server-side branch protection (SAFE-01), for anything that eventually reaches a push; nothing local inspects an unknown tool's internal behaviour |
 | EV-65 | sensitive-read | `grep { pattern: "SECRET", glob: ".env*" }` | A glob WILDCARD defeats the exact-basename `isDotEnvFile` check — `.env*` is not `.env` and does not start with the `.env.` prefix that check requires. Deliberately not closed by CR-07: pattern-matching over glob syntax risks the false-positive-trains-the-user-to-disable-the-guard failure mode this project's own `<specifics>` names. | Nothing else on this machine — a genuine residual gap. |
 | EV-73 | sensitive-read | `grep { path: "\\\\localhost\\C$\\Users\\tester\\.aws" }` (UNC alias of the user's OWN `~/.aws`) | WR-14's `$HOME`-anchoring fix (`isSensitiveSearchRoot`) compares `rootedSegmentsOf().root` first — a UNC root never equals a drive-letter root, so a UNC spelling of the SAME real directory fails the home-anchored check outright, even though it resolves to the identical directory on disk. The single-FILE rule still fires for the file itself (`.../.aws/credentials`). | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |
