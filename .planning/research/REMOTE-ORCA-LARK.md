@@ -9,3 +9,9 @@
 - Safeguards: remote = strict mode (every push/terraform/mutating AWS needs explicit approval), allowlisted identity/device, kill switch + auto-expiry, secret redaction to chat/push, short SSO sessions / read-only profile, exact pins + source review.
 - Options: A Orca+Tailscale (low effort, recommended first); B Lark bot→Pi RPC (medium); C both.
 - Related pending: git push rule → ask-for-approval on feature branches, hard block main/staging/--force, refuse when no UI.
+
+## Follow-up (2026-10-13): EC2 host, Orca self-hostability, Lark vs Feishu
+- Host: EC2 fits (Pi is CPU-light). t4g.small ~$12/mo, t4g.medium ~$25/mo 24/7 (us-east-1; SG ~+26%); stopped ≈ $2-5/mo disk. Orca headless needs Xvfb, ~6 vCPU/12 GB (~$120+/mo, unverified), arm64 unverified. Lightsail $12/$24 simpler. Fargate poor fit; Cloud9 closed to new customers.
+- MUST be a separate dev account/VPC, not the auto-deploy account; least-privilege instance role; zero inbound (SSM + Tailscale / Lark long-connection). Needs company approval; changes "zero spend" if company-billed.
+- Orca: `orca serve` headless on Linux; LAN/Tailscale pairing needs no account; relay optional (`ORCA_RELAY_URL`, unofficial self-host); push always via push.onorca.dev (`ORCA_PUSH_GATEWAY_URL`, no self-host); telemetry off via `ORCA_TELEMETRY_DISABLED=1`. Verdict: self-hosted enough with Tailscale pairing + telemetry off + push off/accepted.
+- Lark (Singapore entity, larksuite.com, open.larksuite.com) vs Feishu (Beijing, feishu.cn, open.feishu.cn); separate tenants. Node SDK defaults to Feishu; Lark needs `domain: Domain.Lark`. Check: app name / login URL / admin console domain.
