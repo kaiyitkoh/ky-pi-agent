@@ -704,9 +704,21 @@ Plans:
 
 ### Phase 12.1: v1.0 Gap Closure: audit + deep review fixes (INSERTED)
 
-**Goal:** [Urgent work - to be planned]
-**Requirements**: TBD
+**Goal:** Every genuine gap in `.planning/v1.0-MILESTONE-AUDIT.md` (B1-B4 and its tech debt) and every Critical and Warning in `.planning/CODE-REVIEW-v1.0.md` is fixed with a falsifiable test, or recorded as accepted/deferred with a reason, so that v1.0 can be archived on a green suite.
+**Requirements**: QUAL-07, QUAL-08, GATE-01, SAFE-07, SAFE-10, SAFE-11, SAFE-14, ROUTE-06, ROUTE-07, ROUTE-08, EXT-01..05, FLOW-09, UI-01, BOOT-02 (re-satisfied, no new IDs)
 **Depends on:** Phase 12
+
+**Success Criteria:**
+
+1. Safety: brace expansion, `git -c alias.*`, `send-pack`, `subtree push`, `git-*` executables, `config alias.*`, `trap`, `source`/`.`, `hash -p` and `alias` cannot reach a guarded verb with HEAD on `main` or on a feature branch. Unparseable or unknown constructs fail closed. Secret reads via redirects, `@file`, globs, case variants and `~/.aws/sso/cache` are blocked. The evasion corpus runs its git rows on both branches and asserts `block`.
+2. The evidence gate passes a task that produced a commit and whose declared verification command passes at the end; intermediate non-zero exits and blocked-then-approved calls do not reject it (D-01).
+3. `/quick` gates the change diff after the work, in the target repo. The QUAL-07 design-review pass runs in the real review flow. All workflows settle on `agent_settled`.
+4. Push confirm works when `ctx.hasUI` in `rpc` mode; json, print and subagent contexts still refuse.
+5. Every subagent child loads the safety guard regardless of its `extensions` value. Create/update/eject of subagent definitions needs `ctx.ui.confirm` and is refused with no UI. Agent-definition directories are protected paths (D-03).
+6. Composed packages, the `ky` theme and agent definitions are available in every repo through user-level Pi settings with exact pins, and `package.json` declares the agents (D-02). The Bedrock inference-profile prefix is a setting defaulting to `apac.` (D-04).
+7. The capability guard runs all four checks in production paths, including `/model`. `.pi/agents/reviewer.md` no longer shadows the built-in. The comment-rule test covers every authored path.
+8. Traceability is consistent: REQUIREMENTS.md has UPG/OSPEC/CMT rows, checkboxes match status, SAFE-10 wording is current, and the ROADMAP progress table and STATE.md are correct.
+9. `npx tsc --noEmit` is clean and the full suite passes once at the end, including the safety line budget (trimmed, or raised with a recorded justification).
 **Plans:** 0 plans
 
 Plans:
