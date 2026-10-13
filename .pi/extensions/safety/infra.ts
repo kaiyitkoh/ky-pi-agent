@@ -351,6 +351,13 @@ function classifyOpenspecInvocation(args: readonly string[]): InfraVerdict {
 			reason: `"openspec ${key}" ${openspecConfirmWhy(key)}; it cannot be trivially undone or leaves this repo`,
 		};
 	}
+	// 1.13.2 writes the --code-workspace path with no confinement (dist/commands/context.js writeCodeWorkspace).
+	if (key === "context" && args.some((a) => a === "--code-workspace" || a.startsWith("--code-workspace="))) {
+		return {
+			kind: "confirm",
+			reason: `"openspec context --code-workspace" writes a workspace file at an arbitrary path, outside openspec/`,
+		};
+	}
 	if (OPENSPEC_ALLOW_SUBCOMMANDS.has(key)) {
 		return { kind: "allow" };
 	}

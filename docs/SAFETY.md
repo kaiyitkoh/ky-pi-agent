@@ -120,7 +120,7 @@ docstring for the structural argument). Concretely, it catches:
   `aws sts get-caller-identity`, `aws s3 ls`, `kubectl get`, and `terraform
   plan` stay allowed so ordinary orientation does not train reflexive
   approval.
-- **OpenSpec CLI** — `openspec list|view|show|validate|status|instructions` and the other read-only verbs are allowed, and so is `openspec archive`: it writes only inside `openspec/`, and it is a named allow row rather than a path exemption because bash writes are not path-classified. `init` and `update` (they write agent config directories, and `update` can offer an unpinned global self-upgrade), `completion` (edits shell rc files), `feedback` (posts to GitHub), the state-changing second words of `config`, `store` and `workset`, a bare `openspec`, and any unknown subcommand require confirmation.
+- **OpenSpec CLI** — `openspec list|view|show|validate|status|instructions` and the other read-only verbs are allowed, and so is `openspec archive`: it writes only inside `openspec/`, and it is a named allow row rather than a path exemption because bash writes are not path-classified. `init` and `update` (they write agent config directories, and `update` can offer an unpinned global self-upgrade), `completion` (edits shell rc files), `feedback` (posts to GitHub), `context --code-workspace` (writes a workspace file at an arbitrary path), the state-changing second words of `config`, `store` and `workset`, a bare `openspec`, and any unknown subcommand require confirmation.
 - **Deferred-detonation writes**, not only bash — a `write`/`edit` into
   `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.bash_profile`, `~/.profile`,
   `~/.gitconfig`, a `.github/workflows/*.yml`, or `.gitlab-ci.yml` blocks
