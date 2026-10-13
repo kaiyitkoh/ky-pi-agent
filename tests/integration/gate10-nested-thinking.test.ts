@@ -69,33 +69,7 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { getModeState, runSingleShotRole, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
-
-/**
- * Poll `modelRuntime.hasConfiguredAuth(providerId)` until it reports `true`.
- * Copied from `tests/integration/single-shot-roles.test.ts`, itself copied
- * from `tests/integration/mode-switch.test.ts` — see that file's header for
- * the measured async gap this closes (a faux provider registered under a real
- * provider id still resolves `hasConfiguredAuth` false until the runtime's
- * cached availability snapshot catches up with `setRuntimeApiKey`).
- */
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(
-				`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms ` +
-					"after setRuntimeApiKey resolved. See tests/integration/mode-switch.test.ts's header for " +
-					"the measured async gap.",
-			);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
+import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth } from "../helpers/session.ts";
 
 /** What one nested call's response factory saw as its outgoing `options`. */
 interface Capture {

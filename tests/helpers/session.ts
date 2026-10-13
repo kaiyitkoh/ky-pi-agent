@@ -71,7 +71,7 @@ import type {
 	Model,
 } from "@earendil-works/pi-ai";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
-import type { AgentSession } from "@earendil-works/pi-coding-agent";
+import type { AgentSession, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import {
 	createAgentSession,
 	ModelRuntime,
@@ -353,4 +353,37 @@ export async function withFauxSession<T>(
 	} finally {
 		await handle.dispose();
 	}
+}
+
+/**
+ * Polls until `hasConfiguredAuth(providerId)` is true: after `setRuntimeApiKey` resolves, the cached availability snapshot
+ * lags by a few milliseconds (measured; tests/integration/mode-switch.test.ts header).
+ */
+export async function waitForConfiguredAuth(modelRuntime: ModelRuntime, providerId: string, timeoutMs = 2000): Promise<void> {
+	const start = Date.now();
+	while (!modelRuntime.hasConfiguredAuth(providerId)) {
+		if (Date.now() - start > timeoutMs) {
+			throw new Error(`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms after setRuntimeApiKey resolved.`);
+		}
+		await new Promise((resolve) => setTimeout(resolve, 5));
+	}
+}
+
+/** A notification `ctx.ui.notify` recorded. */
+export interface Notification {
+	text: string;
+	level?: string;
+}
+
+/**
+ * Replaces `ctx.ui` with a recorder. `defineProperty`, not assignment: the command context's `ui` is a getter-only
+ * accessor (pi 1.1.0 dist/core/extensions/runner.js:463-467, :538-542).
+ */
+export function withCapturedNotify(ctx: ExtensionContext, notifications: Notification[]): void {
+	Object.defineProperty(ctx, "ui", {
+		value: { notify: (text: string, level?: string) => void notifications.push({ text, level }) },
+		writable: true,
+		configurable: true,
+		enumerable: true,
+	});
 }

@@ -107,7 +107,7 @@ import { MODE_ENTRY_TYPE, type KyModeData } from "../../.pi/extensions/routing/s
 import { buildOpenAiFixturePayload, wrapFauxWithPayload } from "../helpers/faux.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { readTornSafe } from "../helpers/logs.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth } from "../helpers/session.ts";
 
 /** Absolute path of the diagnostics extension this repository ships. */
 const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
@@ -151,29 +151,6 @@ function readRows<T>(file: string): T[] {
 		throw new Error(`${file} holds ${unparseable.length} unparseable line(s): ${unparseable[0]}`);
 	}
 	return records as T[];
-}
-
-/**
- * Poll `modelRuntime.hasConfiguredAuth(providerId)` until it reports `true`.
- * Copied from `tests/integration/mode-switch.test.ts` — see that file's
- * header and `05-07-SUMMARY.md` for the measured async gap this closes.
- */
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(
-				`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms ` +
-					"after setRuntimeApiKey resolved. See tests/integration/mode-switch.test.ts's header for " +
-					"the measured async gap.",
-			);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
 }
 
 /** A `ky:mode` entry, matched the same way `mode-switch.test.ts#findModeEntry` does. */

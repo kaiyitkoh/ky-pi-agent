@@ -98,7 +98,7 @@ import type { AgentOverrides } from "../../.pi/extensions/routing/agent-override
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, type KyModeData } from "../../.pi/extensions/routing/schema.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth, type Notification, withCapturedNotify } from "../helpers/session.ts";
 
 /** Where the ordering log lives, shared across the test's and the extension's own module graphs. */
 const LOG_KEY = "__kypiModeSwitchOrderLog";
@@ -168,67 +168,6 @@ function resetOrderLog(): void {
 /** Read the shared ordering log. */
 function readOrderLog(): string[] {
 	return ((globalThis as Record<string, unknown>)[LOG_KEY] as string[] | undefined) ?? [];
-}
-
-/**
- * Poll `modelRuntime.hasConfiguredAuth(providerId)` until it reports `true`,
- * or throw naming the timeout. See the module docstring's measured-gap
- * section for why a poll is needed at all rather than trusting the awaited
- * `setRuntimeApiKey` promise alone.
- */
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(
-				`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms ` +
-					"after setRuntimeApiKey resolved. See this file's header for the measured async gap.",
-			);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
-
-/** A notification `ctx.ui.notify` recorded. */
-interface Notification {
-	text: string;
-	level?: string;
-}
-
-/**
- * Replace `ctx.ui` with a recording stand-in, via `defineProperty` rather
- * than assignment.
- *
- * `ExtensionRunner#createCommandContext()` builds its returned object with
- * `Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.
- * createContext()))` [VERIFIED: `dist/core/extensions/runner.js:538-542`],
- * and `createContext()`'s `ui` is a GETTER-ONLY accessor property (an object
- * literal `get ui() {...}` with no setter)
- * [VERIFIED: `dist/core/extensions/runner.js:463-467`]. Plain assignment
- * (`ctx.ui = ...`) throws in strict mode against a getter-only accessor;
- * `defineProperty` replaces the accessor with a writable, configurable data
- * property instead, exactly the technique
- * `tests/integration/fallback-chain.test.ts#withShadowedRegistry` already
- * uses in this repository for the sibling `modelRegistry` property.
- */
-function withCapturedNotify(
-	ctx: import("@earendil-works/pi-coding-agent").ExtensionCommandContext,
-	notifications: Notification[],
-): void {
-	Object.defineProperty(ctx, "ui", {
-		value: {
-			notify: (text: string, level?: string) => {
-				notifications.push({ text, level });
-			},
-		},
-		writable: true,
-		configurable: true,
-		enumerable: true,
-	});
 }
 
 /**

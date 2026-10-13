@@ -66,7 +66,7 @@ import { TURNS_LOG_BASE, type RowKind } from "../../.pi/extensions/diagnostics/s
 import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { readTornSafe } from "../helpers/logs.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth } from "../helpers/session.ts";
 import { existsSync } from "node:fs";
 
 /** A turns row as this file reads it back off disk. */
@@ -86,30 +86,6 @@ function readTurns(cwd: string): TurnsRow[] {
 		throw new Error(`${file} holds ${unparseable.length} unparseable line(s): ${unparseable[0]}`);
 	}
 	return records as TurnsRow[];
-}
-
-/**
- * Poll `modelRuntime.hasConfiguredAuth(providerId)` until it reports `true`.
- * Copied from `tests/integration/gate10-nested-thinking.test.ts`, itself
- * copied from `tests/integration/mode-switch.test.ts` — see that file's
- * header for the measured async gap this closes.
- */
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(
-				`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms ` +
-					"after setRuntimeApiKey resolved. See tests/integration/mode-switch.test.ts's header for " +
-					"the measured async gap.",
-			);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
 }
 
 /** One nested call's captured outgoing request, from the response factory's own arguments. */

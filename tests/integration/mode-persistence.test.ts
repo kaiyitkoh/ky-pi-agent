@@ -54,7 +54,7 @@ import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routin
 import { DEFAULT_MODE, MODE_ENTRY_TYPE, type KyModeData } from "../../.pi/extensions/routing/schema.ts";
 import { buildOpenAiFixturePayload, wrapFauxWithPayload } from "../helpers/faux.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
+import { createFauxSession, type FauxSessionHandle, waitForConfiguredAuth, type Notification, withCapturedNotify } from "../helpers/session.ts";
 
 /** Absolute path of the routing extension entry point this repository ships. */
 const ROUTING_ENTRY = `${repoRoot()}/.pi/extensions/routing/index.ts`;
@@ -68,56 +68,6 @@ const EXTENSION_SOURCE = [
 	"\trouting(pi);",
 	"}",
 ].join("\n");
-
-/**
- * Poll `modelRuntime.hasConfiguredAuth(providerId)` until it reports `true`.
- * Copied from `tests/integration/mode-switch.test.ts` -- see that file's
- * header for the measured cached-snapshot gap this closes.
- */
-async function waitForConfiguredAuth(
-	modelRuntime: FauxSessionHandle["modelRuntime"],
-	providerId: string,
-	timeoutMs = 2000,
-): Promise<void> {
-	const start = Date.now();
-	while (!modelRuntime.hasConfiguredAuth(providerId)) {
-		if (Date.now() - start > timeoutMs) {
-			throw new Error(
-				`waitForConfiguredAuth: ${providerId} never reported configured auth within ${timeoutMs}ms ` +
-					"after setRuntimeApiKey resolved. See mode-switch.test.ts's header for the measured async gap.",
-			);
-		}
-		await new Promise((resolve) => setTimeout(resolve, 5));
-	}
-}
-
-/** A notification `ctx.ui.notify` recorded -- unused here beyond satisfying `withCapturedNotify`'s signature. */
-interface Notification {
-	text: string;
-	level?: string;
-}
-
-/**
- * Replace `ctx.ui` with a recording stand-in, via `defineProperty` -- copied
- * from `tests/integration/mode-switch.test.ts`, which explains why
- * `defineProperty` (not plain assignment) is required for this particular
- * property.
- */
-function withCapturedNotify(
-	ctx: import("@earendil-works/pi-coding-agent").ExtensionCommandContext,
-	notifications: Notification[],
-): void {
-	Object.defineProperty(ctx, "ui", {
-		value: {
-			notify: (text: string, level?: string) => {
-				notifications.push({ text, level });
-			},
-		},
-		writable: true,
-		configurable: true,
-		enumerable: true,
-	});
-}
 
 /** Every `ky:mode` custom entry on `branch`, in path order. */
 function findModeEntries(branch: readonly SessionEntry[]): CustomEntry<KyModeData>[] {
