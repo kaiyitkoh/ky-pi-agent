@@ -152,6 +152,8 @@ interface WrapperGrammar {
 	readonly assignments?: boolean;
 	/** Accepts a bare numeric option (`nice -5`). */
 	readonly numericOption?: boolean;
+	/** Options that make the wrapper look its operand up instead of running it (`command -v`). */
+	readonly query?: ReadonlySet<string>;
 }
 
 const NO_OPTIONS: ReadonlySet<string> = new Set();
@@ -211,7 +213,7 @@ const WRAPPER_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, Wr
 	],
 	["stdbuf", { boolean: NO_OPTIONS, value: new Set(["-i", "--input", "-o", "--output", "-e", "--error"]) }],
 	["unbuffer", { boolean: new Set(["-p"]), value: NO_OPTIONS }],
-	["command", { boolean: new Set(["-p", "-v", "-V"]), value: NO_OPTIONS }],
+	["command", { boolean: new Set(["-p"]), value: NO_OPTIONS, query: new Set(["-v", "-V"]) }],
 	["builtin", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 	["toybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 	["busybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
@@ -512,6 +514,7 @@ interface ResolvedWrappers {
 interface ConsumedOptions {
 	readonly index: number;
 	readonly confident: boolean;
+	readonly query?: true;
 }
 
 /** Consume one wrapper's options and operands from `start`; `onValue` sees each value option. */
@@ -540,6 +543,9 @@ function consumeWrapperOptions(
 		const shortName = word.startsWith("--") ? word : word.slice(0, 2);
 		if (grammar.shellString?.has(longName) === true || grammar.shellString?.has(shortName) === true) {
 			return { index: i, confident: false };
+		}
+		if (grammar.query?.has(word) === true) {
+			return { index: i, confident: true, query: true };
 		}
 		if (grammar.boolean.has(word)) {
 			i += 1;
@@ -632,6 +638,11 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 				cwdOverride = value;
 			}
 		});
+		if (consumed.query === true) {
+			// The wrapper itself is what runs, and it runs nothing.
+			wrappers.pop();
+			break;
+		}
 		i = consumed.index;
 		if (!consumed.confident) {
 			confident = false;

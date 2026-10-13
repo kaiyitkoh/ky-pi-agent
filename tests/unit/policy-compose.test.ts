@@ -389,6 +389,25 @@ const ROWS: readonly Row[] = [
 		expected: "block",
 	},
 	{
+		name: "command -v openspec -- allow, a lookup runs nothing",
+		toolName: "bash",
+		input: { command: "command -v openspec" },
+		expected: "allow",
+	},
+	{
+		name: "command -v git on protected main -- allow",
+		toolName: "bash",
+		input: { command: "command -v git" },
+		facts: PROTECTED_MAIN,
+		expected: "allow",
+	},
+	{
+		name: "command openspec update -- confirm, the operand runs",
+		toolName: "bash",
+		input: { command: "command openspec update" },
+		expected: "confirm",
+	},
+	{
 		name: "env with an unknown option before git push -- unresolved-wrapper block",
 		toolName: "bash",
 		input: { command: "env --frobnicate git push" },
