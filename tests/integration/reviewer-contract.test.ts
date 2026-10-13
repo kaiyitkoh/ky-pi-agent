@@ -44,7 +44,6 @@ import { beforeAll, describe, expect, it } from "vitest";
 import {
 	buildImportGraph,
 	buildReviewerContext,
-	REVIEWER_SYSTEM_PROMPT,
 	runReview,
 	type ReviewerContractInput,
 } from "../../.pi/extensions/quality/reviewer.ts";
@@ -476,54 +475,11 @@ describe("buildReviewerContext -- throws naming which of the six elements is abs
 	it("filesTouchedUnion absent", () => {
 		expect(() => buildReviewerContext({ ...validContract, filesTouchedUnion: [] })).toThrow(/filesTouchedUnion/);
 	});
-	it("importGraph absent", () => {
-		expect(() => buildReviewerContext({ ...validContract, importGraph: [] })).toThrow(/importGraph/);
+	it("an empty importGraph is valid and renders as no edges", () => {
+		const rendered = buildReviewerContext({ ...validContract, importGraph: [] });
+		expect(rendered).toContain("none: no JavaScript or TypeScript file changed");
 	});
 	it("a genuinely complete contract does not throw", () => {
 		expect(() => buildReviewerContext(validContract)).not.toThrow();
-	});
-});
-
-// -----------------------------------------------------------------------------
-// Agent-file drift: .pi/agents/reviewer.md's prompt body must equal
-// REVIEWER_SYSTEM_PROMPT (T-08-26)
-// -----------------------------------------------------------------------------
-
-/** Strip trailing whitespace per line, then trim the whole string. */
-function normalise(text: string): string {
-	return text
-		.split("\n")
-		.map((line) => line.replace(/[ \t]+$/, ""))
-		.join("\n")
-		.trim();
-}
-
-/** The prompt body: everything between the closing frontmatter delimiter and the trailing HTML comment. */
-function extractAgentPromptBody(raw: string): string {
-	const parts = raw.split(/^---$/m);
-	if (parts.length < 3) {
-		throw new Error(
-			`extractAgentPromptBody: expected two "---" frontmatter delimiters, found ${parts.length - 1} -- ` +
-				"the file's frontmatter shape has changed",
-		);
-	}
-	const rest = parts.slice(2).join("---");
-	const commentStart = rest.indexOf("\n<!--");
-	const body = commentStart === -1 ? rest : rest.slice(0, commentStart);
-	return normalise(body);
-}
-
-describe("T-08-26 -- .pi/agents/reviewer.md's prompt body agrees with REVIEWER_SYSTEM_PROMPT", () => {
-	it("the two are identical modulo trailing whitespace", () => {
-		const raw = readFileSync(join(process.cwd(), ".pi/agents/reviewer.md"), "utf-8");
-		const bodyFromFile = extractAgentPromptBody(raw);
-		const bodyFromConstant = normalise(REVIEWER_SYSTEM_PROMPT);
-
-		expect(
-			bodyFromFile,
-			"`.pi/agents/reviewer.md`'s prompt body has drifted from `REVIEWER_SYSTEM_PROMPT` in " +
-				"`.pi/extensions/quality/reviewer.ts` -- update whichever one is stale so the eventual " +
-				"real-subagent path (RB-08-03) and the runSingleShotRole path in force today agree",
-		).toBe(bodyFromConstant);
 	});
 });

@@ -296,6 +296,8 @@ const README_REQUIRED: readonly (readonly [string, string])[] = [
 	["check-gh-unauthenticated.sh", "how to see which side of that control the machine is currently on"],
 	["not covered", "the literal honesty clause required by ROADMAP success criterion 1"],
 	["CONTRIBUTING.md", "the boundary rule lives there and the README is the only path to it"],
+	["pick one delivery path", "the stub and a git package are two diverging copies of the guard"],
+	["pi install git:github.com/kaiyitkoh/ky-pi-agent@", "the git install must carry a ref; an unrefed install is never moved by pi update"],
 ];
 
 /**
@@ -317,6 +319,11 @@ describe("Group A — README states what the supply-chain control does not cover
 			expect(README, `README.md must contain ${JSON.stringify(needle)} — ${why}`).toContain(needle);
 		});
 	}
+
+	it("never shows an unrefed pi install of this repository", () => {
+		const unrefed = README.match(/pi install (?:https?:[/][/]|git:)github[.]com[/]kaiyitkoh[/]ky-pi-agent(?!@)/g) ?? [];
+		expect(unrefed, "an unrefed git install is never moved by pi update; pin it to a tag or commit").toEqual([]);
+	});
 
 	it("keeps the work-in-progress framing it was written with", () => {
 		expect(

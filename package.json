@@ -23,7 +23,12 @@
     ],
     "themes": [
       "./.pi/themes"
-    ]
+    ],
+    "subagents": {
+      "agents": [
+        "./.pi/agents"
+      ]
+    }
   },
   "scripts": {
     "test": "vitest run",

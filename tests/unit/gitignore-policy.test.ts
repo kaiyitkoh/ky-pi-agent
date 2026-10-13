@@ -95,7 +95,7 @@ const MUST_BE_COMMITTABLE = [
 	".pi/skills/x/SKILL.md",
 	".pi/prompts/quick.md",
 	".pi/themes/ky.json",
-	".pi/agents/reviewer.md",
+	".pi/agents/planner.md",
 	".pi/templates/env.example",
 	".pi/APPEND_SYSTEM.md",
 	// --- Packaging and toolchain ---------------------------------------------

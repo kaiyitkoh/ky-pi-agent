@@ -197,13 +197,6 @@ describe("subagent-agents-config -- discovery (guards against a vacuous pass)", 
  */
 const UNROUTED_AGENT_ALLOWLIST: readonly { readonly stem: string; readonly reason: string }[] = [
 	{
-		stem: "reviewer",
-		reason:
-			'plan 08-07 dispatches the reviewer via runSingleShotRole (ROLE_MECHANISM.reviewer === "call-model"), ' +
-			"never through the subagent/agentOverrides mechanism AGENT_NAME_BY_ROLE serves -- this agent file " +
-			"exists for the eventual real-subagent path, tracked as RB-08-03, OUTSTANDING",
-	},
-	{
 		stem: "executor-handoff",
 		reason:
 			"plan 09-11 builds and measures the FLOW-09 handoff packet entirely offline -- `pi-subagents` is " +
@@ -288,6 +281,42 @@ describe("subagent-agents-config -- forbidden-key assertion (real, shipped files
 		}
 		const violations = frontmatterViolations(frontmatter).filter((v) => v.includes("forbidden key"));
 		expect(violations, `${file}: ${violations.join("; ")}`).toEqual([]);
+	});
+});
+
+// -----------------------------------------------------------------------------
+// Shipped agents neither shadow a builtin nor carry HTML comments
+// -----------------------------------------------------------------------------
+
+/** Builtin agent names shipped by pi-subagents 0.76.1 (package agents/ directory). */
+const BUILTIN_AGENT_NAMES = [
+	"claude-code",
+	"claude-code-writer",
+	"codex-exec",
+	"codex-exec-writer",
+	"cursor-agent",
+	"cursor-agent-writer",
+	"delegate",
+	"evidence-auditor",
+	"oracle",
+	"researcher",
+	"reviewer",
+	"scout",
+	"worker",
+] as const;
+
+describe("subagent-agents-config -- builtin shadowing and prompt hygiene (real, shipped files)", () => {
+	it.each(AGENT_FILES)("%s does not shadow a pi-subagents builtin", (file) => {
+		const source = readFileSync(join(repoRoot(), file), "utf-8");
+		const declared = extractFrontmatter(source)?.name;
+		const stem = basename(file, ".md");
+		expect(BUILTIN_AGENT_NAMES as readonly string[], `${file}: filename stem collides with a builtin`).not.toContain(stem);
+		expect(BUILTIN_AGENT_NAMES as readonly string[], `${file}: frontmatter name collides with a builtin`).not.toContain(declared);
+	});
+
+	it.each(AGENT_FILES)("%s carries no HTML comment, which would reach every child as system prompt", (file) => {
+		const source = readFileSync(join(repoRoot(), file), "utf-8");
+		expect(source).not.toContain("<!--");
 	});
 });
 

@@ -52,6 +52,10 @@ describe("package.json manifest shape", () => {
 		expect(manifest.pi.themes).toEqual(["./.pi/themes"]);
 	});
 
+	it("declares the agent definitions for pi-subagents so they travel with the package", () => {
+		expect(manifest.pi.subagents).toEqual({ agents: ["./.pi/agents"] });
+	});
+
 	it("declares exactly the five host-provided peers at range *", () => {
 		const peers = manifest.peerDependencies as Record<string, string>;
 		expect(Object.keys(peers).sort()).toEqual([...PEER_NAMES].sort());

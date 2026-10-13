@@ -46,21 +46,3 @@ could not read, edge cases you noticed but could not verify.
 
 Keep the plan concrete enough that an executor can follow it without asking
 you to re-derive it. You never make the changes yourself.
-
-<!--
-Deliberately no `model:` key in this file's frontmatter.
-
-`pi-subagents@0.49.0 src/agents/agents.ts:1155` reads:
-
-    if (override.model !== undefined && !agentHasFrontmatterField(agent, "model")) {
-
-A settings-level `subagents.agentOverrides` entry (written by
-`.pi/extensions/routing/agent-overrides.ts`, ROUTE-05) only fills in a model
-when the agent's OWN frontmatter has none. If this file ever gains a `model:`
-line, every `/cheap`, `/balanced`, `/max` and `/escalate` switch stops
-affecting the planner — its pin becomes permanent and silent. Do not add one
-back without reading that file's module docstring first.
-
-`fallbackModels:` is withheld for the identical reason — model selection in
-every form belongs to `agent-overrides.ts`, not to this file.
--->

@@ -49,7 +49,7 @@
  * of the GitHub CLI, not of this repo. [threats T-01-21, T-01-22]
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 
@@ -116,8 +116,12 @@ interface CheckRun {
  * directory alone" -- the only honest way to simulate a machine without the
  * GitHub CLI while the real one sits on this machine's PATH.
  */
-function runCheck(opts: { ghExitCode: number | null; args?: string[] }): CheckRun {
+function runCheck(opts: { ghExitCode: number | null; args?: string[]; radius?: boolean }): CheckRun {
 	const logDir = mkdtempSync(join(tmpdir(), "kypi-ghcalls-"));
+	const agentDir = mkdtempSync(join(tmpdir(), "kypi-ghagent-"));
+	if (opts.radius) {
+		writeFileSync(join(agentDir, "auth.json"), JSON.stringify({ radius: { type: "oauth" } }), "utf-8");
+	}
 	const logTo = join(logDir, "calls.log");
 
 	try {
@@ -125,6 +129,7 @@ function runCheck(opts: { ghExitCode: number | null; args?: string[] }): CheckRu
 			opts.ghExitCode === null ? {} : { gh: { exitCode: opts.ghExitCode, logTo } };
 
 		return withStubBin(stubs, (env) => {
+			env.PI_CODING_AGENT_DIR = agentDir;
 			const key = pathKeyOf(env);
 			if (opts.ghExitCode === null) {
 				// withStubBin prepends its temp dir to the inherited PATH. Keep only
@@ -160,6 +165,7 @@ function runCheck(opts: { ghExitCode: number | null; args?: string[] }): CheckRu
 		});
 	} finally {
 		rmSync(logDir, { recursive: true, force: true });
+		rmSync(agentDir, { recursive: true, force: true });
 	}
 }
 
@@ -190,7 +196,7 @@ describe("SAFE-16 -- the /share control classifier", () => {
 		// one hardcoded to exit 1 does the reverse. [threat T-01-23]
 		expect(run.status, `stdout: ${run.stdout}\nstderr: ${run.stderr}`).toBe(0);
 		expect(run.stdout).toMatch(/unauthenticated/);
-		expect(run.stdout).toMatch(/aborts/);
+		expect(run.stdout).toMatch(/cannot upload/);
 
 		expect(run.ghCalls).toContain("gh auth status");
 	}, TIMEOUT_MS);
@@ -239,5 +245,32 @@ describe("SAFE-16 -- the /share control classifier", () => {
 		// real `gh` writes to no log either, so an empty log would still be
 		// consistent with the leak. Stated rather than deleted silently, so the
 		// next reader does not re-add it thinking it is missing coverage.
+	}, TIMEOUT_MS);
+
+	it("case 5: a stored Radius credential fails even when gh is unauthenticated", () => {
+		const run = runCheck({ ghExitCode: 1, radius: true });
+
+		expect(run.status, `stdout: ${run.stdout}
+stderr: ${run.stderr}`).toBe(1);
+		expect(run.stderr).toMatch(/Radius IS configured/);
+		expect(run.stderr).toMatch(/without gh/);
+		expect(run.stdout).not.toMatch(/OK:/);
+	}, TIMEOUT_MS);
+
+	it("case 6: a stored Radius credential fails even when gh is not installed", () => {
+		const run = runCheck({ ghExitCode: null, radius: true });
+
+		expect(run.status, `stdout: ${run.stdout}
+stderr: ${run.stderr}`).toBe(1);
+		expect(run.stderr).toMatch(/Radius IS configured/);
+	}, TIMEOUT_MS);
+
+	it("case 7: a stored Radius credential with --warn-only reports and exits 0", () => {
+		const run = runCheck({ ghExitCode: 1, radius: true, args: ["--warn-only"] });
+
+		expect(run.status, `stdout: ${run.stdout}
+stderr: ${run.stderr}`).toBe(0);
+		expect(run.stderr).toMatch(/Radius IS configured/);
+		expect(run.stderr).toMatch(/warn-only/);
 	}, TIMEOUT_MS);
 });

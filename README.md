@@ -20,13 +20,19 @@ reason for it not to be, not because it is intended as a general-purpose tool.
 
 ## Install
 
-Two paths. They are **alternatives, not a sequence** — pick one.
+Two paths. They are **alternatives, not a sequence** — pick one delivery path:
+the bootstrap stub or the git package, never both.
 
-**Path A — install as a Pi package:**
+**Path A — install as a Pi package, pinned to a release ref:**
 
 ```
-pi install https://github.com/kaiyitkoh/ky-pi-agent
+pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0
 ```
+
+A bare URL with no ref is not supported: `pi update` would not move it, and an
+unpinned clone is unreviewed code. The ref is an exact tag or commit. The
+package manifest declares the agent definitions (`pi.subagents.agents`), so
+they travel with it.
 
 **Path B — clone and bootstrap:**
 
@@ -36,12 +42,20 @@ cd ky-pi-agent
 sh bin/bootstrap.sh
 ```
 
-Do one or the other, **not both**. Installing globally *and* dogfooding by
-`cd`-ing into the repo loads the extension twice, from two different absolute
-paths. Deduplication is by canonical path, so two distinct paths do not
-deduplicate, and you get duplicate entries in the command list. It is
-non-fatal, it is confusing, and it is not worth engineering around — so the
-rule is: dogfood, or install globally, never both.
+Bootstrap also writes the user-level Pi settings: the four composed packages at
+exact pins, the `ky` theme, and this checkout's `.pi/agents` as a subagent scan
+directory, so the harness is available in every repository. It merges rather
+than overwrites: your own packages, extensions, theme and `kyPiAgent` keys
+survive, and a different pinned version of one of ours is refused.
+`sh bin/bootstrap.sh --global-setup` runs only that part.
+
+Do one or the other, **not both**. The bootstrap installs a user-scope safety
+stub that loads this checkout's guard; a git package carries its own copy, and
+two copies can diverge. `sh bin/bootstrap.sh --check-only` fails when both are
+configured. Separately, installing globally *and* dogfooding by `cd`-ing into
+the repo loads the extension twice from two different absolute paths, which
+Pi's canonical-path deduplication does not merge. It is non-fatal and not worth
+engineering around, so the rule is: dogfood, or install globally, never both.
 
 Neither path is finished yet.
 
