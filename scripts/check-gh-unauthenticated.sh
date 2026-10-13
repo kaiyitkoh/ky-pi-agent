@@ -4,11 +4,11 @@
 #
 # /share exports the whole session (source, prompts, pasted secrets) and uploads
 # it. Pi 1.1.0 tries Radius first and only then falls back to a gist
-# (pi dist/modes/interactive/session-share.js:55-74), so there are two doors:
+# (pi dist/modes/interactive/session-share.js), so there are two doors:
 #   - a stored Radius credential uploads without gh at all;
 #   - an authenticated gh posts a secret gist, which is unlisted, not private.
 # No extension hook is upstream of the literal /share match
-# (interactive-mode.js:2578), and `gh auth refresh --remove-scopes gist` cannot
+# (pi interactive-mode.js), and `gh auth refresh --remove-scopes gist` cannot
 # drop the minimum scopes, so the controls are: no stored Radius credential and
 # `gh auth logout`.
 #

@@ -137,6 +137,21 @@ describe("script comment scanner", () => {
 		}
 		expect(offenders, `Delete history and IDs from these comments:\n${offenders.join("\n")}`).toEqual([]);
 	});
+
+	it("has no line-number citations in script or config comments", () => {
+		const repoFiles = trackedFiles().filter((p) => /\.(?:ts|md|json)$/.test(p) && !isExempt(p));
+		const offenders: string[] = [];
+		for (const f of authoredScriptFiles()) {
+			const text = read(f).replace(/\r\n/g, "\n");
+			for (const c of extractAnyComments(f, text)) {
+				const line = text.slice(0, c.pos).split("\n").length;
+				for (const hit of [...findRepoLineCitations(c.text, repoFiles), ...findUnversionedCitations(c.text, repoFiles)]) {
+					offenders.push(`${f}:${line} ${hit}`);
+				}
+			}
+		}
+		expect(offenders, `Cite a symbol, or put the version before the citation:\n${offenders.join("\n")}`).toEqual([]);
+	});
 });
 
 describe("comment discipline", () => {

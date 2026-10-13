@@ -259,7 +259,7 @@ assert_user_scope() {
 
 # Pi creates the agent dir 0700 and auth.json 0600 only when they are absent,
 # so a plain `mkdir -p` here would leave the directory 0755 permanently
-# (pi dist/core/auth-storage.js:21-31). chmod is best-effort: on Windows it only
+# (pi dist/core/auth-storage.js). chmod is best-effort: on Windows it only
 # toggles the read-only bit.
 ensure_agent_dir() {
 	mkdir -p "$PI_AGENT_DIR"
@@ -558,7 +558,7 @@ console.log("  .env.example written from .pi/templates/env.example");
 # ---------------------------------------------------------------------------
 # models.json and auth.json: the files Pi actually reads
 # ---------------------------------------------------------------------------
-# Pi resolves both from the agent directory only (pi dist/config.js:423-425), so
+# Pi resolves both from the agent directory only (pi dist/config.js), so
 # the committed templates are inert until installed here. Both refuse a target
 # that is not valid JSON and report "already current - unchanged" on a no-op.
 #
@@ -773,7 +773,7 @@ console.log("  auth.json provider entries added: " + added.join(", "));
 # pi-subagents worktree hook
 # ---------------------------------------------------------------------------
 # pi-subagents reads this dedicated file, not settings.json (src/extension/
-# config.ts:90-92). Only the two worktreeSetupHook keys are replaced; any other
+# config.ts). Only the two worktreeSetupHook keys are replaced; any other
 # key survives. The path is absolute because the file is user scope and applies
 # in every repo. Tab indent matches pi-subagents own saveConfig().
 merge_subagent_config() {
