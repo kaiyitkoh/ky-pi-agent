@@ -492,10 +492,11 @@ export default function (pi: ExtensionAPI): void {
 	registerToolCallHook(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
+		// NEVER THROWS: retention only, so a failed prune must not affect session start.
 		try {
 			pruneAuditLogs(ctx.cwd);
 		} catch {
-			// Retention only: a failed prune must not affect session start.
+			// Swallowed deliberately.
 		}
 		reportBranchWarnings(ctx, effectiveBranches(ctx.cwd).warnings, true);
 		const sessionId = sessionIdOf(ctx);

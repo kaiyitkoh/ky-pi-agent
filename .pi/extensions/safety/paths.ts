@@ -238,7 +238,8 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 		id: "process-environment",
 		match: (path) => {
 			const { root, parts } = rootedSegmentsOf(path);
-			return root === "/" && parts.length === 3 && parts[0] === "proc" && parts[2].toLowerCase() === "environ";
+			const [proc, pid, environ, ...rest] = parts;
+			return root === "/" && proc === "proc" && pid !== undefined && environ?.toLowerCase() === "environ" && rest.length === 0;
 		},
 		reason: (path) => `"${path}" is a process environment, which holds secret variables`,
 	},
