@@ -60,18 +60,12 @@
  * So for network egress in plan mode, THIS FILE IS THE ONLY LOCAL CONTROL,
  * which is why a bundled short option (`curl -sT`) must be caught here.
  *
- * DECIDED, NOT DEFERRED BY OMISSION: `curl`/`wget` were NOT added to the
- * safety layer's guarded verbs in this pass. Doing so is a Phase 4 change with
- * Phase 4 consequences — `GUARDED_VERB_PATTERN` is what makes a shell runner a
- * refusal (`sh -c "…"` would start refusing ordinary commands), `policy.ts`
- * would need a classifier and an approval path for a verb used constantly and
- * benignly, and `docs/SAFETY.md`'s limits table is derived from the corpus in
- * both directions so closing EV-36 means editing SAFE-15's artifact set. That
- * is a designed change with its own falsification, not a line in a review-fix
- * pass, and doing it badly under time pressure in the one layer everything
- * else depends on is worse than not doing it. The residual is therefore
- * PUBLISHED here rather than silently carried: outside plan mode, no local
- * control gates `curl`/`wget` egress.
+ * `curl`/`wget` are deliberately not guarded verbs in the safety layer:
+ * `GUARDED_VERB_PATTERN` is what makes a shell runner a refusal (`sh -c "…"`
+ * would start refusing ordinary commands), `policy.ts` would need a classifier
+ * and an approval path for a verb used constantly and benignly, and closing
+ * EV-36 changes the corpus and `docs/SAFETY.md`'s limits table together.
+ * Outside plan mode, no local control gates `curl`/`wget` egress.
  *
  * PURITY / BOUNDARY RULE (BOOT-10). No `ctx`, no filesystem, no
  * `child_process`, no default export (a statement-position default export

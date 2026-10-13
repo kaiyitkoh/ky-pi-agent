@@ -1,12 +1,7 @@
 #!/bin/sh
 #
 # Install the official OpenSpec skills and prompts at user level, at zero
-# per-turn cost.
-#
-# The official CLI only writes into a project directory and never emits
-# `disable-model-invocation`, so this script runs it in a throwaway project with
-# a throwaway XDG_CONFIG_HOME, patches the flag into every SKILL.md, and copies
-# the result into the Pi agent dir. Re-run it after any CLI upgrade.
+# per-turn cost. How and why: docs/OPENSPEC.md.
 #
 # Test seams: PI_CODING_AGENT_DIR, XDG_CONFIG_HOME, PATH.
 #

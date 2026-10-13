@@ -23,7 +23,7 @@ function scriptVersion(): string {
 	return m[1] as string;
 }
 
-/** The Phase 12 section of the runbook, from its heading to the next H2 or end. */
+/** The OpenSpec section of the runbook, from its heading to the next H2 or end. */
 function runbookPhase12(runbook: string): string {
 	const start = runbook.indexOf("## Phase 12 — OpenSpec Opt-in Skill");
 	if (start < 0) return "";

@@ -2,7 +2,7 @@
  * bash parsing for policy: a fail-closed node-type deny predicate, then resolution of tabulated wrappers
  * (`env`, `sudo`, `npx`, ...) to the executable that really runs; a wrapper it cannot resolve fails closed.
  * Parser quirks and the rules' rationale: docs/SAFETY.md "Implementation invariants".
- * Pure: no ctx, fs, child_process or default export (extension-layout.test.ts would treat it as an entry point).
+ * Pure: no ctx, fs, child_process or default export (a default export would make it an extension entry point).
  */
 import { posix } from "node:path";
 import { parse } from "unbash";
@@ -38,7 +38,7 @@ const FIND_EXEC_PRIMARIES = new Map([
 	["fd", wordSet("-x --exec -X --exec-batch")],
 ]);
 
-/** Every cause {@link canonicalise} can return; tests iterate it to prove each is reachable. */
+/** Every cause {@link canonicalise} can return. */
 export const SHELL_REFUSAL_CAUSES = [
 	"command-substitution",
 	"process-substitution",
