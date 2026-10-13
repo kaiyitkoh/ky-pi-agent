@@ -143,13 +143,15 @@ downgrade path anywhere in this subsystem.
 |---------|-------|--------|-----------|------|
 | read, bash, approve_ky_command | yes | yes | yes | yes |
 | edit, write, todo | no | no | yes | yes |
-| consult_advisor, lsp_diagnostics, lsp_fix | no | yes | yes | yes |
+| consult_advisor, lsp_diagnostics | no | yes | yes | yes |
+| lsp_fix | no | no | no | yes |
 | subagent, bg_wait, subagent_supervisor, subagents_enable | no | yes | yes | yes |
 | web_enable | yes | yes | yes | yes |
 | web_search, fetch_content, get_search_content, source_check | yes | no | no | yes |
-| questionnaire, bg_run, bg_status, bg_logs, bg_kill, qoder_delegate | no | no | no | yes |
+| questionnaire, bg_run, bg_status, bg_logs, bg_kill | no | no | yes | yes |
+| qoder_delegate | no | no | no | yes |
 
-Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,773 tok, review 1,900, implement 2,344, full 4,179.
+Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,773 tok, review 1,900, implement 4,179, full 4,179. Putting `questionnaire` and the `bg_*` tools in `implement` raised its floor from 2,344 to 4,179 tokens (+1,835, +78%); in the offline measurement harness that equals the `full` floor because the LSP, Qoder and web tools are not loaded there, so on a real install `full` stays above `implement`. This is a deliberate trade: background shell tasks and structured questions are available by default, at the price of a weaker cost control.
 
 Two rules keep this safe. Pi's registered-but-inactive built-ins (`grep`, `find`, `ls`) are neutral and never removed, because if they are active something chose them. A loadout with neither `edit` nor `write` was already chosen read-only (plan mode, a read-only subagent), so the profile leaves it alone.
 
@@ -172,27 +174,98 @@ read and act on — never a substituted model, never a downgrade.
    in every mode instead.
 2. **A request larger than the model's context window.** The estimated
    input token count exceeds `model.contextWindow`.
-3. **Bedrock, not Claude, with thinking requested.** Pi's own request
-   builder (`buildAdditionalModelRequestFields`, pi-ai 0.84.1
-   `bedrock-converse-stream.js:889-927`) returns **no thinking field at all**
-   for a Bedrock model that is not Claude — **even though the picker still
-   offers the thinking level**, because the picker gates on `model.reasoning`
-   alone. This is the most dangerous of the four: nothing in the UI hints
-   that the setting was silently dropped in transit. The identical Claude
-   predicate this guard needs (`isAnthropicClaudeModel`,
-   `bedrock-converse-stream.js:542-550`) is not exported from pi-ai's public
-   API, so `routing/guard.ts` reproduces it locally rather than importing it
-   — a Pi upgrade that moves that predicate will not turn this file red on
-   its own; the behaviour is pinned by `tests/unit/capability-guard.test.ts`,
-   not by Pi's internals.
-4. **Bedrock DeepSeek R1 for a role that needs a tool loop.** Both ids Pi's
-   0.84.x catalogue served it under (absent from the Pi 1.1.0 catalogue; the deny-list still guards custom entries) (`deepseek.r1-v1:0` and `us.deepseek.r1-v1:0`)
-   support no tool calling at all, and `Model<Api>` carries no field
-   anywhere that expresses tool-calling support — so this is an explicit id
-   deny-list, not a catalogue predicate, and there is no catalogue field to
-   write instead. Scoped by whether the **target role** needs a tool loop
-   (derived from `ROLE_MECHANISM`, never by role name), so a tool-less role
-   is never over-blocked by a model that happens to be on the deny-list.
+3. **Thinking requested on a Bedrock reasoning model whose request carries
+   none.** Pi's request builder (`buildAdditionalModelRequestFields`, pi-ai
+   1.1.0 `bedrock-converse-stream.js:1011`) emits a thinking field for Claude
+   and for models whose id or name contains `gpt-` (including `gpt-oss`), and
+   **nothing at all** for every other Bedrock reasoning model — **even though
+   the picker still offers the thinking level**, because the picker gates on
+   `model.reasoning` alone. Nothing in the UI hints that the setting was
+   silently dropped in transit. Claude and `gpt-` models are therefore not
+   refused. The Claude predicate (`isAnthropicClaudeModel`) is not exported
+   from pi-ai, so `routing/guard.ts` reproduces it locally; the behaviour is
+   pinned by `tests/unit/capability-guard.test.ts`, not by Pi's internals.
+4. **Bedrock DeepSeek R1 for a role that needs a tool loop.** Any id ending
+   in `deepseek.r1-v1:0`, under any inference-profile prefix (`us.`, `eu.`,
+   `global.` and so on). Pi 1.1.0's catalogue no longer carries it; the rule
+   still guards a custom `models.json` entry. R1 supports no tool calling at
+   all, and `Model<Api>` carries no field expressing tool-calling support, so
+   this is an id rule, not a catalogue predicate. Scoped by whether the
+   **target role** needs a tool loop (derived from `ROLE_MECHANISM`, never by
+   role name), so a tool-less role is never over-blocked.
+
+### Where the guard runs
+
+`deriveNeed(ctx, extra)` in `routing/guard.ts` builds the guard's input from
+the live session: estimated tokens (current context usage plus the prompt
+length divided by four plus any extra), an image block anywhere on the
+branch, whether the thinking level is anything but `off`, and the tool-loop
+flag. The mode commands and `/escalate` check the candidate with it before
+switching.
+
+The built-in `/model` picker and `Ctrl+P` bypass those commands, and Pi's
+`model_select` event is notification-only in Pi 1.1.0 (`types.d.ts:859-866`):
+it fires after the switch and its return value is ignored. Enforcement is
+therefore undo plus refuse:
+
+- On `model_select` with source `set` or `cycle`, the executor guard runs on
+  the new model. If it refuses, the reason is shown as an error and the
+  previous model is restored with one `setModel` call, guarded against
+  re-entry. The previous model is only restored if it passes the guard itself.
+- A `restore` event (resuming a session) is never reverted.
+- An `input` handler refuses the prompt (`{ action: "handled" }`) whenever the
+  current model fails the guard, which covers a restored session and any
+  switch the revert could not undo. Slash commands run before `input`, so
+  `/cheap`, `/balanced` and `/max` always remain available to recover.
+- An internal error in either handler is swallowed: a guard bug must not
+  brick a session.
+
+### Bedrock inference profiles
+
+The Bedrock Claude route (vision, and advisor in `balanced`/`max`) is written
+once in `routing/schema.ts` as the bare id
+`anthropic.claude-sonnet-4-5-20250929-v1:0`. The id actually requested is the
+inference-profile prefix plus that id, taken from the setting
+`kyPiAgent.bedrockProfilePrefix` in `<agent-dir>/settings.json`:
+
+- absent: `apac.`
+- `""`: the bare id
+- any other value must match a lower-case region prefix such as `us.` or
+  `global.`; anything else refuses the Bedrock candidate with a message naming
+  the setting.
+
+Pi 1.1.0's catalogue carries Sonnet 4.5 under the bare id and the `au.`,
+`eu.`, `global.`, `jp.` and `us.` prefixes, but not `apac.`. The template
+`.pi/templates/models-template.json` therefore adds an
+`apac.anthropic.claude-sonnet-4-5-20250929-v1:0` model (its name contains
+`claude` so prompt caching and thinking match). When a prefixed id cannot be
+found the refusal names the setting and lists the catalogue prefixes. Whether
+AWS serves the apac profile in your account is a live check on the work
+laptop, recorded in `docs/RUNBOOK.md` (RB-12-06).
+
+### Planner pin
+
+`/cheap`, `/balanced` and `/max` write `subagents.agentOverrides` into the
+user-level settings file, which every repo shares. Before the first write, the
+previous value (or its absence) is stored under
+`kyPiAgent.plannerPinRestore` in the same file. The pin is undone on session
+shutdown (not on `/reload`) and, if a crash left the marker behind, at the
+next session start, which then re-pins for the restored mode. Two sessions
+running at once share the file, so one session starting or ending removes the
+other's pin until its next mode switch.
+
+### Accepted decisions
+
+- **The planner role is never dispatched by `/plan`.** `/plan` runs on the
+  session model. Wiring a role call into `plan-ceremony/index.ts` would push
+  that file past its frozen 200-line ceiling (it is 155 lines today), so the
+  planner row in §2 only shapes the subagent pin.
+- **Turns started with `triggerTurn` are not narrowed by tool profiles**,
+  because Pi emits no `input` for them (see §3). Accepted as a limitation.
+- **Tool profiles.** `lsp_fix` is only in `full`; `questionnaire` and the
+  `bg_*` tools are in `implement` at the measured cost shown in §3 (+1,835
+  tokens per turn); `qoder_delegate` is only in `full` because it is a paid,
+  confirm-gated remote delegate.
 
 ---
 
