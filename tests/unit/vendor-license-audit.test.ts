@@ -1,29 +1,7 @@
 /**
- * EXT-10 — vendoring and depending are mutually exclusive, checked in both
- * directions, with provenance required.
- *
- * WHY THIS FILE EXISTS. A vendored directory that merely EXISTS proves
- * nothing on its own: the trap this phase is built to close is a package
- * that is vendored (because it shipped no LICENSE file) while an earlier
- * draft's `.pi/settings.json` `packages[]` entry for the SAME package is
- * left in place. That silently defeats EXT-10 — the code runs from BOTH the
- * vendored copy and an npm install, and no other test in this repository
- * would notice. `tests/unit/npmrc-policy.test.ts`'s own methodology note is
- * the governing rule here too: check the EFFECT (is the package actually
- * absent from the dependency surface), never a file's mere presence.
- *
- * STRUCTURAL ANALOG. `tests/unit/template-tracked.test.ts`'s
- * `MUST_BE_SHIPPED` / `MUST_BE_SWALLOWED` two-table shape, and its "a
- * meaningful number of paths in both directions" vacuity guard, is copied
- * here as `MUST_BE_VENDORED` plus the converse enumeration in Direction 4.
- *
- * THE REGISTRY IS AUTHORITATIVE, NOT PROSE. `MUST_BE_VENDORED` below is the
- * single list this file and every future plan in this phase's wave append
- * rows to (the vendored bundled examples — `plan-mode/`, `todo.ts`,
- * `questionnaire.ts`, `git-checkpoint.ts` — land in later plans). A vendored
- * item that is not a row here is invisible to this audit; Direction 4 exists
- * specifically to catch that omission by enumerating the disk instead of
- * trusting the list to stay complete on its own.
+ * Vendoring and depending are mutually exclusive, both directions, with provenance required: a package vendored for a
+ * missing LICENSE must not also be installed via packages[], or its code runs twice. MUST_BE_VENDORED is authoritative,
+ * and the converse direction enumerates the disk so a vendoring without a row is still caught.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -41,44 +19,18 @@ interface VendoredRow {
 	npmPackageName: string;
 	/** Why it is vendored rather than installed. */
 	why: string;
-	/**
-	 * Where this vendoring's `PROVENANCE.md` lives (WR-15).
-	 *
-	 * Was implicitly `${vendorPath}/PROVENANCE.md`. That assumption is why
-	 * `todo.ts` and `questionnaire.ts` could not have rows at all: decision
-	 * D-07-D puts vendored items FLAT under `.pi/extensions/`, so they have no
-	 * directory to hold one. Explicit here, and their records are
-	 * `<name>.PROVENANCE.md` siblings.
-	 */
+	/** Where its PROVENANCE.md lives: flat vendorings under `.pi/extensions/` use a `<name>.PROVENANCE.md` sibling. */
 	provenancePath: string;
-	/**
-	 * Every tracked path that IS this vendoring — a directory pathspec for a
-	 * directory vendoring, the file itself for a flat one. Fed to
-	 * `trackedFiles()`, which takes a git pathspec, so both shapes work.
-	 */
+	/** Every tracked path that is this vendoring: a directory pathspec, or the flat file itself. */
 	sourcePath: string;
 	/**
-	 * npm packages that must NOT appear in `.pi/settings.json` `packages[]`
-	 * because this vendoring exists instead of them (WR-15).
-	 *
-	 * The original registry checked only {@link npmPackageName}, which is the
-	 * package the source was COPIED FROM. For the four bundled-example
-	 * vendorings that is `@earendil-works/pi-coding-agent` — a devDependency
-	 * nobody would put in `packages[]`, so the check would have been true and
-	 * meaningless. The invariant that actually matters for them is the
-	 * ALTERNATIVE they exist instead of: vendoring plan-mode and also installing
-	 * `@narumitw/pi-plan-mode` would run the unreviewed copy alongside the
-	 * reviewed one, which is the same failure EXT-10's license rule is about.
+	 * npm packages that must not appear in packages[] because this vendoring replaces them. For a bundled Pi example the
+	 * source package is pi-coding-agent itself, so the alternative it replaces is what matters.
 	 */
 	mustNotBeInstalled: readonly string[];
 }
 
-/**
- * The authoritative vendoring registry — not prose, not `docs/EXTENSIONS.md`.
- * Add a row here in the SAME commit that adds the vendored directory; a
- * vendored package with no row is caught by Direction 4 below, not silently
- * accepted.
- */
+/** The authoritative vendoring registry: add a row in the same commit as the vendored code. */
 const MUST_BE_VENDORED: readonly VendoredRow[] = [
 	{
 		vendorPath: ".pi/extensions/loop-police",
@@ -97,13 +49,8 @@ const MUST_BE_VENDORED: readonly VendoredRow[] = [
 		why: "D-02 (08.1-05) -- pi-background-tasks@2.6.9 caps its Pi peers at ^0.84.0 so it cannot install on Pi 1.x; " +
 			"vendored process-only (bg_run/bg_status/bg_logs/bg_kill), no fusion/delegate/attested/update-check",
 	},
-	// WR-15: the four rows below were promised by a comment ("Later plans in
-	// this wave append rows here") and never appended. All four plans landed in
-	// this phase, so four vendored items in the tool-execution path sat outside
-	// EXT-10's own audit -- and Direction 4, which exists to catch precisely
-	// that, could not fire because it discovered vendorings by scanning for
-	// PROVENANCE.md and none of them shipped one. Both halves are fixed: the
-	// records now exist, and Direction 4 discovers by HEADER MARKER instead.
+	// The bundled-example vendorings carry inline headers, not a PROVENANCE.md directory, so the converse direction
+	// discovers by header marker.
 	{
 		vendorPath: ".pi/extensions/plan-mode",
 		sourcePath: ".pi/extensions/plan-mode",
@@ -142,23 +89,13 @@ const MUST_BE_VENDORED: readonly VendoredRow[] = [
 	},
 ];
 
-/** A semver-shaped substring, e.g. "1.14.1". Loosely matched on purpose: this
- * test does not care which exact version is recorded, only that SOME version
- * is — pinning the exact string would make this file a second place a
- * version bump has to touch. */
+/** A semver-shaped substring, loosely matched: some version must be recorded, not a particular one. */
 const VERSION_PATTERN = /\b\d+\.\d+\.\d+\b/;
 
-/** A hex integrity hash of at least SHA-1 length (40 hex chars); this repo's
- * own PROVENANCE.md files record SHA-256 (64 hex chars), but the pattern is
- * left loose enough to accept either without hardcoding an algorithm name. */
+/** A hex integrity hash of at least SHA-1 length, so SHA-256 records pass without naming an algorithm. */
 const HASH_PATTERN = /\b[0-9a-f]{40,}\b/i;
 
-/**
- * True when `spec` (a `.pi/settings.json` packages[] entry) names
- * `npmPackageName` — as `npm:<name>@<ref>`, `npm:<name>`, or a git spec whose
- * final path segment is the package name. Matched with boundaries so
- * `pi-loop-police-fork` cannot be mistaken for `pi-loop-police`.
- */
+/** True when a packages[] spec names `npmPackageName` (npm or git form), boundary-matched against look-alike names. */
 function specNamesPackage(spec: string, npmPackageName: string): boolean {
 	const escaped = npmPackageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	return new RegExp(`(^|[:/])${escaped}(@|$)`).test(spec);
@@ -198,11 +135,7 @@ describe("EXT-10 — vendoring and depending are mutually exclusive", () => {
 			"$vendorPath: nothing it must not be installed alongside appears in .pi/settings.json packages[]",
 			(row) => {
 				const packages = readSettingsPackages();
-				// WR-15: `mustNotBeInstalled`, not `npmPackageName`. For the four
-				// bundled-example vendorings the source package is
-				// `@earendil-works/pi-coding-agent`, a devDependency nobody would put
-				// in packages[] -- checking it would have been true and meaningless.
-				// The invariant that matters is the ALTERNATIVE each exists instead of.
+				// mustNotBeInstalled, not npmPackageName: the replaced alternative is the invariant that matters.
 				const offenders = packages.filter((spec) =>
 					row.mustNotBeInstalled.some((name) => specNamesPackage(spec, name)),
 				);
@@ -272,26 +205,8 @@ describe("EXT-10 — vendoring and depending are mutually exclusive", () => {
 		});
 
 		/**
-		 * WR-15 — the discovery that can actually fire.
-		 *
-		 * The check above is necessary and was never sufficient: it discovers
-		 * vendorings by the presence of a `PROVENANCE.md`, so a vendoring that
-		 * ships none is invisible to it. That is not hypothetical — it is exactly
-		 * what happened. Four bundled-example vendorings (plan-mode/, checkpoint/,
-		 * todo.ts, questionnaire.ts) landed in this phase using inline headers
-		 * instead, the registry comment promising rows for them was never acted
-		 * on, and this file enumerated one directory, found one row, and passed.
-		 * Structurally incapable of firing for the omission that occurred — the
-		 * same shape as CR-04.
-		 *
-		 * Discovery is now "a tracked `.ts` under `.pi/extensions/` at an
-		 * entry-point shape whose header carries a vendoring marker", which is
-		 * what `tool-count-baseline.test.ts:discoverVendoredEntryPoints()` already
-		 * implements. That predicate is duplicated here rather than imported for
-		 * one reason, stated: importing a helper from another TEST file makes the
-		 * two suites share a fixture, and a bug in the shared predicate then hides
-		 * itself from both at once. The constants below are deliberately spelled
-		 * out so a drift between the two is a visible diff.
+		 * Discovery by entry-point shape plus vendoring header marker, so a vendoring that ships no PROVENANCE.md is still
+		 * found. Duplicated from tool-count-baseline.test.ts rather than imported, so a bug in one predicate cannot hide in both.
 		 */
 		it("every tracked, vendored-MARKED entry point has a MUST_BE_VENDORED row", () => {
 			/** `.pi/extensions/<name>.ts` — a flat entry point. */
@@ -314,8 +229,7 @@ describe("EXT-10 — vendoring and depending are mutually exclusive", () => {
 					"vendored — and a broken predicate is how this direction failed to fire in the first place",
 			).toBeGreaterThanOrEqual(5);
 
-			// A row covers an entry point when the row's own source path IS it, or
-			// is the directory holding it.
+			// A row covers an entry point that is its source path or sits inside its directory.
 			const covered = new Set<string>();
 			for (const row of MUST_BE_VENDORED) {
 				covered.add(row.sourcePath);

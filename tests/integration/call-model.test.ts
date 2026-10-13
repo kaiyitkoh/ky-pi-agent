@@ -1,63 +1,8 @@
 /**
- * DIAG-02 — the chokepoint restores every capture on the nested path, and the
- * bare completion beside it proves they would otherwise be absent.
- *
- * ---------------------------------------------------------------------------
- * WHY THE NEGATIVE CONTROL COMES FIRST
- * ---------------------------------------------------------------------------
- * Pi wires `before_provider_headers`, `before_provider_request` and
- * `after_provider_response` into the constructor options of the ONE `Agent` the
- * session owns [VERIFIED: pi 0.84.1 src/core/sdk.ts:294-360]. A nested
- * completion does not go through that agent and fires none of them — executed
- * live during research, where the logging extension's file was never even
- * created (02-RESEARCH.md §4.4).
- *
- * Case 1 reproduces that offline. Without it, case 2 proves only that logging
- * works somewhere: an implementation that captured nothing on the nested path
- * while the main loop happily filled the same files would satisfy every positive
- * assertion in this file. The control is what makes the chokepoint mean
- * anything, so it runs first, on the same fixture, in the same session.
- *
- * ---------------------------------------------------------------------------
- * HOW THE `ExtensionContext` IS OBTAINED, AND WHY A WARM-UP PROMPT COMES FIRST
- * ---------------------------------------------------------------------------
- * Through a user-scope probe extension that stores the `ctx` Pi hands it and
- * parks it on `globalThis`, which the test then reads. `globalThis` rather than
- * a module export because Pi loads the extension through jiti's own module
- * registry: the module instance that ran inside the session is not the one this
- * file imported (02-05's finding). The process-wide object is the one thing both
- * graphs share.
- *
- * Constructing an `ExtensionContext` by hand would test a SHAPE rather than the
- * real object — the `modelRegistry` facade, the session manager and the abort
- * signal would all be stand-ins, and `callModel` would be proven against a
- * fixture of its own author's imagination rather than against Pi.
- *
- * **`session_start` does NOT fire in a headless `createAgentSession`.** Measured
- * here, not assumed: with the probe listening on five events, nothing at all had
- * fired before the first prompt, and after one prompt the order was
- * `before_agent_start`, `turn_start`, `before_provider_headers`, `agent_end`
- * [VERIFIED: executed 2026-08-13, this fixture]. Pi emits the session-start
- * event from `AgentSession`'s extension-binding step
- * [pi 0.84.1 src/core/agent-session.ts:1761], which the headless factory does
- * not reach. So the fixture prompts once to obtain the context — and that
- * warm-up earns its place twice over, because the `main.*` records it leaves are
- * the paired positive that makes case 1's absence mean something: capture is
- * demonstrably working in this very session, and the bare nested call still
- * produces nothing.
- *
- * The probe also loads the real diagnostics extension, so the session behaves
- * exactly as it does in production; `writeUserScopeShim`'s reason applies
- * unchanged (project scope is gated behind trust, which resolves false headless).
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE DOES NOT PROVE
- * ---------------------------------------------------------------------------
- * Case 3 asserts that `reasoningEffort` LEAVES the harness on a nested call. It
- * says nothing about whether a real model honours it. That is the Carried-Forward
- * Unknown "does DeepSeek V4 Flash honour `reasoning_effort`?", whose live half is
- * `RB-02-01` in `docs/RUNBOOK.md` and is **OUTSTANDING**. Never report it as
- * passing on the strength of this file.
+ * callModel restores every capture on the nested path. A nested completion bypasses the session Agent's provider hooks
+ * (pi src/core/sdk.ts:294-360), so the bare-completion negative control runs first on the same session. The live ctx
+ * comes from a user-scope probe via globalThis (jiti loads a separate module graph), and a warm-up prompt is needed
+ * because `session_start` does not fire headless. Whether a model honours reasoning_effort is RB-02-01, OUTSTANDING.
  */
 import { existsSync, readFileSync } from "node:fs";
 
@@ -85,29 +30,18 @@ import { repoRoot } from "../helpers/git.ts";
 import { readTornSafe } from "../helpers/logs.ts";
 import { withFauxSession } from "../helpers/session.ts";
 
-/** Where the probe parks the live `ExtensionContext`. See the header. */
+/** Where the probe parks the live `ExtensionContext`. */
 const CTX_KEY = "__kypiCallModelExtensionContext";
 
 /** Absolute path of the diagnostics extension this repository ships. */
 const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
 
-/**
- * The user-scope extension under test: the real diagnostics entry point, plus a
- * one-line probe that hands the live context out to the test.
- *
- * Backslashes are already absent — `repoRoot()` returns git's forward-slash form
- * on Windows — but the specifier is JSON-stringified anyway, because a path
- * inside a TypeScript string literal is a set of escape sequences and not a path
- * the moment one appears.
- */
+/** The real diagnostics entry point plus a probe that hands the live context to the test; paths JSON-stringified. */
 const PROBE_SOURCE = [
 	"// Generated for tests/integration/call-model.test.ts. Lives in a temp dir.",
 	`import diagnostics from ${JSON.stringify(DIAGNOSTICS_ENTRY)};`,
 	"",
-	// Three hooks, not one. `session_start` does not fire headless (see the
-	// header) and the other two are belt and braces: if Pi's emit order changes,
-	// the fixture keeps working and case 0 keeps being a real guard rather than a
-	// tripwire on an implementation detail this plan does not own.
+	// Three hooks, since `session_start` does not fire headless, so the probe survives an emit-order change.
 	'const HOOKS = ["session_start", "before_agent_start", "before_provider_headers"];',
 	"",
 	"export default function (pi) {",
@@ -198,27 +132,21 @@ async function runFixture(): Promise<Run> {
 	let model: Model<string> | undefined;
 	let callerPayloadHookRan = false;
 
-	// A stale context parked by another file in the same worker would make the
-	// "did the probe run?" guard below pass without this session doing anything.
+	// A stale context parked by another file in this worker would satisfy the "did the probe run?" guard.
 	(globalThis as Record<string, unknown>)[CTX_KEY] = undefined;
 
 	return await withFauxSession(
 		{
 			extensionSource: PROBE_SOURCE,
-			// The credential rides INSIDE the payload, which is where the real hazard
-			// lives on the nested path exactly as it does on the main one: no adapter
-			// puts the API key in the body, but everything the caller assembled into
-			// `messages[]` travels there. [threat T-02-07-02]
+			// The credential rides inside the payload: everything the caller puts in `messages[]` travels there.
 			buildPayload: (m, context, options) =>
 				withSecretHeader(buildOpenAiFixturePayload(m, context, options)),
 			responses: [
-				// 1 — the warm-up prompt on the MAIN loop. Its job is to hand the probe
-				// a live context and to leave `main.*` records proving capture works.
+				// 1 — the warm-up main-loop prompt: hands out a live context and leaves `main.*` records.
 				fauxAssistantMessage("warm", { stopReason: "stop" }),
 				// 2 — consumed by the bare completion (the negative control).
 				fauxAssistantMessage("control", { stopReason: "stop" }),
-				// 3 — the advisor call. A FACTORY, because the only way to see what
-				// left the harness is to look at what the provider was handed.
+				// 3 — the advisor call, a factory so the test sees what the provider was handed.
 				(context, options, _state, requestModel) => {
 					advisorContext = context;
 					model = requestModel;
@@ -233,7 +161,7 @@ async function runFixture(): Promise<Run> {
 			const wireFile = logPath(cwd, WIRE_LOG_BASE);
 			const turnsFile = logPath(cwd, TURNS_LOG_BASE);
 
-			// ---- warm-up: the only way to obtain the live context (see header) ---
+			// ---- warm-up: the only way to obtain the live context ---
 			await session.prompt("warm up");
 
 			const ctx = (globalThis as Record<string, unknown>)[CTX_KEY] as
@@ -251,9 +179,7 @@ async function runFixture(): Promise<Run> {
 			const wireFileExistedAfterControl = existsSync(wireFile);
 
 			if (ctx === undefined) {
-				// Return early rather than throwing: every case below then fails with
-				// its own message instead of one opaque stack trace, and case 1's
-				// evidence — which does not need the context — is preserved.
+				// Return early: each case then fails with its own message, and case 1's evidence is kept.
 				return {
 					wireAfterControl,
 					turnsAfterControl,
@@ -271,12 +197,8 @@ async function runFixture(): Promise<Run> {
 			}
 
 			// ---- cases 2, 3 and 6 fixture: the paired positive -------------------
-			// The `onPayload` here is a HIJACK ATTEMPT, not a mistake. For a
-			// `Model<Api>` the option bag's type resolves to a union that includes
-			// pi-ai's custom-API fallback arm (`StreamOptions & Record<string,
-			// unknown>`), so the compiler accepts it — verified by compiling it. The
-			// spread order inside callModel is what must overwrite it. A caller able
-			// to suppress its own capture is precisely what DIAG-02 denies.
+			// The `onPayload` is a hijack attempt the compiler accepts (the custom-API fallback arm of the options union);
+			// callModel's spread order must overwrite it.
 			await callModel(ctx, {
 				role: "advisor",
 				model: sessionModel,
@@ -298,13 +220,8 @@ async function runFixture(): Promise<Run> {
 			});
 
 			// ---- case 5 fixture: a REJECTED completion ---------------------------
-			// The real `ctx`, with exactly one member shadowed through the prototype
-			// chain. `Object.create` rather than a spread: a spread would flatten a
-			// live object into a snapshot and quietly drop anything behind a getter,
-			// which is how a "real context" test becomes a shape test. On Pi 0.84.1
-			// nothing reaches this branch on its own — `lazyStream` converts setup
-			// failures into an error MESSAGE (see `errorMessageFor` in call-model.ts)
-			// — so a rejection has to be injected or the branch ships untested.
+			// The real ctx with one member shadowed via Object.create (a spread would drop getters). Pi turns setup failures
+			// into an error message, so a rejection must be injected or this branch ships untested.
 			const rejecting = Object.create(ctx, {
 				modelRegistry: {
 					value: {
@@ -381,12 +298,7 @@ describe("DIAG-02 — the callModel chokepoint, against its own negative control
 				"that invalidates the control",
 		).toEqual([]);
 
-		// THE PAIRED POSITIVE, and the reason the warm-up prompt exists. Without
-		// it, "no nested records" would be equally satisfied by a session where the
-		// extension never loaded, no log file was ever created, and nothing was
-		// measurable at all — the two absences above would be a pass over an empty
-		// directory. Here capture is demonstrably live in this very session, on the
-		// main loop, at the moment the bare nested call produced nothing.
+		// The paired positive: capture is live on the main loop of this very session, so the absences above mean something.
 		expect(
 			run.wireFileExistedAfterControl,
 			"no wire log exists at all, so the two absences above are a pass over a directory the " +
@@ -499,10 +411,7 @@ describe("DIAG-02 — the callModel chokepoint, against its own negative control
 				"called with, so the dump would be describing a request that was never sent",
 		).toBe(run.model?.id);
 
-		// Asserted on THIS RECORD, not on the whole file. The warm-up prompt's
-		// `main.request` carries the same planted credential and is redacted by
-		// `wire.ts`, so a file-wide `[redacted:` check would pass even if the nested
-		// path skipped the redactor entirely.
+		// On this record, not the file: the warm-up request carries the same credential and is redacted by wire.ts.
 		const recordText = JSON.stringify(request);
 
 		expect(
@@ -535,11 +444,8 @@ describe("DIAG-02 — the callModel chokepoint, against its own negative control
 	});
 
 	it("case 2c — a caller cannot suppress its own capture", () => {
-		// This is the assertion that replaces a type-level claim which turned out to
-		// be false. `Api` is `KnownApi | (string & {})` (pi-ai src/types.ts:16), so
-		// `WithoutCaptures<ModelsApiStreamOptions<Api>>` always includes the
-		// custom-API fallback arm and the compiler accepts a caller-supplied
-		// `onPayload` — verified by compiling it. Only the spread order stops it.
+		// `Api` includes `string & {}` (pi-ai src/types.ts:16), so the compiler accepts a caller `onPayload`; only the
+		// spread order stops it.
 		expect(
 			run.callerPayloadHookRan,
 			"a caller-supplied `onPayload` ran. callModel spreads `opts.api` FIRST precisely so its " +
@@ -607,8 +513,7 @@ describe("DIAG-02 — the callModel chokepoint, against its own negative control
 				"public. [threat T-02-07-02]",
 		).toBe(false);
 
-		// The paired positive: the non-secret half of the message has to survive, or
-		// a redactor that blanked the whole string would pass the assertion above.
+		// Paired positive: the non-secret half must survive, or a blanking redactor would pass.
 		expect(
 			row?.errorMessage?.includes("upstream refused the key"),
 			"the non-secret half of the provider's error text was destroyed too. Over-redaction " +

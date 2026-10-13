@@ -1,57 +1,8 @@
 /**
- * EXT-08 -- `.pi/settings.json`'s `packages[]` array IS the lockfile
- * (`pi list` reads installed packages from settings, Pi 0.84.1
- * `docs/packages.md:30`), and this file is what diffs it against a committed
- * expectation, in both directions, so a hand edit fails the build rather than
- * silently drifting.
- *
- * WHY THIS FILE EXISTS. `tests/unit/pinning.test.ts`'s own
- * "every third-party entry in .pi/settings.json packages[] carries a ref"
- * assertion has run VACUOUSLY since Phase 1 -- `.pi/settings.json` was `{}`
- * and the test's own early-return branch (`packages === undefined`) meant
- * every run since then passed having checked nothing. This plan (07-09) is
- * what makes that assertion exercise real data for the first time, and this
- * file is the complementary, stronger check: not just "every entry that
- * exists is shaped like a pin" but "the exact SET of entries matches a
- * registry this repository commits to".
- *
- * `isPinnedPackageSpec` is imported from `./pinning.test.ts`, never
- * reimplemented -- a second regex is how the two drift apart
- * (`tests/unit/pinning.test.ts:145-147`, the file's only exported symbol).
- *
- * DIRECTIONS COVERED:
- *   1. Drift        -- packages[] deep-equals EXPECTED_PACKAGES exactly.
- *   2. Pin shape     -- every entry passes isPinnedPackageSpec (proven live
- *                       against inline fixtures first) and carries no range
- *                       operator.
- *   3. Vendored absence -- no packages[] entry names a package this repo also
- *                       vendors in source form under `.pi/extensions/`,
- *                       discovered by scanning tracked PROVENANCE.md files
- *                       rather than importing
- *                       `tests/unit/vendor-license-audit.test.ts`'s own
- *                       `MUST_BE_VENDORED` registry a second time.
- *   4. Installed-but-undeclared -- CONDITIONAL. `.pi/npm/*` and `.pi/git/`
- *                       are gitignored (`.gitignore:154-157`) and CI never
- *                       runs `pi install`, so on a fresh clone there is
- *                       nothing on disk to check. When either directory is
- *                       absent, the suite asserts the absence explicitly
- *                       rather than skipping, so a reader can tell "checked
- *                       and empty" from "never checked" -- the same
- *                       discipline `tests/unit/docs-policy.test.ts` and
- *                       `tests/unit/agent-dir-setup.test.ts` already use for
- *                       their own conditional [RUNBOOK]/machine-state checks.
- *
- * A FIFTH SECTION, outside the four directions above but load-bearing for the
- * same EXT-08 requirement: `pi-subagents@0.76.1` reads NO configuration from
- * `.pi/settings.json` at all (Task 1 of 07-09, `pi-subagents`
- * `src/extension/config.ts:90-92` -- a DEDICATED file,
- * `<agentDir>/extensions/subagent/config.json`), so the worktree-setup-hook
- * wiring this phase's threat model requires (T-07-38) lives in
- * `bin/bootstrap.sh`'s `merge_subagent_config()` instead. That function's
- * presence, its being called from `run_full()`, and the hook path it wires
- * resolving to a real tracked file are asserted here rather than left
- * unverified, closing the same "wired, not merely documented" gap this
- * file's other four directions close for `packages[]`.
+ * `.pi/settings.json` packages[] is the lockfile (`pi list` reads it, docs/packages.md:30), diffed both ways against a
+ * committed expectation: exact set, pin shape (isPinnedPackageSpec, imported never reimplemented), no package that is
+ * also vendored, and nothing installed but undeclared (asserted absent, not skipped, on a fresh clone). pi-subagents
+ * reads its own config file, so its worktree hook wiring is asserted in bin/bootstrap.sh instead.
  */
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -66,18 +17,11 @@ const EXT_DIR = ".pi/extensions";
 interface ExpectedPackage {
 	/** Exact `.pi/settings.json` packages[] entry, `npm:<name>@<version>` form. */
 	readonly spec: string;
-	/** One-line reason naming the capability this package provides. */
+	/** One line naming the capability this package provides. */
 	readonly why: string;
 }
 
-/**
- * THE COMMITTED EXPECTATION criterion 1 requires. Every spec here is the
- * exact live-resolved version from `docs/EXTENSIONS.md`'s "Installed
- * packages" table (07-01, re-verified unchanged at this plan's execution
- * time per 07-01-SUMMARY.md) -- never copied from a research document, per
- * this repository's own standing rule that a version bump must re-run the
- * live commands, not trust a prior file.
- */
+/** The committed expectation: each spec's live-resolved version from docs/EXTENSIONS.md's installed-packages table. */
 const EXPECTED_PACKAGES: readonly ExpectedPackage[] = [
 	{
 		spec: "npm:pi-subagents@0.76.1",
@@ -125,12 +69,7 @@ describe("EXT-08 Direction 1 -- drift: the lockfile matches the committed expect
 });
 
 describe("EXT-08 Direction 2 -- pin shape: proven live, then applied to the real file", () => {
-	/**
-	 * The predicate proven live against inline fixtures first, so the
-	 * real-file assertion below is not a tautology -- one bare npm spec
-	 * (rejected), one unrefed https URL (rejected), one exact npm pin
-	 * (accepted).
-	 */
+	/** Proven live on fixtures first: a bare npm spec and an unrefed URL rejected, an exact npm pin accepted. */
 	const fixtures: readonly { spec: string; expected: boolean; label: string }[] = [
 		{ spec: "npm:pi-web-access", expected: false, label: "bare npm spec, no version" },
 		{ spec: "https://github.com/o/r", expected: false, label: "unrefed https URL" },
@@ -150,18 +89,8 @@ describe("EXT-08 Direction 2 -- pin shape: proven live, then applied to the real
 	});
 
 	/**
-	 * NOT A DUPLICATE of isPinnedPackageSpec. `isPinnedPackageSpec` answers
-	 * "is this shaped like SOME pinned spec" (an npm form with a digit after
-	 * `@`, or a git/URL form with an `@ref` suffix) -- it already rejects a
-	 * caret range in the npm form today, since `^` is not `[0-9]`
-	 * (`pinning.test.ts:146`). This second, narrower check is defense in
-	 * depth against a git/URL-form ref that itself embeds a range-shaped
-	 * string (`...@v1.x`, `...@>=1.0`), which `isPinnedPackageSpec`'s second
-	 * regex (`.+@.+`) does not and cannot reject by design -- any non-empty
-	 * ref is accepted there. `tests/unit/pinning.test.ts`'s own
-	 * `RANGE_OPERATOR` constant (BOOT-08.1, over `package.json`'s dependency
-	 * maps) is the precedent for exactly this kind of second, differently-
-	 * scoped regex existing in this codebase without being a duplicate.
+	 * Not a duplicate of isPinnedPackageSpec, which accepts any non-empty git ref: this also rejects a range-shaped ref
+	 * such as `@v1.x` or `@>=1.0`.
 	 */
 	it("no real packages[] entry carries a range operator anywhere in the string", () => {
 		const RANGE_OPERATOR = /[\^~*><]|\|\||\s-\s/;
@@ -182,22 +111,11 @@ describe("EXT-08 Direction 3 -- vendored packages are absent from packages[]", (
 		).toBeGreaterThanOrEqual(1);
 	});
 
-	/**
-	 * THE GENERAL RULE, not `vendor-license-audit.test.ts`'s own
-	 * `MUST_BE_VENDORED` registry imported a second time: no packages[] entry
-	 * may name a package whose vendored copy exists under `.pi/extensions/`,
-	 * discovered by reading every tracked PROVENANCE.md's own text (each one
-	 * is required, by `vendor-license-audit.test.ts` Direction 3, to name its
-	 * upstream package) rather than a second hardcoded list.
-	 */
+	/** No packages[] entry may name a package vendored under `.pi/extensions/`, found from each tracked PROVENANCE.md. */
 	it("no packages[] entry names a package whose vendored copy exists under .pi/extensions/", () => {
 		const provenanceTexts = provenanceFiles.map((path) => readFileSync(join(repoRoot(), path), "utf-8"));
 
-		// String slicing, not a regex -- Direction 3's job is extracting a
-		// package NAME for a substring collision check, categorically
-		// different from Direction 2's pin-SHAPE validation, but kept
-		// regex-free anyway so this file's own acceptance grep (no second
-		// spec-shape regex) has nothing to eyeball.
+		// String slicing, not a regex: this extracts a package name, not a spec shape.
 		function packageNameFromSpec(spec: string): string | undefined {
 			if (!spec.startsWith("npm:")) {
 				return undefined;
@@ -248,8 +166,7 @@ describe("EXT-08 Direction 4 -- installed-but-undeclared, where checkable", () =
 
 	it("project npm scope (.pi/npm/node_modules): every installed package is declared, or the scope is confirmed absent", () => {
 		if (!existsSync(npmModulesDir)) {
-			// CONFIRMED ABSENT, not skipped -- a fresh clone with .pi/npm gitignored
-			// and no `pi install` ever run (this plan forbids it) has nothing here.
+			// Confirmed absent, not skipped: a fresh clone has no `.pi/npm` (gitignored, never installed).
 			expect(existsSync(npmModulesDir)).toBe(false);
 			return;
 		}
@@ -268,9 +185,7 @@ describe("EXT-08 Direction 4 -- installed-but-undeclared, where checkable", () =
 			expect(existsSync(gitDir)).toBe(false);
 			return;
 		}
-		// No EXPECTED_PACKAGES entry is git-form (all five are npm:), so ANY
-		// content discovered here is undeclared by construction -- enumerated,
-		// not merely existsSync-checked, so a failure names what was found.
+		// Every expected entry is npm-form, so anything here is undeclared; enumerated so a failure names it.
 		const hosts = readdirSync(gitDir, { withFileTypes: true })
 			.filter((entry) => entry.isDirectory())
 			.map((entry) => entry.name);
@@ -282,12 +197,8 @@ describe("EXT-08 Direction 4 -- installed-but-undeclared, where checkable", () =
 });
 
 describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' own config file", () => {
-	// pi-subagents@0.76.1 reads NO configuration from .pi/settings.json at
-	// all -- Task 1 of this plan read getConfigPath() end to end
-	// (pi-subagents src/extension/config.ts:90-92) and found the real key
-	// path is a DEDICATED global file, <agentDir>/extensions/subagent/config.json.
-	// The wiring therefore lives in bin/bootstrap.sh's merge_subagent_config(),
-	// not in .pi/settings.json's own packages[] array.
+	// pi-subagents reads <agentDir>/extensions/subagent/config.json, not .pi/settings.json (src/extension/config.ts:90-92),
+	// so the wiring lives in bin/bootstrap.sh's merge_subagent_config().
 	const bootstrapSource = readFileSync(join(repoRoot(), "bin", "bootstrap.sh"), "utf-8");
 	const stepsSource = readFileSync(join(repoRoot(), "bin", "bootstrap.mjs"), "utf-8");
 
@@ -315,11 +226,8 @@ describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' o
 	});
 
 	it("agentScope is deliberately absent from .pi/settings.json -- pi-subagents@0.76.1 has no such config key", () => {
-		// agentScope is a PER-INVOCATION parameter on the subagent tool's own
-		// schema (pi-subagents src/extension/schemas.js:228), resolved to
-		// "both" whenever a caller omits it (src/agents/agent-scope.js:1-5) --
-		// not a settings key at any scope. Writing one into .pi/settings.json
-		// would be dead configuration nothing reads; see 07-09-SUMMARY.md.
+		// agentScope is a per-invocation tool parameter defaulting to "both" (pi-subagents src/agents/agent-scope.js:1-5),
+		// not a settings key: writing one would be dead configuration.
 		expect(
 			Object.prototype.hasOwnProperty.call(readSettings(), "agentScope"),
 			"agentScope must not appear as a top-level .pi/settings.json key -- nothing in " +

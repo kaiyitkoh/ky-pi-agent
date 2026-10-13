@@ -1,94 +1,8 @@
 /**
- * ROUTE-04 — a single-shot role runs through the Phase 2 chokepoint, leaves a
- * nested row under its own role name, carries its per-call reasoning effort
- * onto the wire, and mutates no session state.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE PROVES, AND WHY "NOT BY MUTATING SESSION STATE" IS THE HALF
- * THAT MATTERS
- * ---------------------------------------------------------------------------
- * The obvious, wrong implementation of a single-shot role is `setModel`, do
- * the work, `setModel` back. It would satisfy "the reviewer ran on a
- * different model" while quietly breaking every concurrent turn's notion of
- * "what model is this session on" for the duration of the call. The assertion
- * that `ctx.model` is byte-identical (provider AND id, never object identity
- * — a registry may legitimately hand back a different object for the same
- * model) either side of {@link runSingleShotRole} is what forecloses that
- * shortcut, together with the absence of any new `model_change` or `ky:mode`
- * session entry.
- *
- * ---------------------------------------------------------------------------
- * HOW THE LIVE `ExtensionContext` IS OBTAINED — NOT VIA A PROBE
- * ---------------------------------------------------------------------------
- * `tests/integration/call-model.test.ts` and `tests/integration/
- * fallback-chain.test.ts` park a probe-captured `ExtensionContext` on
- * `globalThis` because they need a context that was actually handed to a
- * loaded extension's hook. This file does not need that: `.pi/extensions/
- * routing/modes.ts` is a plain module with named exports, imported directly
- * here (never loaded as an extension itself — nothing in `routing/` needs to
- * be), and `AgentSession#extensionRunner.createCommandContext()` hands back a
- * live `ExtensionCommandContext` (which satisfies `ExtensionContext`)
- * immediately after `createAgentSession` returns, with no extension load and
- * no prompt required [VERIFIED: `tests/integration/mode-switch.test.ts`'s own
- * header, itself citing `dist/core/agent-session.d.ts:642` and
- * `dist/core/extensions/runner.d.ts:132,144`]. That file's case 1 already
- * proves this context reflects LIVE session mutations (`ctx.model` changes
- * after a real `pi.setModel`), which is exactly the property the
- * model-unchanged assertion below depends on.
- *
- * The diagnostics extension IS still loaded (via `extensionSource`, no probe)
- * for exactly one reason: the main-loop warm-up prompt's `role: "session"`
- * turn row is written from `diagnostics/index.ts`'s `turn_end`/`message_end`
- * hooks, which only fire when that extension is registered. `callModel`
- * itself needs no extension at all — it writes `wire-*`/`turns-*` directly,
- * which is the whole point of the Phase 2 chokepoint (nested calls bypass
- * every extension hook).
- *
- * ---------------------------------------------------------------------------
- * WHY THE deepseek FAUX PROVIDER NEEDS ITS OWN `setRuntimeApiKey` GRANT AND A
- * POLL, MEASURED IN `mode-switch.test.ts` AND `05-07-SUMMARY.md`, NOT HERE
- * ---------------------------------------------------------------------------
- * A faux provider registered under a real provider id (`"deepseek"`) still
- * resolves `hasConfiguredAuth` false until `ModelRuntime#setRuntimeApiKey` is
- * called AND the cached availability snapshot catches up — a measured async
- * gap, not a synchronous one. `waitForConfiguredAuth` (tests/helpers/session.ts) polls for it.
- *
- * ---------------------------------------------------------------------------
- * THE IDENTITY GUARD (Phase 3's own lesson, applied here)
- * ---------------------------------------------------------------------------
- * `deepseek` is a built-in Pi provider pointing at a real endpoint. If the
- * native registration below had not replaced it, every call would have
- * resolved Pi's real catalogue entry and produced a setup error for want of a
- * credential — silently measuring the wrong thing. Case 0 asserts the
- * resolved model's `api` id equals THIS run's faux provider's `api` id before
- * anything else runs, mirroring `tests/integration/fallback-chain.test.ts`
- * case 1.
- *
- * ---------------------------------------------------------------------------
- * WHY THE REVIEWER CANDIDATE ROUTES THROUGH `callWithFallback`, NOT A DIRECT
- * `callModel`
- * ---------------------------------------------------------------------------
- * `ROLE_MAP.cheap.reviewer`'s first candidate is `{provider:"deepseek",
- * id:"deepseek-flash"}`, which is byte-identical to `CHAIN[0]` in
- * `.pi/extensions/providers/schema.ts`. `usesFallbackChain` therefore reports
- * `true` for it and `runSingleShotRole` dispatches through
- * `callWithFallback`, which itself resolves the model FRESH from
- * `ctx.modelRegistry` and calls `callModel` — so only the `deepseek` faux
- * registration needs to exist for a first-hop success; `dashscope` is never
- * reached and is deliberately not registered here.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE DOES NOT PROVE
- * ---------------------------------------------------------------------------
- * The reasoning-effort case below proves `reasoningEffort: "high"` LEAVES the
- * harness on the reviewer's nested call. It says nothing about whether a real
- * model honours it — that is `RB-02-01` in `docs/RUNBOOK.md`, OUTSTANDING,
- * exactly as `tests/integration/call-model.test.ts` case 3 already states for
- * the underlying chokepoint. Nor does anything here settle whether DeepSeek
- * V4 accepts a cheaper thinking tier — that is `RB-03-04`, also OUTSTANDING,
- * and STATE.md's blocker R1 is why `routing/schema.ts` fixes `reasoningEffort`
- * per role rather than per mode. Never report either as passing on the
- * strength of this file.
+ * A single-shot role runs through the callModel chokepoint, leaves a nested row under its role name, carries its
+ * reasoning effort onto the wire, and mutates no session state (the wrong implementation is setModel-and-back). `ctx`
+ * comes from `createCommandContext()`; case 0 guards that `deepseek` resolved to this run's faux provider, not Pi's real
+ * catalogue entry. Whether a real model honours the effort is a runbook check, never proven here.
  */
 import { existsSync } from "node:fs";
 
@@ -110,11 +24,7 @@ import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts"
 /** Absolute path of the diagnostics extension this repository ships. */
 const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
 
-/**
- * The user-scope extension under test: the real diagnostics entry point,
- * with NO probe. See the module docstring — `ctx` comes from
- * `createCommandContext()`, not from a hook parking it on `globalThis`.
- */
+/** The real diagnostics entry point with no probe; `ctx` comes from `createCommandContext()`. */
 const EXTENSION_SOURCE = [
 	"// Generated for tests/integration/single-shot-roles.test.ts. Lives in a temp dir.",
 	`import diagnostics from ${JSON.stringify(DIAGNOSTICS_ENTRY)};`,
@@ -201,9 +111,7 @@ interface Run {
 }
 
 async function runFixture(): Promise<Run> {
-	// Deterministic starting state regardless of which other test file in this
-	// worker touched the shared globalThis mode slot first (STATE-SLOT HAZARD,
-	// modes.ts's own docstring).
+	// Deterministic starting state: another test file in this worker may have set the shared mode slot.
 	setMode("cheap");
 	setEscalated(false);
 	expect(getModeState().mode, "test setup did not reset the mode slot to cheap").toBe("cheap");
@@ -211,9 +119,7 @@ async function runFixture(): Promise<Run> {
 
 	const handle = await createFauxSession({
 		extensionSource: EXTENSION_SOURCE,
-		// One response: the warm-up prompt on the main loop, which exists only to
-		// leave a `role: "session"` turns row and to let `createCommandContext()`
-		// be exercised against a session that has actually run a turn.
+		// The warm-up main-loop turn leaves a `role: "session"` row.
 		responses: [fauxAssistantMessage("warm", { stopReason: "stop" })],
 	});
 
@@ -227,10 +133,7 @@ async function runFixture(): Promise<Run> {
 				{
 					id: "deepseek-flash",
 					reasoning: true,
-					// Explicitly text-only: the guard-refusal case below needs a
-					// resolvable, AUTHED candidate that the capability guard still
-					// blocks — fauxProvider's own default is ["text","image"], which
-					// would make the refusal case impossible to construct.
+					// Text-only, so the capability guard has an authed candidate to refuse; faux defaults to text+image.
 					input: ["text"],
 					cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 },
 				},
@@ -238,8 +141,7 @@ async function runFixture(): Promise<Run> {
 		});
 
 		deepseekFaux.setResponses([
-			// 1 — the reviewer call. A FACTORY: the only way to see what left the
-			// harness is to look at what the provider was handed.
+			// 1 — the reviewer call, a factory so the test sees what left the harness.
 			(_context, options) => {
 				seenEffortReviewer.push((options as Record<string, unknown> | undefined)?.reasoningEffort);
 				return fauxAssistantMessage("reviewer-reply", { stopReason: "stop" });
@@ -251,10 +153,7 @@ async function runFixture(): Promise<Run> {
 			},
 		]);
 
-		// Register the RESULT, not the bare handle: wrapFauxWithPayload is what
-		// makes `onPayload` fire at all (tests/helpers/faux.ts's own header), and
-		// that is what makes callModel's own capture (the nested.request wire
-		// record) reachable on this second, separately-registered provider.
+		// Register the wrapped provider: only it fires `onPayload`, which callModel's nested.request capture needs.
 		handle.modelRuntime.registerNativeProvider(
 			wrapFauxWithPayload(deepseekFaux, buildOpenAiFixturePayload),
 		);
@@ -445,13 +344,7 @@ describe("ROUTE-04 — single-shot roles through runSingleShotRole", () => {
 	});
 
 	it("case 3 — no model_change entry and no ky:mode entry resulted from the call", () => {
-		// NOT asserted at zero absolute: session construction itself writes one
-		// model_change entry recording the session's initial model (measured —
-		// see the failing first draft of this assertion), so the honest claim is
-		// a DELTA of zero across the call, not an absolute count of zero before
-		// it. `ky:mode` carries no such construction-time write, but the delta
-		// form is used for both for the same reason and to keep the two
-		// assertions symmetric.
+		// A delta of zero, not an absolute zero: session construction itself writes one model_change entry (measured).
 		expect(
 			run.modelChangeCountAfter - run.modelChangeCountBefore,
 			"a model_change session entry was written as a result of runSingleShotRole, which is the " +
@@ -470,7 +363,7 @@ describe("ROUTE-04 — single-shot roles through runSingleShotRole", () => {
 		const captured = run.wireAfterReviewer.filter(
 			(record) => record.corr === reviewerRow?.corr && record.kind === "nested.request",
 		);
-		// Non-vacuity BEFORE content — tests/helpers/faux.ts's own house rule.
+		// Non-vacuity before content.
 		expect(
 			captured.length,
 			"no nested.request wire record was captured for the reviewer call at all — either " +
@@ -543,10 +436,7 @@ describe("ROUTE-04 — single-shot roles through runSingleShotRole", () => {
 			"the thrown error does not name the role the guard refused",
 		).toContain("summariser role needs image input");
 
-		// ZERO requests: no new turns row and no new wire record at all, not
-		// merely "the specific role/kind combination is absent" — a refusal
-		// that fires after dispatch would still leave case 4/5's assertions
-		// satisfied while having already cost money and disclosed content.
+		// Zero requests at all: a refusal that fires after dispatch would already have cost money and disclosed content.
 		expect(
 			run.turnsAfterRefusal.length,
 			"a turns row was written even though the guard refused the call before any dispatch",
@@ -559,33 +449,13 @@ describe("ROUTE-04 — single-shot roles through runSingleShotRole", () => {
 });
 
 // -----------------------------------------------------------------------------
-// CR-02 REGRESSION -- a DashScope-only machine must reach dashscope, not
-// silently discard the resolved candidate and restart the chain at deepseek.
+// A DashScope-only machine must reach dashscope, not restart the chain at deepseek.
 // -----------------------------------------------------------------------------
 
 /**
- * CR-02: `cheap.reviewer`'s candidates are `FLASH_CANDIDATES` -- byte-identical
- * to `CHAIN` in `.pi/extensions/providers/schema.ts` (`deepseek/deepseek-v4-
- * flash` first, `dashscope/deepseek-v4-flash` second). `deepseek` is
- * DELIBERATELY LEFT UNREGISTERED here (Pi's own real, built-in catalogue entry
- * stands in `ctx.modelRegistry` unmodified) -- this fixture only registers and
- * grants auth to `dashscope`, exactly what "no configured auth" looks like for
- * `pickConfiguredCandidate`'s ordering rule on a real DashScope-only machine
- * (CR-02's own "daily-driver configuration this whole project is built
- * around"). MEASURED, NOT ASSUMED: registering a SECOND faux provider under
- * `deepseek` and granting `dashscope` a runtime key was tried first and found
- * to flip `hasConfiguredAuth("deepseek")` to `true` as a side effect of
- * `ModelRuntime`'s own snapshot refresh -- an unrelated quirk this fixture
- * routes around by never touching `deepseek`'s native registration at all,
- * which also means NO PATH in this test can ever reach a real network
- * endpoint: the fix under test dispatches `dashscope`'s resolved candidate
- * through `callModel` directly and never enters `callWithFallback` (which is
- * the only code path that would ever resolve real `deepseek`).
- *
- * `planRoleCall` must resolve `dashscope/deepseek-v4-flash` -- the fix under
- * test is whether `runSingleShotRole` actually SERVES that resolved candidate
- * (`callModel` directly) instead of discarding it and restarting
- * `callWithFallback` at the chain's own head.
+ * Only `dashscope` is registered and authed; `deepseek` stays Pi's untouched built-in, since registering a second faux
+ * `deepseek` flipped its auth as a side effect (measured). runSingleShotRole must serve the resolved dashscope candidate
+ * through callModel, never callWithFallback, so no path here can reach a real endpoint.
  */
 async function runDashscopeOnlyFixture(): Promise<{
 	turnsAfterReviewer: (TurnsRow & { provider?: string; model?: string })[];
@@ -608,9 +478,7 @@ async function runDashscopeOnlyFixture(): Promise<{
 		});
 		dashscopeFaux.setResponses([fauxAssistantMessage("dashscope-reviewer-reply", { stopReason: "stop" })]);
 
-		// dashscope: the only provider this fixture registers and grants auth to.
-		// deepseek is deliberately left as Pi's own real, unmodified built-in
-		// entry -- see this function's own doc comment for why.
+		// dashscope is the only provider registered and authed here.
 		handle.modelRuntime.registerNativeProvider(wrapFauxWithPayload(dashscopeFaux, buildOpenAiFixturePayload));
 		await handle.modelRuntime.setRuntimeApiKey("dashscope", "kypi-fixture-not-a-real-key");
 		await waitForConfiguredAuth(handle.modelRuntime, "dashscope");
@@ -664,11 +532,7 @@ describe("ROUTE-04 / CR-02 -- runSingleShotRole on a DashScope-only machine reac
 		).toBe("dashscope");
 		expect(nested[0]?.model).toBe("deepseek-v4-flash");
 
-		// No row at all named "deepseek" resulted from this call -- the chain
-		// restart CR-02 describes would have produced a failed deepseek attempt
-		// (or thrown before writing anything); either way, zero deepseek-provider
-		// rows is the non-vacuous proof the router's OWN resolved candidate was
-		// served, not the chain's hardcoded head.
+		// Zero deepseek rows proves the router's own resolved candidate was served, not the chain's head.
 		const deepseekRows = result.turnsAfterReviewer.filter((row) => row.provider === "deepseek");
 		expect(
 			deepseekRows.length,

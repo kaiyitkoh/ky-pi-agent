@@ -1,43 +1,8 @@
 /**
- * PROV-03 — the DashScope `compat` block, asserted where it TAKES EFFECT rather
- * than where it is written.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE EXISTS: A TYPO VALIDATES SILENTLY (Trap T6)
- * ---------------------------------------------------------------------------
- * Pi validates `models.json` with typebox, and `Type.Object` permits additional
- * properties [VERIFIED: executed 2026-08-13 —
- * `Compile(Type.Object({a:…})).Check({a:true,zzz:1}) === true`]. A template
- * carrying `supportsStoore: false` therefore parses, validates, composes, and
- * configures NOTHING. Every byte-level assertion ever written about that
- * template stays green. That is the single most likely way this phase ships a
- * broken provider, so nothing below reads the template's text: every assertion
- * runs against the `compat` object Pi actually COMPOSED, obtained through
- * `withModelsConfig` from `tests/helpers/models.ts`, and the misspelling case
- * proves the deep-equality is live rather than decorative.
- *
- * What a wrong `compat` costs, restated because both failures are invisible
- * from the UI: `detectCompat` keys on a hard-coded provider-id list and a
- * hard-coded base-URL-substring list and has NO branch for DashScope, Model
- * Studio, `aliyuncs.com` or Qwen [VERIFIED: pi-ai 0.84.1
- * src/api/openai-completions.ts:1443-1536, and the canary at the bottom of this
- * file re-checks it against the INSTALLED artifact on every run]. A field left
- * to detection silently takes the generic OpenAI default, which means
- * `thinkingFormat` becomes `"openai"` and thinking is never enabled at all, and
- * `requiresReasoningContentOnAssistantMessages` becomes `false` so the SECOND
- * turn of a tool sequence returns HTTP 400 while the first succeeds — which is
- * exactly why the user's original experience read as intermittent.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE DOES NOT PROVE — the live half is RB-03-01
- * ---------------------------------------------------------------------------
- * This proves what Pi COMPOSES from the shipped template. It says nothing
- * whatsoever about whether DashScope ACCEPTS any of it: no request left this
- * machine, no credential exists on it, and `withModelsConfig` is constructed
- * with `refreshOnCreate: false` precisely so that none can. Whether the
- * resulting body is accepted by `dashscope-intl.aliyuncs.com` is `RB-03-01` in
- * `docs/RUNBOOK.md` and it is OUTSTANDING. A green run here may never be read
- * as PROV-03 passing (Trap T12).
+ * The DashScope `compat` block, asserted on the object Pi COMPOSES, never the template text: typebox's Type.Object
+ * accepts unknown keys, so a misspelled key validates and configures nothing. detectCompat has no DashScope branch,
+ * so any field left to detection takes the generic OpenAI default (thinking off, second tool turn HTTP 400).
+ * Whether DashScope accepts the result is RB-03-01 in docs/RUNBOOK.md, OUTSTANDING.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -48,68 +13,38 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { repoRoot } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 
-/** The template plan 03-02 shipped. Loaded through Pi, never read as text here. */
+/** Loaded through Pi, never read as text. */
 const TEMPLATE = join(repoRoot(), ".pi", "templates", "models-template.json");
 
-/**
- * The provider-level `compat` every templated model inherits, with the reason
- * for each field beside it. Transcribed from `03-RESEARCH.md` §Q2.2, whose table
- * carries the generic default and the emission site for every one of them.
- *
- * Three of these (`supportsReasoningEffort`, and the two that happen to agree
- * with no default at all) are written out even where a default would do, because
- * the point of PROV-03 is that nothing is left for detection to decide.
- */
+/** The provider-level compat every templated model inherits; every field is explicit so detection decides nothing. */
 const PROVIDER_COMPAT = {
-	// Generic default `true`, and the emission SENDS `store: false` rather than
-	// omitting the key [pi-ai src/api/openai-completions.ts:711-713]. `store` is
-	// absent from Alibaba's supported-parameter list, so `false` here omits it.
+	// Default true SENDS `store: false` [pi-ai src/api/openai-completions.ts:711-713]; `store` is not in Alibaba's list.
 	supportsStore: false,
-	// Generic default `true`. The `developer` role is unlisted by Alibaba and the
-	// emission is gated on `model.reasoning` [:1083-1085] — it bites on exactly
-	// the models this template defines.
+	// Default true; the unlisted `developer` role is emitted for reasoning models [:1083-1085].
 	supportsDeveloperRole: false,
-	// Generic default `true` already, set explicitly so detection never decides
-	// it [:754, :763, :802, :837].
+	// Already the default, set so detection never decides it [:754, :763, :802, :837].
 	supportsReasoningEffort: true,
-	// Generic default `"max_completion_tokens"` [:715-721]. Alibaba's
-	// compatibility table lists `max_tokens` and does not list the other.
+	// Default "max_completion_tokens" [:715-721]; Alibaba lists only `max_tokens`.
 	maxTokensField: "max_tokens",
-	// Generic default `true` [:1360, :1368]. `strict` is unlisted; suppressing it
-	// removes one unlisted field from the PROV-10 request.
+	// Default true [:1360, :1368]; `strict` is not in Alibaba's list.
 	supportsStrictMode: false,
-	// Generic default `true`, which sends `prompt_cache_key` +
-	// `prompt_cache_retention: "24h"` [:699-704]. Neither is in Alibaba's list.
+	// Default true sends `prompt_cache_key` and `prompt_cache_retention` [:699-704]; neither is in Alibaba's list.
 	supportsLongCacheRetention: false,
-	// Generic default `"openai"`, i.e. thinking NEVER enabled. Pi's "qwen" branch
-	// emits top-level `enable_thinking` + `reasoning_effort` [:761-768], which is
-	// what Alibaba's own DeepSeek-on-Model-Studio page documents; upstream issue
-	// earendil-works/pi#6998 is closed in favour of "qwen".
+	// Default "openai" never enables thinking; "qwen" emits top-level `enable_thinking` + `reasoning_effort` [:761-768].
+	// https://github.com/earendil-works/pi/issues/6998
 	thinkingFormat: "qwen",
 } as const;
 
-/**
- * The fully merged `compat` each templated model must end up with, keyed by
- * model id — the "table of record" shape `tests/unit/pinning.test.ts:95-102`
- * uses for its pins.
- *
- * `mergeCompat` is `{...providerCompat, ...modelCompat}` plus a nested merge of
- * four routing/template objects we do not use [VERIFIED: pi 0.84.1
- * src/core/provider-composer.ts:81-101], so the intended object is the provider
- * block plus each model's one addition.
- */
+/** Merged compat per model: the provider block plus each model's one addition (pi src/core/provider-composer.ts:81-101). */
 const INTENDED_COMPAT: Record<string, Record<string, unknown>> = {
 	"deepseek-v4-flash": {
 		...PROVIDER_COMPAT,
-		// THE PROV-10 FIX, model-level because it is a DeepSeek property and not a
-		// DashScope one. Replayed assistant messages get `reasoning_content: ""`
-		// [:1223-1229, gated on `model.reasoning`]. Without it the first turn of a
-		// tool sequence succeeds and the second returns HTTP 400.
+		// Model-level (a DeepSeek property): replayed assistant messages get `reasoning_content: ""` [:1223-1229], without
+		// which the second turn of a tool sequence returns HTTP 400.
 		requiresReasoningContentOnAssistantMessages: true,
 	},
 	"deepseek-v4-pro": {
 		...PROVIDER_COMPAT,
-		// See the flash entry: same provider, same model family, same fix.
 		requiresReasoningContentOnAssistantMessages: true,
 	},
 };
@@ -131,22 +66,7 @@ const ADAPTER = join(
 	"openai-completions.js",
 );
 
-/**
- * The models the TEMPLATE contributes, discovered by difference rather than by a
- * hardcoded list.
- *
- * Pi's registry carries 1,220 built-in models before this template adds
- * anything, so "everything in the registry" is the wrong set and "the two ids I
- * happen to remember" is a set that silently stops covering a third model
- * somebody adds. Composing a second registry over an empty `providers` object
- * and subtracting gives exactly what the template introduced, with no literal to
- * fall out of date.
- *
- * Deliberately not shared with `tests/unit/model-metadata.test.ts`, which needs
- * the same difference: a helper in `tests/helpers/` carries a standing
- * obligation to be covered in `tests/unit/helpers.test.ts`, and fifteen
- * duplicated lines are a cheaper price than an untested helper.
- */
+/** The models the template contributes: a registry composed over empty `providers` subtracted from the full one. */
 async function templatedModelIds(): Promise<string[]> {
 	const baseline = await withModelsConfig({ models: { providers: {} } }, (handle) =>
 		handle.modelRuntime.getModels().map((model) => `${model.provider}/${model.id}`),
@@ -178,10 +98,7 @@ beforeAll(async () => {
 
 describe("PROV-03 — the composed DashScope compat block", () => {
 	it("the template contributes at least one model (guards against a vacuous pass)", () => {
-		// Every case below iterates or indexes this set. An empty one -- a renamed
-		// provider key, a template that stopped validating, a helper that composed
-		// the wrong file -- would turn this entire file into a pass that executed
-		// no assertion at all.
+		// Every case below iterates this set, so an empty one would assert nothing.
 		expect(
 			templatedIds.length,
 			`${TEMPLATE} contributed NO models to a composed registry. Nothing below this ` +
@@ -192,10 +109,7 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 	});
 
 	it("every templated model has an INTENDED_COMPAT entry, and nothing else does", () => {
-		// Both directions. A third model added to the template without a table
-		// entry would otherwise ship with its compat block entirely unasserted,
-		// and a table entry left behind after a model is removed would look like
-		// coverage that no longer exists.
+		// Both directions: a model without a table entry ships unasserted; a stale entry looks like coverage.
 		expect(
 			templatedIds.sort(),
 			"the set of models the template composes and the set of models this file " +
@@ -215,11 +129,7 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 			const model = composed.get(key);
 			expect(model, `${key} was not composed; see the vacuity guard above`).toBeDefined();
 
-			// THE ASSERTION THIS FILE EXISTS FOR. Against `model.compat` -- what Pi
-			// built -- and never against the template's bytes. A misspelled key in
-			// the template does not appear here under its intended name, so this
-			// goes red; the misspelling case below proves that claim rather than
-			// asserting it.
+			// Against what Pi built, so a misspelled template key goes red (the misspelling case below proves it).
 			expect(
 				model?.compat,
 				`the compat Pi COMPOSED for ${key} is not the intended object. Every field ` +
@@ -235,12 +145,7 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 			const compat = composed.get(key)?.compat;
 			expect(compat, `${key} composed without a compat object at all`).toBeDefined();
 
-			// Deep equality already implies this, but stated separately because the
-			// failure it catches is a different one: a key arriving from somewhere
-			// unexpected -- a provider-level field nobody meant to inherit, a
-			// `modelOverrides` block, a future Pi default written into the composed
-			// object -- should name itself in the failure rather than appear as one
-			// line of a large diff.
+			// Implied by deep equality, but an unexpected key should name itself rather than hide in a large diff.
 			expect(
 				Object.keys(compat ?? {}).sort(),
 				`${key} composed a compat key set that is not the intended one. An extra ` +
@@ -250,13 +155,8 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 		});
 
 		it(`${key} is a reasoning model (Trap T5)`, () => {
-			// `modelFromJson` defaults `reasoning` to FALSE when the key is omitted
-			// [pi src/core/provider-composer.ts:156], and every thinkingFormat branch
-			// is `compat.thinkingFormat === X && model.reasoning` [:748, :761, :796,
-			// :837] while the reasoning_content fix is `&& model.reasoning` too
-			// [:1225]. So an entry that forgets `reasoning: true` disables thinking
-			// AND re-opens the PROV-10 400, together and silently -- with a perfectly
-			// correct compat block sitting right next to it doing nothing.
+			// `reasoning` defaults to false [pi src/core/provider-composer.ts:156], and every thinking branch and the
+			// reasoning_content fix also require it, so omitting it silently disables both.
 			expect(
 				composed.get(key)?.reasoning,
 				`${key} composed with reasoning=false. Every compat assertion above it is ` +
@@ -267,11 +167,7 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 	}
 
 	it("a deliberately misspelled compat key does NOT reach the composed object", async () => {
-		// The fixture is INLINE, never a file under `.pi/templates/`: a fixture in
-		// the scanned/installed directory would be shipped as real configuration
-		// and would fail the gate it exists to prove. `chokepoint-lint.test.ts:146-156`
-		// keeps its offending fixture inline for the same stated reason.
-		// [threat T-03-04-05]
+		// Inline, never under .pi/templates/: a fixture there would ship as real configuration.
 		const misspelled = {
 			providers: {
 				[PROVIDER_ID]: {
@@ -305,16 +201,12 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 		};
 
 		const { compat, configError } = await withModelsConfig({ models: misspelled }, (handle) => ({
-			// `requireModel` throws rather than returning undefined, so a fixture
-			// that failed to compose surfaces as an error naming both ids -- it can
-			// never quietly satisfy the negative assertions below.
+			// requireModel throws, so a fixture that failed to compose cannot satisfy the negatives below.
 			compat: handle.requireModel(PROVIDER_ID, "deepseek-v4-flash").compat,
 			configError: handle.modelRuntime.getError(),
 		}));
 
-		// Positive control first: the typo really did validate and really did
-		// compose. Without this, "supportsStore is absent" would also be satisfied
-		// by a fixture Pi rejected outright, which proves the opposite of the point.
+		// Positive control: the typo really validated and composed, or the absence below would prove nothing.
 		expect(
 			configError,
 			"Pi reported a models.json error for the misspelled fixture. If typebox has " +
@@ -327,9 +219,7 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 				"fixture no longer demonstrates the trap it exists to demonstrate",
 		).toBe(false);
 
-		// And the finding: the intended key is simply not there. This is what makes
-		// the deep-equality assertions above live rather than decorative -- a real
-		// typo in the shipped template produces exactly this shape and turns them red.
+		// The intended key is simply absent, which is what makes the deep-equality assertions live.
 		expect(
 			Object.hasOwn(compat ?? {}, "supportsStore"),
 			"a misspelled compat key somehow still produced the intended key, which " +
@@ -346,8 +236,7 @@ describe("PROV-03 — the composed DashScope compat block", () => {
 describe("PROV-03 — the detectCompat regression canary", () => {
 	it("the installed openai-completions adapter still has no aliyuncs branch", () => {
 		if (!existsSync(ADAPTER)) {
-			// Throw, never skip: a skipped canary is a canary nobody will notice is
-			// dead. [.planning/STATE.md — "throw, never skip"]
+			// Throw, never skip: a skipped canary is a dead canary nobody notices.
 			throw new Error(
 				[
 					`The installed adapter is missing: ${ADAPTER}`,
@@ -365,11 +254,7 @@ describe("PROV-03 — the detectCompat regression canary", () => {
 
 		const source = readFileSync(ADAPTER, "utf-8");
 
-		// Paired positive, and it is load-bearing: `deepseek.com` IS one of
-		// detectCompat's base-URL substrings, so its presence proves this really is
-		// the detection code and not a truncated read, a wrong path, or a file that
-		// stopped containing the list. Without it, an empty string satisfies the
-		// negative below perfectly.
+		// Paired positive: `deepseek.com` is one of detectCompat's base-URL substrings, so the read is the real code.
 		expect(
 			source,
 			`${ADAPTER} does not contain "deepseek.com", which is one of detectCompat's ` +

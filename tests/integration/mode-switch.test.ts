@@ -1,89 +1,8 @@
 /**
- * ROUTE-02 — `/cheap`, `/balanced`, `/max` in a real Pi session, both
- * directions: a switch either takes effect or is refused with a reason.
- *
- * ---------------------------------------------------------------------------
- * WHY A FAUX PROVIDER REGISTERED UNDER A REAL PROVIDER ID STILL NEEDS AN
- * EXPLICIT AUTH GRANT, MEASURED HERE RATHER THAN ASSUMED
- * ---------------------------------------------------------------------------
- * `tests/helpers/session.ts`'s own docstring warns that a faux provider
- * registered under a real provider id "still resolves auth empty". Measured
- * directly against `ModelRuntime` (not inferred): registering a faux
- * provider under `"deepseek"` and calling `hasConfiguredAuth("deepseek")`
- * returns `false`, exactly as documented — `createFauxSession` never writes
- * anything to `authPath` and passes `refreshOnCreate: false`, so nothing
- * populates the auth snapshot.
- *
- * The seam that works, ALSO MEASURED rather than assumed: `ModelRuntime`
- * exposes a public `setRuntimeApiKey(providerId, apiKey)` — no network
- * involved (`synchronizeCredentialState` explicitly calls
- * `this.models.refresh({ allowNetwork: false, ... })`)
- * [VERIFIED: `dist/core/model-runtime.js:374-393`, `:394-400`]. Calling it and
- * awaiting the returned promise is NOT sufficient by itself, though: five
- * back-to-back runs against a bare `ModelRuntime` showed
- * `hasConfiguredAuth(providerId)` still `false` in the same microtask the
- * await returns in, and `true` after a handful of milliseconds of polling —
- * `checkAuth(providerId)` (a live, uncached per-call check) is already `true`
- * at that same point, so the gap is specific to the CACHED availability
- * snapshot `hasConfiguredAuth` reads, not to whether the credential itself
- * "took". `waitForConfiguredAuth` (tests/helpers/session.ts) polls with a real timeout for
- * exactly this reason — a fixed `setTimeout` guess would be exactly the kind
- * of flaky, undocumented magic-number this project's own conventions forbid.
- * This finding, and the seam it justifies, is recorded in
- * `05-07-SUMMARY.md` per the plan's own instruction.
- *
- * ---------------------------------------------------------------------------
- * WHY THE PLAN'S TWO "SETMODEL RETURNS FALSE" AND "NO CONFIGURED CANDIDATE"
- * BEHAVIORS ARE ONE SCENARIO HERE, NOT TWO
- * ---------------------------------------------------------------------------
- * `pi.setModel`'s own wrapper pre-check and `routing/modes.ts`'s
- * `pickConfiguredCandidate` both read the IDENTICAL underlying state —
- * `ModelRuntime#hasConfiguredAuth(provider)`
- * [VERIFIED: `dist/core/agent-session.js:1886`, `dist/core/model-registry.js:
- * 27-28`]. A candidate that `pickConfiguredCandidate` accepts can therefore
- * never make `pi.setModel` return `false` for want of auth in this harness:
- * the refusal always surfaces at candidate-selection, before `pi.setModel` is
- * ever called. Case 3 below drives exactly that path — a mode whose every
- * candidate lacks configured auth — and it is the same scenario the plan's
- * "pi.setModel returning false" bullet describes, because there is no
- * reachable state in Pi 0.84.1's public extension API where the two checks
- * disagree outside the TOCTOU race `05-index.ts`'s own `try`/`catch` defends
- * against defensively (not exercised here — it needs a race, not a fixture).
- * Task 1's own acceptance criteria separately proves, by static grep, that
- * every `pi.setModel` call site is wrapped in `try`/`catch` with the boolean
- * checked; this file proves the RUNTIME behavior the wrapping exists for.
- *
- * ---------------------------------------------------------------------------
- * WHY THE COMMAND IS INVOKED VIA `extensionRunner`, NOT `session.prompt`
- * ---------------------------------------------------------------------------
- * `AgentSession#extensionRunner` is a public getter
- * [VERIFIED: `dist/core/agent-session.d.ts:642`]. `ExtensionRunner` exposes
- * `getCommand(name)` and `createCommandContext()` as public methods
- * [VERIFIED: `dist/core/extensions/runner.d.ts:132,144`], and
- * `createCommandContext()` is available immediately after
- * `createAgentSession` returns — extension loading (and therefore command
- * registration) happens at SESSION CONSTRUCTION, not at the first prompt.
- * `waitForIdleFn` is the no-op `async () => {}` in a headless session
- * [VERIFIED: `dist/core/extensions/runner.js:547-550`, `:81-119`'s
- * `bindCommandContext` called with no actions] — the command context exists
- * and the handler runs; nothing here needs a warm-up prompt the way
- * `tests/integration/call-model.test.ts` did (that file needed a prompt to
- * make an EVENT fire; this file drives a COMMAND directly).
- *
- * ---------------------------------------------------------------------------
- * ORDERING IS RECORDED, NEVER INFERRED
- * ---------------------------------------------------------------------------
- * Because `waitForIdleFn` is a no-op, its position in the call sequence
- * cannot be observed by its side effects — only by RECORDING that it ran.
- * `ctx.waitForIdle` is overridden with a wrapper that pushes to a shared,
- * `globalThis`-keyed log before delegating to the real (no-op) function; the
- * routing extension's own `model_select` handler (loaded via the probe
- * source below) pushes to the SAME log when Pi fires the event inside
- * `pi.setModel`. Two module graphs — the test file and the jiti-loaded
- * extension — share exactly one channel: the process-wide object, the same
- * reason `tests/integration/call-model.test.ts` parks its `ExtensionContext`
- * there. Per Phase 1's recorded lesson, every ordering comparison below is
- * preceded by a non-emptiness assertion on the log itself.
+ * `/cheap`, `/balanced`, `/max` in a real Pi session, both directions: a switch takes effect or is refused with a reason.
+ * A faux provider under a real id needs `setRuntimeApiKey` plus a poll, since `hasConfiguredAuth`'s cached snapshot lags
+ * the awaited promise. Commands run through `extensionRunner` (registered at construction), and the `waitForIdle` /
+ * `model_select` order is recorded in a `globalThis` log shared with the jiti-loaded extension, never inferred.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -106,17 +25,10 @@ const LOG_KEY = "__kypiModeSwitchOrderLog";
 /** Absolute path of the routing extension entry point this repository ships. */
 const ROUTING_ENTRY = `${repoRoot()}/.pi/extensions/routing/index.ts`;
 
-/** Absolute path of routing/schema.ts, needed by the WR-10 guard-blocked-derivation extension source below. */
+/** Absolute path of routing/schema.ts, for the guard-blocked-derivation extension source below. */
 const SCHEMA_ENTRY = `${repoRoot()}/.pi/extensions/routing/schema.ts`;
 
-/**
- * The user-scope extension under test: the real routing entry point, plus a
- * one-line probe that records every `model_select` into the shared log.
- *
- * `event.model` is a real `Model<Api>` on `model_select`
- * [VERIFIED: `dist/core/extensions/types.d.ts:602-607`], so `provider`/`id`
- * are always present -- no optional chaining needed on those two fields.
- */
+/** The real routing entry point plus a probe recording every `model_select` into the shared log. */
 const PROBE_SOURCE = [
 	"// Generated for tests/integration/mode-switch.test.ts. Lives in a temp dir.",
 	`import routing from ${JSON.stringify(ROUTING_ENTRY)};`,
@@ -133,14 +45,8 @@ const PROBE_SOURCE = [
 ].join("\n");
 
 /**
- * WR-10: the user-scope extension for the guard-blocked-derivation case --
- * the real routing entry point, wired through {@link RoutingTestOptions}'s
- * own `agentOverridesFor` seam with a role map whose `balanced.planner`
- * candidate is `amazon-bedrock/us.deepseek.r1-v1:0` (the same no-tool-calling
- * fixture id `tests/unit/agent-overrides.test.ts`'s own guard-blocked case
- * uses) -- everything else about `balanced` (crucially, its `executor`
- * candidate) is left as the REAL `ROLE_MAP.balanced` entry, so the executor
- * switch itself still succeeds and only the subagent-pin write is blocked.
+ * The real routing entry point with `balanced.planner` swapped for a no-tool-calling Bedrock id, so the executor switch
+ * still succeeds and only the subagent-pin write is blocked.
  */
 const BLOCKED_PLANNER_SOURCE = [
 	"// Generated for tests/integration/mode-switch.test.ts. Lives in a temp dir.",
@@ -170,16 +76,7 @@ function readOrderLog(): string[] {
 	return ((globalThis as Record<string, unknown>)[LOG_KEY] as string[] | undefined) ?? [];
 }
 
-/**
- * Replace `ctx.waitForIdle` with a wrapper that records into the shared log
- * before delegating to the real (no-op, headless) function.
- *
- * Unlike `ui`, `waitForIdle` is assigned as a plain, writable, configurable
- * data property inside `createCommandContext()` itself
- * [VERIFIED: `dist/core/extensions/runner.js:547-550`,
- * `context.waitForIdle = () => {...}`], so direct reassignment is sound here
- * -- no `defineProperty` needed for this one property.
- */
+/** Wraps `ctx.waitForIdle` to record into the shared log; it is a plain writable property (runner.js `createCommandContext`). */
 function withRecordedWaitForIdle(
 	ctx: import("@earendil-works/pi-coding-agent").ExtensionCommandContext,
 ): void {
@@ -200,14 +97,7 @@ function freshTempDir(prefix: string): string {
 	return dir;
 }
 
-/**
- * CR-01: the suite-wide value `tests/setup/agent-dir.ts`'s `beforeAll`
- * already set for this file, captured here (in THIS file's own `beforeAll`,
- * which vitest runs AFTER the setup file's) so cases 2/4 below can restore it
- * instead of `delete`-ing the variable outright. Deleting would punch a hole
- * in the suite-wide guard for the rest of this file's cases -- see that
- * file's own docstring.
- */
+/** The suite-wide agent-dir value from tests/setup/agent-dir.ts, restored (never deleted) by the cases that change it. */
 let suiteAgentDir: string | undefined;
 beforeAll(() => {
 	suiteAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -272,10 +162,7 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 			await command.handler("", ctx);
 			const after = ctx.model;
 
-			// Non-vacuity FIRST, per Phase 1's recorded lesson: an ordering
-			// comparison over an empty log passes whatever the two indices
-			// default to, so both entries must be shown to exist before their
-			// order is compared.
+			// Non-vacuity first: an order comparison over an empty log passes whatever the indices default to.
 			const log = readOrderLog();
 			expect(
 				log.length,
@@ -417,11 +304,8 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 	it("case 3 -- a mode with no configured candidate refuses, names both candidates, and leaves the model unchanged", async () => {
 		resetOrderLog();
 		await withModeSwitchSession(async ({ session, modelRuntime }) => {
-			// Deliberately NOT calling setRuntimeApiKey at all -- "deepseek" is
-			// registered (so it resolves) but carries no configured auth, and
-			// "dashscope" is never registered (so it does not resolve either).
-			// This is what a machine with partial credentials looks like on
-			// every one of cheap's flash-tier candidates.
+			// No setRuntimeApiKey: "deepseek" resolves but has no auth and "dashscope" is unregistered, as on a partly
+			// configured machine.
 			expect(
 				modelRuntime.hasConfiguredAuth("deepseek"),
 				"the auth precondition for this case is wrong",
@@ -467,9 +351,7 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 				"the refusal does not name the dashscope candidate that was tried",
 			).toContain("dashscope/deepseek-v4-flash");
 
-			// waitForIdle still ran, first, even on a refusal -- the race is
-			// closed before ANY branch of the outcome, not only the success
-			// branch.
+			// waitForIdle ran first even on a refusal: the race is closed before any branch of the outcome.
 			const log = readOrderLog();
 			expect(
 				log.length,
@@ -541,24 +423,14 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 
 				await command.handler("", ctx);
 
-				// The EXECUTOR switch itself must still succeed --
-				// BLOCKED_PLANNER_SOURCE only corrupts balanced.planner, leaving
-				// balanced.executor as the REAL (authed, guard-approved) ROLE_MAP
-				// entry. A test that only checked the refusal text could pass
-				// against an implementation that failed the WHOLE switch instead
-				// of carrying the subagent refusal into step 6's message, which is
-				// a materially different (and wrong) behaviour.
+				// The executor switch itself must still succeed; only the subagent pin is refused.
 				expect(
 					ctx.model?.provider,
 					`the executor switch itself did not succeed (notifications: ${JSON.stringify(notifications)})`,
 				).toBe("deepseek");
 				expect(ctx.model?.id).toBe("deepseek-flash");
 
-				// THE ASSERTION WR-10 EXISTS FOR: the notification names the
-				// refusal AND the blocked role, driven through the REAL command
-				// path -- not merely a test asserting its own choice not to call
-				// writeAgentOverrides (tests/unit/agent-overrides.test.ts's prior,
-				// self-fulfilling version of this case).
+				// Driven through the real command path: the notification names the refusal and the blocked role.
 				expect(notifications.length, "a successful switch must still report an outcome").toBeGreaterThan(0);
 				const text = notifications.at(-1)?.text ?? "";
 				expect(
@@ -572,10 +444,7 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 					"the notification does not carry the guard's own reason (tool calling)",
 				).toContain("tool calling");
 
-				// THE FILE ITSELF: no subagents key at all -- an agentOverridesFor
-				// ok:false derivation must never be unwrapped, coerced to {}, or
-				// written anyway (agent-overrides.ts's own CALLER DISCIPLINE
-				// section).
+				// A blocked derivation must never be written as subagents config, coerced or not.
 				const settingsPath = join(settingsDir, "settings.json");
 				if (existsSync(settingsPath)) {
 					const written = JSON.parse(readFileSync(settingsPath, "utf-8")) as { subagents?: unknown };
@@ -584,12 +453,7 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 						`settings.json was written but carries a "subagents" key: ${JSON.stringify(written)}`,
 					).toBeUndefined();
 				}
-				// existsSync(settingsPath) === false is ALSO an acceptable pass
-				// here -- applyMode's step 5 only ever writes settings.json when
-				// overridesResult is ok:true, so a guard-blocked derivation should
-				// mean no write occurs at all. Either "no file" or "a file with no
-				// subagents key" proves the same claim; only "a file WITH a
-				// subagents key" would fail it.
+				// No file at all is equally a pass: a blocked derivation should mean no write.
 			},
 			BLOCKED_PLANNER_SOURCE,
 		);
@@ -597,29 +461,9 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 });
 
 /**
- * Build a fresh faux session with the routing extension (plus the
- * `model_select` probe) loaded at user scope, run `fn` against it, then
- * dispose.
- *
- * THE SESSION'S STARTING MODEL IS DELIBERATELY NOT `deepseek/deepseek-v4-
- * flash` -- MEASURED, NOT ASSUMED. `AgentSession#_emitModelSelect` skips the
- * event ENTIRELY when `modelsAreEqual(previousModel, nextModel)`
- * [VERIFIED: `dist/core/agent-session.js:1182-1191`]. Every mode this file
- * drives resolves the executor to `deepseek/deepseek-flash`, so if the
- * session already started there, a "successful" switch would still leave
- * `pi.setModel` returning `true` while firing NO `model_select` event at
- * all -- case 1 caught exactly this the first time this file was run: the
- * ordering log held only `"waitForIdle"`, because the switch was a genuine
- * no-op change. The session therefore starts on the DEFAULT faux model
- * (`faux/faux-flash`, `session.ts`'s own default, registered under faux's
- * own provider id rather than a real one), and `deepseek/deepseek-flash`
- * is registered SEPARATELY, after construction, as a second native
- * provider -- so every switch this file drives is a genuine change.
- *
- * Mirrors `withFauxSession`'s own callback-and-finally-dispose shape (this
- * file's own cases interleave `setRuntimeApiKey`/`waitForConfiguredAuth`
- * between session creation and command invocation INSIDE the callback,
- * which is exactly what a callback shape is for).
+ * A faux session with the routing extension and probe at user scope. It starts on `faux/faux-flash`, not deepseek:
+ * `_emitModelSelect` skips equal models (agent-session.js `_emitModelSelect`), so starting on the target would make every
+ * switch a silent no-op.
  */
 async function withModeSwitchSession<T>(
 	fn: (handle: FauxSessionHandle) => Promise<T>,

@@ -1,65 +1,8 @@
 /**
- * PROV-03 / PROV-10 — the DashScope compat block, asserted on the WIRE.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE IS, AND WHAT IT IS NOT
- * ---------------------------------------------------------------------------
- * Every other PROV-03 assertion in this repository stops one layer short.
- * `tests/unit/dashscope-compat.test.ts` proves what Pi COMPOSES from the shipped
- * template — a real answer to Trap T6, and still not a statement about bytes.
- * `tests/helpers/faux.ts` says at length why a `fauxProvider` payload cannot
- * close the gap: it is a fixture this repository wrote, so asserting on it
- * proves that our fixture builder agrees with our assertion.
- *
- * This file closes the gap. It stands `tests/helpers/loopback.ts`'s `node:http`
- * server on `127.0.0.1`, points the SHIPPED template's provider at it with only
- * `baseUrl` and `apiKey` overridden, and lets Pi's REAL `openai-completions`
- * adapter build, encode and send the request. Every assertion below runs against
- * bytes Pi produced.
- *
- * Why a loopback URL is evidence about DashScope: `detectCompat` keys entirely
- * on `model.provider` against a fixed provider-id list and on
- * `model.baseUrl.includes(...)` against a fixed host-substring list
- * [VERIFIED: pi-ai 0.84.1 `dist/api/openai-completions.js:1161-1221`]. Neither
- * `http://127.0.0.1:<port>/v1` nor a DashScope base URL matches any of them —
- * the standing canary in `tests/unit/dashscope-compat.test.ts` re-checks that
- * absence against the installed artifact on every run. So the emission path here
- * is byte-for-byte the DashScope path except for the URL string.
- *
- * IT PROVES WHAT PI EMITS. IT SAYS NOTHING ABOUT WHAT DASHSCOPE ACCEPTS.
- * A body captured perfectly here may still be rejected by the real gateway — a
- * spelling the gateway refuses, a model id absent from the caller's workspace, a
- * parameter its compatibility table does not list. Those are `RB-03-01` (an
- * ordinary DashScope turn returns 200 and the wire dump shows this same field
- * set) and `RB-03-02` (the SECOND turn of a tool-calling sequence returns 200
- * rather than the `reasoning_content` 400) in `docs/RUNBOOK.md`. Both are
- * **OUTSTANDING**, this file is the offline proxy `RB-03-02` names, and nothing
- * green here may be read as discharging either of them (Trap T12).
- *
- * ---------------------------------------------------------------------------
- * THE PROV-10 MECHANISM, STATED ONCE
- * ---------------------------------------------------------------------------
- * `convertMessages` inserts `reasoning_content: ""` on a replayed assistant
- * message when `compat.requiresReasoningContentOnAssistantMessages && model.reasoning`
- * and the key is not already set [pi-ai `openai-completions.ts:1223-1229`]. The
- * value `""` is correct and expected — Pi is the thing that puts it there. Its
- * ABSENCE is what returns HTTP 400 on the second turn of a tool sequence while
- * the first turn succeeds, which is why the failure reads as intermittent rather
- * than as a misconfiguration. Two controls below prove the assertion can fail.
- *
- * ---------------------------------------------------------------------------
- * NO REQUEST IN THIS FILE LEAVES 127.0.0.1
- * ---------------------------------------------------------------------------
- * `withLoopbackCompletions` refuses to hand out a non-loopback `baseUrl`
- * (Trap T11), and {@link captureOne} additionally runs `assertLoopbackUrl` over
- * the COMPOSED `model.baseUrl` — the string the adapter will actually dial —
- * BEFORE any completion is issued. A real provider host is never spelled in this
- * file, not even in a comment. [threat T-03-09-01]
- *
- * The API key written into the fixture is an obviously synthetic literal. No
- * credential exists on this machine to substitute for it and none is needed: the
- * loopback server never inspects the `Authorization` header.
- * [threat T-03-09-02]
+ * The DashScope compat block asserted on bytes Pi's real openai-completions adapter sends to a `127.0.0.1` server, with
+ * only `baseUrl` and `apiKey` overridden in the shipped template. A loopback URL matches no compat detection rule
+ * (pi-ai dist/api/openai-completions.js detectCompat), so this is the DashScope path except for the URL. It proves what
+ * Pi emits, not what DashScope accepts (runbook RB-03-01/RB-03-02). No request leaves 127.0.0.1.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -79,18 +22,10 @@ const TEMPLATE = join(repoRoot(), ".pi", "templates", "models-template.json");
 const PROVIDER_ID = "dashscope";
 const MODEL_ID = "deepseek-v4-flash";
 
-/**
- * Obviously synthetic, and it never leaves the machine. Written as one literal
- * so a reader grepping this repository for a credential shape finds a string
- * that says what it is. [threat T-03-09-02]
- */
+/** Obviously synthetic; the loopback server never inspects it. */
 const SYNTHETIC_API_KEY = "kypi-synthetic-fixture-key-not-a-credential";
 
-/**
- * Deliberately not a round number and not the template's own `maxTokens`: the
- * `max_tokens` assertion compares the emitted VALUE, so a body that echoed the
- * model's cap by some other route could not satisfy it by coincidence.
- */
+/** Not a round number nor the template's cap, so `max_tokens` cannot match by coincidence. */
 const FIXTURE_MAX_TOKENS = 1234;
 
 /** Set so `prompt_cache_key` has something to be clamped from — see PRESENCE 4. */
@@ -104,17 +39,8 @@ const FIXTURE_TOOL: Tool = {
 };
 
 /**
- * The options every capture passes, chosen so each field under test has a reason
- * to appear:
- *   - `reasoningEffort` — `enable_thinking` is `!!options?.reasoningEffort` and
- *     `reasoning_effort` is emitted only when it is set [`:761-768`];
- *   - `maxTokens` — Pi emits a token cap ONLY when the caller sets this
- *     [`:715-721`], so without it the `max_tokens` assertion would be vacuous;
- *   - `cacheRetention: "long"` + `sessionId` — this is what makes the
- *     `prompt_cache_*` ABSENCE attributable to `supportsLongCacheRetention:
- *     false` rather than to nobody having asked for long retention [`:699-704`].
- *     Without them the absence assertion would hold with the compat field
- *     deleted, which is the definition of a test that proves nothing.
+ * Each option gives a field under test a reason to appear: `reasoningEffort` for thinking, `maxTokens` for the cap,
+ * and `cacheRetention: "long"` with `sessionId` so a missing `prompt_cache_*` is attributable to the compat field.
  */
 const REQUEST_OPTIONS = {
 	reasoningEffort: "high",
@@ -129,14 +55,8 @@ const ONE_TURN: Message[] = [{ role: "user", content: "hello", timestamp: 1 }];
 const TOOL_CALL_ID = "call_kypi_fixture_1";
 
 /**
- * A replayed two-turn tool sequence, built by hand.
- *
- * The assistant entry carries a tool call and NOTHING resembling reasoning
- * content — pi-ai's `AssistantMessage` has no `reasoning_content` field at all
- * [pi-ai 0.84.1 `dist/types.d.ts:295-310`], so the fixture is structurally
- * incapable of supplying the key the PROV-10 case asserts. Whatever appears on
- * the wire was put there by the adapter. The two controls prove that claim
- * rather than resting on it. [threat T-03-09-05]
+ * A replayed two-turn tool sequence. pi-ai's AssistantMessage has no `reasoning_content` field, so any such key on
+ * the wire was put there by the adapter.
  */
 const TWO_TURN: Message[] = [
 	{ role: "user", content: "read package.json", timestamp: 1 },
@@ -174,16 +94,7 @@ const TWO_TURN: Message[] = [
 	},
 ];
 
-/**
- * Parse the models template the way `bin/bootstrap.sh` does: WHOLE-LINE `//`
- * only, which is what the template's own header promises. A naive strip of every
- * `//` would eat the `https://` inside a base URL.
- *
- * Duplicated from `tests/integration/templates-install.test.ts:178-185`
- * deliberately — that file deep-equals the INSTALLED provider block against its
- * own parse, so the two strips drifting apart fails there rather than silently
- * changing what this file believes the template says.
- */
+/** Parses the models template as bootstrap does: whole-line `//` comments only, so `https://` survives. */
 function parseModelsTemplate(): Record<string, unknown> {
 	return JSON.parse(
 		readFileSync(TEMPLATE, "utf-8")
@@ -239,13 +150,8 @@ interface Capture {
 }
 
 /**
- * Drive ONE completion through Pi's real adapter at a loopback server and hand
- * back what it emitted.
- *
- * `mutate` receives the shipped provider block and may change it; the controls
- * are the only callers that do. `baseUrl` and `apiKey` are overridden here and
- * nowhere else, which is what makes every assertion a statement about the
- * TEMPLATE rather than about a hand-written copy of it. [threat T-03-09-03]
+ * Drives one completion through Pi's real adapter at a loopback server. `baseUrl` and `apiKey` are overridden here
+ * only, so every assertion is about the template; `mutate` is for the controls.
  */
 async function captureOne(
 	label: string,
@@ -263,11 +169,7 @@ async function captureOne(
 		return await withModelsConfig({ models }, async (handle) => {
 			const model = handle.requireModel(PROVIDER_ID, MODEL_ID);
 
-			// TRAP T11, and it runs BEFORE the request is issued. The helper already
-			// refuses to hand out a non-loopback `baseUrl`; this checks the string
-			// that survived composition, which is the one `buildParams` gives to the
-			// OpenAI client. An override that failed to land would otherwise dial the
-			// template's real host from CI. [threat T-03-09-01]
+			// Checked on the composed URL before any request, so an override that failed to land cannot dial a real host.
 			assertLoopbackUrl(model.baseUrl);
 
 			const context: Context = {
@@ -294,15 +196,7 @@ async function captureOne(
 	});
 }
 
-/**
- * THE VACUITY GUARD, and it is the most important function in this file.
- *
- * Every absence assertion below — no `store`, no `developer` role, no `strict`,
- * no `prompt_cache_*`, no `reasoning_content` — is satisfied PERFECTLY by an
- * empty or missing body. So no case may touch a body it has not first proved
- * exists, and each case calls this as its first statement.
- * [threat T-03-09-04]
- */
+/** Every absence assertion is satisfied by an empty body, so each case first proves a body exists. */
 function wireBody(capture: Capture): Record<string, unknown> {
 	expect(
 		capture.requestCount,
@@ -349,16 +243,10 @@ let replayWithoutCompatField: Capture;
 let replayWithoutReasoning: Capture;
 
 beforeAll(async () => {
-	// One capture per fixture, taken once. Each is a full server + registry +
-	// completion, and the cases are about different properties of the same bodies.
+	// One capture per fixture, shared by the cases.
 	shipped = await captureOne("shipped template, one turn", ONE_TURN);
 
-	// THE PAIRED POSITIVE FOR EVERY ABSENCE ASSERTION IN THIS FILE, and the whole
-	// reason the absences mean anything. Delete the five compat fields whose only
-	// job is suppression and drive the identical request: if the shipped body's
-	// missing `store` / `developer` / `strict` / `prompt_cache_*` were an artefact
-	// of the loopback path, of the fixture context, or of an option nobody set,
-	// they would be missing here too. They are not. [threat T-03-09-04]
+	// The paired positive for every absence: without the five suppressing compat fields the same request must emit them.
 	detectionDefaults = await captureOne("detection defaults, one turn", ONE_TURN, (provider) => {
 		const compat = provider.compat as Record<string, unknown>;
 		delete compat.supportsStore;
@@ -370,9 +258,7 @@ beforeAll(async () => {
 
 	replay = await captureOne("shipped template, replayed two-turn", TWO_TURN);
 
-	// CONTROL 1 — without the compat field the key must vanish. Without this, an
-	// assertion that read the wrong object, or a fixture that somehow carried the
-	// key itself, would pass while proving nothing. [threat T-03-09-05]
+	// Control 1: without the compat field the key must vanish.
 	replayWithoutCompatField = await captureOne(
 		"two-turn, requiresReasoningContentOnAssistantMessages removed",
 		TWO_TURN,
@@ -384,12 +270,8 @@ beforeAll(async () => {
 		},
 	);
 
-	// CONTROL 2 — TRAP T5. The emission is `compat.requires… && model.reasoning`
-	// [`:1223-1229`], and `modelFromJson` defaults `reasoning` to FALSE when the
-	// key is omitted [pi `provider-composer.ts:156`]. So a template that forgets
-	// `reasoning: true` re-opens the 400 with a perfectly correct compat block
-	// sitting next to it doing nothing. Without this control, a reader could
-	// believe the compat field alone is sufficient. [threat T-03-09-05]
+	// Control 2: emission also needs `model.reasoning`, which defaults to false when omitted, so the compat field
+	// alone is not sufficient.
 	replayWithoutReasoning = await captureOne(
 		"two-turn, reasoning:false on the model entry",
 		TWO_TURN,
@@ -405,10 +287,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 	it("case 0 — one request was captured, and it went to 127.0.0.1", () => {
 		const body = wireBody(shipped);
 
-		// The resolved base URL is asserted here as well as inside `captureOne`,
-		// where it gates the request. This case is what makes the guard VISIBLE:
-		// a silent guard that stopped running would take the whole file's egress
-		// protection with it and nothing would report the loss.
+		// Asserted here too, so the guard inside captureOne is visible if it ever stops running.
 		expect(
 			new URL(shipped.resolvedBaseUrl).hostname,
 			`the composed model dialled ${shipped.resolvedBaseUrl}. Every body in this file must ` +
@@ -432,9 +311,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 	});
 
 	it("case 1 — the fixture is the SHIPPED template with only baseUrl and apiKey changed", () => {
-		// A test that hand-wrote its own compat block would assert its own copy and
-		// let the template drift away unasserted. This is the case that forbids it.
-		// [threat T-03-09-03]
+		// The block under test is the shipped template's, never a hand-written copy.
 		const template = templateProvider();
 
 		expect(
@@ -472,16 +349,9 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 	it("case 2 — presence AND absence, on the same captured body", () => {
 		const body = wireBody(shipped);
 
-		// PRESENCE FIRST, AND IN THE SAME CASE. Split across two cases, the absence
-		// half could go green against an empty or truncated body while the presence
-		// half went red somewhere else in the report — the exact pattern
-		// `tests/integration/wire-capture.test.ts:276-288` records. Every absence
-		// below is therefore preceded by a positive on this same object.
-		// [threat T-03-09-04]
+		// Presence first, in the same case, so no absence can pass against an empty body.
 
-		// PRESENCE 1 — `thinkingFormat: "qwen"` [`:761-768`]. Without that one key
-		// detection returns "openai", this branch never runs, and thinking is
-		// silently never enabled at all.
+		// `thinkingFormat: "qwen"`: without it detection says "openai" and thinking is never enabled.
 		expect(
 			Object.hasOwn(body, "enable_thinking"),
 			"the body carries no top-level `enable_thinking`. That is what a missing or wrong " +
@@ -496,9 +366,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 				"option did not reach the adapter.",
 		).toBe(true);
 
-		// PRESENCE 2 — TOP-LEVEL, not nested. Pi's "deepseek" branch would emit a
-		// nested `thinking: {type}` object instead [`:796-805`]; the value is the
-		// model's own thinkingLevelMap entry for "high".
+		// Top-level, not the nested `thinking: {type}` of Pi's deepseek branch.
 		expect(
 			body.reasoning_effort,
 			"`reasoning_effort` must be a TOP-LEVEL string. Absent means the qwen branch did " +
@@ -512,9 +380,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 				"qwen shape; both present at once would mean two branches ran.",
 		).toBe(false);
 
-		// PRESENCE 3 — `maxTokensField: "max_tokens"` [`:715-721`]. Detection's
-		// default is `max_completion_tokens`, which Alibaba's compatibility table
-		// does not list.
+		// `max_tokens`, not detection's default `max_completion_tokens`, which Alibaba does not list.
 		expect(
 			body.max_tokens,
 			"the token cap must ride as `max_tokens`. Pi emits a cap only when the caller sets " +
@@ -528,9 +394,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 				"effect.",
 		).toBe(false);
 
-		// PRESENCE 4 — the messages and tools the absences are about actually
-		// exist. Without these two, "no message has role developer" and "no tool
-		// carries strict" are both satisfied by an empty array.
+		// The messages and tools the absences are about really exist.
 		const messages = wireMessages(body);
 		expect(
 			messages.length,
@@ -556,9 +420,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 				"something else",
 		).toBe(FIXTURE_TOOL.name);
 
-		// ABSENCE 1 — `supportsStore: false`. Note the default SENDS `store: false`
-		// rather than omitting the key [`:711-713`], so this is a key-presence
-		// assertion and not a value one.
+		// The default sends `store: false` rather than omitting it, so this checks key presence.
 		expect(
 			Object.hasOwn(body, "store"),
 			"the body carries a `store` key. `store` is not in Alibaba's supported-parameter " +
@@ -566,8 +428,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 				"`false` in the template is what removes the key.",
 		).toBe(false);
 
-		// ABSENCE 2 — `supportsDeveloperRole: false`, gated on `model.reasoning`
-		// [`:1083-1085`], i.e. it bites on exactly the models this template defines.
+		// Gated on `model.reasoning`, so it bites on exactly this template's models.
 		expect(
 			messages.map((message) => message.role),
 			"a message rode with role `developer`. The role is unlisted by Alibaba and the " +
@@ -575,8 +436,6 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 				"model, so this is the default biting rather than an edge case.",
 		).not.toContain("developer");
 
-		// ABSENCE 3 — `supportsStrictMode: false` [`:1360-1369`]. See case 4 for
-		// what detection's default would have emitted.
 		for (const [index, tool] of tools.entries()) {
 			expect(
 				Object.hasOwn(tool.function ?? {}, "strict"),
@@ -585,9 +444,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 			).toBe(false);
 		}
 
-		// ABSENCE 4 — `supportsLongCacheRetention: false` [`:699-704`]. This fixture
-		// asks for `cacheRetention: "long"` AND supplies a `sessionId`, so the
-		// absence is attributable to the compat field and to nothing else.
+		// The fixture asks for long retention with a sessionId, so the absence is the compat field's doing.
 		expect(
 			Object.hasOwn(body, "prompt_cache_key"),
 			"the body carries `prompt_cache_key`. This fixture deliberately requests " +
@@ -604,10 +461,7 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 	it("case 3 — the detection-defaults control: the compat block is what removes them", () => {
 		const body = wireBody(detectionDefaults);
 
-		// EVERY ABSENCE IN CASE 2 IS FALSIFIED HERE. Same template, same context,
-		// same options, same loopback server — only the five suppressing compat
-		// fields are gone. If this body looked like case 2's, case 2 would be
-		// asserting a property of the harness rather than of the shipped block.
+		// Only the five suppressing compat fields differ from case 2, so case 2 asserts the block, not the harness.
 		expect(
 			Object.hasOwn(body, "store"),
 			"with `supportsStore` left to detection, Pi should emit `store: false` " +
@@ -657,16 +511,8 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 			"no tool was emitted at all, so the finding below is about an empty array",
 		).toBeGreaterThan(0);
 
-		// THE FINDING, AS AN ASSERTION RATHER THAN A COMMENT (RESEARCH §Q7).
-		// `convertTools` writes `...(compat.supportsStrictMode !== false && { strict: strict ?? false })`
-		// [`:1360-1369`], and `strict` is `true` only when the TOOL declares
-		// `constrainedSampling: { type: "json_schema", … }` [pi-ai
-		// `constrained-sampling.ts:84-99`]. Generic detection sets
-		// `supportsStrictMode` true, so today Pi already sends `"strict": false` on
-		// every function to every provider that leaves the field alone — including
-		// DeepSeek-direct. Turning strict ON is a tool-authoring change, not a
-		// `compat` switch. Phase 3 RECORDS this and ships `supportsStrictMode: false`;
-		// it runs no quality-gate experiment. Phase 8/10 starts from here.
+		// `strict` is sent only when a tool declares constrained sampling; turning it on is a tool-authoring change,
+		// not a compat switch.
 		for (const [index, tool] of shippedTools.entries()) {
 			expect(
 				Object.keys(tool.function ?? {}).includes("strict"),
@@ -681,16 +527,8 @@ describe("PROV-03 — the shipped compat block, on the wire", () => {
 			controlTools.length,
 			"the control emitted no tools, so it cannot demonstrate what the default does",
 		).toBe(shippedTools.length);
-		// Q7 re-decided against pi-ai 1.1.0 (08.1-02 deferred item). 0.84.1 detection
-		// defaulted `supportsStrictMode` true and so emitted `"strict": false` on every
-		// function. 1.1.0 detection defaults it to FALSE ("OpenAI compatibility alone
-		// does not imply strict JSON-schema tool support",
-		// `openai-completions.js` detectCompat), so `convertTools` omits `strict` in
-		// the control body as well. Omission is acceptable for DashScope: `strict` is
-		// optional in the OpenAI tools schema and the endpoint never needed it. The
-		// template KEEPS the explicit `supportsStrictMode: false` so the shipped wire
-		// no longer depends on a detection default that has already flipped once.
-		// What is still worth asserting: detection must never silently turn strict ON.
+		// pi-ai 1.1.0 detection defaults `supportsStrictMode` to false, so `strict` is omitted here too; the template keeps
+		// the explicit false so the wire does not depend on a default that already flipped once. Detection must never turn it on.
 		for (const [index, tool] of controlTools.entries()) {
 			expect(
 				tool.function?.strict,
@@ -721,19 +559,14 @@ describe("PROV-10 — reasoning_content on a replayed two-turn context", () => {
 				"reaching the wire for the assertion below to mean anything.",
 		).toBeDefined();
 
-		// The paired positive: the message this case is about really is the one
-		// carrying the tool call. An assistant message with `reasoning_content` and
-		// no `tool_calls` would be a different (and harmless) thing entirely.
+		// The message under test really carries the tool call.
 		expect(
 			Array.isArray(assistant?.tool_calls) && (assistant?.tool_calls as unknown[]).length,
 			"the replayed assistant message reached the wire WITHOUT its tool_calls, so this " +
 				"is not the second-turn shape PROV-10 is about",
 		).toBe(1);
 
-		// THE ASSERTION THIS HALF OF THE FILE EXISTS FOR. The KEY'S PRESENCE is the
-		// claim; the value `""` is correct and expected, because Pi is what inserts
-		// it [`:1223-1229`]. Its absence is the HTTP 400 on the second turn of every
-		// tool sequence, while the first turn succeeds.
+		// The key's presence is the claim (Pi inserts `""`); its absence is the second-turn HTTP 400.
 		expect(
 			Object.hasOwn(assistant ?? {}, "reasoning_content"),
 			"the replayed assistant message carrying tool_calls has NO `reasoning_content` " +
@@ -751,11 +584,7 @@ describe("PROV-10 — reasoning_content on a replayed two-turn context", () => {
 	});
 
 	it("case 6 — control: without the compat field, the key is gone", () => {
-		// WHAT WOULD SILENTLY PASS WITHOUT THIS. A case 5 that read the wrong
-		// object, matched on a key some other layer adds, or asserted against a
-		// fixture that carried the key itself would be green forever. This is the
-		// same body, same context, same adapter, with exactly one compat key
-		// removed. [threat T-03-09-05]
+		// Same body with one compat key removed, so a wrong-object read or a self-supplied key cannot stay green.
 		const body = wireBody(replayWithoutCompatField);
 		const assistant = wireMessages(body).find((message) => message.role === "assistant");
 
@@ -780,13 +609,7 @@ describe("PROV-10 — reasoning_content on a replayed two-turn context", () => {
 	});
 
 	it("case 7 — control (Trap T5): with reasoning:false the key is gone even with the compat field set", () => {
-		// WHAT WOULD SILENTLY PASS WITHOUT THIS. A reader could conclude that
-		// `requiresReasoningContentOnAssistantMessages` alone is sufficient. It is
-		// not: the emission is `compat.requires… && model.reasoning` [`:1223-1229`],
-		// and `modelFromJson` defaults `reasoning` to FALSE when the key is omitted
-		// [pi `provider-composer.ts:156`]. So a template that drops `reasoning: true`
-		// disables thinking AND re-opens the 400, together, with a perfectly correct
-		// compat block sitting beside it doing nothing.
+		// The compat key alone is not sufficient: dropping `reasoning: true` re-opens the 400 and disables thinking.
 		const body = wireBody(replayWithoutReasoning);
 		const assistant = wireMessages(body).find((message) => message.role === "assistant");
 
@@ -804,9 +627,7 @@ describe("PROV-10 — reasoning_content on a replayed two-turn context", () => {
 				"not driving the model it thinks it is.",
 		).toBe(false);
 
-		// The second half of Trap T5, on the same body: forgetting `reasoning` does
-		// not only re-open the 400, it silently disables thinking. Both failures
-		// arrive together and neither is visible from the UI.
+		// Forgetting `reasoning` also silently disables thinking.
 		expect(
 			Object.hasOwn(body, "enable_thinking"),
 			"`enable_thinking` survived `reasoning: false`. Every thinkingFormat branch is " +

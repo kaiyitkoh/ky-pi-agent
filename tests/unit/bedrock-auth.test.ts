@@ -1,68 +1,8 @@
 /**
- * PROV-04 — the Bedrock credential path Pi actually uses, proven offline in both
- * directions.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE IS, AND WHAT IT IS NOT — the [RUNBOOK] honesty paragraph
- * ---------------------------------------------------------------------------
- * This file proves Pi's *resolution* of a stored `AWS_PROFILE`: that an
- * `auth.json` entry of the shape this repository ships resolves as a Bedrock
- * credential, that the file beats the ambient variable, that nothing resolves
- * when neither is present, and that an empty placeholder is an outage.
- *
- * It says NOTHING about whether a live SSO token resolves on the work laptop.
- * No request is issued, no AWS SDK is loaded, no profile store is read. The
- * live half is `RB-03-03` in `docs/RUNBOOK.md`, status **OUTSTANDING**, and a
- * green run here may never be used to mark PROV-04 as passing (Trap T12).
- *
- * The gap is the entire reason PROV-04 is a `[RUNBOOK]` requirement:
- * `aws sso login` sets **no** environment variable. It writes a token cache
- * under the AWS CLI's own SSO cache directory in the user's home, so without
- * `AWS_PROFILE` literally set Pi reports no Bedrock credentials even though the
- * SDK's own chain would resolve fine. `credential.env.AWS_PROFILE` is checked
- * before process env, survives a fresh shell, and contains no secret — which is
- * why it is templatable in a public repository.
- *
- * ---------------------------------------------------------------------------
- * CLOSED DOORS — recorded so they are not re-derived
- * ---------------------------------------------------------------------------
- *   - `pi auth login` → Amazon Bedrock → **"Existing AWS credential chain"**
- *     stores `{ type: "api_key" }` with no `key` and no `env`
- *     [VERIFIED: pi-ai 0.84.1 src/providers/amazon-bedrock.ts:46-52]. That is a
- *     stored no-op that *looks* like configuration. The persisting choice is
- *     **"AWS profile"**, which is what writes the `env.AWS_PROFILE` this file
- *     tests.
- *   - There is no EC2 instance-profile / IMDS branch anywhere in `resolve()`
- *     [VERIFIED: same file, :54-79 — the full chain is `credential.key` →
- *     `AWS_BEARER_TOKEN_BEDROCK` → `credential.env.AWS_PROFILE ?? ambient
- *     AWS_PROFILE` → access keys → the two container URIs → web identity →
- *     `undefined`]. Do not write a check that expects one.
- *
- * ---------------------------------------------------------------------------
- * TWO LITERALS DELIBERATELY NOT SPELLED
- * ---------------------------------------------------------------------------
- * The acceptance gate for this file greps it for the AWS SDK's npm scope and
- * for the AWS CLI's dot-directory name and requires both counts to be zero, so
- * that "this test never touches the developer's real credentials" is a machine
- * check rather than a promise. A comment is text like any other, so both are
- * described here rather than written. The meaning survives; neither literal
- * does. (Same reasoning, same house precedent, as the out-of-scope vendor name
- * in `.pi/templates/models-template.json`.)
- *
- * ---------------------------------------------------------------------------
- * ISOLATION — why every case blanks the whole chain
- * ---------------------------------------------------------------------------
- * Pi's auth context treats an empty or whitespace-only variable as absent
- * [VERIFIED: pi-ai 0.84.1 dist/auth/context.js — `defaultProviderAuthContext`
- * returns `undefined` unless `value.trim().length > 0`], so blanking a variable
- * through `withModelsConfig`'s `env` option is how this file says "the
- * developer's machine does not have this set" without reading, mutating or
- * reporting what the developer's machine actually has. Every one of the seven
- * variables in the chain is blanked in every case; a case that cares about one
- * of them overrides exactly that one. Without this, a run on the work laptop
- * would resolve through an ambient bearer token or an ambient profile and
- * report the developer's machine state as a property of this repository.
- * [threat T-03-05-01]
+ * Pi's resolution of a stored Bedrock `AWS_PROFILE`, offline, both directions: the shipped entry resolves, the file beats
+ * the ambient variable, nothing resolves when neither is set, and an empty placeholder is an outage. Whether a live SSO
+ * token resolves is a runbook check. Every case blanks the whole credential chain (Pi treats an empty variable as
+ * absent), so a run never reports this machine's state. The AWS SDK scope and CLI dot-directory are deliberately unspelled.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -84,22 +24,13 @@ import { withModelsConfig } from "../helpers/models.ts";
 /** Pi's built-in provider id. Not defined by this repo's models template. */
 const BEDROCK = "amazon-bedrock";
 
-/**
- * What a template value must look like to be recognised as an unedited one.
- *
- * Built from the exported prefix rather than typed out, so the pattern cannot
- * drift from the literal `bin/bootstrap.sh` and the SSO classifier both key on.
- */
+/** Built from the exported prefix, so it cannot drift from what bootstrap and the SSO classifier key on. */
 const SENTINEL_SHAPE = new RegExp(`^${TEMPLATE_SENTINEL_PREFIX}`);
 
 /** The artifact under test, at the filename Trap T1 forced. */
 const AUTH_TEMPLATE_PATH = join(repoRoot(), ".pi", "templates", "auth-template.json");
 
-/**
- * The shipped template, parsed. Read from disk on every call rather than
- * memoised into a literal: the point of case 1 is that the *committed bytes*
- * resolve, so a hand-copied fixture would assert this file's own typing.
- */
+/** The shipped template, read from disk each call: the claim is that the committed bytes resolve. */
 function authTemplate(): Record<string, unknown> {
 	return JSON.parse(readFileSync(AUTH_TEMPLATE_PATH, "utf-8")) as Record<string, unknown>;
 }
@@ -111,11 +42,8 @@ function templatePlaceholder(): unknown {
 }
 
 /**
- * Every environment variable Bedrock's `resolve()` consults, in its own order
- * [VERIFIED: pi-ai 0.84.1 src/providers/amazon-bedrock.ts:54-79]. Listed in
- * full, not just `AWS_PROFILE`: a case that blanked only the variable it talks
- * about would still resolve through an ambient bearer token on a machine that
- * has one, and would then pass for the wrong reason.
+ * Every variable Bedrock's `resolve()` consults (pi-ai src/providers/amazon-bedrock.ts `resolve`), all blanked: blanking
+ * only AWS_PROFILE would still resolve through an ambient bearer token.
  */
 const AWS_CHAIN_VARIABLES = [
 	"AWS_BEARER_TOKEN_BEDROCK",
@@ -136,19 +64,11 @@ function scopedAwsEnv(overrides: Record<string, string> = {}): Record<string, st
 	return { ...env, ...overrides };
 }
 
-/**
- * Distinctive fixture values. Distinct from each other on purpose: case 2's
- * whole claim is precedence, and two equal values would satisfy it whichever
- * source won.
- */
+/** Distinct fixture values, so the precedence case cannot pass whichever source won. */
 const PROFILE_FROM_FILE = "kypi-fixture-profile-from-auth-json";
 const PROFILE_FROM_AMBIENT = "kypi-fixture-profile-from-environment";
 
-/**
- * `amazon-bedrock` is a built-in provider, so this file needs no models entry
- * for it — and deliberately declares none. PROV-06 forbids redefining a
- * catalogued model, and a Bedrock block here would be exactly that drift.
- */
+/** Bedrock is built in, so no models entry is declared: redefining a catalogued model is forbidden drift. */
 const NO_MODELS_CONFIG = {} as const;
 
 describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-03-03 is the live half)", () => {
@@ -205,15 +125,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 	});
 
 	it("case 1b -- the shipped placeholder is recognisably a placeholder", () => {
-		// WHY THE ROUND TRIP ABOVE IS NOT ENOUGH. Case 1 feeds `authTemplate()` in
-		// and asserts the result equals `templatePlaceholder()`, which re-reads the
-		// SAME file. Both sides derive from one source, so the assertion is
-		// "whatever the template says, Pi echoed it back" -- true for ANY value,
-		// including a plausible-looking profile name. It does prove one real
-		// property (Pi returns `credential.env` verbatim on that branch) so it is
-		// not vacuous, but it is not the assertion this file needs, and it is why
-		// the CR-01 hazard sat here unnoticed: case 5 asserts the placeholder is
-		// non-empty and nothing asserts anything else about it. [WR-08]
+		// The round trip above re-reads the same file, so it holds for any value; this pins what the placeholder must be.
 		const placeholder = templatePlaceholder();
 
 		expect(
@@ -272,9 +184,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 	});
 
 	it("case 3 — the negative control: no entry and no ambient variable resolves nothing", async () => {
-		// Without this case, a resolver that returned a credential unconditionally
-		// -- a stub, a wrong provider id, a chain that fell through to something on
-		// this machine -- would satisfy cases 1 and 2 perfectly. [threat T-03-05-03]
+		// Without this, a resolver that always returned a credential would satisfy cases 1 and 2.
 		await withModelsConfig(
 			{ models: NO_MODELS_CONFIG, auth: { dashscope: { type: "api_key", key: "$KYPI_UNSET" } }, env: scopedAwsEnv() },
 			async (handle) => {
@@ -293,8 +203,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 	});
 
 	it("case 4 — the paired positive: an ambient AWS_PROFILE alone still resolves", async () => {
-		// Paired with case 3 so that "absent" is proven to mean absent rather than
-		// broken: the same construction, the same blanked chain, one variable set.
+		// Paired with case 3: the same blanked chain with one variable set, so "absent" means absent, not broken.
 		await withModelsConfig(
 			{ models: NO_MODELS_CONFIG, env: scopedAwsEnv({ AWS_PROFILE: PROFILE_FROM_AMBIENT }) },
 			async (handle) => {
@@ -319,11 +228,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 	});
 
 	it("case 5 — Trap T8: an empty-string env.AWS_PROFILE defeats the ambient variable", async () => {
-		// `credential?.env?.AWS_PROFILE ?? (await env("AWS_PROFILE"))`: `??` falls
-		// through on null/undefined ONLY, so `""` is "present" and the ambient
-		// variable is never consulted -- and `""` is then falsy, so the branch is
-		// not taken at all and resolution falls off the end of the chain.
-		// [VERIFIED: pi-ai 0.84.1 src/providers/amazon-bedrock.ts:65-71]
+		// `??` falls through only on null/undefined, so `""` blocks the ambient variable and then fails the truthy branch.
 		await withModelsConfig(
 			{
 				models: NO_MODELS_CONFIG,
@@ -353,9 +258,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 			},
 		);
 
-		// The demonstration above and the shipped artifact are only linked if the
-		// shipped placeholder is asserted here too. Otherwise this case proves a
-		// hazard nobody has checked the template against.
+		// Links the demonstration to the shipped artifact.
 		const placeholder = templatePlaceholder();
 		expect(
 			typeof placeholder === "string" && placeholder.length > 0,
@@ -367,26 +270,9 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 	});
 
 	// -------------------------------------------------------------------------
-	// Case 6 — WR-03: the HARNESS mirrors Pi's order, asserted directly
+	// Case 6 — the harness's profile message follows Pi's order, or the user re-authenticates the profile that did not fail
 	// -------------------------------------------------------------------------
-	// Cases 2 and 4 prove PI's order. Nothing proved that the message PROV-05
-	// surfaces follows it, and it is the message the user acts on: a laptop with
-	// `export AWS_PROFILE=personal` and a stored Bedrock credential naming `work`
-	// has Pi dialling `work` while an inverted handler prints `aws sso login
-	// --profile personal`. The user re-authenticates the profile that did not
-	// fail, the next turn fails identically, and PROV-05 has made the failure
-	// MORE confusing than the raw SDK string. Verified: swapping the two lines of
-	// `resolveProfileName` left the whole suite at 649/649 green.
-	//
-	// WHY A STUB AND NOT THE SESSION. `tests/integration/sso-classifier.test.ts`
-	// reaches the ambient branch on every single run — `withFauxSession` aims
-	// `ModelRuntime.create` at an `auth.json` that does not exist and faux's own
-	// auth resolves empty — and since the WR-05 fix the faux provider is
-	// registered under `amazon-bedrock`, which SHADOWS Pi's real Bedrock
-	// resolver, so `getProviderAuth("amazon-bedrock")` cannot be made to answer
-	// through that seam at all. `resolveProfileName` reads nothing but
-	// `ctx.modelRegistry.getProviderAuth`, so a stub covers both branches with no
-	// session, no temp directory and no faux provider. [WR-03]
+	// A stub: in a session the faux provider shadows Pi's Bedrock resolver, and resolveProfileName reads only getProviderAuth.
 
 	/** Every call `resolveProfileName` made, so a wrong provider id cannot hide. */
 	interface StubbedRegistry {
@@ -394,15 +280,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 		asked: string[];
 	}
 
-	/**
-	 * An `ExtensionContext` that is nothing but `modelRegistry.getProviderAuth`.
-	 *
-	 * `stored === undefined` means "no credential for this provider", which is
-	 * what Pi's registry returns when `auth.json` has no entry. Any provider id
-	 * other than Bedrock's answers `undefined` too, so a handler that asked for
-	 * the wrong provider would fall through to the ambient branch and the
-	 * precedence assertion would fail rather than pass by coincidence.
-	 */
+	/** A context of nothing but `getProviderAuth`; any provider other than Bedrock answers undefined, so a wrong id fails. */
 	function stubCtx(stored: string | undefined): StubbedRegistry {
 		const asked: string[] = [];
 		const ctx = {
@@ -419,15 +297,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 		return { ctx, asked };
 	}
 
-	/**
-	 * Scope the ambient `AWS_PROFILE` around one call, then put it back.
-	 *
-	 * A key that did not exist beforehand is DELETED, never set to `""`: Pi's
-	 * auth context reads an empty value as absent, and so does
-	 * `usableProfileName`, so `""` and "unset" would be indistinguishable here
-	 * while meaning different things one layer down (Trap T8, and the same
-	 * reasoning as `scopedAwsEnv` above).
-	 */
+	/** Scopes the ambient AWS_PROFILE around one call; a previously absent key is deleted, not set to `""`. */
 	async function withAmbientProfile<T>(value: string | undefined, fn: () => Promise<T>): Promise<T> {
 		const had = Object.hasOwn(process.env, AWS_PROFILE_ENV);
 		const previous = process.env[AWS_PROFILE_ENV];
@@ -477,11 +347,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 	});
 
 	it("case 6b — the paired positive: with no stored credential the AMBIENT one is surfaced", async () => {
-		// WITHOUT THIS, CASE 6 IS SATISFIED BY A FUNCTION THAT NEVER READS THE
-		// ENVIRONMENT AT ALL. The ambient branch is the one that fires on the
-		// target machine today — nothing writes a Bedrock entry, because
-		// bin/bootstrap.sh deliberately withholds the placeholder one — so a
-		// regression here is the common case, not the corner.
+		// Without this, case 6 passes for a function that never reads the environment, which is the common path today.
 		const { ctx } = stubCtx(undefined);
 
 		const resolved = await withAmbientProfile(AMBIENT_PROFILE, async () =>
@@ -497,9 +363,7 @@ describe("PROV-04 — Bedrock credential resolution from auth.json (offline; RB-
 	});
 
 	it("case 6c — with neither source the placeholder is surfaced, not an empty command", async () => {
-		// The floor. `aws sso login --profile ` with nothing after it is a command
-		// the user can paste and cannot use, and it is what a chain that returned
-		// `undefined ?? ""` would produce.
+		// The floor: `aws sso login --profile ` with nothing after it is unusable.
 		const { ctx } = stubCtx(undefined);
 
 		const resolved = await withAmbientProfile(undefined, async () => resolveProfileName(ctx));

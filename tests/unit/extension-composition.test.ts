@@ -1,33 +1,7 @@
 /**
- * EXT-05/EXT-06 -- the capability-to-evidence registry, both directions.
- *
- * WHY THIS FILE EXISTS. EXT-05 names eight capabilities (plan mode, todo
- * tracking, structured user questions, loop detection, background bash, LSP
- * diagnostics, web lookup, session search). EXT-06 adds that Pi's own bundled
- * examples are preferred wherever they cover the need. Both are claims about
- * COMPOSITION -- which of two mutually exclusive sources (a vendored file in
- * this repo, or a pinned `packages[]` entry) each capability resolves to --
- * and both are checkable offline, today, with no install and no credentials.
- * A row whose evidence checks `packages[]` for a capability that should have
- * been vendored (EXT-10's license gap, or EXT-06's caret-range gap) is the
- * exact regression this phase is named after ("composed extensions, pinned,
- * reviewed"), caught mechanically here rather than discovered by a user
- * hitting a duplicate command or an unreviewed second copy of the same code.
- *
- * THE ANALOG. `tests/unit/workflow-budgets.test.ts`'s `{ subject, value, why }`
- * row shape, its vacuity guards, and its two-direction completeness block are
- * the template for `CAPABILITY_SOURCES` below. `tests/unit/extension-pins.test.ts`
- * and `tests/unit/vendor-license-audit.test.ts` are the template for the
- * pin-vs-vendor mutual-exclusion checks (Direction 2/3) -- this file composes
- * both disciplines over the specific eight-capability registry EXT-05 names,
- * rather than re-deriving either from scratch.
- *
- * SCOPE. `pi-subagents` is not one of the eight capabilities -- it serves
- * EXT-01..EXT-04 (subagent isolation/background execution/steering), not one
- * of EXT-05's Claude Code-parity items. It is still the sixth entry in
- * `.pi/settings.json`'s... no, the FIFTH entry in `packages[]`, and Direction
- * 3 below names it as an explicit, commented exception rather than silently
- * filtering it out (`PI_SUBAGENTS_EXCEPTION` below).
+ * The capability-to-evidence registry, both directions: each of the eight Claude-Code-parity capabilities resolves to
+ * exactly one source, a vendored file or a pinned packages[] entry, never both, and Pi's own bundled examples win where
+ * they cover the need. pi-subagents is the one packages[] entry outside the eight, named as an explicit exception.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,42 +11,29 @@ import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { packageNameFromNpmSpec, readSettingsPackages } from "../helpers/settings.ts";
 import { isEntryPoint } from "./extension-layout.test.ts";
 
-/**
- * Mirrors `tests/unit/extension-layout.test.ts`'s own `FLAT`/`NESTED_INDEX`
- * shapes (not exported there -- that file's only exported symbol is the
- * discriminator `isEntryPoint`). Duplicated deliberately: this file needs the
- * SHAPE check, not the enumeration `extension-layout.test.ts` performs, and a
- * regex this small (two lines, unchanged since Phase 2) is cheaper to keep in
- * sync by inspection than to thread through a second export.
- */
+/** The auto-discovered entry-point shapes, kept in sync with extension-layout.test.ts by inspection (too small to export). */
 const FLAT = /^\.pi\/extensions\/[^/]+\.ts$/;
 const NESTED_INDEX = /^\.pi\/extensions\/[^/]+\/index\.ts$/;
 
-/** A semver-shaped substring, e.g. "0.84.1" -- the Pi version marker in a vendoring header. */
+/** A semver-shaped substring: the Pi version marker in a vendoring header. */
 const VERSION_PATTERN = /\b\d+\.\d+\.\d+\b/;
 
 /** The literal upstream-path marker every Pi-bundled-example vendoring header carries. */
 const UPSTREAM_PATH_MARKER = "examples/extensions/";
 
 interface CapabilitySource {
-	/** One of EXT-05's eight named capabilities, verbatim from the plan's `<capability_map>`. */
+	/** One of the eight named capabilities. */
 	capability: string;
 	kind: "vendored" | "npm";
 	/** Repo-relative path (vendored) or bare npm package name (npm). */
 	evidence: string;
 	/** For `"vendored"` rows only: the npm package that must NOT appear in packages[] instead. */
 	npmAlternative?: string;
-	/** The EXT-05/EXT-06 reason, one line. */
+	/** The reason, one line. */
 	why: string;
 }
 
-/**
- * THE REGISTRY. One row per EXT-05 capability, re-verified against this
- * phase's own waves 1-3 (07-06 loop-police, 07-07 plan-mode, 07-08
- * todo/questionnaire, 07-09 packages[]), never copied from a research
- * document without re-checking `.pi/settings.json` and the tracked
- * `.pi/extensions/` tree directly (both read live by the assertions below).
- */
+/** One row per capability, checked live against `.pi/settings.json` and the tracked `.pi/extensions/` tree. */
 const CAPABILITY_SOURCES: readonly CapabilitySource[] = [
 	{
 		capability: "plan mode",
@@ -129,21 +90,10 @@ const CAPABILITY_SOURCES: readonly CapabilitySource[] = [
 	},
 ];
 
-/**
- * `pi-subagents` is the ONE `packages[]` entry that is not one of the eight
- * EXT-05 capabilities -- it serves EXT-01..EXT-04 (subagent isolation,
- * background execution, mid-run steering). Named here as a constant with a
- * comment, per Direction 3's own requirement, rather than filtered out
- * inline where a reader could mistake the filter for an oversight.
- */
+/** The one packages[] entry outside the eight (it serves subagents), named so the exclusion is not mistaken for an oversight. */
 const PI_SUBAGENTS_EXCEPTION = "pi-subagents";
 
-/**
- * True when `spec` (a `packages[]` entry) names `packageName` -- as
- * `npm:<name>@<ref>` or `npm:<name>`. Boundary-matched so
- * `pi-loop-police-fork` cannot be mistaken for `pi-loop-police`, mirroring
- * `tests/unit/vendor-license-audit.test.ts`'s own `specNamesPackage`.
- */
+/** True when a packages[] spec names `packageName`, boundary-matched so `pi-loop-police-fork` is not `pi-loop-police`. */
 function specNamesPackage(spec: string, packageName: string): boolean {
 	const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	return new RegExp(`^npm:${escaped}(@|$)`).test(spec);
@@ -186,9 +136,7 @@ describe("EXT-05 Direction 1 -- every capability resolves to a real, tracked sou
 	it.each(vendoredRows)("vendored: $capability's evidence ($evidence), when an entry point, sits at an auto-discovered shape", (row) => {
 		const text = readFileSync(join(repoRoot(), row.evidence), "utf-8");
 		if (!isEntryPoint(text)) {
-			// Not an entry point (e.g. a helper module) -- this row's shape
-			// requirement does not apply; extension-layout.test.ts governs
-			// non-entry-point placement separately.
+			// Not an entry point (a helper module): extension-layout.test.ts governs its placement.
 			return;
 		}
 		expect(

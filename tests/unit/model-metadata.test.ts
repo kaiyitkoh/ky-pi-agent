@@ -1,51 +1,8 @@
 /**
- * PROV-06 — no templated model inherits another provider's numbers, and no
- * placeholder price ships unlisted.
- *
- * ---------------------------------------------------------------------------
- * TRAP T9: THE IDS ARE IDENTICAL ON PURPOSE
- * ---------------------------------------------------------------------------
- * `.pi/templates/models-template.json` defines `deepseek-v4-flash` and
- * `deepseek-v4-pro` under `dashscope`, and Pi's built-in catalogue defines the
- * SAME TWO IDS under `deepseek` with a different context window (1,000,000 vs
- * 393,216), a different output cap (384,000 vs 65,536) and a real cost table
- * [VERIFIED: pi-ai 0.84.1 dist/providers/data/deepseek.json]. Copying
- * `contextWindow: 1000000` across is one keystroke, produces a file that parses,
- * validates and composes, and is invisible in review — the failure surfaces much
- * later as an overflow error from the provider instead of as clean compaction.
- * That collision is deliberate: renaming the DashScope ids would dodge the test
- * rather than the bug. This file is the invariant that makes the collision safe.
- *
- * ---------------------------------------------------------------------------
- * THE COST PLACEHOLDER, AND WHY IT IS ASSERTED IN BOTH DIRECTIONS
- * ---------------------------------------------------------------------------
- * Alibaba's public English documentation gives no per-token price for these
- * models — the figure lives in the Model Studio console — so the template ships
- * an all-zero `cost` block as a VISIBLE placeholder. An all-zero cost renders as
- * "free" in a cost report, so the risk is that a number nobody sourced is
- * eventually believed. {@link COST_UNVERIFIED} is asserted both ways: everything
- * on the list really is all-zero, and everything all-zero is on the list, so a
- * new placeholder cannot ship silently and an entry that quietly gained a real
- * price stops being listed as having none. [threat T-03-04-03]
- *
- * DISCHARGED, AND NOW AN ASSERTION. The other half of that coupling — every id
- * on the list is also named in `docs/RUNBOOK.md` under `RB-03-05` — could not be
- * written when this file was created, because `RB-03-05` did not exist until
- * plan 03-11 and a knowingly-red case spanning two waves of an unattended run is
- * worse than a late one. Plan 03-11 created the entry and added the case in the
- * same commit; it is the third describe block below. A placeholder price can
- * therefore no longer ship without a named live check that will replace it: the
- * allowlist is asserted against the composed registry in both directions AND
- * against the runbook.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE DOES NOT PROVE — the live half is RB-03-05
- * ---------------------------------------------------------------------------
- * Everything below is what Pi COMPOSED from the shipped template. The real
- * output cap and the real per-token price cannot be learned on this machine:
- * there is no credential here and no request was issued. They are `RB-03-05` in
- * `docs/RUNBOOK.md` and that entry is OUTSTANDING. A green run here is not
- * evidence that 65,536 is the true cap or that these models are free.
+ * No templated model inherits another provider's numbers, and no placeholder price ships unlisted. The DashScope ids
+ * deliberately collide with Pi's built-in direct-DeepSeek ids, which carry a larger window, cap and real cost; copying
+ * one across parses and composes and surfaces only as a provider overflow. COST_UNVERIFIED is asserted against the
+ * composed registry both ways and against RB-03-05 in docs/RUNBOOK.md, which measures the real cap and price (OUTSTANDING).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -56,51 +13,28 @@ import { beforeAll, describe, expect, it } from "vitest";
 import { repoRoot } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 
-/** The template plan 03-02 shipped. Composed through Pi for every assertion. */
+/** Composed through Pi for every assertion. */
 const TEMPLATE = join(repoRoot(), ".pi", "templates", "models-template.json");
 
-/**
- * Every templated model whose `cost` is all zeros, with the reason beside it —
- * the "table of record" shape of `tests/unit/pinning.test.ts:95-102`.
- *
- * Nothing may be added here without a reason, and nothing all-zero may be
- * missing from it; both directions are asserted below.
- */
+/** Every templated model whose cost is all zeros, each with its reason; asserted in both directions. */
 const COST_UNVERIFIED: string[] = [
-	// Alibaba's public English docs give no per-token price for the DeepSeek V4
-	// models on Model Studio ("see the Model Studio console"), so zeros are a
-	// declared gap rather than a fabricated figure. `RB-03-05` measures the real
-	// price on the work laptop and replaces them.
+	// Alibaba's public docs give no per-token price ("see the Model Studio console"); RB-03-05 replaces the zeros.
 	"dashscope/deepseek-v4-flash",
 	"dashscope/deepseek-v4-pro",
 ];
 
-/**
- * The output cap the template ships, and the mark it must keep.
- *
- * UNVERIFIED and deliberately conservative: Pi sends `max_tokens` only when the
- * caller sets `options.maxTokens`, so a low value costs at most a truncation
- * while a high one risks a 400. `RB-03-05` measures the real cap.
- */
+/** The shipped output cap: unverified and conservative, since a low value costs a truncation and a high one a 400. */
 const TEMPLATED_MAX_TOKENS = 65536;
 
-/**
- * The specific collision PROV-06 names, with BOTH sides pinned.
- *
- * Asserting only the DashScope number would still pass if Pi's own catalogue
- * changed underneath — and a catalogue change is exactly the event that should
- * make somebody re-read this file.
- */
+/** The collision with both sides pinned, so a change to Pi's own catalogue also makes this file re-read. */
 const CONTEXT_WINDOW_OF_RECORD: { model: string; builtin: string; dashscope: number; deepseek: number }[] = [
 	{
 		model: "deepseek-v4-flash",
 		// Pi 1.1.0 renamed the direct-DeepSeek flash id; the DashScope id is unchanged.
 		builtin: "deepseek-flash",
-		// VERIFIED-with-URL: "393,216 in total"
-		// [CITED: alibabacloud.com/help/en/model-studio/deepseek-api].
+		// "393,216 in total": https://www.alibabacloud.com/help/en/model-studio/deepseek-api
 		dashscope: 393216,
-		// Pi's built-in direct-DeepSeek entry
-		// [VERIFIED: pi-ai 0.84.1 dist/providers/data/deepseek.json].
+		// Pi's built-in direct-DeepSeek entry (pi-ai dist/providers/data/deepseek.json).
 		deepseek: 1000000,
 	},
 	{
@@ -121,21 +55,8 @@ function keyOf(model: { provider: string; id: string }): string {
 }
 
 /**
- * The models the TEMPLATE contributes, discovered by difference.
- *
- * Pi's registry carries 1,220 built-in models before this template adds
- * anything, so a blanket "no two providers may share a context window for the
- * same id" over the whole registry would be false by design (Bedrock and
- * Anthropic legitimately serve the same Claude models at 200,000). The invariant
- * is about what THIS repository writes, so the enumeration is the difference
- * between a registry composed with the template and one composed without it —
- * no literal to fall out of date, and a third model added to the template is
- * covered automatically.
- *
- * Deliberately not shared with `tests/unit/dashscope-compat.test.ts`, which
- * needs the same difference: a helper in `tests/helpers/` carries a standing
- * obligation to be covered in `tests/unit/helpers.test.ts`, and a duplicated
- * block is a cheaper price than an untested helper.
+ * The models the template contributes, by registry difference: a registry-wide rule would be false by design (Bedrock
+ * and Anthropic legitimately share Claude windows), and a new templated model is covered automatically.
  */
 async function composeRegistrySnapshot(): Promise<{
 	all: readonly Model<Api>[];
@@ -161,9 +82,7 @@ beforeAll(async () => {
 
 describe("PROV-06 — the cross-provider invariant", () => {
 	it("the template contributes at least one model (guards against a vacuous pass)", () => {
-		// Every loop below iterates this set. An empty one -- a renamed `providers`
-		// key, a template that stopped validating, a helper composing the wrong
-		// file -- would turn the whole invariant into a pass that executed nothing.
+		// Every loop below iterates this set, so an empty one would assert nothing.
 		expect(
 			templated.length,
 			`${TEMPLATE} contributed NO models to a composed registry, so every ` +
@@ -230,10 +149,7 @@ describe("PROV-06 — the cross-provider invariant", () => {
 			}
 		}
 
-		// Non-empty BEFORE the loop that judges them. If nothing collides, the
-		// general form of this invariant has nothing to say -- and the most likely
-		// reason for that is that somebody renamed the DashScope ids to make the
-		// problem go away, which dodges the test rather than the bug.
+		// Non-empty first: renaming the DashScope ids to make the collision vanish dodges the test, not the bug.
 		expect(
 			collisions.length,
 			"no templated model id is served by any other provider, so this invariant " +
@@ -270,10 +186,7 @@ describe("PROV-06 — the cross-provider invariant", () => {
 			expect(ours, `${TEMPLATED_PROVIDER}/${record.model} did not compose`).toBeDefined();
 			expect(builtin, `${BUILTIN_PROVIDER}/${record.builtin} is not in the catalogue`).toBeDefined();
 
-			// Positive control: the built-in table has real numbers in it. Without
-			// this, two all-zero cost blocks would satisfy the inequality below by
-			// being equal to nothing, and the case would pass while proving the
-			// opposite of its name.
+			// Positive control: the built-in table has real numbers, or two zero blocks would satisfy the inequality.
 			const builtinTotal = Object.values(builtin?.cost ?? {}).reduce(
 				(sum, value) => sum + (typeof value === "number" ? value : 0),
 				0,
@@ -354,18 +267,11 @@ describe("PROV-06 — the COST_UNVERIFIED allowlist", () => {
 });
 
 describe("PROV-06 — every placeholder price names the live check that will replace it", () => {
-	// Read once, as text. This block is about `docs/RUNBOOK.md` as a DOCUMENT --
-	// whether the gap has a named owner -- and not about anything Pi composes.
+	// Read once, as text: this block is about the runbook as a document.
 	const RUNBOOK = readFileSync(join(repoRoot(), "docs", "RUNBOOK.md"), "utf-8");
 
 	it("names RB-03-05 in docs/RUNBOOK.md", () => {
-		// POSITIVE CONTROL for the case below, and it is not ceremonial. That case
-		// passes vacuously if the allowlist is ever emptied, and it passes against
-		// any file that happens to contain two model ids --
-		// `.pi/templates/models-template.json` contains both, for instance.
-		// Asserting that the file also carries the entry id is what pins the
-		// assertion to the runbook rather than to any file with the right words in
-		// it.
+		// Positive control: the template also contains both ids, so the entry id pins this to the runbook.
 		expect(
 			RUNBOOK,
 			"docs/RUNBOOK.md does not mention RB-03-05, the entry that measures the real DashScope " +
@@ -376,9 +282,7 @@ describe("PROV-06 — every placeholder price names the live check that will rep
 	});
 
 	it("names every COST_UNVERIFIED model in docs/RUNBOOK.md", () => {
-		// Non-empty BEFORE the filter. An emptied allowlist would otherwise satisfy
-		// this case by having nothing to look for, which is exactly the state in
-		// which an unpriced model is most likely to be shipping unnoticed.
+		// Non-empty first: an emptied allowlist would satisfy the case by having nothing to look for.
 		expect(
 			COST_UNVERIFIED.length,
 			"COST_UNVERIFIED is empty, so the filter below iterates nothing and this case cannot fail",
@@ -411,8 +315,7 @@ describe("PROV-06 — the unverified output cap keeps its mark", () => {
 				"explain. Raising it is RB-03-05's job, after the real cap is measured.",
 		).toEqual([]);
 
-		// Paired positive: the built-in entry for the same ids caps at 384,000, so
-		// this is a number the template chose rather than one it inherited.
+		// Paired positive: the built-in entry caps at 384,000, so this figure was chosen, not inherited.
 		const builtin = all.find(
 			(model) => model.provider === BUILTIN_PROVIDER && model.id === "deepseek-flash",
 		);
@@ -424,11 +327,8 @@ describe("PROV-06 — the unverified output cap keeps its mark", () => {
 	});
 
 	it("the file carrying that number still marks it UNVERIFIED", () => {
-		// The one assertion in this file that reads the template as text, and it is
-		// about the template as a DOCUMENT rather than as configuration: a figure
-		// nobody sourced must not be able to lose its mark. Pi strips `//` comments
-		// from models.json (`stripJsonComments`, model-config.ts:261), so the mark
-		// costs nothing at runtime and is invisible to every other assertion here.
+		// The template as a document: an unsourced figure must keep its mark. Pi strips `//` comments from models.json
+		// (stripJsonComments), so the mark costs nothing at runtime.
 		const text = readFileSync(TEMPLATE, "utf-8");
 		expect(
 			text,

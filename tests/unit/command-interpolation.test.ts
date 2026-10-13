@@ -1,77 +1,8 @@
 /**
- * PROV-02 — `!command` belongs in `auth.json` and nowhere else, enforced on both
- * surfaces where "nowhere else" can actually hide.
- *
- * ---------------------------------------------------------------------------
- * THE RULE IS ABOUT A CALL SITE, NOT ABOUT A FILE NAME
- * ---------------------------------------------------------------------------
- * Pi has two resolvers for a config value and they differ in exactly one way:
- * whether the subprocess result is memoised.
- *
- *   - `resolveConfigValue()` → `executeCommand()`, which consults a
- *     module-level `commandResultCache` keyed on the whole `!…` string and
- *     therefore spawns **once per process**
- *     [VERIFIED: pi 0.84.1 src/core/resolve-config-value.ts:10, :145-151, :208-216].
- *   - `resolveConfigValueUncached()` → `executeCommandUncached()`, which does
- *     not touch that map at all
- *     [VERIFIED: pi 0.84.1 src/core/resolve-config-value.ts:198-206, :221-227].
- *
- * Which one runs is decided by the caller, not by the filename:
- *
- *   - `auth.json`'s `credential.key` is resolved by `DefaultAuthStorage.read`
- *     through the **cached** resolver
- *     [VERIFIED: pi 0.84.1 src/core/auth-storage.ts:442-448]. (`ReadOnlyAuthStorage`
- *     diverges: it returns a `!command` credential *unresolved* rather than
- *     running it [VERIFIED: :259-268] — worth knowing before debugging one.)
- *   - `models.json`'s `providers.<id>.apiKey` / `headers` are resolved by
- *     `composeApiKeyAuth().resolve()` through `resolveConfigValueOrThrow`, which
- *     calls the **uncached** one
- *     [VERIFIED: pi 0.84.1 src/core/provider-composer.ts:272-277, :341-363;
- *     src/core/resolve-config-value.ts:229-231]. Pi's own documentation says so
- *     in as many words: "For `models.json`, shell commands are resolved at
- *     request time. pi intentionally does not apply built-in TTL, stale reuse,
- *     or recovery logic" [CITED: pi 0.84.1 docs/models.md:172].
- *
- * ---------------------------------------------------------------------------
- * TRAP T13 — SCANNING ONLY THE TEMPLATE IS THE MISTAKE THIS FILE EXISTS TO STOP
- * ---------------------------------------------------------------------------
- * `configuredApiKey()` is `extension?.apiKey ?? config?.apiKey`
- * [VERIFIED: pi 0.84.1 src/core/provider-composer.ts:272-277] — the key a
- * project extension hands to the provider-registration call takes the *same*
- * uncached path as the one in `models.json`, and Pi's docs describe it with the
- * identical wording: "`apiKey` — API key literal, environment interpolation
- * (`$ENV_VAR` or `${ENV_VAR}`), or leading `!command`"
- * [CITED: pi 0.84.1 docs/extensions.md:1820]. So "it is not in `models.json`"
- * reads as compliance and is not. Both surfaces are scanned below.
- *
- * ---------------------------------------------------------------------------
- * THE AUTH TEMPLATE IS DELIBERATELY *NOT* SUBJECT TO THE BANG PROHIBITION
- * ---------------------------------------------------------------------------
- * `.pi/templates/auth-template.json` may legally carry a `!command`; that file
- * is the sanctioned position and the asymmetry between the two templates IS the
- * requirement. A scan that swept both would be enforcing a rule nobody wrote.
- *
- * ---------------------------------------------------------------------------
- * VACUITY GUARDS, BECAUSE A CLEAN TREE AND A DEAD PATTERN LOOK IDENTICAL
- * ---------------------------------------------------------------------------
- * Modelled on `tests/unit/chokepoint-lint.test.ts:166-233`: the scanned sets are
- * asserted non-empty **before** they are looped, every entry of {@link FORBIDDEN}
- * is proven live against an **inline** offending fixture, and the template's
- * bang check is paired with a positive (`$ENV_VAR` present) so a walk that found
- * no strings at all cannot pass by accident. The fixture is inline for the
- * reason `chokepoint-lint.test.ts:146-156` states: a fixture file under
- * `.pi/extensions/` or `.pi/templates/` would be enumerated by the scan and fail
- * the gate it exists to prove.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS IS WORTH A TEST AT ALL, IN PLAIN WORDS
- * ---------------------------------------------------------------------------
- * A `!command` in `models.json` — or in an extension's provider registration —
- * is a subprocess spawn on **every provider request**, in the hot path, on a
- * laptop where the model is already the slow part. It is not a style violation;
- * it is latency added to every turn, forever, with no cache and no way to notice
- * from the UI. The second half of this file proves that difference by counting
- * subprocesses rather than by quoting the documentation above.
+ * `!command` belongs in auth.json and nowhere else. auth.json keys go through Pi's cached resolver (one spawn per
+ * process); models.json and extension-registered `apiKey`/`headers` go through the uncached one, a subprocess on every
+ * request (pi src/core/resolve-config-value.ts, src/core/provider-composer.ts:272-277). Half A scans both surfaces;
+ * Half B counts subprocesses to prove the difference. The auth template is deliberately exempt from the ban.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -98,15 +29,7 @@ const SCANNED_TEMPLATES: readonly string[] = [MODELS_TEMPLATE];
 /** The scanned extension tree. Everything outside it is out of scope by design. */
 const EXT_DIR = ".pi/extensions";
 
-/**
- * Parse the models template the way `bin/bootstrap.sh` and
- * `tests/integration/templates-install.test.ts:179-185` do.
- *
- * WHOLE-LINE ONLY. `models.json` is comment-stripped by Pi
- * [VERIFIED: pi 0.84.1 src/core/model-config.ts:261] so every number in the
- * template carries its source, but a naive strip of every `//` would eat the
- * `https://` inside `baseUrl`.
- */
+/** Parses the models template as bootstrap does: whole-line `//` comments only, so `https://` survives. */
 function stripWholeLineComments(text: string): string {
 	return text
 		.split("\n")
@@ -120,15 +43,7 @@ interface StringLeaf {
 	value: string;
 }
 
-/**
- * Every string leaf of a parsed JSON value, at any depth.
- *
- * Walking the PARSED structure rather than regexing the text is the whole
- * design of this scan, and it is load-bearing in both directions: a `//`
- * comment that merely mentions `!echo` must not fail the gate, and a value
- * nested three levels down inside `providers.<id>.models[0].compat` must not
- * escape it.
- */
+/** Every string leaf of a parsed JSON value: a comment mentioning `!echo` passes, a deeply nested value cannot hide. */
 function stringLeaves(value: unknown, path = "$"): StringLeaf[] {
 	if (typeof value === "string") {
 		return [{ path, value }];
@@ -152,13 +67,7 @@ function bangLeaves(leaves: readonly StringLeaf[]): StringLeaf[] {
 	return leaves.filter((leaf) => leaf.value.startsWith("!"));
 }
 
-/**
- * A models-template-shaped fixture whose ONLY mention of a bang command is
- * inside a whole-line `//` comment.
- *
- * This is the control for "parsed leaves, not raw text": a text-level scan
- * fails it, and the scan this file actually performs must not.
- */
+/** Control for parsed-leaves scanning: the only bang mention is inside a whole-line comment. */
 const COMMENT_ONLY_FIXTURE = [
 	"// A comment may say !echo hello and even quote \"!echo hello\" freely —",
 	"// the template header does exactly this when it explains the rule.",
@@ -177,19 +86,8 @@ const BANG_VALUE_FIXTURE = COMMENT_ONLY_FIXTURE.replace(
 );
 
 /**
- * The forbidden shapes in an extension source, each with the reason it is
- * banned.
- *
- * Matched against RAW SOURCE, comments included, exactly as
- * `chokepoint-lint.test.ts` matches its own set — a substring/shape match is
- * the only form that survives an alias or a reformat, and the price is that no
- * extension file may spell the offending shape even in prose. Describe it
- * instead.
- *
- * Bounded quantifiers only, no `.`, and no `g` flag: these run over committed
- * source in a loop, and a `g` pattern carries a persistent `lastIndex` that
- * makes `.test()` lie on every other call (the lesson `prose.ts:130-135`
- * records against `redact.ts`).
+ * Forbidden shapes in raw extension source, comments included, so aliases and reformats are caught; no extension may
+ * spell them even in prose. No `g` flag: a persistent `lastIndex` makes `.test()` lie on alternate calls.
  */
 const FORBIDDEN: readonly { readonly pattern: RegExp; readonly why: string }[] = [
 	{
@@ -220,20 +118,8 @@ const FORBIDDEN: readonly { readonly pattern: RegExp; readonly why: string }[] =
 	},
 ];
 
-/**
- * A synthetic extension source carrying one offending form per pattern.
- *
- * INLINE, deliberately. A fixture file under `.pi/extensions/` would be
- * enumerated by the scan below and fail the very gate it exists to prove; one
- * under `.pi/templates/` would do the same to the template scan. It also
- * exercises the quote-style and whitespace tolerance the patterns claim, rather
- * than only the tidy spelling.
- */
-/**
- * A string that must appear in the inline fixture and NOWHERE under the scanned
- * trees. It is how "the fixture is inline" is asserted mechanically rather than
- * by inspection.
- */
+/** One offending form per pattern, inline: a fixture file under a scanned tree would fail the gate it proves. */
+/** Present in the inline fixture and nowhere under the scanned trees, proving the fixture stayed inline. */
 const FIXTURE_MARKER = "kypi-prov02-offending-fixture";
 
 const OFFENDING_FIXTURE = [
@@ -286,9 +172,7 @@ describe("PROV-02 surface 1 — no `!command` value in the models template", () 
 	});
 
 	it("paired positive — at least one leaf IS a `$`-prefixed environment reference", () => {
-		// Without this, a template that carried no credential reference at all --
-		// or a walk that silently returned only structural strings -- would satisfy
-		// the bang check perfectly while proving nothing about interpolation.
+		// A positive control, so a walk that found no credential reference cannot pass the bang check.
 		const envRefs = leaves.filter((leaf) => /^\$\{?[A-Za-z_]/.test(leaf.value));
 
 		expect(
@@ -300,8 +184,7 @@ describe("PROV-02 surface 1 — no `!command` value in the models template", () 
 	});
 
 	it("walks parsed leaves, not raw text — a `//` mention of !echo passes, a real value fails", () => {
-		// The template's own header explains the bang rule and therefore CONTAINS
-		// the string `!command`. A text-level scan fails on the documentation.
+		// The template header itself mentions `!command`, which a text-level scan would flag.
 		expect(
 			bangLeaves(templateStringLeaves(COMMENT_ONLY_FIXTURE)),
 			"a bang command mentioned only inside a whole-line // comment was reported as a " +
@@ -324,9 +207,6 @@ describe("PROV-02 surface 1 — no `!command` value in the models template", () 
 	});
 
 	it("leaves the auth template alone, because `!command` is legal there", () => {
-		// The asymmetry IS the requirement. Asserting it mechanically stops a
-		// future tidy-up from "consistently" sweeping both files and banning the
-		// one construct PROV-02 exists to permit.
 		const tracked = trackedFiles(".pi/templates");
 
 		expect(
@@ -343,9 +223,7 @@ describe("PROV-02 surface 1 — no `!command` value in the models template", () 
 			`${AUTH_TEMPLATE} produced no string leaves, so the statement below is about nothing`,
 		).toBeGreaterThanOrEqual(3);
 
-		// Stated as a property of the SCAN, not of the file: the auth template
-		// happens to carry no !command today, and it would still be compliant if
-		// it did. Nothing here asserts an absence.
+		// A property of the scan: the auth template would still comply if it carried a !command.
 		expect(
 			SCANNED_TEMPLATES,
 			`${AUTH_TEMPLATE} has been added to the bang scan. It is the one config file where a ` +
@@ -390,10 +268,7 @@ describe("PROV-02 surface 2 — no `!command` credential in an extension (Trap T
 	});
 
 	it("proves every forbidden pattern is live against an inline offending fixture", () => {
-		// A regex set proven only against a clean tree is a set that could be
-		// uniformly broken -- a stray anchor, an escaping slip during a rename --
-		// and never noticed, because a dead pattern and a clean repository produce
-		// byte-identical output.
+		// A dead pattern and a clean tree produce identical output, so each pattern is proven live.
 		const dead = FORBIDDEN.filter(({ pattern }) => !pattern.test(OFFENDING_FIXTURE)).map(
 			({ pattern, why }) => `${String(pattern)} — ${why}`,
 		);
@@ -414,10 +289,6 @@ describe("PROV-02 surface 2 — no `!command` credential in an extension (Trap T
 	});
 
 	it("keeps the offending fixture inline rather than on disk", () => {
-		// A fixture file under `.pi/extensions/` would be enumerated by the scan
-		// above and fail the very gate it exists to prove; one under
-		// `.pi/templates/` would do the same to surface 1. Asserting the shape,
-		// since the fixture is a `const` two screens up.
 		expect(
 			OFFENDING_FIXTURE,
 			"the inline fixture no longer exercises the provider-registration call it models, so " +
@@ -431,10 +302,6 @@ describe("PROV-02 surface 2 — no `!command` credential in an extension (Trap T
 				"on the ones that remain",
 		).toBeGreaterThanOrEqual(FORBIDDEN.length + 1);
 
-		// The fixture's marker must exist NOWHERE under the two scanned trees. If
-		// someone "extracts the fixture to a file" for tidiness, the scan
-		// enumerates it, reports it as a real offender, and the gate fails on its
-		// own evidence. Catch that here, with a message that says why.
 		const onDisk = trackedFiles(".")
 			.filter((p) => p.startsWith(`${EXT_DIR}/`) || p.startsWith(".pi/templates/"))
 			.filter((p) => readFileSync(join(repoRoot(), p), "utf-8").includes(FIXTURE_MARKER));
@@ -459,27 +326,9 @@ const PROBE_PROVIDER = "kypi-prov02-probe";
 const COUNTER_VALUE = "kypi-prov02-counter-value";
 
 /**
- * A shell command that appends exactly one line to a log file per invocation.
- *
- * A `node` invocation of a generated `.mjs`, not a PATH stub. Three reasons,
- * and the first is decisive:
- *
- *   1. `withStubBin` is SYNCHRONOUS by contract and rejects a thenable
- *      (`tests/helpers/stub-bin.ts:205-211`), because it deletes the stub
- *      directory the moment its callback returns. Every resolution below is
- *      awaited, so a stub-bin PATH could not survive the call it exists to
- *      observe.
- *   2. Pi executes the command through Git Bash `-c` on Windows and `execSync`
- *      elsewhere [VERIFIED: pi 0.84.1 src/core/resolve-config-value.ts:153-206,
- *      src/utils/shell.ts:76-98], so a `.cmd` shim is never the reachable
- *      launcher and the CVE-2024-27980 limitation recorded at
- *      `stub-bin.ts:33-47` does not arise. `node "<abs path>"` is one token that
- *      both shells resolve identically.
- *   3. Each counter gets its own temp path, so its command STRING is unique.
- *      That matters: Pi's cache is keyed on the whole `!…` string and cannot be
- *      cleared from a test — `clearApiKeyCache` is re-exported from
- *      `core/model-registry.ts` but not from the package root — so two cases
- *      sharing a command string could not both be honest.
+ * A command that appends one line to a log per invocation. A generated `.mjs` run by node, not a PATH stub: withStubBin
+ * is synchronous and these resolutions are awaited. Each counter has a unique command string because Pi's cache is
+ * keyed on it and cannot be cleared from a test.
  */
 interface Counter {
 	/** The `!…` config value to place in models.json or auth.json. */
@@ -491,8 +340,7 @@ interface Counter {
 
 function makeCounter(label: string): Counter {
 	const dir = mkdtempSync(join(tmpdir(), `kypi-prov02-${label}-`));
-	// Forward slashes: both Git Bash and sh take this form verbatim, and a
-	// backslash path would be an escape sequence to either of them.
+	// Forward slashes: a backslash is an escape to both Git Bash and sh.
 	const toPosix = (p: string): string => p.split("\\").join("/");
 	const logPath = join(dir, "invocations.log");
 	const scriptPath = join(dir, "counter.mjs");
@@ -502,9 +350,7 @@ function makeCounter(label: string): Counter {
 		[
 			"// Generated by tests/unit/command-interpolation.test.ts. Lives in a temp dir.",
 			'import { appendFileSync } from "node:fs";',
-			// Appended BEFORE anything is written to stdout, so an invocation is
-			// recorded even if the value never reaches Pi -- the same reason
-			// `stub-bin.ts:96-106` logs before it chooses a response.
+			// Logged before stdout, so an invocation counts even if its value never reaches Pi.
 			`appendFileSync(${JSON.stringify(toPosix(logPath))}, "invoked\\n");`,
 			`process.stdout.write(${JSON.stringify(`${COUNTER_VALUE}\n`)});`,
 			"",
@@ -540,8 +386,7 @@ function probeProvider(apiKey?: string): Record<string, unknown> {
 			[PROBE_PROVIDER]: {
 				name: "PROV-02 probe",
 				api: "openai-completions",
-				// Discard-port loopback: if anything ever tried to reach it, the
-				// failure would be immediate and local rather than an egress.
+				// Discard-port loopback: any request would fail locally rather than egress.
 				baseUrl: "http://127.0.0.1:9/v1",
 				...(apiKey === undefined ? {} : { apiKey }),
 				models: [{ id: "prov02-probe-model" }],
@@ -551,20 +396,8 @@ function probeProvider(apiKey?: string): Record<string, unknown> {
 }
 
 /**
- * THE PAIR IS THE POINT, and neither half alone would carry it.
- *
- * A resolver that never ran the command produces zero lines, which is why both
- * cases assert the log non-empty first. Beyond that: a correct cache and a
- * resolver that simply resolved once are indistinguishable from the cached case
- * alone, and a broken cache is indistinguishable from the uncached case alone.
- * Only 1-versus-2, from the same counter mechanism in the same process,
- * separates them.
- *
- * [VERIFIED: executed 2026-08-13 on win32 / node 24.16.0 — a standalone probe
- * over ModelRuntime + ModelRegistry produced exactly these counts, 2 for the
- * models.json apiKey and 1 for the auth.json key, before this file existed.]
- * Neither direction needed narrowing for a platform reason; Pi resolves the
- * command through Git Bash `-c` here, not through a `.cmd` launcher.
+ * The pair is the proof: a correct cache and a single resolution look alike, as do a broken cache and the uncached
+ * path. Only 1 versus 2 from the same counter in the same process separates them.
  */
 describe("PROV-02 — the rule matters: cached vs uncached, counted in subprocesses", () => {
 	it("auth.json `!command` — two resolutions, ONE subprocess", async () => {
@@ -572,16 +405,12 @@ describe("PROV-02 — the rule matters: cached vs uncached, counted in subproces
 		try {
 			await withModelsConfig(
 				{
-					// No apiKey in models.json: the credential branch of
-					// composeApiKeyAuth().resolve() must be the one taken.
+					// No apiKey in models.json, so the credential branch is taken.
 					models: probeProvider(),
 					auth: { [PROBE_PROVIDER]: { type: "api_key", key: counter.command } },
 				},
 				async (handle) => {
-					// BOTH resolutions inside ONE callback, deliberately. Pi's cache is
-					// process-global and cannot be cleared from a test, so a second
-					// callback would inherit the first one's answer and the count would
-					// be a statement about vitest's worker rather than about Pi.
+					// Both resolutions in one callback: Pi's cache is process-global and cannot be cleared.
 					const first = await handle.registry.getProviderAuth(PROBE_PROVIDER);
 					const second = await handle.registry.getProviderAuth(PROBE_PROVIDER);
 
@@ -627,8 +456,7 @@ describe("PROV-02 — the rule matters: cached vs uncached, counted in subproces
 		try {
 			await withModelsConfig(
 				{
-					// apiKey in models.json and NO auth.json entry: the rawKey branch of
-					// composeApiKeyAuth().resolve() must be the one taken.
+					// apiKey in models.json and no auth.json entry, so the raw-key branch is taken.
 					models: probeProvider(counter.command),
 				},
 				async (handle) => {

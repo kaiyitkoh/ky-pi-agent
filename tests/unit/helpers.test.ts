@@ -1,19 +1,6 @@
 /**
- * Self-tests for the phase's test harness.
- *
- * Not in the plan's file list; added because the three helpers in
- * tests/helpers/ are what every later plan in this phase asserts THROUGH, and
- * nothing else exercises `runPi` or `withStubBin` at all. A typecheck proves
- * they compile, not that a stub is reachable on PATH or that the `pi` binary
- * runs -- and both of those are platform-specific enough to have already
- * produced two verified Windows surprises (see the module docstrings). A
- * broken helper here would surface in Plan 05/06 as a mysterious failure in
- * the thing under test.
- *
- * Phase 2 extends the same precedent to its own three Wave 0 helpers --
- * `logs.ts`, `session.ts` and `faux.ts` -- at the bottom of this file. The
- * `faux.ts` block is the one that matters most: it is the guard against a
- * whole class of vacuously-green DIAG-01/DIAG-07 tests.
+ * Self-tests for tests/helpers/: every later test asserts through them, and their platform quirks (PATH stubs, the `pi`
+ * binary, faux payloads) would otherwise surface as mysterious failures in the thing under test.
  */
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -56,8 +43,7 @@ describe("git helper", () => {
 });
 
 describe("pi helper", () => {
-	// Deliberately not guarded by a skip: if `pi` is absent, this suite must go
-	// red. A skipped load-path test is a vacuous pass.
+	// No skip: if `pi` is absent this suite must go red.
 	it("finds the pi binary and reports its version", () => {
 		expect(requirePiOnPath()).toMatch(/^\d+\.\d+\.\d+/);
 	});
@@ -122,16 +108,7 @@ describe("stub-bin helper", () => {
 	});
 });
 
-/**
- * The single Windows quoter, asserted directly.
- *
- * There were four hand-rolled copies of this across the suite and two were
- * wrong -- `stub-bin.ts` escaped quotes but not trailing backslashes, and
- * `load-paths.test.ts` did no escaping at all. All four are now one function,
- * and it is a function no test exercised, on the `shell: true` path Node's
- * DEP0190 warns about. Inputs are test-controlled today, which is exactly why
- * it needs asserting rather than assuming.
- */
+/** The one Windows quoter, on the `shell: true` path Node's DEP0190 warns about. */
 describe("quoteForWindows -- one implementation of the DEP0190 hazard", () => {
 	it("leaves plain arguments alone", () => {
 		// Readability of the command string in a failure message is worth this.
@@ -147,8 +124,7 @@ describe("quoteForWindows -- one implementation of the DEP0190 hazard", () => {
 	});
 
 	it("doubles a trailing backslash run so it cannot eat the closing quote", () => {
-		// THE stub-bin.ts BUG. `"C:\some dir\"` leaves the closing quote escaped,
-		// so the argument runs on into whatever follows it on the command line.
+		// `"C:\some dir\"` must not leave the closing quote escaped and run on into the next argument.
 		expect(quoteForWindows("C:\\some dir\\")).toBe('"C:\\some dir\\\\"');
 		expect(quoteForWindows("C:\\some dir\\\\")).toBe('"C:\\some dir\\\\\\\\"');
 		// A backslash NOT before a quote or the end is literal, so it stays put.
@@ -174,29 +150,14 @@ describe("quoteForWindows -- one implementation of the DEP0190 hazard", () => {
 	});
 });
 
-// ===========================================================================
-// Phase 2, Wave 0 helpers. See the note at the top of this file.
-// ===========================================================================
-
 /** Compare two absolute paths on a platform where git and node disagree on slashes. */
 function normalisePath(path: string): string {
 	return resolve(path).replace(/\\/g, "/").toLowerCase();
 }
 
-/**
- * The two JSONL readers, and the difference between them.
- *
- * The whole point of `readTornSafe` is that it reports a torn line as DATA
- * rather than raising it as an exception -- DIAG-08 is a measurement ("0 of 800
- * records torn"), and a reader that throws turns that measurement into a stack
- * trace at record 217. Asserting only that `readTornSafe` succeeds would not
- * prove the two readers differ at all; so the strict reader is pointed at the
- * SAME file and required to throw.
- */
+/** `readTornSafe` reports a torn line as data; the strict reader is pointed at the same file and must throw. */
 describe("logs helper -- a torn line is a measurement, not an exception", () => {
-	// Inline, and written at run time into a temp dir. A committed fixture named
-	// `*.jsonl` would be silently untracked (.gitignore:30 is a blanket
-	// `*.jsonl`), so CI would run this against a file that is not there.
+	// Written at run time: a committed `*.jsonl` fixture is gitignored, so CI would read a file that is not there.
 	const MIXED_JSONL = ['{"seq":1,"ok":true}', '{"seq":2,"ok":true}', '{"seq":3,"ok":tr'].join(
 		"\n",
 	);
@@ -264,15 +225,7 @@ describe("logs helper -- a torn line is a measurement, not an exception", () => 
 	});
 });
 
-/**
- * The in-memory agent session really runs, and really runs OUTSIDE this repo.
- *
- * The second assertion is not hygiene. Pi walks up from `cwd` collecting
- * context files; from anywhere inside this repository that means loading a
- * 49 KB `CLAUDE.md` into every faux request -- measured at 12,725 input tokens
- * for a one-word prompt. Any later `/budget` or token-accounting test would
- * then be measuring this repo's own instructions. [threat T-02-01-02]
- */
+/** The faux session runs, and runs outside this repo: inside it Pi would load the repo's large CLAUDE.md into every request. */
 describe("session helper -- a real agent run with no network and no credentials", () => {
 	it("drives one prompt through the faux provider and disposes cleanly", async () => {
 		let seenCwd = "";
@@ -306,31 +259,13 @@ describe("session helper -- a real agent run with no network and no credentials"
 });
 
 /**
- * PITFALL 1 -- the guard this whole plan exists for.
- *
- * `fauxProvider` never calls `onPayload` (pi-ai src/providers/faux.ts:510), so
- * under a PLAIN faux session `before_provider_request` never fires and a
- * capture list is always empty. A DIAG-01 or DIAG-07 test written as "register
- * faux, prompt, assert the captured payload" would then pass while asserting
- * nothing, because its loop over an empty list never executes a single
- * expectation.
- *
- * `wrapFauxWithPayload` is the fix. This block is the proof that the fix is
- * live: it loads a user-scope extension that records every payload
- * `before_provider_request` hands it, runs one prompt, and requires the count
- * to be strictly positive BEFORE looking at any content.
+ * Plain faux never calls `onPayload`, so a payload-capture test over it asserts nothing. This proves
+ * `wrapFauxWithPayload` makes `before_provider_request` fire, requiring a positive count before any content.
  */
 describe("faux helper -- before_provider_request actually fires", () => {
 	/**
-	 * The extension under test, as source. Written into `<agentDir>/extensions/`
-	 * at USER scope by the session helper -- project scope is gated behind
-	 * project trust, which resolves false headless.
-	 *
-	 * The handler has a BLOCK body and no return. Returning any non-undefined
-	 * value from `before_provider_request` REPLACES the request payload for
-	 * every later handler and for the real request
-	 * (pi 0.84.1 src/core/extensions/runner.ts:1030-1033), so an expression-bodied
-	 * arrow that happened to return something would silently rewrite the wire.
+	 * A user-scope recorder. Block body, no return: a non-undefined return from `before_provider_request` replaces the
+	 * payload for every later handler and the real request.
 	 */
 	const CAPTURE_EXTENSION = [
 		'import { appendFileSync } from "node:fs";',
@@ -419,13 +354,6 @@ describe("faux helper -- TranscriptContext accessors are not vacuous (pi-ai 1.1.
 	});
 });
 
-// ===========================================================================
-// Phase 3, Wave 0 helpers. Same precedent as the Phase 2 block above: every
-// seam a later plan asserts THROUGH gets a live case here, so a seam that
-// silently stopped working fails in this file rather than turning some Wave 1
-// assertion vacuous. [threat T-03-01-05]
-// ===========================================================================
-
 /** What one wrapped provider call reported back to its caller. */
 interface StatusCapture {
 	/** Every `onResponse` invocation, in order. Its LENGTH is the assertion. */
@@ -436,15 +364,7 @@ interface StatusCapture {
 	text: string;
 }
 
-/**
- * Drive exactly one provider call through `wrap(faux)` and record what the
- * caller's callbacks saw.
- *
- * The runtime is constructed the way `tests/helpers/session.ts` does it --
- * `modelsPath: null` so the developer's own `models.json` is never read, and
- * `refreshOnCreate: false` so nothing touches the network -- and the temp agent
- * directory is removed in the `finally`.
- */
+/** Drives one provider call through `wrap(faux)` offline (`modelsPath: null`, no refresh) and records the callbacks. */
 async function driveOneCall(wrap: (faux: FauxProviderHandle) => Provider): Promise<StatusCapture> {
 	const faux = fauxProvider({ models: [{ id: "faux-flash" }] });
 	faux.setResponses([fauxAssistantMessage("the stream survived the wrapper")]);
@@ -492,23 +412,14 @@ async function driveOneCall(wrap: (faux: FauxProviderHandle) => Provider): Promi
 		try {
 			rmSync(agentDir, { recursive: true, force: true, maxRetries: 3 });
 		} catch {
-			// A leftover temp dir is noise, not a failure.
+			// A leftover temp dir must never mask the test's own result.
 		}
 	}
 }
 
 /**
- * PROV-08's seam -- a faux provider that can report a status other than 200.
- *
- * `fauxProvider` runs `onResponse({ status: 200, headers: {} })` unconditionally
- * (pi-ai 0.84.1 src/providers/faux.ts:510), so a fallback-chain test meaning to
- * distinguish quota (429) from unavailable (503) would, without this wrapper, be
- * asserting against a 200 in both cases and passing either way.
- *
- * The first case is the live-oracle control, in the shape
- * `logs-gitignored.test.ts:74-83` uses: it proves the recorder answers 200 when
- * nothing rewrites the status, so the 503 in the case below it came from the
- * wrapper rather than from a recorder that says 503 to everything.
+ * A faux provider reporting a non-200 status: faux itself always reports 200, so a 429-vs-503 test would pass either way.
+ * The first case is the control proving the recorder answers 200 when nothing rewrites it.
  */
 describe("faux helper -- wrapFauxWithStatus rewrites the status exactly once", () => {
 	it("the oracle is live: an unwrapped faux call reports 200, once", async () => {
@@ -562,8 +473,7 @@ describe("faux helper -- wrapFauxWithStatus rewrites the status exactly once", (
 			wrapFauxWithStatus(wrapFauxWithPayload(faux), 429),
 		);
 
-		// Non-emptiness FIRST -- the house rule. An empty capture list satisfies
-		// every assertion about its contents without executing one of them.
+		// Non-emptiness first: an empty capture list satisfies every assertion about its contents.
 		expect(
 			capture.payloads.length,
 			"ZERO payloads were captured through the composed wrappers. wrapFauxWithStatus has " +
@@ -586,15 +496,8 @@ describe("faux helper -- wrapFauxWithStatus rewrites the status exactly once", (
 });
 
 /**
- * The PROV-01 / PROV-03 / PROV-04 / PROV-06 / PROV-07 seam -- an offline model
- * registry over an arbitrary models.json.
- *
- * Every structural claim this phase makes about the shipped templates has to be
- * made against the model Pi COMPOSED, never against the template's bytes: Pi
- * validates models.json with typebox and accepts an unknown `compat` key in
- * silence, so a template carrying `supportsStoore: false` passes every
- * byte-level assertion ever written about it while configuring nothing
- * (Trap T6).
+ * An offline model registry over an arbitrary models.json: claims about templates must be made against the model Pi
+ * composed, since Pi accepts an unknown `compat` key in silence.
  */
 describe("models helper -- a composed registry with no network and no credentials", () => {
 	/** A provider id, model id and env vars no real configuration uses. */
@@ -607,9 +510,7 @@ describe("models helper -- a composed registry with no network and no credential
 		providers: {
 			[PROVIDER]: {
 				name: "Kypi Fixture",
-				// `.invalid` is reserved by RFC 2606 and resolves nowhere. Nothing in
-				// this block issues a request, and this makes that true by
-				// construction rather than by assertion.
+				// `.invalid` (RFC 2606) resolves nowhere, so no request is possible by construction.
 				baseUrl: "https://models.invalid/v1",
 				apiKey: `$${ABSENT_KEY}`,
 				api: "openai-completions",
@@ -636,11 +537,7 @@ describe("models helper -- a composed registry with no network and no credential
 					"asserted against the wrong object entirely",
 			).toBe(393216);
 
-			// `Model.compat` is a four-arm union keyed on the API family, and only
-			// the openai-completions arm declares `thinkingFormat`. Reading it
-			// through an index signature is the honest narrowing here: the
-			// assertion is about the value Pi composed, not about which arm the
-			// type checker picked.
+			// Only the openai-completions arm of `Model.compat` declares `thinkingFormat`, hence the index read.
 			const compat = model.compat as Record<string, unknown> | undefined;
 			expect(
 				compat?.thinkingFormat,
@@ -649,9 +546,7 @@ describe("models helper -- a composed registry with no network and no credential
 					"here means thinking is silently never enabled on the wire",
 			).toBe("qwen");
 
-			// The positive control that the object is COMPOSED and not the config's
-			// own bytes: maxTokens was never declared, so only Pi can have supplied
-			// it. A test reading the template JSON would find `undefined` here.
+			// maxTokens was never declared, so only Pi can have supplied it: the object is composed, not the config's bytes.
 			expect(
 				model.maxTokens,
 				"maxTokens was not declared in the config, so a defined value can only have come " +
@@ -708,8 +603,7 @@ describe("models helper -- a composed registry with no network and no credential
 					env: { [ABSENT_KEY]: "resolved-at-runtime", [PRESENT_KEY]: "overridden-value" },
 				},
 				async (handle) => {
-					// The paired positive. "Absent afterwards" is satisfied by a helper
-					// that never set the key at all, so presence is asserted first.
+					// The paired positive: presence first, or "absent afterwards" passes for a helper that never set it.
 					expect(
 						process.env[ABSENT_KEY],
 						"the env option must be visible to code running inside the callback -- that " +
@@ -720,12 +614,8 @@ describe("models helper -- a composed registry with no network and no credential
 						"an env entry must override a variable that already existed, not defer to it",
 					).toBe("overridden-value");
 
-					// The env must reach Pi's own config-value resolution, not just
-					// process.env -- that round trip IS PROV-01. (It says nothing about
-					// ordering relative to ModelRuntime.create: `$ENV_VAR` values are
-					// resolved lazily at getProviderAuth() time, verified by swapping
-					// the two statements and watching this stay green. The ordering
-					// rationale lives in tests/helpers/models.ts.)
+					// The env reaches Pi's own config-value resolution, not just process.env; `$ENV_VAR` resolves lazily at
+					// getProviderAuth() time.
 					const auth = await handle.registry.getProviderAuth(PROVIDER);
 					expect(
 						auth?.auth.apiKey,
@@ -762,8 +652,7 @@ describe("models helper -- a composed registry with no network and no credential
 		await withModelsConfig({ models: INLINE_MODELS }, (handle) => {
 			seenAgentDir = handle.agentDir;
 
-			// Paired positive: the files must exist WHILE the callback runs, or the
-			// cleanup assertion below is satisfied by a helper that wrote nothing.
+			// Paired positive: the files exist while the callback runs.
 			expect(existsSync(handle.agentDir)).toBe(true);
 			expect(
 				existsSync(handle.modelsPath),
@@ -792,13 +681,7 @@ type FetchOutcome =
 	| { ok: true; status: number; contentType: string; text: string }
 	| { ok: false; error: Error };
 
-/**
- * Fetch `url` and report the outcome as data.
- *
- * The signal bounds every call: a case here asserts a fetch FAILS, and a hung
- * connect would otherwise stall the whole suite rather than fail it. The body
- * is drained on the success path so the socket is not left half-read.
- */
+/** Fetches `url`, reporting the outcome as data; the signal bounds every call so a hung connect fails, not stalls. */
 async function tryFetch(url: string, init: RequestInit = {}): Promise<FetchOutcome> {
 	try {
 		const response = await fetch(url, { signal: AbortSignal.timeout(5_000), ...init });
@@ -815,20 +698,8 @@ async function tryFetch(url: string, init: RequestInit = {}): Promise<FetchOutco
 }
 
 /**
- * The PROV-03 / PROV-10 seam -- a loopback server that records what Pi emitted.
- *
- * This is the seam that turns "the source says Pi sends `enable_thinking`" into
- * "the wire shows Pi sent `enable_thinking`", with no credential and no egress.
- * Four properties have to hold before any Wave 2 payload assertion built on it
- * means anything, and each gets a case: it CAPTURES (a server that recorded
- * nothing makes every body assertion vacuous, [threat T-03-03-05]); it RESPONDS
- * with a stream the adapter can finish (otherwise the payload test hangs rather
- * than fails, [threat T-03-03-04]); it REFUSES a non-loopback host before
- * handing out a URL ([threat T-03-03-01]); and it RELEASES its port, on the
- * clean path and on the throwing path alike ([threat T-03-03-03]).
- *
- * What none of this proves: that DashScope accepts anything. That is RB-03-01
- * and RB-03-02 in docs/RUNBOOK.md, both OUTSTANDING.
+ * The loopback capture server: it captures, responds with a stream the adapter can finish, refuses a non-loopback host
+ * and releases its port on both paths. Whether DashScope accepts anything is a runbook check.
  */
 describe("loopback helper -- the wire capture that needs no credential", () => {
 	it("captures the request body, and something was actually captured", async () => {
@@ -846,10 +717,7 @@ describe("loopback helper -- the wire capture that needs no credential", () => {
 					"about a capture -- fix the server before reading the assertions that follow",
 			).toBe("");
 
-			// Non-emptiness FIRST -- the house rule. Every assertion below indexes
-			// this array, so an empty one turns them all into a pass that verified
-			// nothing: a server that captured zero requests satisfies "the recorded
-			// body has no `store` key" perfectly. [threat T-03-03-05]
+			// Non-emptiness first: every assertion below indexes this array.
 			expect(
 				handle.requests.length,
 				"the loopback server recorded ZERO requests after one POST completed against it. " +
@@ -950,9 +818,7 @@ describe("loopback helper -- the wire capture that needs no credential", () => {
 					"being told what is right -- and the remedy is a guess",
 			).toContain("127.0.0.1");
 
-			// The paired positive. Without it a refusal that threw on EVERYTHING --
-			// including the handle's own URL -- would satisfy the assertions above
-			// while making the helper unusable.
+			// The paired positive: a refusal that threw on everything would make the helper unusable.
 			expect(
 				() => {
 					assertLoopbackUrl(handle.baseUrl);
@@ -969,9 +835,7 @@ describe("loopback helper -- the wire capture that needs no credential", () => {
 
 		await withLoopbackCompletions({}, async (handle) => {
 			baseUrl = handle.baseUrl;
-			// The paired positive, taken BEFORE teardown: the URL must be reachable
-			// while the server is up, or "unreachable afterwards" is satisfied by a
-			// server that never listened at all.
+			// Reachable while up, or "unreachable afterwards" passes for a server that never listened.
 			const inside = await tryFetch(`${handle.baseUrl}/chat/completions`);
 			insideStatus = inside.ok ? inside.status : -1;
 		});

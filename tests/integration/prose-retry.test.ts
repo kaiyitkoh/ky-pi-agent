@@ -1,80 +1,8 @@
 /**
- * DIAG-05 — a prose tool call is detected, logged, and retried exactly once
- * inside a single agent run.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE IS, AND WHAT IT IS NOT — read this before quoting a green run
- * ---------------------------------------------------------------------------
- * This file and `tests/unit/prose-detector.test.ts` are the two OFFLINE PROXIES
- * named by `RB-02-03`. Between them they prove the mechanism: that the predicate
- * classifies correctly (there) and that the harness really calls the model a
- * second time, once, inside one agent run, having executed nothing (here).
- *
- * They say **nothing whatsoever** about the question `RB-02-03` actually asks:
- * has the detector fired on real DeepSeek V4 Flash traffic, and at what rate.
- * That needs live credentials this machine does not have, and it stays
- * **OUTSTANDING**. Phase 10 discriminates between root causes using a measured
- * prose rate; a green run of this file is not that measurement and must never be
- * reported as one. The provider here is `fauxProvider` and every "prose tool
- * call" below was written by this test, not by a model.
- *
- * ---------------------------------------------------------------------------
- * THE SHAPE THIS REPRODUCES, EXECUTED DURING RESEARCH
- * ---------------------------------------------------------------------------
- * RESEARCH §6.3 recorded the retry working against a live in-memory session:
- * two `message_end` events, `callCount = 2`, a single `agent_end`, `pending = 0`
- * [VERIFIED: executed 2026-08-13]. Cases 1 and 2 are that observation turned
- * into a standing assertion, because an observation nobody re-runs is a claim
- * about the past.
- *
- * ---------------------------------------------------------------------------
- * TWO KINDS OF ROW CARRY `event: prose_tool_call`, AND THE DIFFERENCE MATTERS
- * ---------------------------------------------------------------------------
- * A detected prose tool call leaves two marks in `turns-*.jsonl`:
- *
- *   1. The turn's OWN row (`kind: "turn"`), whose `event` records the verdict
- *      ALONGSIDE its `stopReason` — never instead of it (RESEARCH §3.3).
- *   2. A STANDALONE record with NO `kind`, written immediately from
- *      `message_end`, naming the matched tool. It exists so the event survives
- *      even if the turn row never lands — a handler throwing in `turn_end` is
- *      swallowed by Pi (runner.ts:861-870).
- *
- * So every count below filters on `kind` before it counts, through
- * {@link standalone} and {@link turnRows}. Counting bare `event` matches across
- * both shapes would make "exactly one retry" unassertable: the cap case
- * legitimately produces two turn rows carrying the verdict and exactly one
- * standalone record of each action.
- *
- * ---------------------------------------------------------------------------
- * THREE NEGATIVE CONTROLS, BECAUSE ONE WAS NOT ENOUGH
- * ---------------------------------------------------------------------------
- * The plan asked for one: a real tool call, narrated as well. It was written,
- * it passed — and deleting gate 2 from `prose.ts` left every case green
- * (falsification H), because a genuine tool call always stops for `toolUse` and
- * gate 1 rejected it first. Deleting gate 1 instead also left everything green
- * (falsification J), because gate 2 then caught it. Each gate was covering for
- * the other, so neither was tested.
- *
- * Cases 4b and 4c exist to break that symmetry: 4b is a CLEAN stop that
- * nonetheless carries a real tool call (gate 2 alone), 4c is the same prose text
- * on a turn the token limit cut short (gate 1 alone). Both were confirmed to
- * fail when their gate is removed. The same finding, in the same shape, as plan
- * 02-04's ninth negative — a guard no test can break is a guard that is not
- * there.
- *
- * ---------------------------------------------------------------------------
- * FIXTURE DISCIPLINE
- * ---------------------------------------------------------------------------
- * Every session enables the `read` tool. `isProseToolCall` refuses on an empty
- * active-tool list by design (gate 3), so a session with no tools would make
- * every case here vacuously "no prose detected" — a green file over a detector
- * that was never allowed to run. {@link toolsAreActive} asserts the precondition
- * directly rather than leaving it implied by the other cases passing.
- *
- * The extension loads at USER scope through `extensionPath` / `extensionSource`:
- * project-scoped `.pi/extensions` is gated behind project trust, which resolves
- * `false` headless with no UI to answer the prompt, and a silently absent
- * extension is a green run over nothing (RESEARCH §8.4).
+ * A prose tool call is detected, logged and retried exactly once inside one agent run. An offline proxy for runbook
+ * RB-02-03: it proves the mechanism, never the live prose rate. A detection leaves a `kind: "turn"` row and a
+ * kind-less standalone record, so every count filters on `kind`. Cases 4b and 4c each isolate one gate, which the
+ * other would otherwise cover for. Every session activates `read`, since gate 3 refuses an empty tool list.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -107,32 +35,10 @@ const TOOL = "read";
 /** The file `read` would have opened, so the negative control's tool call succeeds. */
 const NOTE = "note.txt";
 
-/**
- * Where the probe writes the active-tool list Pi actually reported.
- *
- * WHY THIS FILE EXISTS. `Capture.activeTools` used to be the literal `[TOOL]`,
- * hardcoded by `drive()` — so the final `it` in this file was
- * `[TOOL].toContain(TOOL)` and could not fail even if `tools: [TOOL]` were dropped
- * from `withFauxSession`, which is precisely the condition it claims to guard.
- * Gate 3 refuses an empty active-tool list by design, so that removal would turn
- * every count in this file into a trivial zero while the guard stayed green — the
- * vacuous-pass shape this whole phase exists to eliminate, wearing the costume of
- * a precondition check.
- *
- * The value is now READ OUT OF THE LIVE SESSION, through the same
- * `pi.getActiveTools()` the detector itself calls. It goes through a file because
- * jiti gives the loaded extension its own module registry, so an in-process
- * variable this file could read would never move (02-05's finding).
- */
+/** Where the probe writes the active-tool list read live from `pi.getActiveTools()`, so the precondition is measured. */
 const ACTIVE_TOOLS_DUMP = "active-tools.json";
 
-/**
- * A message that DESCRIBES a `read` call instead of emitting one.
- *
- * The name, an immediately-following `(` and a `{` — the whole of gate 4. It is
- * wrapped in explanation on both sides because that is what the failure looks
- * like in the wild: the model narrating its intention and then stopping.
- */
+/** A message that describes a `read` call instead of emitting one, wrapped in narration as in the wild. */
 const PROSE_TEXT = `I'll open the file for you. read({"path":"${NOTE}"}) — one moment.`;
 
 /** A perfectly ordinary reply, carrying nothing the detector could match. */
@@ -166,24 +72,11 @@ interface Capture {
 	activeTools: string[];
 	/** Every outgoing context a capturing response step recorded. */
 	outgoing: Context[];
-	/**
-	 * The turns log EXACTLY as it reached disk.
-	 *
-	 * The parsed `rows` are what most cases assert on, but `RB-02-03` is a
-	 * procedure the operator runs with `grep` over these bytes, so the case that
-	 * checks the runbook's arithmetic has to see the bytes and not a reconstruction
-	 * of them. A serialised-back-from-`rows` fixture would silently agree with any
-	 * key order the runbook's fixed-string patterns depend on.
-	 */
+	/** The turns log bytes as written, because the runbook's grep pipeline depends on them. */
 	logText: string;
 }
 
-/**
- * Read the turns log, failing with the remedy rather than an `ENOENT` stack.
- *
- * A missing file is what "the extension never loaded" looks like, and it is the
- * single most likely failure of this whole file.
- */
+/** Reads the turns log; a missing file means the extension never loaded. */
 function readTurns(cwd: string): { records: unknown[]; unparseable: string[] } {
 	const file = logPath(cwd, TURNS_LOG_BASE);
 	if (!existsSync(file)) {
@@ -207,15 +100,7 @@ function turnRows(capture: Capture): Row[] {
 	return capture.rows.filter((row) => row.kind === "turn");
 }
 
-/**
- * The `cat .pi/logs/turns-*.jsonl | ...` one-liners `RB-02-03` tells the operator
- * to run, in the order the runbook numbers them.
- *
- * Read out of `docs/RUNBOOK.md` rather than retyped. The point of
- * {@link runbookPipeline} is to compute the operator's number from the runbook's
- * own text over a real log, so a retyped copy would only prove this file agrees
- * with itself.
- */
+/** RB-02-03's one-liners, read from docs/RUNBOOK.md rather than retyped, in runbook order. */
 function runbookCountingCommands(): string[] {
 	const runbook = readFileSync(join(repoRoot(), "docs", "RUNBOOK.md"), "utf-8");
 	const section = runbook.slice(runbook.indexOf("### RB-02-03"));
@@ -227,16 +112,8 @@ function runbookCountingCommands(): string[] {
 }
 
 /**
- * Run one of those one-liners against real log bytes and return its number.
- *
- * A faithful interpreter for exactly the four stage forms `RB-02-03` uses, and it
- * THROWS on anything else. That is deliberate: a rewrite of the runbook into a
- * shape this cannot read must fail loudly here, because the alternative is a
- * pipeline that silently computes nothing and a green test over it.
- *
- * `grep -F` semantics are plain substring matching on a whole line, which is
- * exactly what makes the trailing `"` in `'"event":"prose_tool_call"'` keep
- * `prose_tool_call_retry_exhausted` out of the count.
+ * Runs one of those one-liners over real log bytes. Interprets exactly the four stage forms the runbook uses and throws
+ * on anything else, so a rewritten runbook fails loudly. `grep -F` is whole-line substring matching.
  */
 function runbookPipeline(command: string, logText: string): number {
 	const stages = command.split("|").map((stage) => stage.trim());
@@ -291,10 +168,7 @@ async function drive(options: {
 	const outgoing = options.outgoing ?? [];
 	return await withFauxSession(
 		{
-			// `extensionSource` rather than `extensionPath`: the probe IS the real
-			// diagnostics extension plus the observers this file needs, and one of them
-			// is what makes the active-tool precondition a measurement instead of a
-			// literal. See {@link ACTIVE_TOOLS_DUMP}.
+			// The probe is the real diagnostics extension plus observers, one of which measures the active tools.
 			extensionSource: probeSource(),
 			responses: options.responses,
 			tools: [TOOL],
@@ -306,15 +180,11 @@ async function drive(options: {
 			}
 			const turns = readTurns(cwd);
 			return {
-				// WHY THE BYTES AND NOT `producedPaths()`. Pi loads the extension
-				// through jiti, which keeps its own module registry, so the `jsonl.ts`
-				// instance that did the writing is not the one this file imported
-				// (02-05's finding, re-confirmed in 02-07 and 02-08).
+				// Read the bytes: jiti gives the extension its own module registry, so its jsonl.ts is not this file's.
 				rows: turns.records as Row[],
 				unparseable: turns.unparseable,
 				callCount: faux.state.callCount,
 				pending: faux.getPendingResponseCount(),
-				// OBSERVED, not asserted. See {@link ACTIVE_TOOLS_DUMP}.
 				activeTools: readActiveTools(cwd),
 				outgoing,
 				logText: readFileSync(logPath(cwd, TURNS_LOG_BASE), "utf-8"),
@@ -324,13 +194,8 @@ async function drive(options: {
 }
 
 /**
- * An extension that IS the real diagnostics extension, plus two counters.
- *
- * Written inline rather than composed from two extension paths because
- * `createFauxSession` accepts one user-scope entry point and refuses both
- * options at once. The counters append to files in `cwd` rather than
- * incrementing a variable: jiti gives the loaded extension its own module
- * registry, so an in-process counter this file could read would never move.
+ * The real diagnostics extension plus two counters, inline because createFauxSession takes one user-scope entry. The
+ * counters append to files: jiti gives the extension its own module registry.
  */
 function probeSource(): string {
 	return [
@@ -345,10 +210,7 @@ function probeSource(): string {
 		'\tpi.on("agent_start", (_event, ctx) => {',
 		'\t\tappendFileSync(join(ctx.cwd, "agent-start.count"), "x\\n");',
 		"\t});",
-		// THE ACTIVE-TOOL LIST AS PI REALLY REPORTS IT, read through the same
-		// `pi.getActiveTools()` the detector's gate 3 reads. See
-		// {@link ACTIVE_TOOLS_DUMP} for why this is observed rather than asserted
-		// against a literal.
+		// Read through the same `pi.getActiveTools()` gate 3 uses.
 		'\tpi.on("turn_start", (_event, ctx) => {',
 		`\t\twriteFileSync(join(ctx.cwd, ${JSON.stringify(ACTIVE_TOOLS_DUMP)}), JSON.stringify(pi.getActiveTools()), "utf-8");`,
 		"\t});",
@@ -357,14 +219,7 @@ function probeSource(): string {
 	].join("\n");
 }
 
-/**
- * The active-tool list the live session reported, or `[]` when the probe never ran.
- *
- * `[]` on absence is deliberate and is the honest answer: an absent dump means no
- * `turn_start` fired, which means the extension did not load, which means the
- * detector was never active. Returning `[TOOL]` as a fallback would put the
- * tautology straight back.
- */
+/** The active-tool list the live session reported, or `[]` when the probe never ran (no fallback to `[TOOL]`). */
 function readActiveTools(cwd: string): string[] {
 	const file = join(cwd, ACTIVE_TOOLS_DUMP);
 	if (!existsSync(file)) {
@@ -392,8 +247,7 @@ const retryOutgoing: Context[] = [];
 
 describe("DIAG-05 — the prose retry, on a live session", () => {
 	beforeAll(async () => {
-		// Case 1 / 5 — prose, then an ordinary answer. The second step CAPTURES the
-		// outgoing context, which is what proves the follow-up reached the model.
+		// Prose, then an ordinary answer; the second step captures the context the follow-up sent.
 		retried = await drive({
 			outgoing: retryOutgoing,
 			responses: [
@@ -405,8 +259,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 			],
 		});
 
-		// Case 3 — THREE prose responses scripted, so the cap has something to hold
-		// back. Two would prove the retry happened; three proves it stopped.
+		// Three prose responses: two prove the retry happened, three prove it stopped.
 		capped = await drive({
 			responses: [
 				fauxAssistantMessage([fauxText(PROSE_TEXT)], { stopReason: "stop" }),
@@ -415,8 +268,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 			],
 		});
 
-		// Case 4 — the negative control: a REAL tool call whose text also narrates
-		// it. Same words, same tool, genuine emission.
+		// Negative control: a real tool call whose text also narrates it.
 		control = await drive({
 			responses: [
 				fauxAssistantMessage([fauxText(PROSE_TEXT), fauxToolCall(TOOL, { path: NOTE })], {
@@ -426,11 +278,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 			],
 		});
 
-		// Case 4b — the same real tool call, but reported with `stopReason: "stop"`.
-		// This fixture exists because falsification H found that case 4 above is
-		// held by GATE 1, not gate 2: a genuine tool call always stops for
-		// `toolUse`, so removing "no toolCall block" from the predicate broke
-		// nothing at this layer. Only a clean stop CARRYING a call isolates gate 2.
+		// A real tool call with `stopReason: "stop"`, which isolates gate 2 (case 4 is held by gate 1).
 		stopWithCall = await drive({
 			responses: [
 				fauxAssistantMessage([fauxText(PROSE_TEXT), fauxToolCall(TOOL, { path: NOTE })], {
@@ -440,16 +288,12 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 			],
 		});
 
-		// Case 4c — the same prose text on a turn the token limit cut short.
-		// Falsification J found that deleting gate 1 broke nothing either: cases 4
-		// and 4b are both held by gate 2. A truncated turn is the shape that
-		// isolates the stop reason.
+		// The prose text on a turn the token limit cut short, which isolates gate 1.
 		truncated = await drive({
 			responses: [fauxAssistantMessage([fauxText(PROSE_TEXT)], { stopReason: "length" })],
 		});
 
-		// Case 6 — TWO prompts, so two agent runs, each opening with prose. This is
-		// the only fixture that can see the `agent_start` reset.
+		// Two prompts, so two agent runs: the only fixture that sees the `agent_start` reset.
 		twoRuns = await drive({
 			prompts: ["read the note", "read it again"],
 			responses: [
@@ -462,11 +306,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("the fixture really is a prose tool call, and really is not one without tools", () => {
-		// THE PRECONDITION, ASSERTED RATHER THAN ASSUMED. If `PROSE_TEXT` stopped
-		// matching — a tool rename, a tightened pattern — every case below would
-		// report "no prose detected" and pass. That is the vacuous-pass shape this
-		// whole phase exists to eliminate, and it is invisible from the assertions
-		// themselves because they are all counting zero-or-one.
+		// If PROSE_TEXT stopped matching, every case would count zero and pass.
 		const message = fauxAssistantMessage([fauxText(PROSE_TEXT)], { stopReason: "stop" });
 		expect(
 			isProseToolCall(message, [TOOL]),
@@ -536,11 +376,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 				"turn' must see it there",
 		).toBe(PROSE_EVENT);
 
-		// ALONGSIDE, NOT INSTEAD OF. RESEARCH §3.3 is explicit that the detector
-		// verdict sits NEXT TO the provider's own word. `prose_tool_call` is this
-		// project's interpretation; `stop` is what the provider said. A row that
-		// replaced one with the other would destroy the evidence for the very
-		// judgement it is recording. [threat T-02-09-03]
+		// The verdict sits alongside the provider's stopReason, never instead of it.
 		expect(
 			prose.stopReason,
 			"the prose row's `stopReason` was overwritten by the event. The two columns answer " +
@@ -561,10 +397,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 1b — the retry prompt actually reached the model", () => {
-		// `sendUserMessage` returns void and swallows nothing visibly. Without this
-		// assertion, case 1's `callCount === 2` proves a second request happened and
-		// says nothing about whether it carried the nudge — a retry that re-sends
-		// the identical context is a second roll of the same dice, not a correction.
+		// A second request alone does not prove the nudge was sent; re-sending the same context corrects nothing.
 		expect(
 			retryOutgoing.length,
 			"the capturing response step never ran, so there was no second request to inspect and " +
@@ -588,12 +421,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 2 — one agent run, not two", async () => {
-		// WHY THIS IS NOT A DETAIL. `sendUserMessage` from `agent_settled` also
-		// works (RESEARCH §6.5) and starts a NEW agent run. That would show up as a
-		// spurious settled gap, a second `agent_start`, and `/session` accounting
-		// that reports two runs where the user asked one question. It would also
-		// break the cap: the counter resets on `agent_start`, so a retry that
-		// started a new run could never be capped at all.
+		// One agent run: a retry from `agent_settled` would start a new run, miscount sessions and escape the cap.
 		await withFauxSession(
 			{
 				extensionSource: probeSource(),
@@ -679,10 +507,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 				"without recording what it was trying to fix",
 		).toBe(TOOL);
 
-		// Both turns really were prose — the verdict is on both rows even though
-		// only the first bought a retry. That is the intended asymmetry: the row
-		// records what the turn WAS, the standalone records record what the harness
-		// DID about it.
+		// Both rows carry the verdict (what the turn was); the standalone records show what the harness did.
 		const rows = turnRows(capped);
 		expect(
 			rows.length,
@@ -697,16 +522,8 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 3b — RB-02-03's own commands, run over the capped session's real log", () => {
-		// [WR-01R] THE RUNBOOK'S ARITHMETIC, MEASURED. Case 3 proves the log holds
-		// two verdict rows and one retry action. This case proves the commands
-		// `docs/RUNBOOK.md` hands the operator turn those bytes into the right
-		// numbers, because the whole value of RB-02-03 is the ratio it produces and
-		// an off-by-a-factor numerator read against a published ~11% baseline is
-		// worse than no measurement: it looks like evidence.
-		//
-		// The `capped` session is the only fixture that can catch this. It is one
-		// agent run with TWO prose turns and a cap of one, which is exactly the
-		// shape where the verdict count and the action count diverge.
+		// The runbook's commands turn these bytes into the right numbers. Only the capped session (two prose turns, one
+		// retry) separates the verdict count from the action count.
 		const commands = runbookCountingCommands();
 		expect(
 			commands.length,
@@ -758,11 +575,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 4 — a genuine tool call, narrated as well, does not fire the detector", () => {
-		// WITHOUT THIS CONTROL THE MEASURED RATE IS FICTION. A detector that fired
-		// on every tool-using turn would look identical from the inside: rows
-		// appear, retries happen, nothing errors. The unit table has this negative
-		// too, against an inline fixture; here it is a real agent loop, with a real
-		// tool execution in the middle, and the message the loop actually finalized.
+		// Without this control a detector firing on every tool-using turn would look identical from the inside.
 		expect(control.unparseable, "a line of the control turns log could not be parsed").toEqual([]);
 
 		expect(
@@ -809,21 +622,8 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 4b — a clean stop that nonetheless carries a real tool call", () => {
-		// GATE 2 IN ISOLATION, AND WHY IT NEEDED ITS OWN FIXTURE. Case 4 above is a
-		// `stopReason: "toolUse"` turn, so gate 1 rejects it before gate 2 is ever
-		// consulted: deleting gate 2 from `prose.ts` left all nine cases green
-		// (falsification H). The predicate's docstring claims gate 2 rules out "the
-		// model that actually emitted the call and merely narrated it as well", and
-		// a claim no test can break is not a guarantee — that is the same finding
-		// plan 02-04 recorded for the leading `\b`.
-		//
-		// This is not a contrived shape. `stopReason` is Pi's MAPPING of the
-		// provider's `finish_reason` [pi-ai openai-completions.ts:462-464], and a
-		// cheap OpenAI-compatible endpoint reporting `stop` on a response that
-		// nonetheless carried `tool_calls` is precisely the class of provider
-		// misbehaviour this harness exists for. The agent loop reads the content
-		// blocks, not the stop reason, when deciding what to execute
-		// [pi-agent-core agent-loop.ts:203], so the tool really runs here.
+		// Gate 2 alone: a clean stop that still carries a tool call. Realistic, since stopReason maps the provider's
+		// finish_reason while the agent loop executes the content blocks (pi-agent-core agent-loop.ts:203).
 		expect(stopWithCall.unparseable, "a line of the 4b turns log could not be parsed").toEqual([]);
 
 		const rows = turnRows(stopWithCall);
@@ -853,16 +653,8 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 4c — a turn cut short by the token limit is a different failure", () => {
-		// GATE 1 IN ISOLATION. Cases 4 and 4b are both held by gate 2, so deleting
-		// the stop-reason check broke nothing (falsification J). This fixture is
-		// the missing half: identical text, no tool call, `stopReason: "length"`.
-		//
-		// WHY IT MUST NOT FIRE. A truncated turn did not silently do less than it
-		// claimed — it was cut off, visibly, and the fix is a larger `maxTokens` or
-		// a compaction, not a re-prompt. Folding it into the prose rate would
-		// inflate the number Phase 10 discriminates on with a failure that has a
-		// different cause AND a different remedy, and the retry would spend a
-		// second call re-truncating the same answer.
+		// Gate 1 alone: a truncated turn must not fire. Its remedy is a larger maxTokens or compaction, and counting it
+		// would inflate the prose rate with a different failure.
 		expect(truncated.unparseable, "a line of the 4c turns log could not be parsed").toEqual([]);
 
 		const rows = turnRows(truncated);
@@ -892,16 +684,8 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 5 — nothing was executed on the model's behalf", () => {
-		// THE DIFFERENCE BETWEEN THE FOLLOW-UP RETRY AND THE REJECTED PROMOTION.
-		// Promotion — returning `{ message }` from `message_end` with the parsed
-		// prose turned into a real `toolCall` block — was executed during research
-		// and works at zero extra model calls (RESEARCH §6.4). It is not built,
-		// because it executes a tool whose arguments were regex-scraped out of
-		// untrusted prose, on a laptop where merging to `main` auto-deploys and
-		// Phase 4's command guard has not shipped. If it were ever built, this
-		// turn's row would carry a tool call and a tool result — the research
-		// output for the promotion path shows `toolResults: 1` on exactly this
-		// turn. [threat T-02-09-01]
+		// The follow-up retry, not promotion: promoting scraped prose into a real toolCall would execute untrusted
+		// arguments, so this turn must carry no tool call or result.
 		const prose = turnRows(retried)[0] as Row;
 
 		expect(
@@ -926,12 +710,8 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("case 6 — the retry budget is per agent run, and really is reset", () => {
-		// THE ONLY CASE THAT CAN SEE `agent_start`. Every other fixture here drives
-		// ONE prompt, so a build that never reset `proseRetriesThisRun` would pass
-		// all of them and then, in real use, retry the first prose call of the
-		// session and silently log `prose_tool_call_retry_exhausted` for every one
-		// after it — for the rest of the day. That failure has no error in it
-		// anywhere and looks, in the log, exactly like a model that got worse.
+		// The only fixture that sees `agent_start`: without the reset, every prose call after the first in a session
+		// would log retry_exhausted silently.
 		expect(twoRuns.unparseable, "a line of the two-run turns log could not be parsed").toEqual([]);
 
 		expect(
@@ -960,15 +740,7 @@ describe("DIAG-05 — the prose retry, on a live session", () => {
 	});
 
 	it("every session really had the tool active, as Pi itself reported it", () => {
-		// THIS USED TO BE A TAUTOLOGY. `Capture.activeTools` was the literal `[TOOL]`,
-		// written by `drive()` — so the assertion was `[TOOL].toContain(TOOL)` and
-		// could not fail even if `tools: [TOOL]` were dropped from `withFauxSession`,
-		// which is exactly the condition it claims to guard. Gate 3 refuses an empty
-		// active-tool list, so that removal would make every count in this file a
-		// trivial zero with this "precondition check" still green.
-		//
-		// The value now comes from `pi.getActiveTools()` inside the live session, read
-		// back off disk because jiti gives the extension its own module registry.
+		// Measured, not a literal: gate 3 refuses an empty list, so dropping `tools: [TOOL]` must turn this red.
 		for (const capture of [retried, capped, control, stopWithCall, truncated, twoRuns]) {
 			expect(
 				capture.activeTools,

@@ -1,33 +1,7 @@
 /**
- * ROUTE-11's OFFLINE PROXY -- `RB-05-01`'s four-part runbook contract names
- * THIS file as the offline proxy. Do not rename this path without updating
- * `docs/RUNBOOK.md` in the same commit; `tests/unit/docs-policy.test.ts`
- * asserts the named path exists on disk.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE PROVES, AND WHAT IT DOES NOT
- * ---------------------------------------------------------------------------
- * This file drives `.pi/extensions/qoder/client.ts#delegateTask` against a
- * REAL `node:http` server on `127.0.0.1` (`tests/helpers/qoder-loopback.ts`)
- * shaped like Qoder's documented Cloud Agents API. It proves the harness
- * CONSTRUCTS the three-request sequence correctly (method, path, auth
- * header, JSON body) and PARSES a response shaped like Qoder's own
- * documented SSE envelope correctly (folding `agent.message` deltas,
- * ignoring `agent.thinking` deltas and unrecognised event types, completing
- * on `session.status_idle`).
- *
- * It proves NOTHING about whether a real personal access token against a
- * real `agent_id`/`environment_id` produces this exact envelope from
- * Qoder's real Cloud Agents host -- that host is never dialled by this
- * file, not even indirectly (`assertQoderLoopbackUrl` in the helper this
- * file uses refuses any non-loopback host before a `baseUrl` is ever
- * handed out). That live check is `RB-05-01` in `docs/RUNBOOK.md`, and it
- * is OUTSTANDING by construction: there is no personal access token and no
- * network egress on this machine, and nothing green in this file may be
- * read as discharging it. See `.pi/extensions/qoder/client.ts`'s own
- * module docstring (`DEFAULT_QODER_BASE_URL`) for the real host string --
- * it is never spelled out again in this file, not even in a comment, so a
- * grep for it here finds nothing to target by mistake.
+ * Runbook RB-05-01's offline proxy (docs-policy.test.ts asserts this path exists; rename both together). Drives
+ * `delegateTask` against a real `127.0.0.1` server shaped like Qoder's Cloud Agents API: it proves request construction
+ * and SSE folding, not that the real service answers this way. The real host is never spelled in this file.
  */
 import { join } from "node:path";
 
@@ -48,12 +22,7 @@ import {
 import { logFilesIn, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
 import { type QoderLoopbackHandle, withQoderLoopback } from "../helpers/qoder-loopback.ts";
 
-// -----------------------------------------------------------------------------
-// Fixture credential -- obviously fake, documented as such, and it never
-// leaves this machine: the loopback server never inspects the value, and
-// Qoder's real Cloud Agents host is never dialled anywhere in this file.
-// [threat T-05-23]
-// -----------------------------------------------------------------------------
+// Fixture credential: obviously fake; the loopback server never inspects it.
 const FIXTURE_TOKEN = "pt-kypi-loopback-fixture-not-a-credential";
 const FIXTURE_AGENT_ID = "agent-kypi-fixture";
 const FIXTURE_ENVIRONMENT_ID = "env-kypi-fixture";
@@ -68,15 +37,7 @@ function fixtureEnv(baseUrl: string): NodeJS.ProcessEnv {
 	};
 }
 
-// -----------------------------------------------------------------------------
-// A frame script distinct from tests/unit/qoder-client.test.ts's own fixture:
-// this one gives `agent.thinking` a DELTA of its own, carrying text that
-// appears NOWHERE in the message deltas. Without a distinct thinking text,
-// "the folded result does not contain the thinking text" would be satisfied
-// by a fixture that never produced any thinking text at all -- the same
-// "absence assertion needs a control body" discipline Phase 3 recorded for
-// the compat-block wire proof (05-CONTEXT.md, `dashscope-payload.test.ts`).
-// -----------------------------------------------------------------------------
+// A distinct `agent.thinking` delta text, so "the result omits the thinking text" has a control that produced some.
 
 const THINKING_START =
 	"id: evt_think\n" +
@@ -137,12 +98,7 @@ async function runDelegate(
 	return await withTempLogCwd(async (cwd) => {
 		return await withQoderLoopback(loopbackOpts, async (loop) => {
 			const config = resolveFixtureConfig(loop.baseUrl);
-			// Callers of this shared helper that pass `splitStreamAt` (e.g. the
-			// "split across two writes" case below) do not care about the
-			// stall-detection behaviour WR-07 exercises directly -- they only
-			// want a genuine two-write arrival. Release the gate as soon as the
-			// FIRST chunk has genuinely landed (an event, never a duration) so
-			// `delegateTask` cannot hang waiting on a gate nobody else would open.
+			// Callers that split the stream only want a two-write arrival, so open the gate once the first chunk lands.
 			void loop.firstChunkWritten.then(() => {
 				loop.releaseSecondChunk();
 			});
@@ -185,12 +141,7 @@ describe("qoder-delegate -- the exact three-request sequence, in order", () => {
 		const { loop } = await runDelegate({ frames: FRAMES });
 		expect(loop.received.length).toBeGreaterThan(0);
 
-		// The session id is minted by the SERVER in its response to step 1
-		// (qoder-loopback.ts's `sess_kypi_loopback_<n>`), never supplied by the
-		// client -- so the id is read back from where the CLIENT used it (the
-		// path of steps 2 and 3), which is the observable proof that
-		// `delegateTask` actually parsed the create-session response rather
-		// than fabricating a path.
+		// The server mints the session id; reading it back from the client's later paths proves the response was parsed.
 		const eventsMatch = /^\/sessions\/([^/]+)\/events$/.exec(loop.received[2]?.url ?? "");
 		expect(eventsMatch, `the events url "${loop.received[2]?.url}" did not match the expected shape`).not.toBeNull();
 		const sessionId = eventsMatch?.[1] as string;
@@ -223,21 +174,14 @@ describe("qoder-delegate -- the folded result is the agent.message text only", (
 		expect(folded.done).toBe(true);
 		expect(folded.stopReason).toBe("end_turn");
 
-		// THE PAIRED POSITIVE. Without proving the thinking text was genuinely
-		// produced and accumulated SOMEWHERE, its absence from `folded.text`
-		// would be indistinguishable from a fixture that never emitted any
-		// thinking text at all.
+		// Paired positive: the thinking text really was produced, so its absence below means something.
 		expect(folded.thinkingText).toContain("PONDERING_KYPI_SECRET_XYZ");
 
-		// THE NEGATIVE THIS CASE EXISTS FOR.
 		expect(folded.text).not.toContain("PONDERING_KYPI_SECRET_XYZ");
 	});
 
 	it("ignores an unknown event type injected mid-stream and still completes on session.status_idle", async () => {
-		// FRAMES already contains UNKNOWN_FRAME between the two message deltas
-		// (see the module-level fixture) -- this case names that fact
-		// explicitly and checks the server genuinely sent it, so "ignored" is
-		// distinguishable from "never arrived".
+		// The fixture already carries UNKNOWN_FRAME; checking the server sent it tells "ignored" from "never arrived".
 		expect(FRAMES).toContain("agent.tool_use");
 
 		const { loop, folded } = await runDelegate({ frames: FRAMES });
@@ -252,10 +196,7 @@ describe("qoder-delegate -- the folded result is the agent.message text only", (
 		const unsplit = await runDelegate({ frames: FRAMES });
 		expect(unsplit.loop.received.length).toBeGreaterThan(0);
 
-		// Split mid-way through the second message delta's JSON payload -- the
-		// case that catches a parser that only works when a whole frame
-		// arrives in one read (mirrors tests/unit/qoder-client.test.ts's own
-		// "mid-line" split case, but exercised over a REAL socket this time).
+		// Split inside a frame's JSON payload, over a real socket, to catch a parser that needs whole frames per read.
 		const splitAt = FRAMES.indexOf('"text":"world') + '"text":"wor'.length;
 		const split = await runDelegate({ frames: FRAMES, splitStreamAt: splitAt });
 		expect(split.loop.received.length).toBeGreaterThan(0);
@@ -265,9 +206,7 @@ describe("qoder-delegate -- the folded result is the agent.message text only", (
 		expect(split.folded.done).toBe(unsplit.folded.done);
 		expect(split.folded.stopReason).toBe(unsplit.folded.stopReason);
 
-		// Non-vacuity for the split case specifically: prove it actually
-		// completed and produced the same non-empty result, not that both
-		// sides independently produced nothing.
+		// The split run really completed with the same non-empty result.
 		expect(split.folded.text).toBe("Hello world");
 		expect(split.folded.done).toBe(true);
 	});
@@ -281,9 +220,7 @@ describe("qoder-delegate -- failure surfaces as an error, never a hang or a sile
 
 				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(/503/);
 
-				// Non-vacuity: the failing request really was recorded, and only
-				// that one request was made -- the client did not proceed to the
-				// events or stream endpoints after the session create failed.
+				// Only the failing request was made: the client stopped after the session create failed.
 				expect(loop.received.length).toBeGreaterThan(0);
 				expect(loop.received).toHaveLength(1);
 				expect(loop.received[0]?.url).toBe("/sessions");
@@ -307,15 +244,8 @@ describe("qoder-delegate -- the missing-PAT refusal happens before any network a
 				expect(resolved.message).toContain(QODER_TOKEN_ENV);
 			}
 
-			// THE LOAD-BEARING ASSERTION. resolveQoderConfig is pure and
-			// delegateTask REQUIRES an already-validated QoderConfig -- there is
-			// no code path from a refused resolution to a fetch() call. A test
-			// that only checked the error message would pass against a client
-			// that dialled first and refused afterwards; this proves the
-			// refusal happens strictly BEFORE any socket is opened, by
-			// construction of the type signature `delegateTask` exposes, and by
-			// observing the server's own request log stayed empty for the
-			// entire scope of this callback.
+			// Zero requests, not merely the right message: delegateTask takes an already-validated config, so a refused
+			// resolution can never reach fetch().
 			expect(loop.received).toHaveLength(0);
 		});
 	});
@@ -327,9 +257,7 @@ describe("qoder-delegate -- WR-09: the ASVS V5 task-validation refusals happen b
 			await withQoderLoopback({ frames: FRAMES }, async (loop) => {
 				const config = resolveFixtureConfig(loop.baseUrl);
 				await expect(delegateTask({ config, task: "   \n\t ", cwd })).rejects.toThrow(/empty after trimming/);
-				// THE LOAD-BEARING HALF: zero requests, not merely the right
-				// message -- see the sibling missing-PAT describe block's own
-				// identical discipline for why the message alone is not enough.
+				// Zero requests, not merely the right message.
 				expect(loop.received).toHaveLength(0);
 			});
 		});
@@ -394,16 +322,8 @@ describe("qoder-delegate -- the transcript never carries the token or an Authori
 
 describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a complete answer", () => {
 	it("a final frame with no terminating blank line is still folded in (the trailing-buffer flush), and the call still completes", async () => {
-		// Deliberately NOT `+ "\n"` after the join -- FRAMES (the module-level
-		// fixture) appends that trailing newline, which is what gives the LAST
-		// frame (STATUS_IDLE) a full blank-line terminator. Without it, the
-		// server closes the body right after STATUS_IDLE's own single trailing
-		// "\n" -- exactly the "SSE server ends the body with the last frame not
-		// followed by a blank line" shape this file's own module docstring and
-		// client.ts's CR-03 fix both name. Before the fix, this frame (often
-		// the one carrying session.status_idle) would sit unparsed in the
-		// reader's buffer forever and delegateTask would either hang or return
-		// with `done: false`; the fix flushes it after the read loop exits.
+		// No trailing newline after the join: the last frame then lacks its blank-line terminator, and the client must still
+		// flush it after the read loop instead of hanging or returning `done: false`.
 		const framesWithNoTrailingBlankLine = [
 			THINKING_START,
 			THINKING_DELTA,
@@ -464,12 +384,7 @@ describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a 
 	});
 
 	it("a stream closed before session.status_idle throws, naming the accumulated character count, rather than returning a truncated result", async () => {
-		// No STATUS_IDLE frame at all -- the server closes the connection after
-		// the message deltas, simulating a dropped connection, a server-side
-		// 5xx after headers, or an early close. Before the fix, delegateTask
-		// returned `folded` regardless of `done`, and index.ts's tool handler
-		// handed `folded.text` ("Hello world") back to the model as a complete
-		// answer with no error and no marker.
+		// No STATUS_IDLE: a dropped connection must not hand partial text back as a complete answer.
 		const framesWithNoIdle = [THINKING_START, THINKING_DELTA, MESSAGE_START, MESSAGE_DELTA_1, MESSAGE_DELTA_2].join(
 			"\n",
 		) + "\n\n";
@@ -483,8 +398,7 @@ describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a 
 					/event stream ended without a session\.status_idle frame/,
 				);
 
-				// Session create, stream open and event send all completed, then the
-				// still-running remote session was cancelled.
+				// All three requests completed, then the still-running remote session was cancelled.
 				expect(loop.received).toHaveLength(4);
 				expect(loop.received[3]?.url).toMatch(/\/cancel$/);
 			});
@@ -512,11 +426,7 @@ describe("qoder-delegate -- WR-06: the stream-open step writes its own request/r
 
 			const events = records as { event?: unknown; status?: unknown; url?: unknown }[];
 
-			// RB-05-01 step 4 names "a 401/403 on any of the three requests" as
-			// the failure signal that matters most -- before this fix, the
-			// stream-open step (this one) was the ONE step of the three that
-			// wrote neither half, so this is the paired-presence proof for the
-			// event this fix adds, not merely the two the file already covered.
+			// A 401/403 on stream open is the runbook's key failure signal, so this step must log its request/response pair.
 			const streamRequest = events.find((e) => e.event === "qoder.stream.open.request");
 			const streamResponse = events.find((e) => e.event === "qoder.stream.open.response");
 			expect(
@@ -535,10 +445,7 @@ describe("qoder-delegate -- WR-06: the stream-open step writes its own request/r
 				"the qoder.stream.open.response record does not carry the HTTP status a 401/403 would show up in",
 			).toBe(200);
 
-			// Paired positive: the two PRIOR steps this file already knew to
-			// write their own request/response pairs -- proving the reader and
-			// the fixture are both live, not that this file's own event names
-			// happen to be absent from an instrument that captures nothing.
+			// Paired positive: the two earlier steps' pairs are logged, so the reader and fixture are live.
 			expect(events.some((e) => e.event === "qoder.session.create.request")).toBe(true);
 			expect(events.some((e) => e.event === "qoder.event.send.request")).toBe(true);
 		});
@@ -547,27 +454,10 @@ describe("qoder-delegate -- WR-06: the stream-open step writes its own request/r
 
 describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reported, never hung on indefinitely", () => {
 	it("throws an actionable inactivity-timeout error when the server goes silent between two writes, using an injected short timeout", async () => {
-		// `delegateTask`'s own `inactivityTimeoutMs` is a TEST-ONLY injection
-		// seam (see client.ts's own doc comment on DelegateTaskOptions) --
-		// production never passes it, defaulting to the real five-minute
-		// STREAM_INACTIVITY_TIMEOUT_MS. Injecting a short one here is what makes
-		// this stall-detection behaviour provable without an actual five-minute
-		// wait. The loopback server splits the stream body into two writes and
-		// then holds the second one behind `loop.releaseSecondChunk()` -- a
-		// gate this test never calls until AFTER the rejection assertion below,
-		// so the server genuinely goes silent rather than racing a wall-clock
-		// guess at when it would. See tests/helpers/qoder-loopback.ts's own
-		// docstring ("Event-gated stream splitting") for why the previous
-		// duration-based version of this fixture made this file intermittently
-		// red.
+		// `inactivityTimeoutMs` is a test-only seam (production uses five minutes). The server holds the second chunk behind
+		// a gate this test opens only after the rejection, so the stream genuinely goes silent; nothing races a clock.
 		const injectedTimeoutMs = 60;
-		// Split right at the frame boundary AFTER the first `agent.message`
-		// delta (rather than at the string midpoint) -- the `textChars > 0`
-		// assertion below needs the first chunk to contain at least one
-		// COMPLETE, parseable frame, not merely half the byte count. Splitting
-		// mid-frame would leave `folded.text` empty until the (never-sent)
-		// second chunk arrived, which is a fact about SSE framing, not about
-		// timing.
+		// Split after the first complete `agent.message` frame, so `textChars > 0` has a parseable frame to fold.
 		const splitAt = FRAMES.indexOf(UNKNOWN_FRAME);
 
 		await withTempLogCwd(async (cwd) => {
@@ -582,31 +472,21 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 				});
 
 				try {
-					// The property the deleted `>= 60ms` wall-clock bound was
-					// standing in for: the first read genuinely happened. This is a
-					// FACT the server reports, not a duration long enough for it to
-					// probably have happened by.
+					// The first read genuinely happened, as reported by the server.
 					await loop.firstChunkWritten;
 
 					await expect(delegatePromise).rejects.toThrow(/no bytes for \d+ms/);
 				} finally {
-					// A failed assertion above must not leave the server's responder
-					// awaiting a gate nobody will ever open -- release it here too,
-					// as well as relying on the helper's own teardown, which does
-					// the same thing as a second line of defence.
+					// Release here too, so a failed assertion cannot leave the responder awaiting the gate.
 					loop.releaseSecondChunk();
 				}
 
-				// All three requests happened before the timeout fired, and the
-				// still-running remote session was then cancelled.
+				// All three requests happened before the timeout, then the remote session was cancelled.
 				expect(loop.received).toHaveLength(4);
 				expect(loop.received[3]?.url).toMatch(/\/cancel$/);
 			});
 
-			// WR-06: a terminal transcript record for the inactivity-timeout path.
-			// Before this fix, the transcript ended at
-			// "qoder.stream.open.response: 200" with nothing following a stall --
-			// the same gap WR-06 originally closed for the stream-open step itself.
+			// The inactivity timeout leaves a terminal transcript record.
 			const dir = logDir(cwd);
 			const files = logFilesIn(dir);
 			const qoderFile = files.find((name) => name.startsWith("qoder-"));
@@ -621,15 +501,8 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 			).toHaveLength(1);
 			expect(failedRecords[0]?.cause).toBe("inactivity-timeout");
 
-			// STRICTLY STRONGER than the deleted `60 <= (Date.now() delta) < 400`
-			// wall-clock bound: `afterMs` is the deadline the client actually armed
-			// (client.ts:706-710,720 -- `afterMs: inactivityTimeoutMs`), proving
-			// the injection seam is wired to the real deadline -- the first
-			// bound's whole purpose. `textChars > 0` proves bytes were folded
-			// before the stall was declared -- the second bound's whole purpose.
-			// Both are read from the LOSSLESS transcript record the client itself
-			// wrote, and neither depends on scheduler timing the way a
-			// `Date.now()` delta does.
+			// `afterMs` is the deadline the client armed, and `textChars > 0` shows bytes were folded first; both come from
+			// the client's own transcript record, so neither depends on scheduler timing.
 			expect(failedRecords[0]?.afterMs).toBe(injectedTimeoutMs);
 			expect(failedRecords[0]?.textChars).toBeGreaterThan(0);
 		});
@@ -640,65 +513,9 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 			"while every INDIVIDUAL gap stays under it -- the only shape that distinguishes reset-on-progress " +
 			"from a fixed budget, proved with an INJECTED CLOCK rather than a real sleep",
 		async () => {
-			// The paired positive, tightened per WR-04, then de-flaked again per
-			// WR2-03 (`08-REVIEW.md` iteration 2). The prior version used ONE
-			// gap (~50ms) against a MUCH larger budget (2000ms): a client that
-			// arms a single fixed timeout at stream-open time and never resets it
-			// would STILL pass that case, because 50ms elapsed is nowhere near
-			// 2000ms regardless of reset behaviour -- the test's own comment
-			// claimed to prove reset-on-progress but never actually forced a
-			// choice between the two implementations.
-			//
-			// WR-04's own fix split the stream into FOUR chunks (three gaps) and
-			// used a REAL 150ms sleep between each release against a 300ms
-			// budget -- correct in shape (proves SUM > budget while every
-			// INDIVIDUAL gap stays under it, which DOES force the choice), but
-			// the review found the margin was only 2x (down from the prior
-			// version's ~40x), and on a loaded CI runner a real scheduler hiccup
-			// during any ONE real 150ms sleep could push that single gap over the
-			// real 300ms budget, making delegateTask genuinely and CORRECTLY
-			// reject -- a false-failure risk in the TEST, not a bug in the code
-			// under test, and one that widening the margin cannot honestly fix
-			// per this phase's own de-flake prohibitions (no widened elapsed
-			// bounds).
-			//
-			// WR2-03's fix, following 08-05's own "root cause eliminated at its
-			// source, no wall-clock delay option" discipline: `delegateTask` now
-			// accepts an injected `now` AND an `onProgress` callback (both
-			// `DelegateTaskOptions`, test-only). `onProgress` fires from INSIDE
-			// the read loop, exactly once per reset, immediately after
-			// `lastProgressAt` is captured -- so bumping the injected clock and
-			// releasing the NEXT chunk from within this callback guarantees the
-			// client's OWN next remaining-check sees EXACTLY one gap's worth of
-			// elapsed time, never more, never less, and never dependent on
-			// whether the server's write or the client's read happens to be
-			// scheduled first (an earlier version of this fix drove the bump off
-			// the SERVER's own `chunkWritten` event instead, independently of the
-			// client's consumption -- since nothing then throttled the test's own
-			// loop to the client's pace, it could race ahead and dump all three
-			// bumps in before the client had processed even the first chunk,
-			// which is worse than non-deterministic: it is UNFALSIFIABLE, since a
-			// mutated non-resetting client happened to still pass). The four
-			// chunks still arrive over a REAL socket -- nothing about the
-			// transport is faked -- but the TEST never once waits in real time:
-			// this file's own 20-test run, including this case, completes in
-			// well under a second, immune to CI scheduler jitter entirely, not
-			// merely less exposed to it.
-			//
-			// The only assertions below are on the OUTCOME (`folded.done`,
-			// `folded.text`), never on how much time passed -- exactly the prior
-			// version's own discipline, preserved here.
-			// WR3-03 (`08-REVIEW.md` iteration 3): `nowCalls` makes the injected
-			// clock self-defending. This whole case's proof rests on
-			// `delegateTask`'s deadline arithmetic actually reading `opts.now` --
-			// without it, the seam is production surface added for one test with
-			// nothing pinning it: deleting `opts.now`'s only use (e.g. hardcoding
-			// `const now = Date.now;` inside `delegateTask`, ignoring the option
-			// entirely) leaves all 20 tests in this file green, because real
-			// elapsed time across four loopback chunks is a few milliseconds
-			// against a 300ms budget regardless of reset behaviour. Counting
-			// calls and asserting `> 0` closes that: a client that never consults
-			// `opts.now` at all leaves this counter at zero.
+			// Reset-on-progress: four chunks whose summed gaps exceed the budget while each gap stays under it, so a single
+			// fixed timeout would fail. The injected clock advances one gap per `onProgress` call, from inside the client's read
+			// loop, so nothing waits in real time or races. `nowCalls > 0` proves the client really reads the injected clock.
 			const injectedTimeoutMs = 300;
 			const interGapMs = 150;
 			let fakeElapsedMs = 0;
@@ -720,15 +537,7 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 						cwd,
 						inactivityTimeoutMs: injectedTimeoutMs,
 						now,
-						// Fires once per chunk READ that is not the terminal stream-close
-						// read -- four times for this four-chunk split (chunks 0-2 each
-						// precede a real gap the test controls; chunk 3 also resets, since
-						// the fold only observes `done` AFTER processing it, and the loop
-						// exits on the NEXT `while` check rather than reading again).
-						// `releaseNextChunk` is idempotent past the last boundary
-						// (`qoder-loopback.ts`'s own contract), so the 4th, boundary-less
-						// call here is a harmless no-op. Measured, not guessed: run 5x,
-						// always exactly 4 -- see the commit this test landed in.
+						// Fires once per non-terminal chunk read (four here); the fourth releaseNextChunk is a no-op past the last gate.
 						onProgress: () => {
 							progressCount += 1;
 							fakeElapsedMs += interGapMs;
@@ -756,11 +565,7 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 
 describe("qoder-delegate -- WR-08: a malformed server-supplied session id is refused, never spliced raw into a request path", () => {
 	it("a session id containing path-traversal characters is refused before the second request is ever made", async () => {
-		// The DEFAULT loopback session id generator can never produce this --
-		// `sessionIdOverride` is the seam that lets this test hand the CLIENT a
-		// server response shaped like a malicious id, which is exactly the
-		// untrusted-input scenario WR-08 describes (`sessionId` comes from a
-		// network response the client does not control).
+		// A server-supplied id shaped like path traversal, which the default generator never produces.
 		const maliciousId = "../../etc/passwd?x=1#y";
 
 		await withTempLogCwd(async (cwd) => {
@@ -771,20 +576,13 @@ describe("qoder-delegate -- WR-08: a malformed server-supplied session id is ref
 					/does not look like one/,
 				);
 
-				// THE LOAD-BEARING ASSERTION: only the FIRST request (session
-				// create, the one that returned the malicious id) was ever made.
-				// A client that validated too late -- after already splicing the
-				// id into the events-POST path -- would still show a second
-				// request here, just possibly a mangled one.
+				// Only the session create was made: a client that validated after splicing the id would show a second request.
 				expect(loop.received.length).toBeGreaterThan(0);
 				expect(loop.received).toHaveLength(1);
 				expect(loop.received[0]?.url).toBe("/sessions");
 			});
 
-			// WR-06: a terminal transcript record for the malformed-session-id
-			// path -- the same gap WR-06 originally closed for the stream-open
-			// step. Before this fix the transcript ended at
-			// "qoder.session.create.response: 200" with nothing following.
+			// A malformed session id leaves a terminal transcript record.
 			const dir = logDir(cwd);
 			const files = logFilesIn(dir);
 			const qoderFile = files.find((name) => name.startsWith("qoder-"));
@@ -798,10 +596,7 @@ describe("qoder-delegate -- WR-08: a malformed server-supplied session id is ref
 				"no qoder.delegate.failed record was written for the malformed-session-id path",
 			).toHaveLength(1);
 			expect(failedRecords[0]?.cause).toBe("malformed-session-id");
-			// Never the offending id verbatim, even in the failure record -- it is
-			// untrusted network input and this file's own module docstring holds
-			// the transcript to the "never the token, never Authorization" bar;
-			// WR-06 extends the same discipline to this new record.
+			// The failure record never repeats the untrusted id.
 			const serialized = JSON.stringify(records);
 			expect(serialized).not.toContain(maliciousId);
 		});
@@ -818,10 +613,7 @@ describe("qoder-delegate -- WR-08: a malformed server-supplied session id is ref
 	});
 
 	it("a well-formed session id containing a real '/' is refused the same way (the shape check, not merely a blocklist)", async () => {
-		// A slash is not on any blocklist enumerated anywhere in this file --
-		// this proves the check is a POSITIVE shape match
-		// (`/^[A-Za-z0-9._-]{1,128}$/`), not a denylist of specific dangerous
-		// substrings that a differently-shaped bad id could slip past.
+		// A slash is on no denylist here, so this proves a positive shape match.
 		const idWithSlash = "sess/nested";
 
 		await withTempLogCwd(async (cwd) => {
@@ -839,12 +631,7 @@ describe("qoder-delegate -- WR-08: a malformed server-supplied session id is ref
 
 describe("qoder-delegate -- this file never dials the real host", () => {
 	it("resolveQoderConfig's own documented default base URL is never used by any case in this file", () => {
-		// Every fixture config in this file supplies QODER_BASE_URL_ENV pointed
-		// at the loopback handle; this asserts the module's own real default
-		// (defined once in client.ts and imported here, never re-typed in this
-		// file) resolves to a non-loopback https host, which is a coarse,
-		// mechanical proof that the loopback override -- not this default --
-		// is what every other case in this file actually dialled.
+		// The module's real default is a non-loopback https host, so every other case really dialled the loopback override.
 		expect(DEFAULT_QODER_BASE_URL.startsWith("https://")).toBe(true);
 		expect(new URL(DEFAULT_QODER_BASE_URL).hostname).not.toBe("127.0.0.1");
 	});

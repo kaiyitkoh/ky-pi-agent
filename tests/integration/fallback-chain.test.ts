@@ -1,79 +1,9 @@
 /**
- * PROV-08 — the chain advances exactly one hop on quota, on a rate limit and on
- * an outage, and spends nothing on a 400.
- *
- * ---------------------------------------------------------------------------
- * WHY THE FATAL CASE IS NOT AN EXTRA — IT IS WHAT MAKES THE OTHER THREE MEAN
- * ANYTHING
- * ---------------------------------------------------------------------------
- * "The second provider was attempted once" is satisfied perfectly by an
- * implementation that attempts every provider unconditionally and classifies
- * nothing at all. Every positive assertion in this file would still be green.
- * So the fatal control runs in the SAME session as the three advancing classes,
- * against the same two providers, and asserts the second provider's attempt
- * count is exactly **0**. The pair is the measurement; either half alone is a
- * shape test. (The discipline is ported from
- * `tests/integration/call-model.test.ts:5-19`.)
- *
- * ---------------------------------------------------------------------------
- * HOW THE LIVE `ExtensionContext` IS OBTAINED, AND WHY A WARM-UP PROMPT COMES
- * FIRST
- * ---------------------------------------------------------------------------
- * Through a user-scope probe extension that parks the `ctx` Pi hands it on
- * `globalThis`. Two facts inherited from the analog, both measured there rather
- * than assumed:
- *
- *   - jiti gives the loaded extension its OWN module registry, so a module
- *     export cannot carry the context out — the process-wide object is the only
- *     channel the two graphs share;
- *   - **`session_start` does not fire in a headless `createAgentSession`**
- *     [VERIFIED: executed 2026-08-13, `tests/integration/call-model.test.ts:36-47`],
- *     so the fixture prompts once before it has a context to use.
- *
- * Constructing an `ExtensionContext` by hand would test a shape: the registry
- * facade the chain resolves its models through would be a stand-in, and the
- * whole question this file asks — does the chain reach the models Pi composed? —
- * would be answered by the fixture's author rather than by Pi.
- *
- * ---------------------------------------------------------------------------
- * THE TWO PROVIDERS, AND THE GUARD THAT PROVES THEY ARE THE ONES BEING DIALLED
- * ---------------------------------------------------------------------------
- * The chain names `deepseek` and `dashscope`. `deepseek` is a BUILT-IN provider
- * in Pi's catalogue and its real entry points at the real endpoint, so a fixture
- * that failed to register its stand-in would silently be exercising the real
- * catalogue entry instead. Registering a native provider replaces the built-in
- * for that id [VERIFIED: pi 0.84.1 src/core/model-runtime.ts:245-246 — the
- * composition base is `nativeExtensionProviders.get(id) ?? builtins.get(id)`],
- * and every run asserts the model the chain resolved carries THIS run's faux
- * `api` id. Nothing here can reach a network: `fauxProvider` has no socket, and
- * this machine has no credentials for either vendor.
- *
- * `state.callCount` is incremented before any asynchronous work in `stream()`
- * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:504-507], so it counts
- * ATTEMPTS — which is the exact signal PROV-08 needs, since "advanced once" and
- * "retried the same provider" differ only in which counter moved.
- *
- * `wrapFauxWithStatus` (plan 03-01) is what makes a non-200 reachable at all:
- * faux hard-codes `onResponse({ status: 200 })` unconditionally [same file,
- * :507], so without it every class would report the same green status on its
- * turns row.
- *
- * ---------------------------------------------------------------------------
- * WHAT THESE ERROR STRINGS ARE, AND WHAT THEY ARE NOT
- * ---------------------------------------------------------------------------
- * FIXTURES THIS REPOSITORY WROTE. They are modelled on OpenAI-compatible and
- * DashScope wording, but no live provider produced them here — this machine has
- * no credentials and this file issues no request. What IS anchored on something
- * outside this repository is the classification: the retryable/fatal split is
- * Pi's own exported predicate, unmodified, so a string Pi calls retryable is
- * never called fatal here. Each fixture also carries Pi's recorded verdict, and
- * case 7 asserts Pi still agrees — a Pi bump that moves one turns this file red
- * and names the claim that expired.
- *
- * The one place the harness deliberately disagrees with Pi is `quota`, and it
- * disagrees in one direction only: Pi says "do not retry" (correctly), and the
- * chain says "do not retry HERE, try the other vendor". Case 8 pins that down on
- * DashScope's own wording, which Pi's limit table does not carry at all.
+ * The fallback chain advances exactly one hop on quota, rate limit and outage, and spends nothing on a 400; the fatal
+ * control runs in the same session, since an implementation that always advances passes every positive. A probe parks
+ * the live ExtensionContext on globalThis (jiti isolates module registries; session_start does not fire headless).
+ * Native faux providers replace the built-in `deepseek`, and each run checks the resolved model is this run's faux.
+ * The error strings are fixtures; the retryable/fatal split is Pi's own predicate, re-checked in case 7.
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -105,28 +35,8 @@ import { withFauxSession } from "../helpers/session.ts";
 const CTX_KEY = "__kypiFallbackChainExtensionContext";
 
 /**
- * Split a regular-expression source into its TOP-LEVEL alternatives.
- *
- * WHY THIS EXISTS AT ALL. `QUOTA_ALTERNATIVE_FIXTURES` is a hand-written list of
- * alternative labels sitting BESIDE {@link QUOTA_PATTERN}, and nothing tied the
- * two together. That closed the deletion direction — remove an alternative and
- * its fixture stops classifying `quota` — and closed NOTHING in the addition
- * direction, which is the direction CR-03 was about: a new alternative gets no
- * fixture, no minimality check, and the `>= 7` floor is still satisfied by the
- * seven that were already there. Verified: appending `|exceeded` to the pattern
- * left 649/649 green while making
- * `"Input length exceeded the maximum allowed for this model"` classify as
- * `quota`, i.e. forwarding the user's whole prompt to a second vendor on a
- * context-length error. That is CR-03 restored by seven characters. [WR-02]
- *
- * A CHARACTER WALK, NOT A REGEX. Splitting a regex source with a regex needs a
- * lookahead that is correct only for the parenthesis shapes present today
- * (`/\|(?![^(]*\))/` mis-splits the moment a second group appears, and silently
- * — it produces alternatives, just the wrong ones). This walks the source
- * tracking group depth, character classes and backslash escapes, so it stays
- * correct as the pattern grows. Its own behaviour is pinned by case 3d below,
- * because a splitter nobody checks can be "adjusted" until the equality it feeds
- * passes.
+ * A regex source's top-level alternatives, by a character walk tracking groups, classes and escapes (a splitting regex
+ * breaks as groups are added). Lets case 3c tie QUOTA_PATTERN to its fixture table in both directions.
  */
 function topLevelAlternatives(source: string): string[] {
 	const out: string[] = [];
@@ -137,8 +47,7 @@ function topLevelAlternatives(source: string): string[] {
 	for (let i = 0; i < source.length; i += 1) {
 		const ch = source[i] as string;
 
-		// An escape consumes the next character whatever it is, so `\|`, `\[`,
-		// `\(` and `\)` never move the state below.
+		// An escape consumes the next character, so an escaped `|`, `[`, `(` or `)` never changes state.
 		if (ch === "\\") {
 			current += ch + (source[i + 1] ?? "");
 			i += 1;
@@ -184,12 +93,8 @@ const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
 const MODELS_TEMPLATE = join(repoRoot(), ".pi", "templates", "models-template.json");
 
 /**
- * The extension under test: the real diagnostics entry point plus a probe.
- *
- * The diagnostics extension is loaded because the chain's hops are supposed to
- * land in ITS logs — case 5 reads them back off disk. Three hooks rather than
- * one, for the analog's reason: `session_start` is dead headless, and the other
- * two mean a change in Pi's emit order does not silently leave the probe empty.
+ * The real diagnostics extension (case 5 reads its logs) plus a probe on three hooks, so a change in Pi's emit order
+ * cannot silently leave the probe empty.
  */
 const PROBE_SOURCE = [
 	"// Generated for tests/integration/fallback-chain.test.ts. Lives in a temp dir.",
@@ -285,15 +190,8 @@ function failure(text: string): AssistantMessage {
 }
 
 /**
- * Walk the chain once against two freshly-registered faux providers.
- *
- * FRESH HANDLES PER RUN, deliberately. `state.callCount` is cumulative for the
- * life of a handle, so reusing one across four classes would turn every
- * assertion into arithmetic over a running total — and an off-by-one in that
- * arithmetic reads exactly like a chain that advanced when it should not have.
- * Re-registering under the same provider id replaces the previous registration
- * [pi 0.84.1 src/core/model-runtime.ts:733-739], so each run starts from zero
- * and every count below is absolute.
+ * Walks the chain once against two freshly registered faux providers. Fresh handles keep every `callCount` absolute;
+ * re-registering an id replaces the previous registration.
  */
 async function walkChain(
 	ctx: ExtensionContext,
@@ -327,8 +225,7 @@ async function walkChain(
 	firstFaux.setResponses([spec.firstResponse]);
 	secondFaux.setResponses([spec.secondResponse]);
 
-	// Both wrappers, composed: `wrapFauxWithPayload` keeps the wire capture
-	// realistic, `wrapFauxWithStatus` is the only way a non-200 reaches the row.
+	// `wrapFauxWithStatus` is the only way a non-200 reaches the turns row.
 	modelRuntime.registerNativeProvider(
 		wrapFauxWithStatus(wrapFauxWithPayload(firstFaux), spec.status),
 	);
@@ -343,9 +240,7 @@ async function walkChain(
 		first: firstFaux.state.callCount,
 		second: secondFaux.state.callCount,
 		message,
-		// Read through the SESSION's registry facade, which is the object the
-		// chain itself used. If the fixture's registration went somewhere else,
-		// these are the real catalogue's api ids and case 1 says so.
+		// Read through the session's registry facade, the object the chain used.
 		resolvedFirstApi: ctx.modelRegistry.find(firstEntry.provider, firstEntry.id)?.api,
 		resolvedSecondApi: ctx.modelRegistry.find(secondEntry.provider, secondEntry.id)?.api,
 		expectedFirstApi: firstFaux.api,
@@ -355,15 +250,8 @@ async function walkChain(
 }
 
 /**
- * The real context with exactly one member shadowed through the prototype chain.
- *
- * `Object.create` rather than a spread, for the analog's reason
- * (`tests/integration/call-model.test.ts:300-307`): a spread flattens a live
- * object into a snapshot and drops anything behind a getter, which is how a
- * "real context" test quietly becomes a shape test.
- *
- * The model LOOKUP is delegated to the real facade so the chain still resolves
- * the providers this fixture registered; only the call itself is replaced.
+ * The real context with one member shadowed via `Object.create`, which keeps getters live where a spread would
+ * snapshot them. Model lookup still goes to the real facade.
  */
 function withShadowedRegistry(
 	ctx: ExtensionContext,
@@ -383,13 +271,8 @@ function withShadowedRegistry(
 }
 
 /**
- * Walk the chain against a facade that REJECTS rather than returning a message.
- *
- * On Pi 0.84.1 nothing reaches this branch on its own — both provider failure
- * classes are converted to an error-stopped message — so the rejection has to be
- * injected or the `catch` in `callWithFallback` ships untested. It is not dead
- * code: the chokepoint rethrows a registry-facade rejection specifically because
- * "the caller owns the fallback decision", and this module is that caller.
+ * Walks the chain against a facade that rejects. Nothing in Pi reaches this branch on its own, but the chokepoint
+ * rethrows facade rejections for the caller to decide, so the catch must be tested.
  */
 async function walkRejecting(ctx: ExtensionContext, text: string): Promise<RejectionRun> {
 	let calls = 0;
@@ -413,15 +296,13 @@ async function walkRejecting(ctx: ExtensionContext, text: string): Promise<Rejec
 }
 
 async function runFixture(): Promise<Fixture> {
-	// A stale context parked by another file in the same worker would make the
-	// "did the probe run?" guard pass without this session doing anything.
+	// A stale context from another file in this worker would fake the probe guard.
 	(globalThis as Record<string, unknown>)[CTX_KEY] = undefined;
 
 	return await withFauxSession(
 		{
 			extensionSource: PROBE_SOURCE,
-			// One response: the warm-up prompt on the main loop, which exists only
-			// to hand the probe a live context.
+			// One response: the warm-up prompt that hands the probe a live context.
 			responses: [fauxAssistantMessage("warm", { stopReason: "stop" })],
 		},
 		async ({ cwd, session, modelRuntime }) => {
@@ -439,8 +320,7 @@ async function runFixture(): Promise<Fixture> {
 			const noRun: RejectionRun = { calls: 0, thrown: undefined };
 
 			if (ctx === undefined) {
-				// Return rather than throw: case 0 then fails with its own message
-				// instead of every case failing with one opaque stack trace.
+				// Return, not throw, so case 0 fails with its own message.
 				return {
 					sawContext: false,
 					runs,
@@ -455,8 +335,7 @@ async function runFixture(): Promise<Fixture> {
 				};
 			}
 
-			// The three advancing classes, then the fatal control, IN ONE SESSION
-			// against the same pair of providers. See the header.
+			// The three advancing classes, then the fatal control, in one session.
 			for (const name of ["quota", "transient", "unavailable", "fatal"] as const) {
 				runs[name] = await walkChain(ctx, modelRuntime, {
 					role: `chain-${name}`,
@@ -474,9 +353,7 @@ async function runFixture(): Promise<Fixture> {
 				status: 200,
 			});
 
-			// An entry that does not resolve must be an ERROR, never a skipped hop.
-			// The lookup is shadowed to report nothing for every entry, which is
-			// what a renamed upstream model id would look like from in here.
+			// An unresolved entry (as a renamed upstream id would look) must be an error, never a skipped hop.
 			const unresolvedCtx = withShadowedRegistry(ctx, { find: () => undefined });
 			let unresolved = { threw: false, message: "" };
 			try {
@@ -491,8 +368,7 @@ async function runFixture(): Promise<Fixture> {
 				};
 			}
 
-			// The `catch` branch, both directions: a fatal-shaped rejection must
-			// stop at the first hop, an advancing one must reach both.
+			// The catch branch both ways: fatal-shaped stops at hop 1, advancing reaches both.
 			const rejectFatal = await walkRejecting(
 				ctx,
 				"Error code: 400 - {'error': {'message': 'Invalid request from the facade'}}",
@@ -589,17 +465,8 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 1 — every hop resolved THIS fixture's faux provider, not the real catalogue", () => {
-		// `deepseek` is a built-in provider pointing at the real endpoint. If the
-		// native registration had not replaced it, the chain would have resolved
-		// the real entry, produced a setup error for want of a credential, and
-		// every count below would be a measurement of the wrong thing.
-		// THE FILE'S OWN HOUSE RULE, APPLIED TO THIS LOOP TOO. `fixture.runs` is
-		// empty when the probe failed to hand over an ExtensionContext, and this
-		// loop then iterates nothing and reports green in exactly the scenario
-		// where the identity guard matters most. Case 0 does go red in that
-		// situation, so something in the file fails — but a guard that is not
-		// self-guarding is one refactor away from being the only one left.
-		// [IN-06]
+		// Without native registration the chain would resolve the real built-in entry. The loop is floored itself: an
+		// empty `fixture.runs` would otherwise pass exactly when the identity guard matters most.
 		expect(
 			Object.keys(fixture.runs).length,
 			"no chain walk was recorded, so the identity guard below iterates nothing and " +
@@ -667,8 +534,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 		const advanced = run("quota");
 		const walk = run("fatal");
 
-		// The paired positive comes FIRST and in the same session: without it, an
-		// implementation that never advances satisfies the zero below perfectly.
+		// The paired positive first, in the same session: a chain that never advances satisfies the zero below.
 		expect(
 			advanced.second,
 			"the quota walk did not advance either, so 'the second provider was not attempted' below " +
@@ -701,13 +567,8 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 			"error",
 		);
 
-		// THE CLASS THE LIVE WALK IS SILENT ABOUT. `CLASS_FIXTURES.fatal.text`
-		// carries no billing wording, so it is correct about the string it holds
-		// and says nothing about every other 400/403 that happens to mention
-		// billing. QUOTA_PATTERN borrowed a bare `billing` alternative from Pi's
-		// NON_RETRYABLE_PROVIDER_LIMIT_ERROR_PATTERN, where a match means "do not
-		// retry" and costs nothing; here a match means "forward the whole prompt to
-		// a second vendor". Same token, inverted consequence. [CR-03]
+		// A bare `billing` alternative means "forward the prompt to another vendor" here, the inverse of Pi's "do not
+		// retry", so a 400 that merely mentions billing must stay fatal.
 		expect(
 			NON_QUOTA_BILLING_FIXTURES.length,
 			"the non-quota billing table is empty, so the loop below iterates nothing and the " +
@@ -725,10 +586,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 			).toBe("fatal");
 		}
 
-		// The paired positive, in the same case: a real quota wall that ALSO
-		// mentions billing must still advance. Without it, anchoring the borrowed
-		// token could be satisfied by a pattern that stopped matching quota
-		// failures altogether.
+		// Paired positive: a real quota wall that mentions billing still advances.
 		expect(
 			classifyFailure(CLASS_FIXTURES.quota.text),
 			"the real quota fixture stopped classifying as quota. The anchoring of the borrowed " +
@@ -739,12 +597,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 3b — every QUOTA_PATTERN alternative is live, and each is the only one that matches its fixture", () => {
-		// FOUND BY FALSIFICATION, NOT BY READING. With CLASS_FIXTURES.quota as the
-		// only positive, deleting BOTH `insufficient_quota` and `exceeded your
-		// current quota` left the entire suite green: that fixture also says
-		// "billing details", so a different alternative covered for the two that had
-		// gone. An alternative no test can kill reads wider than it behaves, and
-		// this table is what kills each one individually. [CR-03]
+		// One fixture per alternative, so each can be killed individually; alternatives otherwise cover for each other.
 		expect(
 			QUOTA_ALTERNATIVE_FIXTURES.length,
 			"the per-alternative table is empty or truncated, so alternatives can be deleted " +
@@ -761,20 +614,8 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 					"stops on the single failure a second provider is most certain to survive",
 			).toBe("quota");
 
-			// MINIMALITY, ASSERTED AGAINST THE REAL PATTERN RATHER THAN AGAINST THE
-			// TABLE. A fixture that two alternatives match cannot kill either of
-			// them: delete one and the other keeps the row green, which is exactly
-			// the hole this case exists to close. Checked by removing THIS
-			// alternative from the pattern and requiring the fixture to stop
-			// matching.
-			//
-			// THE OTHERS COME FROM `QUOTA_PATTERN.source`, NOT FROM
-			// `QUOTA_ALTERNATIVE_FIXTURES`. Rebuilding them from the table made this
-			// verdict relative to the table — so an alternative added to the pattern
-			// and absent from the table was excluded from its own minimality check,
-			// and `schema.ts`'s claim that minimality "is asserted directly" stopped
-			// being true the moment the two diverged. Case 3c below is what keeps
-			// the two in set equality; this line is what makes the claim true. [WR-02]
+			// Minimality against the real pattern: removing this alternative from QUOTA_PATTERN.source must stop the
+			// fixture matching, so an alternative absent from the table is still checked.
 			const withoutThis = topLevelAlternatives(QUOTA_PATTERN.source)
 				.filter((entry) => entry !== alternative)
 				.join("|");
@@ -788,19 +629,8 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 3c — WR-02: the fixture table and QUOTA_PATTERN's alternatives are the SAME set", () => {
-		// THE ADDITION DIRECTION, WHICH CASE 3b DOES NOT CLOSE. Case 3b proves
-		// every FIXTURE's alternative is live and minimal. It is silent about an
-		// alternative that has no fixture: such a token is untested in both
-		// directions — nothing kills it, and far worse, nothing shows what else it
-		// now matches. Widening QUOTA_PATTERN is not a widened "do not retry" as it
-		// is in Pi; here a match means SEND THIS USER'S PROMPT, SYSTEM PROMPT AND
-		// TOOL SCHEMAS TO A DIFFERENT VENDOR. Same token, inverted consequence —
-		// the pattern's own docstring records this and the table did not enforce it.
-		//
-		// Verified: appending `|exceeded` to QUOTA_PATTERN left 649/649 green, and
-		// with it in place `classifyFailure("Error code: 400 - ... 'Input length
-		// exceeded the maximum allowed for this model'")` returned "quota".
-		// [CR-03, WR-02, threat T-03-10-01]
+		// The addition direction: every alternative in QUOTA_PATTERN needs a fixture, because a widened pattern forwards
+		// prompts to another vendor (e.g. `|exceeded` would match a context-length error).
 		const declared = topLevelAlternatives(QUOTA_PATTERN.source);
 
 		expect(
@@ -816,13 +646,8 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 3d — the alternation splitter case 3c depends on really splits", () => {
-		// WITHOUT THIS, CASE 3c IS ONE EDIT AWAY FROM BEING SATISFIED BY A BROKEN
-		// SPLITTER. A `topLevelAlternatives` that returned `[source]`, or `[]`, or
-		// that split inside groups, would make the equality above fail loudly today
-		// — but the obvious way to make a failing equality pass is to adjust the
-		// thing producing the left-hand side. So the splitter's contract is pinned
-		// on inputs whose answers are obvious by inspection and independent of
-		// QUOTA_PATTERN. [WR-02]
+		// The splitter's contract, pinned on inputs independent of QUOTA_PATTERN, so the equality above cannot be met by
+		// adjusting the splitter.
 		expect(
 			topLevelAlternatives("a|b|c"),
 			"a flat alternation must split on every bar",
@@ -916,17 +741,10 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 6 — every CHAIN entry resolves in a registry composed from the shipped template", async () => {
-		// NOT the faux session: there, both ids resolve because this fixture
-		// registered them, which would be an assertion about the fixture. This
-		// composes the registry Pi would build on a real machine — its built-in
-		// catalogue plus `.pi/templates/models-template.json` — and asks whether
-		// both hops exist in it. Assumption A7 is precisely that DashScope serves
-		// the same model id, and a renamed id would otherwise skip the hop in
-		// silence. [threat T-03-10-05]
+		// The registry Pi would compose on a real machine (catalogue plus template), not the faux one: a renamed id would
+		// otherwise skip the hop silently.
 		await withModelsConfig({ models: MODELS_TEMPLATE }, ({ registry }) => {
-			// Vacuity guard: a registry that composed nothing would report every
-			// entry missing, and a registry that composed everything-but-the-template
-			// would still resolve the built-in half.
+			// Vacuity guard: the composed registry really holds both halves.
 			expect(
 				registry.getAll().length,
 				"the composed registry holds no models at all, so 'this entry is missing' below would " +
@@ -982,8 +800,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 				"as 'both vendors are down' [threat T-03-10-05]",
 		).toBe(true);
 
-		// The remedy, not just the fact. A throw that says only "not found" leaves
-		// the reader to guess whether the provider is unconfigured or the id moved.
+		// The remedy, not just the fact.
 		expect(
 			fixture.unresolved.message,
 			"the unresolved-entry error does not name the entry that failed, so nobody reading it " +
@@ -998,11 +815,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 6c — a REJECTION is classified by the same rule, both directions", () => {
-		// Nothing on Pi 0.84.1 reaches this branch on its own: both provider
-		// failure classes arrive as an error-stopped message. The chokepoint
-		// nevertheless rethrows a registry-facade rejection, on the stated ground
-		// that the caller owns the fallback decision — so the branch exists for
-		// exactly one caller, and this is it.
+		// Only injection reaches this branch; the chokepoint rethrows facade rejections for this caller to decide.
 		expect(
 			fixture.rejectTransient.calls,
 			"a transient-shaped REJECTION did not reach both hops. Either the try/catch is missing — " +
@@ -1031,10 +844,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 7 — Pi still returns the verdict every class fixture records", () => {
-		// The classification is only anchored while Pi agrees about these strings.
-		// Recorded verdicts, EXECUTED 2026-08-13 over `isRetryableAssistantError`;
-		// if a Pi bump moves one, this names which claim expired instead of
-		// letting the taxonomy drift underneath a green suite. [threat T-03-10-03]
+		// Pi's recorded verdicts on these strings; a Pi bump that moves one names the expired claim.
 		for (const [name, fixtureEntry] of Object.entries(CLASS_FIXTURES)) {
 			expect(
 				isRetryableAssistantError(failure(fixtureEntry.text)),
@@ -1045,9 +855,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 			).toBe(fixtureEntry.retryableToday);
 		}
 
-		// And the pair that makes the local quota table necessary rather than
-		// decorative: `quota` and `fatal` are BOTH non-retryable to Pi, and take
-		// opposite chain actions.
+		// quota and fatal are both non-retryable to Pi yet take opposite chain actions.
 		expect(
 			isRetryableAssistantError(failure(CLASS_FIXTURES.quota.text)),
 			"the quota fixture is retryable to Pi, so the quota table is no longer distinguishing " +
@@ -1057,14 +865,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 	});
 
 	it("case 8 — DashScope's own quota wording advances, and a dead credential does not", () => {
-		// DISARMED BY DELETION, NOT BY BREAKAGE. `DASHSCOPE_QUOTA_FIXTURES` has
-		// exactly one consumer in the repository — this loop. Emptying it in
-		// schema.ts made the loop iterate nothing, dropped the ENTIRE proof that
-		// DashScope's `Arrearage` / `Allocated quota exceeded` wording is handled
-		// at all, and left the suite GREENER than before. Same shape as the
-		// ALL_IDS hole `docs-policy.test.ts:406-435` was written to close, and the
-		// same remedy: a floor on the table itself, before it is iterated.
-		// [WR-03]
+		// A floor on the table first: emptying it would drop the DashScope wording proof and leave the suite green.
 		expect(
 			DASHSCOPE_QUOTA_FIXTURES.length,
 			"the DashScope quota table is the only reason QUOTA_PATTERN carries wording Pi's " +
@@ -1087,10 +888,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 			).toBe("quota");
 		}
 
-		// THE DISCLOSURE CONTROL. An expired SSO credential must never advance:
-		// the credential is dead everywhere, and forwarding the prompt to a second
-		// vendor on the strength of a local misclassification is the highest-rated
-		// threat on this plan. [threat T-03-10-02]
+		// An expired SSO credential is dead everywhere, so it must never forward the prompt to another vendor.
 		for (const ssoFixture of SSO_FIXTURES) {
 			expect(
 				classifyFailure(ssoFixture.text),
@@ -1101,10 +899,7 @@ describe("PROV-08 — the DeepSeek-direct -> DashScope chain, against its fatal 
 			).toBe("fatal");
 		}
 
-		// A failure with no text at all is fatal, not an excuse to try somebody
-		// else. Asserted because the empty string is the one input where "be
-		// conservative" and "advance on anything that is not obviously fatal"
-		// disagree.
+		// An empty failure is fatal, not a reason to try another vendor.
 		expect(
 			classifyFailure(""),
 			"an untextured failure classifies as advancing, so the chain would forward the prompt to a " +

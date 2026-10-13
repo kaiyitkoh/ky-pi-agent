@@ -1,39 +1,7 @@
 /**
- * Git ignore/tracking oracle.
- *
- * Rule: never parse `.gitignore`. Git is the only correct authority on ignore
- * precedence, negation, nested ignore files, `.git/info/exclude` and
- * `core.excludesFile`. Ask git; do not reimplement it.
- * (RESEARCH.md "Don't Hand-Roll", row 1.)
- *
- * Two verified traps are encoded here:
- *
- * 1. `check-ignore -q` is the primitive; the verbose form is NOT.
- *    The verbose form exits 0 whenever it finds a matching line -- INCLUDING a
- *    negation line -- so its exit code reports "a rule matched", not "the path
- *    is ignored". Using it would invert the verdict for every negated path
- *    (`!/.npmrc`, `!/.pi/npm/.npmrc`, `!.env.example`), i.e. every path this
- *    repo most needs to be committable. Quiet mode exits 0 = ignored,
- *    1 = not ignored. [RESEARCH.md 6.4]
- *
- * 2. `--no-index` is mandatory, and its absence is a silent vacuous pass.
- *    By default `check-ignore` consults the index and reports any TRACKED path
- *    as not-ignored regardless of the rules. Most of `MUST_BE_COMMITTABLE` is
- *    already tracked, so without `--no-index` the committable direction of the
- *    BOOT-09 test would assert nothing at all.
- *
- *    [VERIFIED: executed 2026-08-13, scratch repo, git 2.x]
- *      .npmrc tracked, .gitignore = `.npmrc` + `!/.npmrc`
- *        check-ignore -q            -> 1     check-ignore -q --no-index -> 1
- *      negation REMOVED, .npmrc still tracked
- *        check-ignore -q            -> 1  <-- WRONG, index masks the rule
- *        check-ignore -q --no-index -> 0  <-- correct
- *
- * Scope caveat, stated rather than overclaimed: `git add -f` bypasses ignore
- * rules entirely. This module proves POLICY -- that the declared rules classify
- * each path correctly -- not omnipotence over what a human can force into the
- * index. A `git add -f .pi/auth.json` is out of reach of any ignore rule and is
- * a different control's problem.
+ * Git oracles for tests. Ignore questions go to `git check-ignore -q --no-index`, never a `.gitignore` parser: the
+ * verbose form exits 0 on a negation line, and without `--no-index` any tracked path reads as not-ignored.
+ * `git add -f` bypasses ignore rules entirely, so this proves the declared policy, not what a human can force.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
@@ -56,12 +24,7 @@ export function gitResult(args: string[], cwd?: string): { stdout: string; stder
 	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
 }
 
-/**
- * Absolute path to the repository root, resolved once per process.
- *
- * On Windows git prints a forward-slash path (`C:/Users/...`); that form is a
- * valid `cwd` for `spawnSync`, so it is used verbatim rather than normalised.
- */
+/** Absolute repository root, resolved once; git's forward-slash Windows form is a valid `cwd` as is. */
 export function repoRoot(): string {
 	if (cachedRoot === undefined) {
 		const { stdout, status } = gitResult(["rev-parse", "--show-toplevel"]);
@@ -76,13 +39,7 @@ export function repoRoot(): string {
 	return cachedRoot;
 }
 
-/**
- * True when git's ignore rules classify `path` as ignored.
- *
- * `path` is interpreted relative to the repository root and does NOT need to
- * exist -- `check-ignore` evaluates rules against the string, which is why the
- * BOOT-09 table needs no fixture files on disk.
- */
+/** True when git's ignore rules classify `path` (repo-relative, need not exist) as ignored. */
 export function isIgnored(path: string): boolean {
 	const { status } = gitResult(["check-ignore", "-q", "--no-index", "--", path], repoRoot());
 	if (status !== 0 && status !== 1) {
@@ -91,13 +48,7 @@ export function isIgnored(path: string): boolean {
 	return status === 0;
 }
 
-/**
- * Paths currently tracked in the index, filtered by a git pathspec.
- *
- * Returns repo-root-relative, forward-slash paths. Unlike {@link isIgnored},
- * this reports what git actually holds, so it is the right oracle for "was this
- * accidentally committed" questions.
- */
+/** Repo-relative paths git actually tracks under a pathspec. */
 export function trackedFiles(pattern = "."): string[] {
 	const { stdout, status } = gitResult(["ls-files", "--", pattern], repoRoot());
 	if (status !== 0) {

@@ -1,85 +1,8 @@
 /**
- * ROUTE-10 — the wire dump proves the model a mode intended is the model that
- * actually served the next turn, for both routed mechanisms this repository
- * has: the executor (`/balanced`, `/max`) and a single-shot role
- * (`runSingleShotRole`).
- *
- * ---------------------------------------------------------------------------
- * THE FILE'S CONTRACT, IN ONE LINE
- * ---------------------------------------------------------------------------
- * A spy proves intent; the wire record proves service. Every assertion below
- * reads `turns-*.jsonl` and `wire-*.jsonl` off disk — the bytes Phase 2's
- * chokepoint and main-loop hooks actually wrote — and NONE of it may be
- * replaced by a spy on Pi's own `setModel` entry point, however convenient a
- * future refactor makes that. A test asserting "`setModel` was called" proves
- * the harness's intent; this file proves the request that followed really
- * carried the model the switch named. This file contains no assertion on
- * whether `setModel` was called at all — the acceptance grep for that
- * literal, run outside this header, must report zero.
- *
- * ---------------------------------------------------------------------------
- * THE EXECUTOR HALF — TWO SWITCHES, NOT ONE (RESEARCH Pitfall 1)
- * ---------------------------------------------------------------------------
- * A single switch proves nothing: if the session's starting model already
- * happened to be the target, the "proof" would hold even for a router that
- * does nothing. `/balanced` and `/max` resolve DIFFERENT executor candidates
- * in `routing/schema.ts`'s `ROLE_MAP` (`deepseek-flash` vs
- * `deepseek-v4-pro`), so driving both and asserting the two observed models
- * differ is what makes either assertion mean anything.
- *
- * Every row lookup below is sliced by POSITION — the count of `kind:"turn"`
- * rows present before a switch, and the rows that appear after it — never by
- * filtering on `role`. `diagnostics/index.ts`'s own `SESSION_TURN_ROLE`
- * constant is what every main-loop row carries, always `"session"`; a filter
- * on `role === "executor"` would find zero rows and pass having proven
- * nothing, which RESEARCH names as the single most likely way this file could
- * be green and worthless. Case 4 below asserts `role` equals that constant
- * explicitly, on every main-loop row this fixture produces, and never filters
- * on anything else.
- *
- * ---------------------------------------------------------------------------
- * THE SINGLE-SHOT HALF — JOINED BY `corr`, WITH A NEGATIVE CONTROL
- * ---------------------------------------------------------------------------
- * The single-shot role's model (`reviewer`, resolved to Bedrock Claude in
- * `max` mode) is deliberately DIFFERENT from the session's executor model at
- * that point (`deepseek/deepseek-v4-pro`) — if they were the same, a nested
- * row naming the right model would prove nothing about routing having
- * happened at all. Nested and main-loop records are joined by `corr`
- * explicitly, never by array position: `wire.ts`'s own module docstring
- * states the serial-loop assumption behind correlation ids, and a
- * position-based join would quietly depend on that assumption in a way a
- * future concurrent path would break without this file ever noticing.
- *
- * A third, registered-but-never-routed model is asserted absent from BOTH
- * logs. Phase 2 and Phase 3 both recorded that a presence assertion with no
- * paired absence, or an absence with no paired presence, can be satisfied by
- * an instrument that reads nothing — this is that pairing for the reader
- * itself, not just for one fixture's data.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE DOES NOT PROVE
- * ---------------------------------------------------------------------------
- * Subagent-role routing (the `planner` role) is NOT provable from this
- * process's own wire log — a subagent is a SEPARATE `pi` process
- * (05-RESEARCH.md §A.2), so nothing this process writes to `turns-*`/`wire-*`
- * can say what model a subagent actually ran on. ROUTE-05's evidence is the
- * `settings.subagents.agentOverrides` write proven in
- * `tests/integration/mode-switch.test.ts` case 2 (plan 05-07) — a pin being
- * written correctly, not a subagent process having honoured it. Nor does this
- * file say anything about a real DeepSeek or Bedrock request: every model
- * here is `fauxProvider`, wrapped so it emits the request-shaped payload a
- * real adapter assembles (`tests/helpers/faux.ts`), which is realistic and is
- * not the real thing.
- *
- * ---------------------------------------------------------------------------
- * WHY `PI_CODING_AGENT_DIR` IS SET FOR EVERY CASE HERE
- * ---------------------------------------------------------------------------
- * A successful executor switch also writes `settings.subagents.agentOverrides`
- * (ROUTE-05, `routing/index.ts`'s own `applyMode`) to `getAgentDir()/
- * settings.json`, which defaults to this MACHINE's real global Pi settings
- * file when the environment variable is unset — exactly the trap
- * `tests/integration/mode-switch.test.ts` cases 2/4 already avoid by injecting
- * a temp directory. Every switch this file drives does the same.
+ * The wire and turns logs on disk prove the model a mode named really served the next turn, for the executor and for a
+ * single-shot role; a spy on `setModel` would prove only intent. Two switches to different models, rows sliced by
+ * position (every main-loop row's role is "session"), single-shot rows joined by `corr` with a never-routed negative
+ * control. Subagent routing is out of reach: a subagent is a separate process with its own logs.
  */
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -103,12 +26,7 @@ import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts"
 const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
 const ROUTING_ENTRY = `${repoRoot()}/.pi/extensions/routing/index.ts`;
 
-/**
- * The user-scope extension under test: the real diagnostics extension (main-
- * loop turn/wire capture) plus the real routing extension (`/balanced`,
- * `/max`), composed exactly the way production loads them — one extension
- * calling both default exports, no probe and no shortcut.
- */
+/** The real diagnostics and routing extensions, composed exactly as production loads them. */
 const EXTENSION_SOURCE = [
 	"// Generated for tests/integration/wire-proof.test.ts. Lives in a temp dir.",
 	`import diagnostics from ${JSON.stringify(DIAGNOSTICS_ENTRY)};`,
@@ -180,7 +98,6 @@ interface Run {
 	nestedTurnRow: TurnsRow | undefined;
 	nestedWireRecords: WireRow[];
 
-	// WR-01: cheap's own leg -- see TASK 3 below.
 	advisorRef: { provider: string; id: string };
 	executorModelAtAdvisorCall: { provider: string | undefined; id: string | undefined };
 	turnsAfterAdvisor: TurnsRow[];
@@ -193,9 +110,7 @@ interface Run {
 }
 
 async function runFixture(): Promise<Run> {
-	// Deterministic starting state regardless of which other test file in this
-	// worker touched the shared globalThis mode slot first (routing/modes.ts's
-	// own STATE-SLOT HAZARD documentation).
+	// Deterministic starting state: another test file in this worker may have set the shared mode slot.
 	setMode("cheap");
 	setEscalated(false);
 
@@ -323,33 +238,12 @@ async function runFixture(): Promise<Run> {
 			.find((row) => row.kind === "nested" && row.role === "reviewer");
 		const nestedWireRecords = nestedTurnRow === undefined ? [] : wireAfterNested.filter((record) => record.corr === nestedTurnRow.corr);
 
-		// =====================================================================
-		// TASK 3 — WR-01: cheap.advisor, closing the "cheap leg is unproven"
-		// adjudication gap. `max.reviewer` above (Task 2) proves the single-
-		// shot MECHANISM; it says nothing about `cheap`'s OWN role map, and
-		// nothing anywhere else in this file ever serves a turn in cheap mode
-		// at all. `ROLE_MAP.cheap.advisor`'s first candidate
-		// (deepseek/deepseek-v4-pro) is deliberately NOT a `CHAIN` member
-		// (CHAIN only knows deepseek-v4-FLASH) and is distinct from
-		// `balanced.advisor`'s Bedrock Claude -- so this is a route no other
-		// case in this file can be mistaken for.
-		// =====================================================================
+		// cheap.advisor: its first candidate is no CHAIN member and differs from balanced.advisor, so no other route here
+		// can be mistaken for it.
 
-		// Switch back to balanced FIRST, purely so the session's own executor
-		// sits on the FLASH tier (deepseek-v4-flash) -- a different id than
-		// cheap.advisor's PRO-tier candidate (deepseek-v4-pro), which happens
-		// to be byte-identical to max's OWN executor candidate. Without this,
-		// "the advisor route differs from the session's own executor" would be
-		// comparing deepseek-v4-pro against deepseek-v4-pro and would be
-		// vacuously true for the wrong reason.
+		// Back on balanced first, so the session executor (flash tier) cannot equal cheap.advisor's pro-tier candidate.
 		await balancedCommand.handler("", ctx);
-		// The routing module's OWN state, set directly (not via the /cheap
-		// command) so this task exercises cheap's role map without a second
-		// settings.json write or a second model_select event to reason about --
-		// ROADMAP criterion 1's claim under test here is "cheap's role map
-		// resolves and dispatches correctly", not "the /cheap command also
-		// switches the executor", which Task 1's own two cases already prove
-		// for balanced/max.
+		// Set the routing state directly: the claim is cheap's role map, not the /cheap command, which Task 1 covers.
 		setMode("cheap");
 		setEscalated(false);
 
@@ -360,12 +254,7 @@ async function runFixture(): Promise<Run> {
 
 		const executorModelAtAdvisorCall = { provider: ctx.model?.provider, id: ctx.model?.id };
 
-		// cheap.advisor's resolved candidate (deepseek/deepseek-v4-pro) is
-		// byte-identical to maxExecutor's ModelRef, so it already resolves
-		// against executorFaux's own registered "deepseek" native provider and
-		// its already-granted auth -- no new provider registration needed, only
-		// a third scripted response appended to the SAME queue Task 1's two
-		// switches already consumed two entries from.
+		// Same ModelRef as maxExecutor, so it resolves against the already-authed provider; one more scripted response.
 		executorFaux.appendResponses([fauxAssistantMessage("advisor-nested-reply", { stopReason: "stop" })]);
 
 		const turnsCountBeforeAdvisor = readRows<TurnsRow>(turnsFile).length;
@@ -415,20 +304,12 @@ async function runFixture(): Promise<Run> {
 
 let run: Run;
 let settingsDir: string;
-// WR-05 (iteration 3): captured so `afterAll` can RESTORE this suite's own
-// `PI_CODING_AGENT_DIR` guard instead of `delete`-ing it -- see
-// `tests/setup/agent-dir.ts`'s own docstring ("must restore this suite
-// value afterward, never merely delete it -- deleting would punch a hole
-// in this guard for the REST of that file's cases"). Matches the shape
-// `mode-switch.test.ts` and `agent-overrides.test.ts` already use.
+// Captured so `afterAll` restores the suite's PI_CODING_AGENT_DIR guard (tests/setup/agent-dir.ts) rather than deleting it.
 let suiteAgentDir: string | undefined;
 
 describe("ROUTE-10 -- the wire dump proves the intended model served the turn", () => {
 	beforeAll(async () => {
-		// See the module docstring's "WHY PI_CODING_AGENT_DIR IS SET" section --
-		// a successful executor switch also writes settings.subagents.
-		// agentOverrides, which defaults to this machine's real global Pi
-		// settings file when this variable is unset.
+		// A successful switch writes settings.subagents.agentOverrides, which would otherwise land in this machine's real settings.
 		suiteAgentDir = process.env.PI_CODING_AGENT_DIR;
 		settingsDir = mkdtempSync(join(tmpdir(), "kypi-wire-proof-settings-"));
 		process.env.PI_CODING_AGENT_DIR = settingsDir;
@@ -494,10 +375,7 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 			"the turn row's model does not name max's executor candidate",
 		).toBe(run.maxExecutor.id);
 
-		// THE PROOF THAT MAKES CASE 1 MEAN ANYTHING: a single switch could hold
-		// even for a router that does nothing, if the session's starting model
-		// happened to already be the target. Two switches to two DIFFERENT
-		// observed models is what closes that gap.
+		// Two switches to two different observed models: one switch holds even for a router that does nothing.
 		expect(
 			run.firstTurnRowAfterSwitch2?.model,
 			"the two switches produced the SAME observed model on the wire -- the proof above would " +
@@ -660,7 +538,7 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 	});
 
 	// -------------------------------------------------------------------------
-	// Task 3 -- WR-01: cheap's own leg, closed
+	// Task 3 -- cheap's own leg
 	// -------------------------------------------------------------------------
 
 	it('case 10 -- cheap.advisor leaves exactly one nested turn row naming cheap\'s OWN route, not a CHAIN member and not the session\'s executor', () => {
@@ -685,11 +563,7 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 				"cheap.advisor's own resolved candidate",
 		).toBe(run.advisorRef.id);
 
-		// Paired distinctness (WR-01's own requirement): this is ROUTING, not
-		// the session's own executor model leaking through. The fixture
-		// deliberately switched the executor back to balanced's flash-tier
-		// model before this call so the two ids cannot coincide by construction
-		// (see runFixture's own TASK 3 comment for why that switch is needed).
+		// Routing, not the session's own executor leaking through: the fixture made the two ids distinct.
 		expect(
 			run.advisorTurnRow?.model,
 			"the nested advisor row's model is the SAME as the session's own executor model at the time " +
@@ -697,12 +571,7 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 				"role map if the two were never distinct",
 		).not.toBe(run.executorModelAtAdvisorCall.id);
 
-		// CR-02's own concern, restated as a positive here: cheap.advisor's
-		// candidate is NOT a CHAIN member (CHAIN only knows deepseek-v4-flash),
-		// so this proof is NOT running through callWithFallback's
-		// restart-at-CHAIN[0] path -- it is impossible for this assertion to
-		// pass on the strength of a hardcoded chain head, unlike the reviewer
-		// route WR-01 originally flagged.
+		// Not a CHAIN member, so this cannot pass on callWithFallback's restart-at-CHAIN[0] path.
 		expect(run.advisorRef.id).not.toBe("deepseek-flash");
 	});
 

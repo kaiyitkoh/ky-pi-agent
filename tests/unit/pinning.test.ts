@@ -1,17 +1,7 @@
 /**
- * BOOT-08: nothing in this repo's dependency surface may drift.
- *
- * Four independent claims, each asserted so that breaking it goes red:
- *
- *   1. No range operator anywhere in the dependency maps.
- *   2. `package-lock.json` is tracked (and `npm-shrinkwrap.json` is not used).
- *   3. The six toolchain pins match Pi core 1.1.0's own devDependencies.
- *   4. Every third-party package source recorded for Pi carries a ref.
- *
- * Scope boundary: CI action SHA pinning is a real BOOT-08 obligation and it is
- * NOT asserted here -- it belongs to Plan 08's `tests/unit/ci-pinning.test.ts`.
- * Keeping it out means this file never has to tolerate a missing workflow file,
- * and "tolerating absence" is how a pinning test becomes a vacuous pass.
+ * Nothing in the dependency surface may drift: no range operator, a tracked package-lock.json, toolchain pins matching
+ * Pi core's own devDependencies, and a ref on every third-party Pi package source. CI action pinning is
+ * tests/unit/ci-pinning.test.ts.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -37,34 +27,9 @@ function depMap(field: string): Record<string, string> {
 }
 
 /**
- * The five host-provided peers.
- *
- * These are the ONLY keys in the whole manifest allowed to carry `"*"`, and only
- * inside `peerDependencies`. This is not a pin regression and a future reader
- * must not "fix" it:
- *
- *   - `docs/packages.md:171` mandates the `"*"` range for peers.
- *   - At RUNTIME none of them is ours: jiti aliases every one to Pi's own
- *     bundled copy at load time (`loader.ts:118-140`), so the version that
- *     actually executes is the host's, whatever we wrote here.
- *   - Bundling or pinning them creates a SECOND module instance and breaks
- *     `instanceof` across the extension boundary.
- *
- * What this comment USED to say, and what is false: "Peers are never installed
- * by us." npm 7+ installs the root project's own `peerDependencies`, and
- * `npm install --omit=dev` -- the exact command Pi runs inside a clone of this
- * repo (`package-manager.ts:1829`) -- adds 101 packages to a fresh clone,
- * including four of the five peers (`pi-coding-agent` alone is resolved through
- * the devDependency edge and marked `dev` in the lock), plus the AWS SDK,
- * `openai` and `@anthropic-ai/sdk` [VERIFIED: executed 2026-08-13, fresh clone,
- * npm 11.13.0]. Every consumer of `pi install <this repo url>` downloads them.
- *
- * So the BOOT-08 obligation for these five is discharged by
- * `package-lock.json`, and ONLY by it -- the lock's non-dev entries are the one
- * thing standing between a `"*"` range and "whatever is latest today". That is
- * asserted below rather than assumed. `devDependencies` pins what the
- * development machine builds against, which is a different guarantee.
- * [RESEARCH.md 8.3 tension 1]
+ * The host-provided peers: the only `"*"` ranges allowed (docs/packages.md:171), because jiti aliases each to Pi's own
+ * copy at load time and bundling one breaks `instanceof`. `npm install --omit=dev` still installs them into a clone, so
+ * package-lock.json is their only pin, asserted below.
  */
 const PEER_NAMES = [
 	"@earendil-works/pi-agent-core",
@@ -83,15 +48,7 @@ const RANGE_OPERATOR = /[\^~*><]|\|\||\s-\s/;
 /** Maps that must be exact. `peerDependencies` is deliberately excluded. */
 const EXACT_FIELDS = ["dependencies", "devDependencies", "optionalDependencies"] as const;
 
-/**
- * Pi core 0.84.1's own devDependencies, taken deliberately over the registry
- * latest. At research time (2026-08-13) the latest published versions were
- * typescript 7.0.2, vitest 4.1.10, @types/node 26.2.0 and typebox 1.3.13 --
- * all rejected. Type-only compatibility with Pi's shipped `.d.ts` is what
- * matters, so we match Pi rather than npm. Recorded here as literals so that
- * moving off them is a decision someone makes, not an accident someone commits.
- * [RESEARCH.md "Standard Stack"]
- */
+/** Pi core's own devDependencies rather than npm latest: type compatibility with Pi's `.d.ts` is what matters. */
 const REQUIRED_DEV_PINS: Record<string, string> = {
 	"@earendil-works/pi-coding-agent": "1.1.0",
 	"@earendil-works/pi-ai": "1.1.0",
@@ -103,25 +60,8 @@ const REQUIRED_DEV_PINS: Record<string, string> = {
 };
 
 /**
- * `dependencies` (runtime, installed by `npm install --omit=dev`) mirrors
- * `REQUIRED_DEV_PINS`' shape for `unbash@4.0.10` and `typescript@5.9.3` (the quality
- * extension imports typescript at load time).
- *
- * Why this cannot live in `devDependencies`: Pi installs a consumer's clone
- * with `npm install --omit=dev` (CLAUDE.md, "Runtime deps must be in
- * `dependencies`"; `docs/packages.md`), so anything in `devDependencies`
- * simply never reaches a machine that installs this repo as a Pi package.
- * `unbash` is the AST parser Phase 4's safety guard runs on every `bash`
- * tool call -- it sits in the tool-execution path, not the dev toolchain.
- *
- * Why this is governed at all: `unbash` is the one package audited in
- * `.planning/phases/04-safety-deployment-guardrails/04-RESEARCH.md`
- * ("Package Legitimacy Audit" -- Approved, slopcheck `[OK]`). An ungoverned
- * `dependencies` block is exactly where the next, unaudited package would
- * land silently -- the same reasoning `REQUIRED_DEV_PINS` above already
- * states for the six toolchain pins. `EXACT_FIELDS` (`:84`) already forbids
- * a range operator on `dependencies`; this constant additionally pins WHICH
- * keys are allowed to be there, and at what version.
+ * The only runtime `dependencies` allowed, at exact versions: Pi installs with `--omit=dev`, so tool-path packages such
+ * as unbash must live here, and an ungoverned block is where an unaudited package would land silently.
  */
 const REQUIRED_RUNTIME_PINS: Record<string, string> = {
 	typescript: "5.9.3",
@@ -129,35 +69,14 @@ const REQUIRED_RUNTIME_PINS: Record<string, string> = {
 };
 
 /**
- * True when a Pi package source cannot silently move under you.
- *
- * `pi update --extensions` reconciles an existing install to the configured
- * ref; versioned npm specs are pinned and skipped, and only `…@ref` git forms
- * are pinned at all (`docs/packages.md:90`). Anything else is a moving target
- * that ships new code onto a laptop holding live cloud credentials.
- *
- * Exported because Phase 7 needs exactly this lint when the real extension set
- * is written into `.pi/settings.json`; writing it now costs nothing and means
- * Phase 7 inherits a proven function instead of a fresh regex.
- *
- * Known limitation, stated rather than hidden: the git branch accepts any `@`
- * after the scheme, so a URL carrying userinfo (`https://user@host/o/r`) would
- * be judged pinned. Pi's own accepted forms do not use userinfo, and tightening
- * it risks rejecting legitimate refs; the residual is documented instead.
+ * True when a Pi package source cannot move under you: a versioned npm spec or a git source with `@ref`
+ * (docs/packages.md:90). Known limit: a git URL with userinfo (`user@host`) is judged pinned.
  */
 export function isPinnedPackageSpec(spec: string): boolean {
 	return /^npm:.+@[0-9]/.test(spec) || /^(git:|https:\/\/|http:\/\/|ssh:\/\/|git:\/\/).+@.+$/.test(spec);
 }
 
-/**
- * The single documented exemption.
- *
- * BOOT-02 mandates the literal command `pi install
- * https://github.com/kaiyitkoh/ky-pi-agent`, and for our OWN repo an unrefed
- * source is the desired behaviour -- we control the default branch and want
- * `pi update` to reconcile to it. Every THIRD-PARTY source must carry a ref.
- * [RESEARCH.md 8.3 tension 2]
- */
+/** Our own repo, installed unrefed on purpose so `pi update` follows its default branch; third-party sources need a ref. */
 const OWN_REPO_URL = "https://github.com/kaiyitkoh/ky-pi-agent";
 
 function isOwnRepo(spec: string): boolean {
@@ -185,8 +104,7 @@ describe("BOOT-08.1 -- no range may drift", () => {
 			expect(peers[name]).toBe("*");
 		}
 
-		// The allow-list is an allow-list: a peer name reappearing with `*` in a
-		// map we install from is not covered by it.
+		// An allow-list: a peer name reappearing with `*` in an installed map is not covered by it.
 		for (const field of EXACT_FIELDS) {
 			for (const [name, range] of Object.entries(depMap(field))) {
 				expect(
@@ -204,26 +122,12 @@ describe("BOOT-08.2 -- the resolved tree is under version control", () => {
 	});
 
 	it("does not use npm-shrinkwrap.json", () => {
-		// Shrinkwrap only matters for packages published to npm, which is a
-		// Deferred Idea. Pi consumes this repo by `git clone` + `npm install` at
-		// the clone root, where the lockfile already applies.
-		// [RESEARCH.md "Standard Stack" > Alternatives considered]
+		// Shrinkwrap only matters for npm-published packages; Pi consumes this repo by clone, where the lockfile applies.
 		expect(existsSync(join(ROOT, "npm-shrinkwrap.json"))).toBe(false);
 		expect(trackedFiles("npm-shrinkwrap.json")).toEqual([]);
 	});
 
-	/**
-	 * The lock's NON-DEV `@earendil-works/*` entries are the whole pin for the
-	 * `"*"` peers.
-	 *
-	 * `npm install --omit=dev` in a clone installs the root's peerDependencies
-	 * -- 101 packages, four of the five peers among them
-	 * [VERIFIED: executed 2026-08-13, fresh clone, npm 11.13.0]. `"*"` means
-	 * "whatever is latest" the instant the lock stops constraining it, so this
-	 * is where the BOOT-08 obligation for those packages actually lives. Only
-	 * non-dev entries are checked: a dev-only tree is not what a consumer of
-	 * `pi install <url>` receives.
-	 */
+	/** The lock's `@earendil-works/*` entries are the only pin the `"*"` peers have. */
 	const PI_FAMILY_PIN = "1.1.0";
 
 	interface LockEntry {
@@ -233,19 +137,14 @@ describe("BOOT-08.2 -- the resolved tree is under version control", () => {
 
 	const lockPackages = (readJson("package-lock.json").packages ?? {}) as Record<string, LockEntry>;
 
-	/** Non-dev `node_modules/@earendil-works/<pkg>` entries, path -> version. */
+	/** `node_modules/@earendil-works/<pkg>` lock entries, path -> version. */
 	const runtimePiEntries = Object.entries(lockPackages).filter(
 		([path]) => /^node_modules\/@earendil-works\/[^/]+$/.test(path),
 	);
-	// 08.1-01 (Pi 1.1.0): Pi 1.1.0 ships no npm-shrinkwrap.json (D-07), so npm now
-	// marks every Pi-family lock entry dev:true (they are explicit exact
-	// devDependencies). The entries are still the only lock-level pin; the
-	// non-dev filter that held under 0.84.1's shrinkwrap is therefore dropped.
+	// No dev filter: without a Pi shrinkwrap npm marks every Pi-family entry dev:true, yet they remain the only pin.
 
 	it("locks at least one non-dev @earendil-works entry", () => {
-		// Without this, the loop below passes over an empty set -- the exact
-		// vacuity this file exists to avoid. A lock format change that renames
-		// `packages` would otherwise go unnoticed.
+		// Without this the loop below could pass over an empty set.
 		expect(
 			runtimePiEntries.length,
 			"no non-dev @earendil-works entry in package-lock.json; either the lock " +
@@ -296,9 +195,7 @@ describe("BOOT-08.5 -- the runtime dependencies block is governed exactly like d
 	}
 
 	it("declares no runtime dependency beyond the audited pin", () => {
-		// Same reasoning as BOOT-08.3's dev-pin equivalent: anything extra has not
-		// been through the Package Legitimacy Audit, and `dependencies` is what a
-		// consumer's `npm install --omit=dev` actually installs.
+		// Anything extra has not been through the Package Legitimacy Audit, and this is what `--omit=dev` installs.
 		expect(Object.keys(runtime).sort()).toEqual(Object.keys(REQUIRED_RUNTIME_PINS).sort());
 	});
 
@@ -312,9 +209,7 @@ describe("BOOT-08.5 -- the runtime dependencies block is governed exactly like d
 });
 
 describe("BOOT-08.4 -- package sources carry a ref", () => {
-	// Proven against a table so the lint is live today, while
-	// `.pi/settings.json` still has no `packages` array. A lint that only runs
-	// when data happens to exist is a lint nobody has ever executed.
+	// Proven against a table so the lint runs even while settings carry no packages.
 	const PINNED: string[] = [
 		"npm:pi-subagents@0.47.1",
 		"npm:@scope/pkg@1.2.3",
@@ -360,8 +255,7 @@ describe("BOOT-08.4 -- package sources carry a ref", () => {
 		const settings = readJson(join(".pi", "settings.json"));
 		const packages = settings.packages;
 		if (packages === undefined) {
-			// Legitimately empty today (Plan 01 created `{}`); the lint above is
-			// what proves the rule, and this branch is what applies it later.
+			// Legitimately absent; the table above proves the rule.
 			expect(packages).toBeUndefined();
 			return;
 		}

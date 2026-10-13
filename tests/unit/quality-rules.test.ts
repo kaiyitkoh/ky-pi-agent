@@ -1,27 +1,7 @@
 /**
- * QUAL-01 — the six anti-pattern rules, proven live in both directions.
- *
- * Four groups, following `chokepoint-lint.test.ts`/`contributing-boundary.test.ts`'s
- * vacuity-guard discipline: a rule proven only against a clean corpus is a rule
- * that could be uniformly dead and nothing here would notice.
- *
- *   A — per-rule POSITIVE: an inline fixture (never a file under a scanned
- *       tree — see `SCAN_EXEMPT_PREFIXES`'s own docstring for why) each rule
- *       must fire against.
- *   B — per-rule NEGATIVE, drawn from this repository's own deliberate style:
- *       a documented NEVER-THROWS catch, a named byte constant, a
- *       not-in-the-callee-set loop call, a `TODO` sitting inside a string.
- *   C — the dead-rule guard: one combined fixture trips all six; a rule that
- *       matches nothing here is a rule that could be silently broken.
- *   D — the false-positive sweep: run every rule over this repository's own
- *       real `.pi/extensions/` sources and record the measured error-tier
- *       count, per `08-RESEARCH.md` Pitfall 2 ("record the real number, do
- *       not tune to zero by weakening the rule into uselessness").
- *
- * Plus: both directions of `SCAN_EXEMPT_PREFIXES` on the SAME text (differing
- * only in `path`), both directions of `SUPPRESSION_MARKER` (reasoned vs bare),
- * and a parse-safety case for T-08-04 (a syntactically broken source must not
- * throw `runAntiPatternRules`).
+ * The six anti-pattern rules, live in both directions: each fires on an inline fixture, stays quiet on this repo's
+ * deliberate style, all six trip one combined fixture, and the real-source error count is a recorded number. Also
+ * covers both directions of SCAN_EXEMPT_PREFIXES and SUPPRESSION_MARKER, and that a broken source does not throw.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -286,88 +266,11 @@ describe("QUAL-01 Group C — dead-rule guard", () => {
 // ---------------------------------------------------------------------------
 
 /**
- * The measured error-tier finding count `runAntiPatternRules` produces
- * against this repository's own `.pi/extensions/` sources, as of the date
- * below. Per `08-RESEARCH.md` Pitfall 2: this is a RECORDED NUMBER, not a
- * target tuned to zero. If it rises, either the new source genuinely
- * introduced the anti-pattern (fix the source) or a rule needs narrowing
- * (narrow it and record what shape forced the narrowing) — it is not
- * lowered by silently widening an exemption. `toBe`, not merely
- * `toBeLessThanOrEqual` (see the second `it` below, WR-07): a DROP also
- * requires a deliberate edit here, the same discipline `workflow-budgets.
- * test.ts` uses for its own ratchets (WR2-03) — headroom accumulated by a
- * silent fix is exactly the slack a recorded-number budget exists to
- * prevent from hiding.
- *
- * why: originally measured 2026-08-15 against the Phase 1-7 `.pi/
- * extensions/` tree (this plan's own `quality/rules.ts` did not appear in
- * it yet — the first measurement run found 4 `shipped-todo`
- * self-references inside this module's own docstrings describing the very
- * tokens it detects, which was treated as a genuine finding on real source
- * and fixed by rewording the docstrings to reference `SHIPPED_TODO_TOKENS`
- * by name instead of spelling the four literal tokens in prose — not by
- * narrowing the rule or widening an exemption).
- *
- * WR-07 (code-review fix pass): the assertion scans the CURRENT tracked
- * tree (`trackedFiles(".pi/extensions")`), which by the end of this phase
- * includes eight `quality/*.ts` files (3,406+ lines) that landed AFTER the
- * measurement above — so the claim "this plan's own quality/rules.ts does
- * not appear in it" no longer described what the assertion actually scans.
- * RE-MEASURED 2026-08-15 against the current tree (51 tracked `.ts` files):
- * still exactly 22, UNCHANGED. All eight `quality/*.ts` files contribute
- * ZERO error-tier findings — the new source did not move this number
- * either direction. The 22 remain pre-existing Phase 1-7 code, same
- * per-rule breakdown as originally recorded: `swallowed-exception` (17:
- * checkpoint/git.ts x3, checkpoint/index.ts x1, diagnostics/budget.ts x2,
- * diagnostics/call-model.ts x1, diagnostics/index.ts x1, loop-police/
- * loop-police.ts x1, providers/index.ts x1, qoder/client.ts x1, qoder/
- * index.ts x1, routing/agent-overrides.ts x1, routing/index.ts x1, safety/
- * index.ts x1, workflows/index.ts x2) and `magic-number` (5: loop-police/
- * loop-police.ts x2, todo.ts x3, e.g. todo.ts's repeated `5`-item
- * truncation constant). Fixing them is out of this plan's scope
- * (`08-02-PLAN.md` builds and proves the rules; it does not remediate six
- * phases of pre-existing code) and is left for a future gate-integration
- * plan to triage.
- *
- * 08.1-07 RE-MEASURE (2026-10-13): 22 -> 67. Phase 08.1 vendored upstream
- * pi-background-tasks under `.pi/extensions/background-tasks/` (tracked), which
- * adds 45 findings: `magic-number` x42 (e.g. src/core/common.ts) and
- * `swallowed-exception` x3. They are third-party code kept byte-faithful to
- * upstream, so they are recorded here rather than remediated. The 22
- * pre-existing findings are unchanged (swallowed-exception 17, magic-number 5).
- *
- * 12.1 RE-MEASURE (2026-10-13): 67 -> 72 -> 65. Phase 12.1 added five error
- * findings, all real: deliberate best-effort catches with no documented
- * contract (routing/index.ts model_select, input and session_shutdown;
- * safety/index.ts sessionIdOf; safety/subagents.ts disposeChildGuard). The
- * review fixes then repeated a `/ 4` token estimate in routing/guard.ts (two more).
- * Each catch now carries the NEVER THROWS contract that says why swallowing is
- * correct there, and guard.ts names CHARS_PER_TOKEN. The older routing/index.ts
- * session_start catch got the same contract. Remaining: 45 vendored background-tasks
- * findings plus 20 authored ones (swallowed-exception 15: checkpoint/git.ts x3,
- * checkpoint/index.ts x1, diagnostics/budget.ts x2, diagnostics/call-model.ts
- * x1, diagnostics/index.ts x1, loop-police/loop-police.ts x1,
- * providers/index.ts x1, qoder/client.ts x1, qoder/index.ts x1,
- * routing/agent-overrides.ts x1, workflows/index.ts x1, workflows/settle.ts x1;
- * magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
- *
- * RE-MEASURE (2026-10-14): 68 -> 65 -> 61. The safety refactor added three
- * (safety/index.ts prune catch, safety/paths.ts repeated depth literal x2),
- * cleared again by a NEVER THROWS contract and a destructured match. The
- * routing/providers/qoder pass then documented the contracts of four
- * best-effort catches (providers/index.ts, qoder/client.ts, qoder/index.ts,
- * routing/agent-overrides.ts). Remaining: 45 vendored plus 16 authored
- * (swallowed-exception 11: checkpoint/git.ts x3, checkpoint/index.ts x1,
- * diagnostics/budget.ts x2, diagnostics/call-model.ts x1, diagnostics/index.ts
- * x1, loop-police/loop-police.ts x1, workflows/index.ts x1, workflows/settle.ts
- * x1; magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
- *
- * RE-MEASURE (2026-10-14): 61 -> 57. The diagnostics pass routed its error rows
- * through one NEVER THROWS writeErrorRow and documented the call-model and
- * /budget containment contracts. Remaining: 45 vendored plus 12 authored
- * (swallowed-exception 7: checkpoint/git.ts x3, checkpoint/index.ts x1,
- * loop-police/loop-police.ts x1, workflows/index.ts x1, workflows/settle.ts x1;
- * magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
+ * The recorded error-tier count over this repo's own `.pi/extensions/` sources: a measurement, not a target. A rise
+ * means fix the source or narrow a rule (never widen an exemption); a drop must lower this too. Current breakdown: 45
+ * vendored background-tasks findings, plus swallowed-exception 7 (checkpoint/git.ts x3, checkpoint/index.ts x1,
+ * loop-police/loop-police.ts x1, workflows/index.ts x1, workflows/settle.ts x1) and magic-number 5 (loop-police x2,
+ * todo.ts x3).
  */
 const ERROR_BUDGET_ON_OWN_SOURCE = 57;
 
@@ -400,14 +303,7 @@ describe("QUAL-01 Group D — false-positive sweep over this repo's real sources
 	});
 
 	it("WR-07: the recorded budget IS the measured count, exactly -- a DROP requires an edit here too", () => {
-		// Same discipline workflow-budgets.test.ts uses (WR2-03): `toBe`, not
-		// `toBeLessThanOrEqual(actual + slack)`. Headroom accumulated by a real
-		// fix (a `catch` block that stops swallowing, a magic number that gets
-		// named) is exactly the slack a recorded-number budget exists to
-		// prevent from hiding -- so a DROP in the real count must ALSO force a
-		// deliberate edit to this constant, in the same commit as the fix that
-		// earned it, not a silent widening of the margin between recorded and
-		// actual.
+		// toBe, not <=: a real fix must lower the recorded number in the same commit, or the slack hides.
 		const findings = runAntiPatternRules(sources);
 		const errorFindings = findings.filter((f) => f.tier === "error");
 		expect(
@@ -458,7 +354,7 @@ describe("QUAL-01 — quality-allow suppression, both directions", () => {
 });
 
 // ---------------------------------------------------------------------------
-// T-08-04 — a syntactically invalid source must not crash the aggregator
+// A syntactically invalid source must not crash the aggregator
 // ---------------------------------------------------------------------------
 
 describe("QUAL-01 — parse safety (T-08-04)", () => {

@@ -1,60 +1,8 @@
 /**
- * GATE-08 — the seeded-defect calibration run, including its negative
- * controls.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE PROVES, AND IN WHAT ORDER
- * ---------------------------------------------------------------------------
- *   A. Corpus integrity — `SEEDED_DEFECTS` has exactly six entries, one per
- *      `DEFECT_CLASSES` id, importing it performs no file-system write, and
- *      EVERY fixture is invisible to the deterministic stage
- *      (`runAntiPatternRules` reports zero ERROR-tier findings against it).
- *      This last point is what makes "the model reviewer earns its cost" a
- *      MEASURED claim: if a fixture were caught deterministically, GATE-08
- *      would be measuring the wrong layer.
- *   B. Calibration — the full corpus, as ONE combined review contract, driven
- *      through `runReview` SIX times with six differently-scripted faux
- *      reviewers: a KNOWN-SUBSET reviewer (WR3-02: catches exactly 2 of 6
- *      against its own unmodified text — see `KNOWN_SUBSET_CAUGHT`'s own
- *      docstring for why this is 2, not the fixture's originally-scripted
- *      3, and why it is not being re-inflated to chase that number back —
- *      proving `scoreCalibration` reports a real, non-trivial number), a
- *      BLIND reviewer (approves everything, zero findings — the negative
- *      control that proves the scorer can report a bad number), a SHOTGUN
- *      reviewer (twenty vague findings — the control that proves quantity
- *      does not substitute for specificity), (WR-03) a NAME-DROPPING
- *      SHOTGUN reviewer (one finding per touched file, naming only that
- *      file's own conspicuous symbol with no defect description — the
- *      control that proves naming a symbol is not identifying a defect;
- *      before WR-03's fix this exact shape scored catchRate === 1.0 having
- *      caught nothing), (WR2-05) a BOILERPLATE KITCHEN SINK (one sentence,
- *      one needle per defect class, reused across all six files — before
- *      the fix, catchRate === 1.0 having caught nothing), and (WR3-01) a
- *      TWO-NEEDLE KITCHEN SINK (the same shape with two needles per class —
- *      before that fix, catchRate === 1.0 having caught nothing again).
- *   C. Reproducibility — the whole calibration group is run TWICE, against
- *      two independently-built temp repos and faux sessions, and the
- *      resulting `CalibrationResult` objects are asserted identical
- *      pairwise. A catch rate that is not reproducible is not a measurement.
- *
- * ---------------------------------------------------------------------------
- * WHY ONE COMBINED CONTRACT, NOT SIX SEPARATE runReview CALLS
- * ---------------------------------------------------------------------------
- * A real review pass reviews a change once and reports however many
- * findings it finds, covering however many of the change's defects it
- * catches (or misses). Building six defects into ONE temp repo and driving
- * ONE `runReview` call per scenario mirrors that shape — `scoreCalibration`
- * grades one reviewer pass's findings against all six expectations at once,
- * exactly as it would against a real multi-file change.
- *
- * ---------------------------------------------------------------------------
- * NO LIVE REVIEWER, NO LIVE PROVIDER CALL
- * ---------------------------------------------------------------------------
- * Every reviewer here is a scripted `fauxProvider` response, per the
- * autonomous-run rules. The numbers this file produces measure the SCORER
- * and the WIRING, never a real model's judgement — see `calibration.ts`'s
- * own "WHAT THIS DOES NOT PROVE" section. The live run is `RB-08-03`,
- * OUTSTANDING.
+ * The seeded-defect calibration run with its negative controls. A: the six fixtures are each invisible to the
+ * deterministic stage, so the catch rate measures the model reviewer. B: one combined contract is reviewed by six
+ * scripted reviewers (a known subset, blind, shotgun and three answer-key-gaming shapes). C: two independent builds
+ * must score identically. Faux reviewers only: this measures the scorer and wiring, never a real model.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -92,20 +40,8 @@ describe("GATE-08 corpus integrity", () => {
 	});
 
 	/**
-	 * CR3C-01 (`08-REVIEW-R3CHECK.md`): the corpus-wide guard against the exact
-	 * shape found there -- two needles WITHIN one expectation that are not
-	 * mutually independent because one is a literal substring of the other,
-	 * or a shared word bridges the tail of one directly into the head of the
-	 * other (the `"structurally cannot"` + `"cannot fail"` -> `"structurally
-	 * cannot fail"` shape). This is a MECHANICAL, sound check -- it has zero
-	 * false positives against the six real entries below (verified by hand
-	 * against every pair before landing this test) -- but it is NOT a claim
-	 * of completeness: `escaped-side-effect`'s OTHER pre-fix pair
-	 * (`"writes into the real"` + `"developer's own home directory"`) shared
-	 * no word or substring at all, so no generic string check catches it;
-	 * that pair is guarded instead by the SIXTH CONTROL and REGRESSION tests
-	 * below, which pin the exact historical exploit strings. Two guards,
-	 * different mechanisms, same finding -- neither alone is exhaustive.
+	 * Two needles in one expectation must be independent: neither a substring of the other nor bridged by a shared word.
+	 * Sound but not complete; the exploit-string controls below cover the pairs no string check can see.
 	 */
 	function needlesOverlap(a: string, b: string): boolean {
 		if (a === b) return false;
@@ -198,31 +134,8 @@ describe("GATE-08 corpus integrity", () => {
 const REQUIREMENT_ID = "GATE-08";
 
 /**
- * WR3-02 (`08-REVIEW.md` iteration 3): the two defect classes the
- * "known subset" scripted reviewer's UNMODIFIED text actually catches under
- * today's matcher.
- *
- * This fixture originally shipped scripted to catch exactly 3 of 6
- * (`false-label` included) against a matcher that required only ONE
- * `mustMentionAny` needle. When WR2-05 (`bb2a67c`) raised the bar to TWO
- * needles, `false-label`'s `concreteFailure` did not naturally contain a
- * second one -- so, in the SAME commit that raised the bar, its text was
- * extended with an additional clause ("meaning the label survived its own
- * mutation") lifted from this corpus's own `mustMentionAny` answer key
- * (`seeded-defects/index.ts:401`), which kept the reported number at 0.5
- * BY CONSTRUCTION, not by measurement. `08-REVIEW.md` (WR3-02, iteration 3)
- * scored the pre-`bb2a67c` text against the post-`bb2a67c` matcher and got
- * 2/6 = 0.333..., not 3/6 = 0.5.
- *
- * The `false-label` finding below has been reverted to its original,
- * unmodified text. It no longer catches under `MIN_DISTINCT_NEEDLES = 2`
- * -- one needle ("regardless of input") is not enough. This fixture is
- * therefore scripted to catch exactly 2 of 6, honestly, and the number
- * everywhere it is stated (`docs/QUALITY.md`, `docs/RUNBOOK.md`,
- * `.planning/REQUIREMENTS.md`) has been updated to match. The fixture's
- * text is NOT being re-inflated to chase 3/6 back -- see this file's own
- * header and the autonomous-run instructions this fix pass operated under:
- * the catch rate is a measurement, not a target.
+ * The classes the known-subset reviewer's unmodified text catches: 2 of 6. Its text is deliberately not extended to
+ * clear the two-needle bar; the catch rate is a measurement, not a target.
  */
 const KNOWN_SUBSET_CAUGHT: readonly string[] = ["fabricated-evidence", "absent-guard"];
 
@@ -256,13 +169,7 @@ function verdictFor(status: "Implemented" | "Partial" | "Missing", evidence: str
 	return { requirementId: REQUIREMENT_ID, status, evidence };
 }
 
-/**
- * The known-subset reviewer's submit_review arguments. WR3-02: the
- * `false-label` finding below is the ORIGINAL, UNMODIFIED text (as of
- * `ac0e427`, before `bb2a67c` extended it to clear the raised bar) -- it
- * genuinely catches exactly 2 of 6 under today's matcher, not 3. See
- * {@link KNOWN_SUBSET_CAUGHT}'s own docstring for the full disclosure.
- */
+/** The known-subset reviewer's submit_review arguments, unmodified text (see {@link KNOWN_SUBSET_CAUGHT}). */
 const KNOWN_SUBSET_ARGS = {
 	verdicts: [verdictFor("Partial", "src/evidence-claim.ts:1")],
 	findings: [
@@ -281,13 +188,7 @@ const KNOWN_SUBSET_ARGS = {
 		{
 			severity: "BLOCKER",
 			location: "src/parser-mutation-claim.test.ts:3",
-			// WR3-02: this is the ORIGINAL text, unedited since before WR2-05
-			// (`bb2a67c`) raised MIN_DISTINCT_NEEDLES to 2 -- it carries only ONE
-			// needle ("regardless of input") and no longer catches under today's
-			// matcher. It is deliberately NOT extended to clear the bar; doing so
-			// is the exact undisclosed coupling WR3-02 exists to reverse. A
-			// genuinely thorough finding for this defect would need a second,
-			// independently-descriptive needle it does not have here.
+			// One needle only ("regardless of input"), so it does not catch; deliberately left that way.
 			concreteFailure: "Comment claims MUTATION-VERIFIED but parseCommand always returns true regardless of input.",
 			suggestedFix: "Remove the false claim or make the test actually exercise parseCommand's logic.",
 		},
@@ -309,17 +210,8 @@ const BLIND_REVIEWER_ARGS = {
 };
 
 /**
- * The shotgun reviewer's submit_review arguments: twenty generic findings.
- *
- * Deliberately cycles through the SIX REAL touched files (`locationFile` of
- * every seeded defect) rather than an unrelated path — a vague finding that
- * also names the wrong file would pass this corpus's scorer for the wrong
- * reason (location mismatch, not vagueness), which would make the "vagueness
- * does not score" claim untested. With `location` genuinely correct, only
- * the ABSENCE of any `mustMentionAny` needle in `concreteFailure` is what
- * must keep these findings from catching anything — exactly the property
- * Falsification F1 (see this plan's SUMMARY) proves is load-bearing by
- * dropping the `mustMentionAny` check and watching this case turn red.
+ * Twenty vague findings over the real touched files: with every location correct, only the missing needles keep
+ * them from catching, so vagueness alone is what is tested.
  */
 const SHOTGUN_FINDING_COUNT = 20;
 const SHOTGUN_LOCATION_FILES = [
@@ -344,22 +236,8 @@ const SHOTGUN_REVIEWER_ARGS = {
 };
 
 /**
- * WR-03 -- THE NAME-DROPPING SHOTGUN, a THIRD control.
- *
- * This is the EXACT mutation the code review used to prove the pre-fix
- * matcher was gameable: instead of `SHOTGUN_REVIEWER_ARGS`'s uniformly vague
- * `concreteFailure`, each finding here names the touched file's own most
- * conspicuous SYMBOL (the same six identifiers the pre-fix `mustMentionAny`
- * arrays used verbatim: `markMigrationComplete`, `configuredHead`,
- * `homedir()`, `isGuardedCommand`, `isWithinRateLimit`, `MUTATION-VERIFIED`)
- * with no description of what is actually WRONG with it -- "X could use a
- * closer look" identifies nothing. Five of six fixture files contain exactly
- * one function, so naming "the file's only function" is trivially derivable
- * from the input alone, without having understood the defect. Before WR-03's
- * fix (bare-symbol needles), this control scored `catchRate === 1.0` --
- * 6/6 -- having caught nothing. After the fix (behavior-describing needles),
- * it must score `catchRate === 0`, proving the matcher now requires
- * identifying the DEFECT, not merely the symbol.
+ * Names each file's conspicuous symbol with no defect description, derivable from the input alone. Naming a symbol
+ * is not identifying a defect, so this must score 0.
  */
 const SHOTGUN_NAME_DROP_SYMBOLS = ["markMigrationComplete", "configuredHead", "homedir()", "isGuardedCommand", "isWithinRateLimit", "MUTATION-VERIFIED"];
 const SHOTGUN_NAME_DROP_ARGS = {
@@ -376,27 +254,8 @@ const SHOTGUN_NAME_DROP_ARGS = {
 };
 
 /**
- * WR2-05 (`08-REVIEW.md` iteration 2) -- THE BOILERPLATE KITCHEN SINK, a
- * FOURTH permanent control.
- *
- * One BLOCKER per touched file, correct `location`, and ONE boilerplate
- * `concreteFailure` reused VERBATIM for all six -- deliberately crafted so
- * that each of the six defect classes' `mustMentionAny` set has EXACTLY one
- * matching phrase inside it (`fabricated-evidence` <- "performs none";
- * `tautological-test` <- "cannot fail"; `escaped-side-effect` <- "writes
- * into the real"; `absent-guard` <- "never calls isGuardedCommand";
- * `symptomatic-fix` <- "always returns true"; `false-label` <- "regardless
- * of input"). Before WR2-05's `MIN_DISTINCT_NEEDLES` fix
- * (`calibration.ts`), this single boilerplate sentence scored
- * `catchRate === 1.0` -- 6/6 -- having identified zero actual defects; it is
- * NOT derivable from the input the way WR-03's name-drop control is
- * (constructing it requires the ANSWER KEY, i.e. reading this corpus's own
- * `mustMentionAny` arrays), which is why it was a Warning and not a repeat
- * Critical, but it is strictly more dangerous than the name-drop control:
- * it looks like genuine analysis prose, not a bare symbol name. After the
- * fix, it must score `catchRate === 0`, proving the matcher now requires
- * TWO independent needles, not merely one boilerplate phrase reused six
- * times.
+ * One boilerplate sentence reused for all six files, carrying exactly one needle per class (built from the answer
+ * key). Must score 0: a catch needs two independent needles.
  */
 const SHOTGUN_KITCHEN_SINK_CONCRETE_FAILURE =
 	"This code cannot fail; it performs none of the verification it claims, writes into the real home directory, " +
@@ -415,25 +274,8 @@ const SHOTGUN_KITCHEN_SINK_ARGS = {
 };
 
 /**
- * WR3-01 (`08-REVIEW.md` iteration 3) -- THE TWO-NEEDLE KITCHEN SINK, a
- * FIFTH permanent control.
- *
- * Raising `MIN_DISTINCT_NEEDLES` to 2 (WR2-05) only raised the exploit's
- * price, it did not close it: one boilerplate sentence, reused verbatim as
- * the `concreteFailure` of a finding for every one of the six touched
- * files, engineered to contain exactly TWO matching phrases per defect
- * class (constructing it still requires the corpus's own answer key, same
- * as WR2-05's control), scored `catchRate === 1.0` -- 6/6 -- having
- * identified zero actual defects, because the needles within each defect
- * class's own `mustMentionAny` set are near-synonyms, not independent
- * facts ("cannot fail" / "structurally cannot", "performs none" / "no
- * actual verification", "always returns true" / "unconditionally true",
- * "writes into the real" / "escapes the test"). `findingCatches` now also
- * rejects a finding whose text independently clears a DIFFERENT, unrelated
- * expectation's own needle bar -- which this sentence, by construction,
- * does for every one of the other five classes simultaneously, however
- * many of ITS OWN class's needles it also carries. After that fix, this
- * control must score `catchRate === 0`.
+ * The same boilerplate with two near-synonym needles per class. Must score 0: a finding that also clears another
+ * expectation's bar is rejected.
  */
 const TWO_NEEDLE_KITCHEN_SINK_CONCRETE_FAILURE =
 	"This code structurally cannot be trusted and cannot fail; it performs none of the verification it claims and " +
@@ -462,14 +304,7 @@ interface CalibrationSuiteResult {
 	twoNeedleKitchenSink: CalibrationResult;
 }
 
-/**
- * Builds a fresh temp repo + faux session, drives the combined corpus through
- * `runReview` SIX times (known-subset, blind, shotgun, WR-03's name-dropping
- * shotgun, WR2-05's boilerplate kitchen sink, WR3-01's two-needle kitchen
- * sink), and scores each result against the corpus's own expectations. A
- * fresh session per call is what makes the reproducibility check in group C
- * meaningful -- two INDEPENDENT builds, not one build read twice.
- */
+/** Drives the combined corpus through runReview once per scripted reviewer in a fresh repo and session, and scores each. */
 async function runCalibrationSuite(prefix: string): Promise<CalibrationSuiteResult> {
 	setMode("cheap");
 	setEscalated(false);
@@ -647,10 +482,7 @@ describe("GATE-08 calibration -- the full corpus driven through runReview", () =
 });
 
 // -----------------------------------------------------------------------------
-// CR3C-01 -- a SIXTH permanent control and a false-rejection regression, both
-// driven directly through scoreCalibration (no runReview, no faux session --
-// these are properties of the corpus and the scorer itself, not of any one
-// scripted reviewer transcript, so they do not need one).
+// Corpus and scorer properties, driven directly through scoreCalibration
 // -----------------------------------------------------------------------------
 
 describe("CR3C-01 -- the sixth control (a generic derivable phrase) and the false-rejection regression", () => {
@@ -661,14 +493,7 @@ describe("CR3C-01 -- the sixth control (a generic derivable phrase) and the fals
 		minimumSeverity: defect.expected.minimumSeverity,
 	}));
 
-	/**
-	 * WR3C-01 CONSEQUENCE B: before the needle fix, a single generic
-	 * boilerplate phrase -- DERIVABLE FROM THE INPUT ALONE, no answer key
-	 * required, unlike `SHOTGUN_KITCHEN_SINK`/`TWO_NEEDLE_KITCHEN_SINK` --
-	 * reused verbatim across all six touched files, having identified
-	 * nothing, scored a non-zero `catchRate` via exactly one class's own
-	 * non-independent needle pair. This is now the SIXTH permanent control.
-	 */
+	/** A generic phrase derivable from the input alone, reused across all six files, must catch nothing. */
 	const GENERIC_DERIVABLE_PHRASES = [
 		"This test structurally cannot fail.", // pre-fix: 1/6 via tautological-test
 		"It writes into the real developer's own home directory.", // pre-fix: 1/6 via escaped-side-effect
@@ -687,9 +512,7 @@ describe("CR3C-01 -- the sixth control (a generic derivable phrase) and the fals
 	}
 
 	it("MUTATION CHECK -- the sixth control is not vacuously green: under the OLD (pre-fix) needle sets it scored non-zero", () => {
-		// Reproduces CR3C-01's Consequence B against the actual old needle
-		// arrays (copied here, not imported -- the point is to prove the FIX
-		// moved the number, not to re-import code this commit just changed).
+		// The old needle arrays, inlined, to show the current ones moved the number.
 		const preFixExpected: SeededDefectExpectation[] = cr3c01Expected.map((e) =>
 			e.id === "tautological-test"
 				? { ...e, mustMentionAny: ["compares it to itself", "cannot fail", "identical to what it is compared against", "structurally cannot"] }
@@ -708,15 +531,8 @@ describe("CR3C-01 -- the sixth control (a generic derivable phrase) and the fals
 	});
 
 	/**
-	 * WR3C-01 CONSEQUENCE A: before the needle fix, a genuine, correctly
-	 * located, four-for-four accurate finding carrying two of its OWN class's
-	 * needles was REJECTED (scored `caught: 0`) merely because it also
-	 * contained "structurally cannot fail" -- this project's own house
-	 * vocabulary for this entire defect family (`seeded-defects/index.ts`'s
-	 * own header, `docs/QUALITY.md`, `CLAUDE.md`), which happened to
-	 * independently clear `tautological-test`'s own two-needle bar too. A
-	 * real reviewer at `RB-08-03` is MORE likely to write this phrase than to
-	 * avoid it.
+	 * A genuine, correctly located finding that also uses the house phrase "structurally cannot fail" must still catch:
+	 * a real reviewer is more likely to write it than avoid it.
 	 */
 	it("REGRESSION -- a genuine finding is not rejected merely for using this project's own house vocabulary", () => {
 		const finding = [

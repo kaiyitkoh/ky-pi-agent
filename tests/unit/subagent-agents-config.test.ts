@@ -1,80 +1,8 @@
 /**
- * EXT-01 — `.pi/agents/*.md` frontmatter contract, enforced both directions.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE EXISTS
- * ---------------------------------------------------------------------------
- * `.pi/agents/*.md` frontmatter decides three of EXT-01's four properties
- * (system prompt, tool restriction, thinking level) and must NEVER decide the
- * fourth (model). RE-DERIVED at `pi-subagents@0.76.1` (08.1-04): the 0.49.0
- * guard (`override.model !== undefined && !agentHasFrontmatterField(agent,
- * "model")`) NO LONGER EXISTS. `applyBuiltinOverride`
- * (`src/agents/agents.js:1211-1215`) sets `next.model = override.model`
- * unconditionally, and project/user agents receive overrides through
- * `applyCustomAgentOverrides` (`agents.js:1340-1356`, called at :2646 for
- * project agents), so a frontmatter `model:` key no longer makes
- * `settings.subagents.agentOverrides` inert. The "no `model:` key" rule is
- * kept as a conservative invariant, not because the override is blocked:
- * `applyDefaults` (`agents.js:1079`) only fills a default model when
- * `agent.model === undefined`, and a pinned frontmatter model would still beat
- * every default and would hide the routing decision inside an agent file.
- * Phase 5's routing writes (written by
- * `.pi/extensions/routing/agent-overrides.ts`, ROUTE-05) therefore reach
- * these agents; this file is the mechanical proof that no shipped agent file
- * carries a frontmatter model, plus the EXT-01 coverage proof (name,
- * description, tools, thinking, systemPromptMode all present) and the
- * completeness proof (every subagent role in `AGENT_NAME_BY_ROLE` ships a
- * file, and every shipped file names a role).
- *
- * ---------------------------------------------------------------------------
- * THE PARSER IS A DELIBERATE SUBSET, NOT REAL YAML
- * ---------------------------------------------------------------------------
- * `pi-subagents` parses agent frontmatter with a custom flat-key-plus-
- * folded-block parser (`src/agents/frontmatter.ts:65`), NOT the `yaml`
- * dependency. {@link extractFrontmatter} below mirrors only the flat
- * `key: value` half of that grammar — every key this repo's own agent files
- * use is flat, so a folded-block reader is not needed here and is not
- * built. A `.pi/agents/*.md` file that ever needs a folded block would need
- * this extractor extended deliberately, not silently assumed to work.
- *
- * ---------------------------------------------------------------------------
- * DISCOVERY IS `trackedFiles`, NEVER `readdirSync`
- * ---------------------------------------------------------------------------
- * An untracked scratch `.md` dropped into `.pi/agents/` by a stray edit must
- * not silently satisfy any assertion here — `trackedFiles(".pi/agents")`
- * reads git's index, matching this repo's standing "ask git, don't walk the
- * disk" discipline (`tests/helpers/git.ts`'s own module docstring).
- *
- * ---------------------------------------------------------------------------
- * NO HARDCODED ROLE NAME
- * ---------------------------------------------------------------------------
- * Every real-file assertion below reads role names out of
- * `AGENT_NAME_BY_ROLE` (`.pi/extensions/routing/schema.ts`), never a
- * hardcoded string — the same discipline `agent-overrides.test.ts:102`
- * already uses (`Object.values(AGENT_NAME_BY_ROLE)`). If a second subagent
- * role is ever added, this file needs no edit.
- *
- * ---------------------------------------------------------------------------
- * LIVE-PREDICATE PROOF — WHY THE REAL-FILE ASSERTIONS ARE NOT A TAUTOLOGY
- * ---------------------------------------------------------------------------
- * Without a case that PROVES the extractor and the required/forbidden-key
- * check can fail, every assertion above passes trivially against whatever
- * `.pi/agents/` happens to contain today — the exact vacuous-pass shape
- * `extension-layout.test.ts`'s own `isEntryPoint` fixtures exist to rule
- * out (`tests/unit/extension-layout.test.ts:229-265`). Four inline fixture
- * strings, never written to `.pi/agents/` itself (a fixture on disk there
- * would be enumerated by the suite above it), drive
- * {@link frontmatterViolations} directly: one accepted, three rejected —
- * `model:` present, `fallbackModels:` present, `description` missing.
- *
- * ---------------------------------------------------------------------------
- * FALSIFICATION (recorded here per the plan's acceptance criteria; see
- * 07-04-SUMMARY.md for the exact result)
- * ---------------------------------------------------------------------------
- * Before this file was committed, `model: claude-haiku-4-5` was appended to
- * `.pi/agents/planner.md`'s frontmatter and the suite was re-run: the
- * forbidden-key case for that file turned red with the expected message.
- * The line was then reverted.
+ * `.pi/agents/*.md` frontmatter contract, both directions: every file carries name, description, tools, thinking and
+ * systemPromptMode, none carries `model`/`fallbackModels` (a pinned model would hide the routing decision; pi-subagents
+ * applyDefaults only fills an undefined model), and every routed role ships a file. Discovery reads git's index, role
+ * names come from AGENT_NAME_BY_ROLE, and the parser mirrors only the flat `key: value` half of pi-subagents' grammar.
  */
 import { readFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -93,12 +21,7 @@ const FRONTMATTER_FENCE = /^---\r?\n([\s\S]*?)\r?\n---(?:\r?\n|$)/;
 /** One flat frontmatter line: `key: value` (value may be empty). */
 const FLAT_LINE = /^([A-Za-z][A-Za-z0-9_]*):[ \t]?(.*)$/;
 
-/**
- * Parse `.pi/agents/*.md` frontmatter's flat `key: value` lines. Returns
- * `undefined` when no fenced frontmatter block is found. Exported so the
- * live-predicate fixtures below drive it directly, following the
- * `isEntryPoint` precedent in `tests/unit/extension-layout.test.ts`.
- */
+/** Parses the flat `key: value` frontmatter lines, or undefined when there is no fenced block. */
 export function extractFrontmatter(source: string): Record<string, string> | undefined {
 	const match = FRONTMATTER_FENCE.exec(source);
 	if (match === null) {
@@ -122,25 +45,13 @@ export function extractFrontmatter(source: string): Record<string, string> | und
 // The EXT-01 contract — required and forbidden keys
 // -----------------------------------------------------------------------------
 
-/**
- * The per-agent system-prompt / tool-restriction / thinking-level half of
- * EXT-01 — the model half is Phase 5's and is proven by its absence via
- * {@link FORBIDDEN_KEYS} below.
- */
+/** The keys every agent file must carry; the model is routing's, proven by FORBIDDEN_KEYS. */
 const REQUIRED_KEYS = ["name", "description", "tools", "thinking", "systemPromptMode"] as const;
 
-/**
- * `model` — see this file's own header for `agents.ts:1155`.
- * `fallbackModels` — model selection in every form belongs to
- * `.pi/extensions/routing/agent-overrides.ts`, never to an agent file.
- */
+/** Model selection in any form belongs to routing/agent-overrides.ts, never to an agent file. */
 const FORBIDDEN_KEYS = ["model", "fallbackModels"] as const;
 
-/**
- * Every violation of the EXT-01 contract found in `frontmatter`, or an empty
- * array when it is fully compliant. Shared between the real-file assertions
- * and the inline-fixture proof so both exercise the identical rule.
- */
+/** Every contract violation in `frontmatter`; shared by the real-file checks and the fixture proof. */
 function frontmatterViolations(frontmatter: Record<string, string>): string[] {
 	const violations: string[] = [];
 	for (const key of REQUIRED_KEYS) {
@@ -185,16 +96,7 @@ describe("subagent-agents-config -- discovery (guards against a vacuous pass)", 
 // Completeness, both directions
 // -----------------------------------------------------------------------------
 
-/**
- * Agent files intentionally shipped WITHOUT a routed `AGENT_NAME_BY_ROLE`
- * entry today. Adding a stem here is a real architectural statement, not a
- * workaround -- mirrors `chokepoint-lint.test.ts`'s
- * `CHOKEPOINT_BYPASS_ALLOWLIST` shape: each entry must name (a) why the role
- * is not yet routed and (b) the `RB-*` id that tracks wiring it up. Checked
- * for staleness below (every entry must correspond to a real shipped file),
- * the same completeness discipline this describe block applies everywhere
- * else.
- */
+/** Agent files shipped without a routed role; each entry names why and the RB-* id that tracks wiring it. */
 const UNROUTED_AGENT_ALLOWLIST: readonly { readonly stem: string; readonly reason: string }[] = [
 	{
 		stem: "executor-handoff",
@@ -325,9 +227,7 @@ describe("subagent-agents-config -- builtin shadowing and prompt hygiene (real, 
 // -----------------------------------------------------------------------------
 
 describe("extractFrontmatter + frontmatterViolations -- the discriminator is live against inline fixtures", () => {
-	// Never written to .pi/agents/ itself -- a fixture on disk there would be
-	// enumerated by the suites above and defeat the point of a controlled
-	// negative case.
+	// Inline, never under .pi/agents/, where the suites above would enumerate it.
 	const VALID_FIXTURE = [
 		"---",
 		"name: fixture-agent",

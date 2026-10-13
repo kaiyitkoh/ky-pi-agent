@@ -1,57 +1,8 @@
 /**
- * DIAG-04 — a live session appends exactly one honest row per turn, including
- * for the turns that failed.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE IS, AND WHAT IT IS NOT
- * ---------------------------------------------------------------------------
- * This is the end-to-end half of DIAG-04: real `createAgentSession`, the real
- * diagnostics extension loaded at user scope, real `turn_start` /
- * `message_end` / `turn_end` hooks, real bytes on disk. The pure composer's
- * field-by-field behaviour — the omitted-key rule, the outcome table, the
- * optional-field discipline — is `tests/unit/turn-row.test.ts`, against inline
- * fixtures. Neither file is sufficient alone: the unit test cannot prove a hook
- * fired, and driving 52 field permutations through a live session would be slow
- * and would prove less.
- *
- * The numbers here are FAUX numbers. `fauxProvider` synthesises usage at four
- * characters per token and hardcodes `usage.cost` to all zeros
- * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:118-150, :147] — the non-zero
- * cost this file asserts on comes from `composeTurnRow`'s defensive
- * `calculateCost`, not from a provider. What a real DeepSeek or Bedrock turn
- * reports is `RB-02-01`, which stays **OUTSTANDING**. Never read a green run
- * here as a live measurement.
- *
- * ---------------------------------------------------------------------------
- * THE HOOK CHOICE THIS FILE DEFENDS (Pitfall 3)
- * ---------------------------------------------------------------------------
- * The row's spine is `turn_start` + `message_end` + `turn_end`, deliberately
- * NOT `after_provider_response`. That hook sits after the retry wrapper
- * [VERIFIED: pi-ai src/api/openai-completions.ts:239] and a 4xx/5xx throws into
- * the catch at `:590`, so it never fires on a provider error — a row derived
- * from it would be missing exactly the turns most worth having. Case 4 is the
- * assertion that keeps that choice honest, and Pitfall 3's warning sign is a day
- * with errors visible on screen and **zero rows carrying `outcome: "error"`**.
- *
- * The error turn really does reach `turn_end`:
- * `if (message.stopReason === "error" || message.stopReason === "aborted") {
- *  await emit({ type: "turn_end", message, toolResults: [] }); … }`
- * [VERIFIED: pi-agent-core 0.84.1 dist/agent-loop.js:106-110].
- *
- * ---------------------------------------------------------------------------
- * FIXTURE DISCIPLINE
- * ---------------------------------------------------------------------------
- * Four sessions, because the four questions need four different scripts: a
- * clean single turn, a tool-using pair, an errored turn, and two turns sharing
- * one `sessionId` so faux's prefix-cache simulation engages. Every scanned set
- * is asserted non-empty before it is examined — a filter that matches nothing
- * makes every assertion after it vacuously true, which is the failure mode this
- * whole phase exists to eliminate.
- *
- * The extension loads at USER scope through `extensionPath`: project-scoped
- * `.pi/extensions` is gated behind project trust, which resolves `false`
- * headless with no UI to answer the prompt, and a silently absent extension is a
- * green run over nothing (RESEARCH §8.4).
+ * A live session appends exactly one honest turn row per turn, including failed turns; field-level rules live in
+ * tests/unit/turn-row.test.ts. The spine is turn_start + message_end + turn_end, not after_provider_response, which
+ * never fires on a provider error (pi-ai openai-completions.ts catch path). Numbers are faux (zero `usage.cost`), so a
+ * green run is never a live measurement. Every scanned set is asserted non-empty first.
  */
 import { existsSync } from "node:fs";
 
@@ -78,15 +29,8 @@ import { withFauxSession } from "../helpers/session.ts";
 const EXTENSION_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
 
 /**
- * Every field RESEARCH §5.5 says a turn row must always carry.
- *
- * Asserted against `Object.keys` of the DESERIALISED record, so a field that was
- * assigned `undefined` — which `JSON.stringify` silently drops — fails here
- * rather than surviving as a key that is present in memory and absent on disk.
- * The optional fields (`reasoning`, `cacheReadRatio`, `httpStatus`,
- * `rawStopReason`, `responseModel`, `errorMessage`, `event`) are deliberately
- * NOT on this list; their presence rules are the omitted-key rule, asserted in
- * `tests/unit/turn-row.test.ts` and, for `reasoning`, in case 6 below.
+ * Fields every turn row carries, checked on the deserialised record so a key assigned `undefined` (dropped by
+ * `JSON.stringify`) fails. Optional fields follow the omitted-key rule instead.
  */
 const REQUIRED_TURN_FIELDS = [
 	"ts",
@@ -152,13 +96,7 @@ interface Capture {
 	wire: WireRowShape[];
 }
 
-/**
- * Read one stream, failing with the remedy rather than an `ENOENT` stack.
- *
- * A missing file is the single most likely failure of this whole file — it is
- * what "the extension never loaded" looks like — so it gets a message that says
- * so instead of a `readFileSync` trace forty frames from the cause.
- */
+/** Reads one stream; a missing file means the extension never loaded, so the message says that. */
 function readStream(cwd: string, base: string): { records: unknown[]; unparseable: string[] } {
 	const file = logPath(cwd, base);
 	if (!existsSync(file)) {
@@ -196,12 +134,7 @@ async function capture(options: {
 				await session.prompt(prompt);
 			}
 
-			// WHY THE DIRECTORY AND NOT `producedPaths()`. Pi loads the extension
-			// through jiti, which keeps its own module registry, so the `jsonl.ts`
-			// instance that did the writing is not the one this file imported and the
-			// in-process produced-path set is empty here no matter what was written
-			// (02-05's finding, re-confirmed in 02-07). The bytes on disk are the
-			// honest oracle at this boundary.
+			// Read the directory: jiti loads its own jsonl.ts instance, so this module's produced-path set is always empty.
 			const turns = readStream(cwd, TURNS_LOG_BASE);
 			const wire = readStream(cwd, WIRE_LOG_BASE);
 			return {
@@ -343,17 +276,8 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 	});
 
 	it("case 2 — the turn row and its wire records share one correlation id", () => {
-		// WHY THIS CASE EXISTS. `wire-*.jsonl` holds the bytes and `turns-*.jsonl`
-		// holds the numbers. Without a shared key the two files cannot be read
-		// together, and the first question anyone asks of a bad turn — "what did we
-		// actually send?" — has no answer.
-		//
-		// WHAT IS DELIBERATELY NOT CLAIMED: a PER-ATTEMPT id. Provider retries reuse
-		// the same headers rather than re-firing `before_provider_headers`
-		// [CITED: pi 0.84.1 docs/extensions.md:676], so an attempt counter is not
-		// observable on the main loop and would be fabricated. The id identifies one
-		// LOGICAL request — one headers/request/response triple and the row it
-		// produced.
+		// The shared key joins bytes (wire) to numbers (turns) for one logical request. Not per attempt: retries reuse
+		// headers without re-firing `before_provider_headers`, so an attempt counter would be fabricated.
 		const rows = turnRowsOf(onePrompt);
 		expect(rows.length, "no turn row to join, so this case would prove nothing").toBe(1);
 
@@ -425,11 +349,7 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 	});
 
 	it("case 4 — an errored turn still leaves a row, with the error text redacted", () => {
-		// PITFALL 3'S WARNING SIGN, in one sentence: a day with errors visible on
-		// screen and ZERO rows carrying `outcome: "error"`. That is what building the
-		// row from `after_provider_response` produces, because the hook never fires
-		// on a provider error (pi-ai openai-completions.ts:239 vs the catch at :590).
-		// This case is the standing guard against that regression.
+		// The standing guard: a row built from after_provider_response would leave errored turns with no row at all.
 		expect(errorTurn.unparseable, "a line of the error-turn log could not be parsed").toEqual([]);
 
 		const rows = turnRowsOf(errorTurn);
@@ -470,15 +390,8 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 				"over-redaction is a failure too, just a quieter one",
 		).toContain("upstream rejected the request");
 
-		// THE STRUCTURAL HALF OF PITFALL 3, and the reason this assertion sits on the
-		// ERROR row specifically. Faux answers `{status: 200}` unconditionally, before
-		// it even looks at the scripted step (pi-ai faux.ts:341), so
-		// `after_provider_response` DID fire for this errored turn — and the row still
-		// carries no status, because no field of a main-loop row is derived from that
-		// hook. Against a real provider the hook would not have fired at all
-		// (openai-completions.ts:239 vs the catch at :590); a row that had learned to
-		// depend on it would simply not exist. An `httpStatus` appearing here is the
-		// early warning that the spine moved.
+		// Faux answers 200 before reading the step, so after_provider_response did fire here, yet the row has no status:
+		// no main-loop field derives from that hook. An `httpStatus` here means the spine moved.
 		expect(
 			Object.keys(row),
 			"the errored turn row carries an httpStatus. That value can only have come from " +
@@ -488,17 +401,7 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 	});
 
 	it("case 4b — NO main-loop row anywhere carries an httpStatus", () => {
-		// THE DOCUMENTED CLAIM, ASSERTED ACROSS EVERY SESSION IN THIS FILE. Case 4
-		// asserts the absence on ONE errored row, which reads as "absent when the turn
-		// failed" and left the schema table free to say `httpStatus` is present
-		// otherwise. It never is: `turn_end` does not derive it, so no `kind:"turn"`
-		// row has ever carried one, and a reader following the old wording would look
-		// for a column that does not exist.
-		//
-		// Every session here is a successful or tool-using one as well as the errored
-		// one, so this is the four-session version of the same structural guard: if the
-		// spine ever learns to depend on `after_provider_response`, this goes red
-		// before a reader is misled [threat T-02-08-01].
+		// Across every session: `turn_end` never derives `httpStatus`, so no main-loop row carries one.
 		const captures = [onePrompt, toolTurn, errorTurn, twoPrompts];
 		const rows = captures.flatMap((capture) => turnRowsOf(capture));
 
@@ -517,10 +420,7 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 				"update `TurnRow.httpStatus`'s docstring and docs/DIAGNOSTICS.md in the same change",
 		).toBe(0);
 
-		// THE PAIRED POSITIVE lives in tests/integration/call-model.test.ts case 2,
-		// which asserts a NESTED row does carry `httpStatus: 200`. Without that, this
-		// absence would be equally satisfied by a composer that dropped the field on
-		// every path, and the column would be dead rather than nested-only.
+		// The paired positive (a nested row carries `httpStatus: 200`) is call-model.test.ts case 2.
 		expect(
 			rows.every((row) => Object.keys(row).includes("stopReason")),
 			"the rows really are complete rows and not stubs; otherwise the absence above says " +
@@ -529,12 +429,8 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 	});
 
 	it("case 5 — the second turn of a session reads from cache", () => {
-		// This is faux's SIMULATION, not a provider measurement: it keys a prompt
-		// cache on `options.sessionId` and reports the common prefix as `cacheRead`
-		// whenever `cacheRetention !== "none"` [pi-ai faux.ts:118-150]. Pi's main loop
-		// does pass a sessionId (pi dist/core/sdk.js:218), which is what makes the
-		// cache column exercisable at all offline. The real figure — what DeepSeek or
-		// Bedrock actually report — is an `RB-02-01` observation and stays OUTSTANDING.
+		// Faux simulates a prompt cache keyed on `sessionId` (pi-ai faux.ts), which Pi's main loop passes; the real figure is
+		// a runbook observation.
 		expect(twoPrompts.unparseable, "a line of the two-prompt log could not be parsed").toEqual(
 			[],
 		);
@@ -577,17 +473,8 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 	});
 
 	it("case 6 — no faux row carries a `reasoning` key at all", () => {
-		// THE OMITTED-KEY RULE, at the boundary where it is easiest to break. faux
-		// never sets `usage.reasoning` [RESEARCH §8.5], which matches Bedrock, whose
-		// `handleMetadata` never assigns it
-		// [VERIFIED: pi-ai src/api/bedrock-converse-stream.ts:589-602]. A `reasoning:
-		// 0` written here would report every Bedrock turn's thinking as free — a
-		// fabricated measurement (Pitfall 4). Absence of the key means THE PROVIDER
-		// REPORTS NO BREAKDOWN; it does not mean zero thinking tokens were billed.
-		//
-		// The present-when-numeric half cannot be driven through faux at all and is
-		// covered by `tests/unit/turn-row.test.ts`, which feeds `Usage` objects
-		// directly. Neither half is sufficient alone.
+		// Faux, like Bedrock, never sets `usage.reasoning`, so the key must be absent: `reasoning: 0` would report thinking
+		// as free. The present-when-numeric half is in turn-row.test.ts.
 		const rows = [
 			...turnRowsOf(onePrompt),
 			...turnRowsOf(toolTurn),
@@ -613,7 +500,7 @@ describe("DIAG-04 — one turn, one row, on a live session", () => {
 });
 
 // ---------------------------------------------------------------------------
-// QUAL-09 — the quality-cost ledger, on a live session
+// The quality-cost ledger, on a live session
 // ---------------------------------------------------------------------------
 
 let qualityAbsent: Capture;
@@ -621,25 +508,16 @@ let qualityPresent: Capture;
 
 describe("QUAL-09 — takeQualityCost() reaches the turns row on a live session", () => {
 	beforeAll(async () => {
-		// DRAINED FIRST, so a value left over from an unrelated prior test in this
-		// process — the `globalThis`-keyed slot is process-wide, exactly the
-		// STATE-SLOT pattern `routing/modes.ts` documents — cannot leak into the
-		// negative control below and make it pass for the wrong reason.
+		// Drained first: the slot is process-wide, so a prior test's value must not leak into the control.
 		takeQualityCost();
 
-		// THE NEGATIVE CONTROL, CAPTURED FIRST AND WITHOUT `addQualityCost`.
-		// A presence assertion with no absence control cannot distinguish "the
-		// field reflects what was added" from "the field is always there" — this
-		// session is what makes the positive case below mean something.
+		// The negative control, without `addQualityCost`, so the positive case means something.
 		qualityAbsent = await capture({
 			responses: [fauxAssistantMessage("ok", { stopReason: "stop" })],
 			prompts: ["hello"],
 		});
 
-		// `addQualityCost` runs synchronously, before the session below issues its
-		// prompt, so the value is sitting in the accumulator by the time this
-		// session's `turn_end` drains it. Two contributions, exactly like the
-		// deterministic gate stage and the reviewer would make within one turn.
+		// Added synchronously before the prompt, so `turn_end` drains it; two contributions, as gate and reviewer make.
 		addQualityCost({ ms: 12, tokens: 100 });
 		addQualityCost({ ms: 25, tokens: 400 });
 		qualityPresent = await capture({
@@ -679,11 +557,7 @@ describe("QUAL-09 — takeQualityCost() reaches the turns row on a live session"
 	});
 
 	it("the negative and positive sessions used the same script, so the difference is only the ledger call", () => {
-		// The paired-fixture discipline this file already uses elsewhere (case 4b's
-		// httpStatus check, the reasoning-key sweep in case 6): both sessions here
-		// are otherwise IDENTICAL scripts. If this assertion ever fails alongside
-		// the two above, the difference being measured is not `addQualityCost` at
-		// all — something else diverged between the two captures.
+		// The two scripts are otherwise identical, so a failure here alongside the above means something else diverged.
 		const absentRow = turnRowsOf(qualityAbsent)[0] as TurnRowShape;
 		const presentRow = turnRowsOf(qualityPresent)[0] as TurnRowShape;
 

@@ -1,50 +1,8 @@
 /**
- * Throwaway executable stubs on a throwaway PATH.
- *
- * Why this exists: several controls in this phase are about how a THIRD-PARTY
- * binary behaves -- `gh auth status` for SAFE-16, `npm`/`pi` ordering for
- * BOOT-01/BOOT-06. Asserting against the real ones would mean asserting against
- * the developer's live machine state. That is wrong twice over:
- *
- *   - it is not reproducible. `gh` IS currently authenticated on this machine
- *     (account kaiyitkoh, scopes gist/read:org/repo/workflow)
- *     [VERIFIED: RESEARCH.md 6.3, executed 2026-08-13], so a test asserting
- *     "gh is logged out" would fail here and pass in CI, or vice versa;
- *   - it is destructive. The only way to make that assertion true for real is
- *     `gh auth logout`, and no test may log the developer out.
- *
- * So: write fake binaries into a temp directory, put that directory FIRST on
- * PATH, and delete it afterwards. Nothing outside the temp directory is
- * touched. [threat T-01-07]
- *
- * ---------------------------------------------------------------------------
- * Windows executability -- verified, not assumed
- * ---------------------------------------------------------------------------
- * A stub must be resolvable on both platforms, so each one is written three
- * ways: the real logic in `<name>.mjs`, a POSIX `sh` launcher at `<name>`, and
- * a `<name>.cmd` shim for PATHEXT.
- *
- * `.mjs` is deliberate. PATHEXT on this machine is
- *   .COM;.EXE;.BAT;.CMD;.VBS;.VBE;.JS;.JSE;.WSF;.WSH;.MSC;.PY;.PYW;.CPL
- * [VERIFIED: executed 2026-08-13] -- note `.JS` is in it. Naming the payload
- * `<name>.js` would let Windows resolve the payload itself and hand it to
- * Windows Script Host, which cannot run ESM and would fail bizarrely. `.mjs`
- * is absent from PATHEXT, so only the launchers are ever resolved.
- *
- * KNOWN LIMITATION, stated rather than papered over. On Windows the reachable
- * launcher is the `.cmd`, and since the CVE-2024-27980 fix Node will not
- * execute a `.cmd`/`.bat` unless the spawning code passes `shell: true`:
- *   [VERIFIED: executed 2026-08-13, node 24.16.0]
- *     spawnSync("<name>", args, {shell:false})           -> error ENOENT
- *     spawnSync("<abs>/<name>.cmd", args, {shell:false}) -> error EINVAL
- *     spawnSync("<name>", args, {shell:true})            -> status 0, ran
- * Test code that invokes a stub itself must therefore spawn with `shell: true`
- * on Windows (`runPi` in ./pi.ts already does). Code we do NOT control cannot
- * be made to: Pi calls `spawnSync("gh", [...])` with no shell
- * [VERIFIED: RESEARCH.md 6.3, interactive-mode.ts:5856-5866], so on Windows a
- * stub can only ever drive Pi down its FAILURE branch (status !== 0), never a
- * simulated success. Assert accordingly; do not write a Windows test that
- * depends on a stubbed `gh` succeeding inside Pi.
+ * Fake executables first on a temp PATH, so tests of third-party behaviour (gh, npm, pi) never touch live machine state.
+ * Each stub is `<name>.mjs` (not `.js`: `.JS` is in PATHEXT and Windows Script Host cannot run ESM), a POSIX launcher
+ * and a `.cmd` shim. Node refuses a `.cmd` without `shell: true` (CVE-2024-27980), so code we do not control, like Pi's
+ * own `spawnSync("gh")`, can only ever reach a stub's failure branch on Windows.
  */
 import { spawnSync } from "node:child_process";
 import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -53,24 +11,9 @@ import { delimiter, join } from "node:path";
 
 import { quoteForWindows } from "./win-quote.ts";
 
-/**
- * One argv-conditional response.
- *
- * Needed because a single static stdout cannot model a multi-subcommand tool.
- * `bin/bootstrap.sh` asks npm four different questions in one run --
- * `config get ignore-scripts` (must answer `true`), `view <pkg>@<ver> version
- * --json` (must answer a version string), `ls -g --depth=0 --json` (must answer
- * a tree) and `install -g` (must answer nothing) -- and answering `true` to all
- * four would make the stub a caricature rather than a model: the version gate
- * would be "passing" on a token that is not a version, so a regression in its
- * parsing would go unseen.
- */
+/** One argv-conditional response: a multi-subcommand tool like npm cannot be modelled by one static stdout. */
 export interface StubResponse {
-	/**
-	 * Every token here must appear in the stub's argv (exact element match) for
-	 * this response to be selected. Entries are tried in order; the first match
-	 * wins, and no match falls back to the top-level `stdout`/`stderr`/`exitCode`.
-	 */
+	/** Tokens that must all appear in argv for this response to win; the first match wins, else the top-level fields. */
 	when: string[];
 	exitCode?: number;
 	stdout?: string;
@@ -82,31 +25,14 @@ export interface StubSpec {
 	exitCode?: number;
 	/** Written verbatim to the stub's stdout. Default "". */
 	stdout?: string;
-	/**
-	 * Written verbatim to the stub's stderr. Default "".
-	 *
-	 * Needed because real tools split their output: `npm view <pkg>@<ver> --json`
-	 * puts its structured error on stdout and its human error on stderr
-	 * [VERIFIED: executed 2026-08-13, npm 11.13.0]. A stub that can only write
-	 * stdout cannot simulate the failure shapes that matter.
-	 */
+	/** Written verbatim to stderr. Default "". Real tools split output, e.g. npm's `--json` errors. */
 	stderr?: string;
 	/**
-	 * Absolute path of a file the stub appends one line to per invocation, in
-	 * the form `<name> <argv joined by spaces>`.
-	 *
-	 * This is how call ORDER is proven -- e.g. that the `.npmrc` assertion runs
-	 * before any `pi install`. The containing directory must already exist; the
-	 * file need not.
-	 *
-	 * The line is written BEFORE the response is chosen, so an invocation is
-	 * logged even when it falls through to the silent default -- an ordering
-	 * proof that dropped the calls it had no answer for would be worthless.
+	 * File the stub appends `<name> <argv>` to per call, before choosing a response, so an ordering proof also sees calls
+	 * that fell through to the default. Its directory must exist.
 	 */
 	logTo?: string;
-	/**
-	 * Argv-conditional responses, tried in order. See {@link StubResponse}.
-	 */
+	/** Argv-conditional responses, tried in order. */
 	match?: StubResponse[];
 }
 
@@ -162,14 +88,7 @@ function payloadSource(name: string, spec: StubSpec): string {
 	].join("\n");
 }
 
-/**
- * Create executable stubs on a temp PATH, run `fn` with the modified env, then
- * delete the temp directory.
- *
- * `fn` must be SYNCHRONOUS. The temp directory is removed in a `finally`, so an
- * async `fn` would still be running when its stubs vanish -- returning a
- * thenable is therefore rejected loudly rather than left to fail at random.
- */
+/** Runs synchronous `fn` with stubs first on PATH, then deletes them; a thenable is rejected, since the stubs would vanish under it. */
 export function withStubBin<T>(
 	stubs: Record<string, StubSpec>,
 	fn: (env: Record<string, string>) => T,
@@ -217,12 +136,8 @@ export function withStubBin<T>(
 }
 
 /**
- * Convenience: run one command through the stubbed PATH.
- *
- * Uses `shell: true` on Windows for the `.cmd` reason in the module docstring.
- * On that path the arguments are quoted and folded into the command string
- * rather than passed as an array -- an args array combined with `shell: true`
- * is concatenated unescaped, which is exactly what Node's DEP0190 warns about.
+ * Runs one command through the stubbed PATH. On Windows it needs `shell: true` (the `.cmd` rule above), so the arguments
+ * are quoted into the command string: an args array with `shell: true` is concatenated unescaped (DEP0190).
  */
 export function runWithStubBin(
 	stubs: Record<string, StubSpec>,

@@ -1,90 +1,8 @@
 /**
- * A `127.0.0.1` HTTP+SSE fixture shaped for Qoder's Cloud Agents envelope —
- * ROUTE-11's offline proxy, the file `docs/RUNBOOK.md`'s `RB-05-01` will
- * name via `tests/integration/qoder-delegate.test.ts`.
- *
- * ---------------------------------------------------------------------------
- * Why this is a SEPARATE helper from `tests/helpers/loopback.ts`
- * ---------------------------------------------------------------------------
- * `loopback.ts` captures Pi's own `openai-completions` adapter talking OpenAI
- * completions SSE (`data: {...}\n\n` chunks terminated by `data: [DONE]`).
- * Qoder's Cloud Agents envelope is a different shape entirely — three
- * sequential endpoints (`POST /sessions`, `POST /sessions/{id}/events`,
- * `GET /sessions/{id}/events/stream`) and an `id:`/`event:`/`data:` SSE
- * envelope with no `[DONE]` sentinel; completion is signalled by a
- * `session.status_idle` frame instead (05-RESEARCH.md Part C.3). Reusing
- * `defaultSseBody` would be the wrong shape (05-RESEARCH.md A.8 says this
- * explicitly), so this is a small, purpose-built sibling, not a fork.
- *
- * ---------------------------------------------------------------------------
- * Loopback only, enforced HERE and not at the call site
- * ---------------------------------------------------------------------------
- * {@link assertQoderLoopbackUrl} throws before {@link withQoderLoopback} hands
- * its `baseUrl` out, so a copy-paste that reintroduces a real host fails
- * loudly instead of quietly carrying a bearer credential to
- * `api.qoder.com` from CI. [threat T-05-22]
- *
- * The literal `127.0.0.1` is written out TWICE — once in the `listen` call,
- * once in the refusal — never shared through one constant. A shared constant
- * is exactly the shape that defeats the guard: editing it to a real host
- * would move the bind and the assertion together and they would still agree,
- * so the refusal would pass while the server it describes was no longer on
- * loopback. Two independent literals cannot agree by accident. This mirrors
- * `tests/helpers/loopback.ts#assertLoopbackUrl`'s own stated discipline
- * exactly.
- *
- * ---------------------------------------------------------------------------
- * What this proves, and what it does not
- * ---------------------------------------------------------------------------
- * A test built on this helper proves the harness's own HTTP client
- * (`.pi/extensions/qoder/client.ts#delegateTask`) constructs the right
- * requests and correctly parses and folds a response shaped like Qoder's own
- * documented envelope. It proves NOTHING about whether a real personal
- * access token against a real `agent_id`/`environment_id` produces this
- * exact envelope from `api.qoder.com` — that is `RB-05-01` in
- * `docs/RUNBOOK.md`, and it stays OUTSTANDING by construction until run by
- * hand on the work laptop with real credentials and real network egress,
- * neither of which exist on this machine. [threat T-05-24 -- also: a leaked
- * listener or a hung stream in CI would itself be a denial-of-service risk;
- * the server closes in a `finally` and every failure path (non-2xx, unknown
- * event type) is written to terminate rather than hang]
- *
- * ---------------------------------------------------------------------------
- * Fixture credential in a public repo
- * ---------------------------------------------------------------------------
- * This file records whatever `Authorization` header a caller's client sends
- * it, but never itself contains a credential-shaped literal — the fixture
- * token belongs to the test file that uses this helper, documented there as
- * obviously synthetic. [threat T-05-23]
- *
- * ---------------------------------------------------------------------------
- * Event-gated stream splitting, not a duration (2026-08 flake fix)
- * ---------------------------------------------------------------------------
- * This helper used to split a stream response across two `res.write()` calls
- * separated by a fixed millisecond delay option (default 20ms; WR-07's
- * inactivity-timeout test overrode it to 400ms). That WALL-CLOCK duration is
- * what made `tests/integration/qoder-delegate.test.ts` intermittently red:
- * its own `elapsed` assertion started its clock BEFORE `delegateTask`, so
- * `elapsed` additionally covered three HTTP round trips and six synchronous
- * `appendFileSync` transcript writes before the client's 60ms injected
- * deadline even armed (`client.ts:706-710`) -- against a 340ms total slack
- * budget, that is routinely exceeded under vitest's fork-parallel scheduling
- * jitter on Windows. No WIDER duration fixes this: any fixed number is a race
- * against however loaded the machine happens to be at that moment.
- *
- * That delay option is gone. In its place, `QoderLoopbackHandle` exposes
- * `firstChunkWritten` (a promise that resolves once the first -- or only --
- * chunk has genuinely been written to the response) and `releaseSecondChunk`
- * (a caller-controlled gate the server awaits before writing the second half
- * of a split stream). A test now awaits `firstChunkWritten` to know, as a
- * FACT, that the first read already happened, instead of guessing at a
- * duration long enough for it to probably have happened. Nothing here is a
- * duration: the server writes chunk one, resolves a promise, and waits on
- * another promise only the test resolves.
- *
- * Zero dependencies: `node:http` only, matching `loopback.ts`'s own stated
- * discipline. `tests/unit/pinning.test.ts` asserts `devDependencies` equals
- * exactly six audited pins, so no test-server package may be added here.
+ * A `127.0.0.1` HTTP+SSE fixture shaped like Qoder's Cloud Agents envelope (three endpoints, `id:`/`event:`/`data:`
+ * frames, completion on `session.status_idle`), separate from loopback.ts's OpenAI-completions shape. It proves the
+ * client builds and folds that envelope, not that the real service produces it. `127.0.0.1` is written twice on
+ * purpose: one shared constant could move the bind and the guard together. Split streams are event-gated, never timed.
  */
 import { createServer, type IncomingHttpHeaders, type ServerResponse } from "node:http";
 import type { Socket } from "node:net";
@@ -115,59 +33,22 @@ export interface QoderLoopbackStatusOverrides {
 
 /** How the server should answer. Anything not supplied uses the documented default shapes. */
 export interface QoderLoopbackOptions {
-	/**
-	 * Raw SSE frame text written to the stream response body.
-	 *
-	 * Defaults to {@link DEFAULT_QODER_SSE_FRAMES} (the RESEARCH C.3 sample
-	 * verbatim: one `agent.thinking` `event_start`, one `agent.message`
-	 * `event_start`, one `event_delta`, and a terminal `session.status_idle`
-	 * with `stop_reason.type === "end_turn"`). A caller that needs a
-	 * distinct-text thinking delta, an injected unknown event type, or a
-	 * multi-chunk message supplies its own frame text here.
-	 */
+	/** Raw SSE frame text for the stream body; defaults to {@link DEFAULT_QODER_SSE_FRAMES}. */
 	frames?: string;
 	/**
-	 * Split the stream body into two separate `res.write()` calls at this
-	 * character offset into `frames`. The server writes the first chunk,
-	 * resolves the handle's `firstChunkWritten` promise, then AWAITS the
-	 * handle's `releaseSecondChunk()` gate before writing the second chunk and
-	 * ending the response -- an event a test controls, never a duration it
-	 * races. Omitted (or out of range) means the whole body is written in one
-	 * call, and `firstChunkWritten` still resolves once that single write has
-	 * happened, so a caller may always await it without hanging. Ignored when
-	 * `splitStreamAtMultiple` is also set.
+	 * Split the stream into two writes at this offset; the second waits for `releaseSecondChunk()`. Omitted means one
+	 * write. Ignored when `splitStreamAtMultiple` is set.
 	 */
 	splitStreamAt?: number;
-	/**
-	 * WR-04: split the stream body into MORE than two `res.write()` calls, at
-	 * these character offsets into `frames` (strictly increasing, each within
-	 * `(0, frames.length)`). Exists for exactly one property `splitStreamAt`'s
-	 * single gate cannot express: proving an inactivity deadline resets on
-	 * EVERY chunk, not merely once, by making the SUM of several real
-	 * inter-chunk gaps exceed an injected timeout while every INDIVIDUAL gap
-	 * stays under it -- the only shape that distinguishes "resets on progress"
-	 * from "one fixed budget from the stream's own start". Event-gated, same
-	 * discipline as `splitStreamAt`: no `res.write()` here is timed against a
-	 * duration, only against the handle's own `releaseNextChunk()` calls.
-	 */
+	/** Split into more than two writes at these offsets, each gated on `releaseNextChunk()`: proves a deadline resets per chunk. */
 	splitStreamAtMultiple?: readonly number[];
 	/** Per-endpoint status overrides. */
 	statusOverrides?: QoderLoopbackStatusOverrides;
-	/**
-	 * Override the session id returned by `POST /sessions`, in place of the
-	 * default `sess_kypi_loopback_<n>`. WR-08's own test uses this to prove the
-	 * client refuses (rather than blindly splices into a request path) a
-	 * server-supplied id shaped like `../../etc/passwd` or containing a `?`/`#`
-	 * -- a value the DEFAULT id generator can never produce on its own.
-	 */
+	/** Override the session id `POST /sessions` returns, e.g. a path-traversal shape the default generator never makes. */
 	sessionIdOverride?: string;
 	/** Replace the whole `POST /sessions` JSON body, e.g. with `null`, to prove the client refuses a body that is not an object. */
 	sessionBodyOverride?: { readonly body: unknown };
-	/**
-	 * Deliver the stream frames only to a stream that is already open when the
-	 * events POST arrives. A stream opened after the POST receives nothing, so a
-	 * client that subscribes late loses its early frames.
-	 */
+	/** Deliver frames only to a stream already open when the events POST arrives, so a late subscriber loses them. */
 	liveStreamOnly?: boolean;
 }
 
@@ -177,53 +58,19 @@ export interface QoderLoopbackHandle {
 	baseUrl: string;
 	/** The ephemeral port the OS handed out. */
 	port: number;
-	/**
-	 * Every request received, in arrival order.
-	 *
-	 * Assert this is non-empty BEFORE asserting anything about its contents.
-	 * A server that captured nothing satisfies every assertion about the
-	 * bodies it holds without executing one of them.
-	 */
+	/** Every request received, in order. Assert non-empty before asserting on contents. */
 	received: QoderLoopbackRequest[];
-	/**
-	 * Resolves once the stream response's first chunk (or its only chunk, when
-	 * `splitStreamAt` was not set) has genuinely been written. Await this
-	 * before asserting anything that depends on "the first read already
-	 * happened" -- it is a FACT the server reports, replacing the old
-	 * millisecond-delay option that only approximated it.
-	 */
+	/** Resolves once the stream's first (or only) chunk has been written. */
 	firstChunkWritten: Promise<void>;
-	/**
-	 * Release the gate the server is awaiting before it writes a split
-	 * stream's second chunk. Idempotent -- calling it more than once, or when
-	 * `splitStreamAt` was never set, is a harmless no-op. Teardown calls this
-	 * itself if a test never does, so a test that returns early (a failed
-	 * assertion, an early `return`) can never deadlock the helper.
-	 */
+	/** Opens the gate before a split stream's second chunk. Idempotent; teardown calls it so an early return cannot deadlock. */
 	releaseSecondChunk: () => void;
-	/**
-	 * WR-04: one promise per chunk written when `splitStreamAtMultiple` was
-	 * set -- `chunkWritten[i]` resolves once chunk `i` (0-indexed) has
-	 * genuinely landed on the wire. Empty when `splitStreamAtMultiple` was not
-	 * set.
-	 */
+	/** With `splitStreamAtMultiple`, `chunkWritten[i]` resolves once chunk `i` is written; otherwise empty. */
 	chunkWritten: readonly Promise<void>[];
-	/**
-	 * WR-04: release the gate before the NEXT chunk in a
-	 * `splitStreamAtMultiple` sequence. Idempotent per boundary and safe to
-	 * call more times than there are gates (a harmless no-op past the last
-	 * one), matching `releaseSecondChunk`'s own discipline. A no-op when
-	 * `splitStreamAtMultiple` was not set.
-	 */
+	/** Opens the gate before the next chunk of a multi-split stream; a no-op past the last gate. */
 	releaseNextChunk: () => void;
 }
 
-/**
- * Throw unless `url` is on loopback.
- *
- * Exported so a test can prove the refusal actually fires — a guard nobody
- * exercises is a guard nobody knows is dead.
- */
+/** Throws unless `url` is on loopback; exported so a test can prove the refusal fires. */
 export function assertQoderLoopbackUrl(url: string): void {
 	let hostname: string;
 	try {
@@ -235,9 +82,7 @@ export function assertQoderLoopbackUrl(url: string): void {
 		);
 	}
 
-	// The second of the two independent `127.0.0.1` literals. See the module
-	// docstring: sharing one constant with the `listen` call below would let a
-	// single edit move both and keep them agreeing.
+	// The second independent `127.0.0.1` literal.
 	if (hostname !== "127.0.0.1") {
 		throw new TypeError(
 			[
@@ -258,9 +103,7 @@ export function assertQoderLoopbackUrl(url: string): void {
 	}
 }
 
-// -----------------------------------------------------------------------------
-// The RESEARCH C.3 sample, verbatim -- the default stream body.
-// -----------------------------------------------------------------------------
+// The RESEARCH C.3 sample, verbatim: the default stream body.
 
 const DEFAULT_THINKING_START =
 	"id: evt_00jjujk9fbnr55q5rtyp\n" +
@@ -282,16 +125,10 @@ const DEFAULT_STATUS_IDLE =
 	"event: session.status_idle\n" +
 	'data: {"id":"evt_b2c3d4e5f6a7b8c9","type":"session.status_idle","stop_reason":{"type":"end_turn"},"processed_at":"2026-05-18T03:40:50.987654321Z"}\n';
 
-/**
- * The documented RESEARCH C.3 sample stream, blank-line separated, used when
- * a caller does not supply `opts.frames`.
- */
+/** The documented sample stream, used when a caller supplies no `frames`. */
 export const DEFAULT_QODER_SSE_FRAMES =
 	[DEFAULT_THINKING_START, DEFAULT_MESSAGE_START, DEFAULT_MESSAGE_DELTA, DEFAULT_STATUS_IDLE].join("\n") + "\n";
 
-// -----------------------------------------------------------------------------
-// Routing
-// -----------------------------------------------------------------------------
 
 const SESSIONS_PATH_RE = /^\/sessions\/?$/;
 const EVENTS_PATH_RE = /^\/sessions\/([^/]+)\/events\/?$/;
@@ -305,12 +142,7 @@ function writeJson(res: ServerResponse, status: number, body: unknown): void {
 	res.end(text);
 }
 
-/**
- * Write `frames` as the stream body, optionally split into two `res.write()`
- * calls gated on the caller-controlled `releaseGate` promise rather than a
- * wall-clock delay -- see the module docstring's "Event-gated stream
- * splitting" section for why a duration could not do this reliably.
- */
+/** Writes `frames` as the stream body, optionally split in two around the caller-controlled `releaseGate`. */
 async function writeStreamBody(
 	res: ServerResponse,
 	status: number,
@@ -326,17 +158,12 @@ async function writeStreamBody(
 	});
 	if (status < 200 || status >= 300) {
 		res.end();
-		// No bytes were ever written -- still resolve the gate so a caller that
-		// unconditionally awaits `firstChunkWritten` (rather than branching on
-		// the status it forced) is never left hanging.
+		// Nothing written: still resolve, so a caller awaiting `firstChunkWritten` never hangs.
 		onFirstChunkWritten();
 		return;
 	}
 	if (splitAt !== undefined && splitAt > 0 && splitAt < frames.length) {
 		res.write(frames.slice(0, splitAt));
-		// The FIRST chunk genuinely landed on the wire -- a caller can now await
-		// this as a FACT, replacing the old delay-based option that only
-		// approximated "the first read happened" with a wall-clock guess.
 		onFirstChunkWritten();
 		await releaseGate;
 		res.write(frames.slice(splitAt));
@@ -356,13 +183,7 @@ function createDeferred<T = void>(): { promise: Promise<T>; resolve: (value: T) 
 	return { promise, resolve };
 }
 
-/**
- * WR-04: write `frames` as MORE than two `res.write()` calls, at `points`
- * (strictly increasing offsets into `frames`). Chunk `i` is written, its own
- * `onChunkWritten(i)` fires, then (for every chunk but the last) the server
- * AWAITS `gates[i]` before writing chunk `i + 1` -- event-gated exactly like
- * {@link writeStreamBody}'s two-chunk case, just generalised to N chunks.
- */
+/** Writes `frames` in chunks at `points`, awaiting `gates[i]` before chunk `i + 1`. */
 async function writeStreamBodyMultiSplit(
 	res: ServerResponse,
 	status: number,
@@ -378,8 +199,7 @@ async function writeStreamBodyMultiSplit(
 	});
 	if (status < 200 || status >= 300) {
 		res.end();
-		// No bytes were ever written -- still resolve every gate a caller might
-		// unconditionally await, mirroring writeStreamBody's own discipline.
+		// Nothing written: still resolve every gate a caller might await.
 		for (let i = 0; i < points.length + 1; i++) {
 			onChunkWritten(i);
 		}
@@ -397,16 +217,8 @@ async function writeStreamBodyMultiSplit(
 }
 
 /**
- * Stand a Cloud-Agents-shaped capture server on `127.0.0.1`, await `fn` with
- * it, then close it and release the port.
- *
- * The server is closed in the `finally` and the close is AWAITED, so the
- * next test binds against a port this one has genuinely given back.
- * Lingering keep-alive sockets are destroyed for the same reason. Every
- * in-flight responder is tracked and AWAITED here too, after the
- * second-chunk gate is force-released -- a responder still pending at
- * teardown is a live timer leaked into a neighbouring test's event loop.
- * [threat T-08-16]
+ * Stands a Cloud-Agents-shaped server on `127.0.0.1` for `fn`, then force-releases the gates, awaits every in-flight
+ * responder, destroys sockets and awaits the close, so nothing leaks into the next test.
  */
 export async function withQoderLoopback<T>(
 	opts: QoderLoopbackOptions,
@@ -416,15 +228,8 @@ export async function withQoderLoopback<T>(
 	const frames = opts.frames ?? DEFAULT_QODER_SSE_FRAMES;
 	const overrides = opts.statusOverrides ?? {};
 
-	// Structural, so `node:net`'s `Duplex` need not be imported: the only
-	// thing wanted from a socket here is the ability to destroy it.
 	const sockets = new Set<{ destroy: () => void }>();
 
-	// The event gate replacing the old delay-based option (see the module
-	// docstring's "Event-gated stream splitting" section). `firstChunkWritten`
-	// resolves once the stream's first (or only) chunk has genuinely been
-	// written; `releaseSecondChunk` is the caller-controlled gate the server
-	// awaits before writing a split stream's second chunk.
 	const firstChunkWrittenGate = createDeferred<void>();
 	const secondChunkGate = createDeferred<void>();
 	let secondChunkReleased = false;
@@ -436,12 +241,7 @@ export async function withQoderLoopback<T>(
 		secondChunkGate.resolve();
 	};
 
-	// WR-04: the N-way generalisation. One deferred per chunk boundary (one
-	// fewer than the number of chunks); `releaseNextChunk` pops them in order,
-	// so a caller never needs to track which gate is "next" itself. Empty
-	// arrays when `splitStreamAtMultiple` was not set -- `chunkWritten` stays
-	// `[]` and `releaseNextChunk` is a harmless no-op, matching
-	// `releaseSecondChunk`'s own past-the-end idempotency.
+	// One gate per chunk boundary, popped in order by `releaseNextChunk`.
 	const multiSplitPoints = opts.splitStreamAtMultiple ?? [];
 	const chunkWrittenGates = Array.from({ length: multiSplitPoints.length + (multiSplitPoints.length > 0 ? 1 : 0) }, () => createDeferred<void>());
 	const nextChunkGates = Array.from({ length: multiSplitPoints.length }, () => createDeferred<void>());
@@ -455,8 +255,7 @@ export async function withQoderLoopback<T>(
 		gate.resolve();
 	};
 
-	// Every in-flight request responder, tracked so teardown can await it
-	// instead of leaving one running past the server close.
+	// Tracked so teardown can await them.
 	const pendingResponders = new Set<Promise<void>>();
 
 	let sessionCounter = 0;
@@ -476,9 +275,7 @@ export async function withQoderLoopback<T>(
 				try {
 					body = JSON.parse(rawBody) as unknown;
 				} catch {
-					// Deliberately swallowed: `body === undefined` IS the finding, and
-					// it reaches the test as data, matching `loopback.ts`'s own
-					// convention.
+					// Swallowed: `body === undefined` reaches the test as data.
 					body = undefined;
 				}
 			}
@@ -490,8 +287,7 @@ export async function withQoderLoopback<T>(
 				rawBody,
 				body,
 			};
-			// Recorded BEFORE the response is written, so a non-2xx override still
-			// leaves the caller its capture. [non-vacuity]
+			// Recorded before responding, so a non-2xx override still leaves a capture.
 			received.push(record);
 
 			const method = record.method;
@@ -575,22 +371,12 @@ export async function withQoderLoopback<T>(
 					return;
 				}
 
-				// An unrecognised path or method arrives at the test as a captured
-				// request with a surprising `url`, matching `loopback.ts`'s own
-				// "accept any path" convention -- a routing mistake surfaces as
-				// data, not as a hang against a 404 the client never expected.
+				// An unknown route is captured as data rather than hanging the client on a 404.
 				writeJson(res, 404, { error: `qoder-loopback: no route for ${method} ${url}` });
 			};
 
-			// Tracked, not fire-and-forget: teardown awaits every entry here
-			// before it destroys sockets and closes the server, so a responder
-			// still mid-flight (e.g. awaiting `secondChunkGate`) can never
-			// outlive its own test. [threat T-08-16]
 			const responderPromise: Promise<void> = answer().catch((error: unknown) => {
-				// Never throw out of a request handler: an uncaught throw here is
-				// an unhandled rejection in the server, which surfaces at the
-				// client as a transport failure and hides whatever the responder
-				// actually did.
+				// Never throw from a handler: the client would see a transport failure that hides what happened.
 				const detail = error instanceof Error ? error.message : String(error);
 				if (!res.headersSent) {
 					res.writeHead(500, { "content-type": "text/plain" });
@@ -614,16 +400,13 @@ export async function withQoderLoopback<T>(
 
 	await new Promise<void>((resolveListening, rejectListening) => {
 		server.once("error", rejectListening);
-		// The first of the two independent `127.0.0.1` literals. Port 0 asks the
-		// OS for a free ephemeral port, so parallel vitest workers cannot
-		// collide.
+		// Port 0: an ephemeral port, so parallel workers cannot collide.
 		server.listen(0, "127.0.0.1", () => {
 			server.removeListener("error", rejectListening);
 			resolveListening();
 		});
 	}).catch((error: unknown) => {
-		// TEAR DOWN BEFORE RETHROWING -- this `catch` runs BEFORE the `try`
-		// below, so its `finally` never executes.
+		// Tear down before rethrowing: this catch runs before the try below, so its finally never runs.
 		server.removeListener("connection", trackSocket);
 		server.close();
 
@@ -653,8 +436,6 @@ export async function withQoderLoopback<T>(
 	}
 
 	const baseUrl = `http://127.0.0.1:${address.port}`;
-	// The guard runs on the URL about to be handed out, so a caller cannot
-	// forget it and an edit to the bind host above cannot escape it.
 	assertQoderLoopbackUrl(baseUrl);
 
 	try {
@@ -668,19 +449,12 @@ export async function withQoderLoopback<T>(
 			releaseNextChunk,
 		});
 	} finally {
-		// Release the gates FIRST: a test that failed (or returned early)
-		// before calling `releaseSecondChunk`/`releaseNextChunk` itself must not
-		// deadlock teardown on a responder that is awaiting a gate nobody will
-		// ever open.
+		// Release the gates first, so a responder awaiting one cannot deadlock teardown.
 		releaseSecondChunk();
 		eventsPosted.resolve();
 		for (const gate of nextChunkGates) {
 			gate.resolve();
 		}
-		// Now await every tracked responder -- one still pending here (e.g.
-		// mid-`writeStreamBody`/`writeStreamBodyMultiSplit`, having just had its
-		// gate released) is a live timer that must finish before the sockets it
-		// is writing to are destroyed out from under it.
 		await Promise.allSettled(pendingResponders);
 		for (const socket of sockets) {
 			socket.destroy();

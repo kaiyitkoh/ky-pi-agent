@@ -1,44 +1,8 @@
 /**
- * WR-11 -- `.pi/extensions/qoder/index.ts`'s registered `qoder_delegate` TOOL
- * (as opposed to `tests/integration/qoder-delegate.test.ts`, which drives
- * `client.ts#delegateTask` directly and never touches this file at all): a
- * human confirmation gate in interactive mode, and a configuration gate that
- * deactivates the tool entirely on an unconfigured machine.
- *
- * ---------------------------------------------------------------------------
- * WHY `ctx.hasUI`/`ctx.ui` ARE STUBBED VIA `defineProperty`
- * ---------------------------------------------------------------------------
- * `ExtensionRunner#createCommandContext()` builds its returned object with
- * `Object.defineProperties({}, Object.getOwnPropertyDescriptors(this.
- * createContext()))` [VERIFIED: `dist/core/extensions/runner.js:538-542`],
- * and `createContext()`'s `hasUI`/`ui` are both GETTER-ONLY accessor
- * properties [VERIFIED: `dist/core/extensions/runner.js:472-475`]. Plain
- * assignment throws in strict mode against a getter-only accessor;
- * `defineProperty` replaces it with a writable, configurable data property --
- * exactly the technique `tests/integration/mode-switch.test.ts#
- * withCapturedNotify` already uses in this repository for the sibling `ui`
- * property.
- *
- * ---------------------------------------------------------------------------
- * WHY `session.extensionRunner.createToolContext("qoder-test-call", undefined)` SATISFIES `execute()`'s
- * `ctx: ExtensionContext` PARAMETER
- * ---------------------------------------------------------------------------
- * `ExtensionCommandContext extends ExtensionContext`
- * [VERIFIED: `dist/core/extensions/types.d.ts:254`] -- a command context IS
- * an extension context, structurally. `tests/integration/single-shot-
- * roles.test.ts`'s own header makes the identical argument for calling
- * `runSingleShotRole(ctx, ...)`, which also expects `ExtensionContext`.
- *
- * ---------------------------------------------------------------------------
- * WHY THE CONFIGURATION-GATE CASES NEVER CALL `execute()`
- * ---------------------------------------------------------------------------
- * They prove only whether `session.getActiveToolNames()` contains
- * `"qoder_delegate"` AFTER a real `session_start` is emitted. The gate is a
- * once-per-session decision made in a `session_start` HANDLER (CR-01: it
- * cannot live in the factory -- `pi.getActiveTools()`/`setActiveTools()`
- * throw there), reading `process.env` at that moment -- which is why
- * `process.env` is set BEFORE `createFauxSession` in those cases and
- * restored in each case's own `finally`.
+ * The registered qoder_delegate TOOL (qoder-delegate.test.ts drives the client directly): a human confirmation gate in
+ * interactive mode, and a configuration gate that deactivates the tool on an unconfigured machine. The gate runs in a
+ * session_start handler reading process.env, so env is set before the session and restored after. `ctx.hasUI`/`ctx.ui`
+ * are getter-only accessors, so they are stubbed with defineProperty.
  */
 import { join } from "node:path";
 
@@ -61,14 +25,7 @@ import { logFilesIn, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
 import { withQoderLoopback } from "../helpers/qoder-loopback.ts";
 import { createFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
 
-/**
- * Read the `qoder.delegate.confirm` records from `<agentCwd>/.pi/logs/qoder-*.jsonl`.
- * WR-03: `execute()` writes through `client.ts#writeQoderTranscript`, which
- * appends under the SESSION's own cwd (`ctx.cwd`, i.e. `handle.cwd` -- NOT
- * `withTempLogCwd`'s own throwaway directory, which this file's other cases
- * carry only for parity with `qoder-delegate.test.ts`'s pattern but do not
- * read from).
- */
+/** The `qoder.delegate.confirm` records, written under the session's own cwd (`ctx.cwd`). */
 function readConfirmRecords(agentCwd: string): { event?: unknown; hasUI?: unknown; approved?: unknown; taskChars?: unknown }[] {
 	const dir = logDir(agentCwd);
 	const files = logFilesIn(dir);
@@ -80,11 +37,7 @@ function readConfirmRecords(agentCwd: string): { event?: unknown; hasUI?: unknow
 	return (records as { event?: unknown }[]).filter((r) => r.event === "qoder.delegate.confirm");
 }
 
-/**
- * WR-02 (iteration 3): the two silent refusal branches (unconfigured,
- * task-length) write `qoder.delegate.refused` records through the same
- * writer and file as `readConfirmRecords` above -- never the task text.
- */
+/** The silent refusal branches' `qoder.delegate.refused` records, from the same writer and file; never the task text. */
 function readRefusedRecords(agentCwd: string): { event?: unknown; cause?: unknown; taskChars?: unknown }[] {
 	const dir = logDir(agentCwd);
 	const files = logFilesIn(dir);
@@ -134,7 +87,7 @@ afterEach(() => {
 	}
 });
 
-/** Fixture credential -- obviously fake, never dialled (see qoder-delegate.test.ts's own identical discipline). [threat T-05-23] */
+/** Fixture credential: obviously fake, never dialled. */
 const FIXTURE_TOKEN = "pt-kypi-qoder-tool-fixture-not-a-credential";
 const FIXTURE_AGENT_ID = "agent-kypi-qoder-tool-fixture";
 const FIXTURE_ENVIRONMENT_ID = "env-kypi-qoder-tool-fixture";
@@ -147,7 +100,7 @@ function setConfiguredQoderEnv(baseUrl: string): void {
 	process.env[QODER_BASE_URL_ENV] = baseUrl;
 }
 
-/** Replace `ctx.hasUI`/`ctx.ui` with stand-ins, via `defineProperty` -- see this file's own header. */
+/** Replaces `ctx.hasUI`/`ctx.ui` with stand-ins via defineProperty (getter-only accessors). */
 function withStubbedUI(
 	ctx: ExtensionContext,
 	opts: { hasUI: boolean; select?: (message: string, choices: string[]) => Promise<string> },
@@ -169,47 +122,9 @@ function withStubbedUI(
 }
 
 describe("qoder_delegate tool -- WR-11/CR-01: the configuration gate", () => {
-	// MEASURED, NOT ASSUMED (WR-04, iteration 3 -- the prior citation here named
-	// the wrong mechanism): `createFauxSession`'s default `tools: []` becomes
-	// `options.tools` on `createAgentSession`'s SDK options, which
-	// `createAgentSession` maps to `allowedToolNames` [VERIFIED:
-	// `dist/core/sdk.js:133`, `options.tools ?? (options.noTools === "all" ? []
-	// : undefined)`] -- and even an EMPTY array is truthy in JS, so
-	// `_refreshToolRegistry`'s `if (allowedToolNames)` arm
-	// (`dist/core/agent-session.js:1996-2002`) takes precedence over the
-	// `else if (options?.includeAllExtensionTools)` arm that would otherwise
-	// auto-activate every newly-registered extension tool. So under this
-	// harness's own default, `qoder_delegate` would NEVER appear in
-	// `getActiveToolNames()` regardless of whether the fix under test exists
-	// -- both cases below therefore start the session with
-	// `tools: ["qoder_delegate"]` explicitly, simulating the REAL starting
-	// condition a production session's own default would produce (a newly
-	// registered tool starts active), so the fix's `pi.setActiveTools(...
-	// filter(...))` call has something to actually act on.
-	//
-	// CR-01: `session_start` DOES NOT FIRE from `createFauxSession`'s headless
-	// factory -- MEASURED, not assumed: `tests/integration/call-model.test.ts`'s
-	// own header ("a five-event probe logged nothing before the first prompt")
-	// and `tests/integration/mode-persistence.test.ts`'s own header ("Pi emits
-	// `session_start` from `AgentSession`'s extension-binding step ... which the
-	// headless factory this repository's test helpers use does not reach") both
-	// document this. The configuration gate now lives in a `session_start`
-	// handler (CR-01 -- it MUST, since `pi.getActiveTools()`/`setActiveTools()`
-	// throw "not initialized" if called from the factory instead), so a case
-	// that only calls `createFauxSession` and reads `getActiveToolNames()`
-	// immediately would prove nothing about the handler ever running. Every
-	// case below therefore calls `handle.session.extensionRunner.emit({ type:
-	// "session_start", reason: "startup" })` -- `ExtensionRunner#emit<TEvent
-	// extends RunnerEmitEvent>()` [VERIFIED: pi-coding-agent 0.84.1
-	// `dist/core/extensions/runner.d.ts:146`; `SessionStartEvent` is NOT among
-	// the types `RunnerEmitEvent` excludes at `:22`, so this is a genuinely
-	// public, typed way to fire the same event Pi's own real extension-binding
-	// step fires, deterministically and in-process] -- to invoke every
-	// registered `session_start` handler for real, rather than merely asserting
-	// about the handler's source code. This proves the WIRING (the handler is
-	// really registered and really runs) together with the LOGIC (it really
-	// filters the active list), the same "call the real mechanism, don't just
-	// read the source" discipline `headless-deny.test.ts` uses for SAFE-10.
+	// `tools: []` maps to allowedToolNames, which wins over includeAllExtensionTools (pi dist/core/sdk.js:133), so these
+	// cases start with `tools: ["qoder_delegate"]`, as a production session would. session_start does not fire headless,
+	// so each case emits it through ExtensionRunner#emit to run the real handler.
 	it("is NOT in the active tool list, after session_start fires, when QODER_PERSONAL_ACCESS_TOKEN/AGENT_ID/ENVIRONMENT_ID are unset", async () => {
 		clearQoderEnv();
 		const handle: FauxSessionHandle = await createFauxSession({
@@ -217,15 +132,7 @@ describe("qoder_delegate tool -- WR-11/CR-01: the configuration gate", () => {
 			tools: ["qoder_delegate"],
 		});
 		try {
-			// CR-01 NON-VACUITY GUARD: the active-list absence assertion below is
-			// satisfied identically by "the configuration gate deactivated it" and
-			// by "the extension's factory threw and Pi discarded the whole
-			// extension, so the tool never existed at all" -- which is exactly
-			// what happened when the configuration gate lived in the factory
-			// (CR-01), and is unaffected by whether session_start ever fires.
-			// Asserting the tool DEFINITION exists FIRST -- BEFORE emitting
-			// session_start -- rules out the second, wrong-for-the-right-reasons
-			// explanation before the absence assertion is allowed to pass.
+			// Non-vacuity: the definition must exist first, or a factory that threw would satisfy the absence below.
 			const tool = handle.session.extensionRunner.getToolDefinition("qoder_delegate");
 			expect(
 				tool,
@@ -233,9 +140,7 @@ describe("qoder_delegate tool -- WR-11/CR-01: the configuration gate", () => {
 					"active-tool-list absence assertion below would pass for the wrong reason",
 			).toBeDefined();
 
-			// Still active here: registerTool() defaults a newly-registered tool
-			// to active, and the deactivation only happens once session_start
-			// fires -- see this describe block's own header.
+			// Still active: deactivation happens only once session_start fires.
 			expect(
 				handle.session.getActiveToolNames(),
 				"qoder_delegate is already inactive BEFORE session_start fired -- something deactivated " +
@@ -311,13 +216,10 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 					).rejects.toThrow(/declined by the user/);
 
 					expect(selectCallCount, "ctx.ui.select was never called -- the confirmation gate did not run at all").toBe(1);
-					// THE LOAD-BEARING ASSERTION: zero requests reached the loopback --
-					// a decline must refuse BEFORE delegateTask ever opens a socket.
+					// Zero requests reached the loopback: a decline refuses before delegateTask opens a socket.
 					expect(loop.received).toHaveLength(0);
 
-					// WR-03: the decline branch must ALSO write an audit record --
-					// before this fix, this was the only decision point in the phase
-					// with no record on any branch.
+					// The decline branch writes an audit record too.
 					const confirmRecords = readConfirmRecords(handle.cwd);
 					expect(
 						confirmRecords,
@@ -396,9 +298,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						tool.execute("call-1", { task: overLimitTask }, undefined, undefined, ctx),
 					).rejects.toThrow(new RegExp(`1\\.\\.${MAX_TASK_CHARS} characters`));
 
-					// THE LOAD-BEARING ASSERTION: WR-04's whole point is that the
-					// validation now runs BEFORE the human decision -- an unbounded
-					// task must never even reach ctx.ui.select, let alone the network.
+					// Validation runs before the human decision: an unbounded task never reaches ctx.ui.select.
 					expect(
 						selectCallCount,
 						"ctx.ui.select was called for an over-limit task -- WR-04's validation must run " +
@@ -439,11 +339,8 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						},
 					});
 
-					// Newlines placed in the MIDDLE (never leading/trailing, so
-					// `task.trim()` cannot remove them) used to add one dialog line
-					// each -- see this file's own module header and WR-01 in
-					// `.pi/extensions/qoder/index.ts`. Kept under
-					// CONFIRM_EXCERPT_CHARS so truncation never hides the tail.
+					// Mid-task newlines (trim cannot remove them) would each add a dialog line; kept under CONFIRM_EXCERPT_CHARS so
+					// truncation never hides the tail.
 					const newlineStuffedTask = `${"a".repeat(50)}${"\n".repeat(100)}walk the dog`;
 					await expect(
 						tool.execute("call-1", { task: newlineStuffedTask }, undefined, undefined, ctx),
@@ -456,8 +353,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						"the confirmation dialog title grew past a handful of lines for a " +
 							"newline-stuffed task -- WR-01's flattening did not run",
 					).toBeLessThanOrEqual(10);
-					// The flattened excerpt must still be present so the user can read
-					// what they are approving.
+					// The flattened excerpt must still be readable.
 					expect(capturedTitle).toContain("walk the dog");
 				} finally {
 					await handle.dispose();
@@ -494,8 +390,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 						ctx,
 					);
 
-					// Non-vacuity: an approval that never reached the network would
-					// satisfy "did not throw" just as well as a working approval path.
+					// Non-vacuity: an approval that never reached the network would also not throw.
 					expect(
 						loop.received.length,
 						"approving the confirmation did not result in any request reaching the loopback -- " +
@@ -503,9 +398,7 @@ describe("qoder_delegate tool -- WR-11: the human-in-the-loop confirmation gate"
 					).toBeGreaterThan(0);
 					expect(result.content.some((block) => block.type === "text")).toBe(true);
 
-					// WR-03: the approve branch must ALSO write an audit record, with
-					// the SAME event name as the decline branch, distinguished only by
-					// `approved`.
+					// The approve branch writes the same event as the decline, distinguished only by `approved`.
 					const confirmRecords = readConfirmRecords(handle.cwd);
 					expect(
 						confirmRecords,
@@ -544,7 +437,7 @@ describe("qoder_delegate tool -- WR-02: the two previously-silent refusal branch
 					tool.execute("call-1", { task: "summarise the open PRs" }, undefined, undefined, ctx),
 				).rejects.toThrow(); // resolveQoderConfig's own actionable message
 
-				// Before WR-02 this branch left ZERO trace anywhere.
+				// This branch must leave a trace.
 				const refused = readRefusedRecords(handle.cwd);
 				expect(
 					refused,
@@ -582,8 +475,7 @@ describe("qoder_delegate tool -- WR-02: the two previously-silent refusal branch
 						tool.execute("call-1", { task: overLimitTask }, undefined, undefined, ctx),
 					).rejects.toThrow(new RegExp(`1\\.\\.${MAX_TASK_CHARS} characters`));
 
-					// Before WR-02 this branch -- the one an adversarial or looping
-					// model hits repeatedly -- left ZERO trace anywhere.
+					// The branch an adversarial or looping model hits repeatedly must leave a trace.
 					const refused = readRefusedRecords(handle.cwd);
 					expect(
 						refused,

@@ -1,93 +1,9 @@
 /**
- * The Phase 10 tool-count baseline: every model-facing tool this repository's
- * `.pi/settings.json` `packages[]` lockfile and vendored `.pi/extensions/`
- * tree admit, one row per source, including the zero-tool rows.
- *
- * WHY THIS FILE EXISTS. Every registered tool's full JSON Schema rides in
- * `tools[]` on EVERY provider request [VERIFIED: pi-ai
- * src/api/openai-completions.ts:1337-1372, called at :731 -- the same
- * citation `tests/unit/contributing-boundary.test.ts` (BOOT-10) already
- * carries]. Phase 2 measured a ~1,850 tok/turn floor for a 7-tool session;
- * Phase 10 owns deciding what to cut from that bill. A count that lives only
- * in `docs/EXTENSIONS.md`'s prose or `07-RESEARCH.md`'s Addendum A4 is not a
- * baseline Phase 10 can trust -- this file is that baseline, checked in both
- * directions on the half this repository can mechanically enforce (the
- * vendored side) and honestly labelled as a recorded, re-read observation on
- * the half it cannot (the npm side -- nothing was installed by this plan or
- * any prior Phase 7 plan; `07-10-SUMMARY.md`'s install gate was NOT
- * SATISFIED).
- *
- * THIS SESSION'S RE-VERIFICATION, NOT A COPY OF ADDENDUM A4. Every npm row's
- * `toolNames` below was obtained by `npm pack <pkg>@<pinned-version>
- * --ignore-scripts` + `tar -xf` into a scratch directory under this session's
- * own temp scratchpad (never this repo, never `~/.pi`), grepping the
- * extracted `.ts` source for `registerTool(` call sites and their `name:`
- * fields, then deleting the scratch directory -- the same read-only technique
- * `07-01-SUMMARY.md`, `07-10-SUMMARY.md` and `07-12-SUMMARY.md` already used.
- * No `npm install`, `pi install`, or `pi update` was run by this file's
- * authoring. The exact `file:line` citations are recorded in
- * `07-11-SUMMARY.md`, not repeated in full here (this file asserts against
- * the citations' CONCLUSIONS -- the tool-name sets -- not the citations
- * themselves, which would require re-fetching the tarball on every test run).
- *
- * THE BOUNDARY, STATED PLAINLY (this is what distinguishes the two `kind`s):
- *
- *   - `"vendored"` rows are MECHANICALLY ENFORCED, every run, against this
- *     repository's own tracked source (Direction 1): grep the tracked
- *     file(s) for `registerTool(`, extract every `name:` field, and assert
- *     the set equals the row's `toolNames` exactly. This half is real
- *     drift-detection in this repository's own tree.
- *
- *   - `"npm"` rows are a RECORDED BASELINE, not something this file can
- *     re-derive on a fresh clone: `.pi/npm/` and `.pi/git/` are gitignored
- *     (`.gitignore:154-157`), CI never runs `pi install`, and this plan's own
- *     critical constraints forbid running one. Direction 2 asserts only that
- *     the package is still pinned in `packages[]` at a version -- the
- *     `toolNames` themselves are read from source, ONCE, in this session, and
- *     go stale silently the moment the pin moves without a re-read. This is
- *     the identical boundary discipline `tests/unit/docs-policy.test.ts` and
- *     `tests/unit/agent-dir-setup.test.ts` already use for their own
- *     conditional [RUNBOOK]/machine-state checks, and the identical boundary
- *     `tests/unit/subagent-capabilities.test.ts` (07-12) already states for
- *     its own third-party evidence table.
- *
- * CHILD-PROCESS-ONLY EXCLUSIONS, NAMED RATHER THAN SILENTLY DROPPED
- * (re-derived in 08.1-04 from `pi-subagents@0.76.1`'s compiled JS).
- * The package registers further tool NAMES that never appear in this
- * baseline because they are not registered into the PARENT (main) session:
- *
- *   - `contact_supervisor` is registered only by
- *     `registerNativeSupervisorClient()`, which returns early unless child
- *     metadata is present (`src/intercom/native-supervisor-channel.js:179-183`);
- *     it runs inside a spawned CHILD subagent's own process. The PARENT
- *     registers `subagent_supervisor` (`NATIVE_SUPERVISOR_TOOL_NAME`,
- *     native-supervisor-channel.js:13) via `registerParentTools()` (:648-656),
- *     started from the `session_start` handler (src/extension/index.js:1056,
- *     :1084). `intercom` was registered by 0.49.0 but no longer is by this
- *     package (it appears only as a tool-name reference at :597).
- *   - `structured_output`, the watchdog diff tool and similar child-runtime
- *     tools are registered from `src/runs/shared/subagent-prompt-runtime.js:439,488`
- *     inside spawned children only.
- *
- * DYNAMIC TOOL ACTIVATION IS NEW SINCE 0.49.0. `pi-subagents@0.76.1`
- * registers a loader tool `subagents_enable`
- * (`src/extension/tool-activation.js:78,114`, mode `auto` by default) and
- * `pi-web-access@0.38.0` registers `web_enable` (`tool-activation.ts:11,73`,
- * called from `index.ts:2259` unless `toolActivation` is `eager`). Both
- * loaders carry a `promptSnippet`, so they are counted here as tools with
- * prompt metadata; the baseline counts REGISTERED tools, not the subset a
- * given session has ACTIVE.
- *
- * `pi-web-access@0.38.0`'s four tools are each gated by their own
- * `isToolEnabled()` check [VERIFIED: index.ts:738-741, registration sites at
- * :1405,:1950,:1972,:2160] -- CONDITIONAL in general, but this repository's
- * `.pi/settings.json` carries no `pi-web-access`-specific configuration at
- * all, and `isToolEnabled()`'s own default (no override present) resolves to
- * `true` for all four keys. Recorded as "conditional, default-enabled with
- * this repo's actual config" rather than flatly "always active" or flatly
- * "conditional" -- neither alone is the honest answer. The extension entry
- * point is the compiled `dist/` bundle built from this `.ts` (see
- * docs/EXTENSIONS.md, Compiled-JS exception).
+ * The tool-count baseline: every model-facing tool the pinned packages[] and the vendored extensions register into
+ * the main session, one row per source including zero-tool rows (every tool's schema rides on every request,
+ * pi-ai src/api/openai-completions.ts:1337-1372). Vendored rows are re-derived from tracked source every run; npm rows
+ * are a recorded reading of each pinned tarball, re-read only when the pin moves. Child-only tools (e.g.
+ * pi-subagents' contact_supervisor) are excluded; dynamic loaders (subagents_enable, web_enable) are counted.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -102,7 +18,7 @@ const EXT_DIR = ".pi/extensions";
 const FLAT = /^\.pi\/extensions\/[^/]+\.ts$/;
 const NESTED_INDEX = /^\.pi\/extensions\/[^/]+\/index\.ts$/;
 
-/** The same case-insensitive marker every vendored entry point's header carries -- see Direction 3. */
+/** The case-insensitive marker every vendored entry point's header carries. */
 const VENDORED_MARKER = /vendored/i;
 
 interface ToolCountRow {
@@ -116,12 +32,7 @@ interface ToolCountRow {
 	why: string;
 }
 
-/**
- * THE REGISTRY. One row per installed (pinned, though never actually
- * installed on this machine -- see the file docstring) npm package, one row
- * per vendored extension, including the zero-tool rows -- a zero-tool row is
- * the assertion that the extension has not grown a tool since this session.
- */
+/** One row per pinned npm package and per vendored extension; a zero-tool row asserts no tool has been added. */
 const TOOL_COUNT_BASELINE: readonly ToolCountRow[] = [
 	{
 		source: "pi-subagents",
@@ -245,19 +156,10 @@ const TOOL_COUNT_BASELINE: readonly ToolCountRow[] = [
 	},
 ];
 
-/** Exception: `pi-subagents` serves EXT-01..EXT-04, not one of EXT-05's eight capabilities -- named, not silently allowed. */
+/** pi-subagents serves the subagent requirements, not one of the eight capabilities; named, not silently allowed. */
 const PI_SUBAGENTS_EXCEPTION = "pi-subagents";
 
-/**
- * Every `name:` field belonging to a `registerTool(` (optionally generic,
- * `registerTool<Foo, Bar>(`) call site in `text`, matched within a bounded
- * lookahead window so this stays a simple grep-shaped extraction rather than
- * a parser, mirroring `tests/unit/contributing-boundary.test.ts`'s own
- * deliberately-a-substring-not-a-parser `registerTool` matching rule. Throws
- * on a `registerTool(` call with no `name:` found in the window -- a parser
- * that silently skips an unreadable call site is how a registry with a real
- * gap passes every assertion below.
- */
+/** Every `name:` of a `registerTool(` call site, grep-shaped; throws on a call site with no readable name. */
 function extractRegisteredToolNames(text: string): string[] {
 	const names: string[] = [];
 	const callSite = /registerTool\s*(?:<[^>]*>)?\s*\(/g;
@@ -277,7 +179,7 @@ function extractRegisteredToolNames(text: string): string[] {
 	return names;
 }
 
-/** The `.ts` file(s) a vendored row's `source` should be scanned across -- the whole directory for a nested-index row, just the file itself for a flat row. */
+/** The `.ts` files a vendored row covers: the whole directory for a nested index, else the file itself. */
 function filesForVendoredRow(source: string): string[] {
 	if (NESTED_INDEX.test(source)) {
 		const dir = source.slice(0, source.lastIndexOf("/"));
@@ -287,24 +189,8 @@ function filesForVendoredRow(source: string): string[] {
 }
 
 /**
- * Tracked `.ts` files under `.pi/extensions/` sitting at an auto-discovered
- * entry-point SHAPE (FLAT or NESTED_INDEX) whose source carries the
- * case-insensitive "vendored" marker.
- *
- * Deliberately NOT filtered through `extension-layout.test.ts`'s exported
- * `isEntryPoint` discriminator: `.pi/extensions/loop-police/index.ts`
- * re-exports its default
- * (`export { loopPolice as default } from "./loop-police.ts";`) rather than
- * declaring `export default ...` directly, so `isEntryPoint`'s
- * `DEFAULT_EXPORT` regex -- correctly scoped to `extension-layout.test.ts`'s
- * own narrower question of "does THIS file's own text declare a default
- * export" -- returns `false` for it, even though Pi auto-discovers and loads
- * this exact path. `extension-layout.test.ts`'s own BOOT-05 suite never
- * noticed because loop-police/index.ts's path ALSO satisfies its
- * `NESTED_MODULE` fallback shape, so its own completeness check passes
- * either way; this file's narrower "is this a vendored entry point" question
- * has no such fallback and needs the correct classification. Found and fixed
- * during this task's own falsification pass (Direction 3, mutation ii).
+ * Tracked entry-point-shaped `.ts` files under `.pi/extensions/` carrying the vendored marker. Not filtered through
+ * `isEntryPoint`: loop-police/index.ts re-exports its default, which that regex does not count, yet Pi loads it.
  */
 function discoverVendoredEntryPoints(): string[] {
 	return trackedFiles(EXT_DIR)
@@ -434,16 +320,7 @@ describe("tool-count-baseline Direction 4 -- vendored background tasks stay proc
 	});
 });
 
-/**
- * Named so `PI_SUBAGENTS_EXCEPTION` (declared above for symmetry with
- * `tests/unit/extension-composition.test.ts`'s own named exception, per this
- * file's shared discipline with that one) is not flagged as dead code by a
- * future lint pass: it documents, at the point of declaration, WHY
- * `pi-subagents` needs no special-casing in this file's own Direction 3 (it
- * already has a normal `"npm"` row here, unlike `extension-composition.test.ts`
- * where it is deliberately excluded from `CAPABILITY_SOURCES` because it is
- * not one of the eight EXT-05 capabilities).
- */
+/** pi-subagents has a normal npm row here; only extension-composition.test.ts excludes it. */
 describe("tool-count-baseline -- pi-subagents needs no exception here, unlike extension-composition.test.ts", () => {
 	it("pi-subagents has a normal TOOL_COUNT_BASELINE row (this file counts ALL installed packages' tools, not just EXT-05's eight)", () => {
 		expect(TOOL_COUNT_BASELINE.some((row) => row.source === PI_SUBAGENTS_EXCEPTION)).toBe(true);
