@@ -8,7 +8,7 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
-import { acceptedEntries, allowanceOf, latestRepin, pinnedAllowance, readLedger } from "../execute/ledger.ts";
+import { acceptedEntries, allowanceOf, latestRepin, pinnedAllowance, pinnedTasks, readLedger, tasksOf } from "../execute/ledger.ts";
 import { ensureHarnessIgnored, uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
@@ -72,6 +72,10 @@ export default function (pi: ExtensionAPI): void {
 				const pinned = pinnedAllowance(rows);
 				if (pinned !== undefined && pinned.join("\n") !== allowanceOf(spec.spec.scopePin.expectedFiles, plan.plan.filesTouched).join("\n")) {
 					return fail(`review: the SPEC/PLAN write allowance changed since /execute pinned it (pinned: ${pinned.join(", ")}) -- restore it`);
+				}
+				const pinnedT = pinnedTasks(rows);
+				if (pinnedT !== undefined && JSON.stringify(pinnedT) !== JSON.stringify(tasksOf(plan.plan.tasks))) {
+					return fail(`review: PLAN.md's tasks or verification commands changed since /execute pinned them -- restore them, or re-pin with /execute ${slug} --rebase-base`);
 				}
 				const repin = latestRepin(rows);
 				const accepted = acceptedEntries(rows);

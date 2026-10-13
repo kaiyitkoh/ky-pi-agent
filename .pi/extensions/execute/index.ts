@@ -16,7 +16,7 @@ import { classifyGitInvocation, currentBranch, currentSha, currentTree } from ".
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { disarmRun, endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
-import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, readLedger } from "./ledger.ts";
+import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, pinnedTasks, readLedger, renderTasks, tasksOf } from "./ledger.ts";
 import {
 	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureHarnessIgnored, normalisePathForDrift,
 	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, renderProgressAppend, uncommittedPaths, verificationRecord,
@@ -71,22 +71,29 @@ export default function (pi: ExtensionAPI): void {
 				const union = allowanceOf(allowance.spec, allowance.plan);
 				const pinnedUnion = pinnedAllowance(rows);
 				const from = ledgerBase(rows);
+				const tasks = tasksOf(plan.plan.tasks);
+				const pinnedT = pinnedTasks(rows);
 				if (tokens.includes("--rebase-base")) {
 					// The only way past a rebase, a user's own commit or an intended allowance change: the user sees what moves.
 					if (from === undefined) return fail(`execute: ${slug} has no pinned base to move -- run /execute ${slug} first`);
 					const head = currentSha(ctx.cwd);
 					const undeclared = changedFiles(ctx.cwd, from, head).filter((p) => !union.includes(normalisePathForDrift(p)));
-					const shown = `Move ${slug}'s drift base from ${from} to HEAD ${head}.\nChanged since the base and not declared: ${undeclared.join(", ") || "none"}\nAllowance pinned: ${(pinnedUnion ?? []).join(", ")}\nAllowance now: ${union.join(", ")}`;
+					const shown = `Move ${slug}'s drift base from ${from} to HEAD ${head}.\nChanged since the base and not declared: ${undeclared.join(", ") || "none"}\nAllowance pinned: ${(pinnedUnion ?? []).join(", ")}\nAllowance now: ${union.join(", ")}\nTasks pinned:\n${renderTasks(pinnedT)}\nTasks now:\n${renderTasks(tasks)}`;
 					if (!(await ctx.ui.confirm("Re-pin the drift base?", shown))) return void ctx.ui.notify("execute: drift base not moved -- re-pin declined", "warning");
-					appendLedger(ctx.cwd, slug, { kind: "base", sha: head, allowance: union, reason: "re-pinned by the user with --rebase-base" });
+					appendLedger(ctx.cwd, slug, { kind: "base", sha: head, allowance: union, tasks, reason: "re-pinned by the user with --rebase-base" });
 					return void ctx.ui.notify(`execute: ${slug}'s drift base is now ${head}; run /execute ${slug} to continue`, "info");
 				}
 				if (pinnedUnion !== undefined && pinnedUnion.join("\n") !== union.join("\n")) {
 					return fail(`execute: the SPEC/PLAN write allowance changed since ${slug}'s base was pinned (pinned: ${pinnedUnion.join(", ")}) -- restore it, or accept it with /execute ${slug} --rebase-base`);
 				}
+				// The executor can edit PLAN.md mid-run, so a task's verification command comes from the signed pin, never PLAN.md alone.
+				if (from !== undefined && JSON.stringify(pinnedT) !== JSON.stringify(tasks)) {
+					return fail(`execute: PLAN.md's tasks or verification commands differ from those pinned for ${slug} -- restore them, or accept the change with /execute ${slug} --rebase-base, which shows both`);
+				}
 				const recorded = new Set(acceptedEntries(rows).map((e) => e.taskId));
 				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !recorded.has(t.id));
-				if (task === undefined || task.verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
+				const verificationCommand = (pinnedT ?? tasks).find((t) => t.id === task?.id)?.verificationCommand ?? undefined;
+				if (task === undefined || verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
 				if (isRunArmed() || !ctx.isIdle()) return fail("execute: a turn is already in flight -- wait for it to finish");
 
@@ -117,13 +124,13 @@ export default function (pi: ExtensionAPI): void {
 				const ignoredNow = ensureHarnessIgnored(ctx.cwd);
 				if (ignoredNow !== undefined) ctx.ui.notify(`execute: ${ignoredNow}`, "info");
 				const headSha = currentSha(ctx.cwd);
-				if (from === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, reason: "first /execute" });
+				if (from === undefined) appendLedger(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, tasks, reason: "first /execute" });
 				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
 				baseSha = from ?? headSha;
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd));
 				claimWorkflow("execute");
-				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand: task.verificationCommand, mode });
-				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${task.verificationCommand}\nFailed intermediate tool calls are logged, not fatal: the attempt passes when the one atomic commit lands and the verification command, run exactly as written on the committed HEAD, exits 0. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
+				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand, mode });
+				pi.sendUserMessage(`${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${verificationCommand}\nFailed intermediate tool calls are logged, not fatal: the attempt passes when the one atomic commit lands and the verification command, run exactly as written on the committed HEAD, exits 0. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`);
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
 			}

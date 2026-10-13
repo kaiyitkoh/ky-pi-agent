@@ -14,8 +14,15 @@ import { stallDetected } from "./progress.ts";
 /** Directory under the git common dir; the safety path guard refuses any tool path through a segment of this name. */
 export const LEDGER_DIR = HARNESS_LEDGER_SEGMENT;
 
+/** What a task may not change once pinned: PLAN.md sits in the work tree, so the model can edit it mid-run. */
+export interface PinnedTask {
+	readonly id: string;
+	readonly path: string | null;
+	readonly verificationCommand: string | null;
+}
+
 export type LedgerRow =
-	| { readonly kind: "base"; readonly sha: string; readonly allowance: readonly string[]; readonly reason: string }
+	| { readonly kind: "base"; readonly sha: string; readonly allowance: readonly string[]; readonly reason: string; readonly tasks?: readonly PinnedTask[] }
 	| { readonly kind: "rejected"; readonly taskId: string; readonly count: number | null }
 	| { readonly kind: "reset"; readonly taskId: string }
 	| { readonly kind: "accepted"; readonly taskId: string; readonly sha: string; readonly entry: string };
@@ -92,6 +99,21 @@ export function ledgerBase(rows: readonly LedgerRow[]): string | undefined {
 export function pinnedAllowance(rows: readonly LedgerRow[]): readonly string[] | undefined {
 	const base = rows.filter((r) => r.kind === "base").at(-1);
 	return base?.kind === "base" ? base.allowance : undefined;
+}
+
+/** The task list pinned with the latest base; undefined when no base, or a base written before tasks were pinned. */
+export function pinnedTasks(rows: readonly LedgerRow[]): readonly PinnedTask[] | undefined {
+	const base = rows.filter((r) => r.kind === "base").at(-1);
+	return base?.kind === "base" ? base.tasks : undefined;
+}
+
+export function tasksOf(tasks: readonly { readonly id: string; readonly path?: string; readonly verificationCommand?: string }[]): readonly PinnedTask[] {
+	return tasks.map((t) => ({ id: t.id, path: t.path ?? null, verificationCommand: t.verificationCommand ?? null }));
+}
+
+/** One line per task, so a re-pin prompt shows exactly what moved. */
+export function renderTasks(tasks: readonly PinnedTask[] | undefined): string {
+	return tasks === undefined ? "(none pinned)" : tasks.map((t) => `${t.id} ${t.path ?? "-"} | verify: ${t.verificationCommand ?? "(none)"}`).join("\n");
 }
 
 export function acceptedEntries(rows: readonly LedgerRow[]): readonly { readonly taskId: string; readonly sha: string; readonly entry: string }[] {

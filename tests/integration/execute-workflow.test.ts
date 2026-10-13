@@ -583,6 +583,35 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(readFileSync(progressFile(h), "utf-8")).toContain(`## T001 @ ${headSha(h.repo)}`);
 	});
 
+	it("a verification command rewritten in PLAN.md after the pin is refused until the user re-pins and sees both", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		await h.fire("agent_settled", { aborted: true });
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), PLAN.replace("verify: npm test", "verify: true"));
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("differ from those pinned");
+		expect(h.sent, "a tampered plan hands nothing to the model").toHaveLength(1);
+
+		h.approve = true;
+		await h.command(`${SLUG} --rebase-base`);
+		expect(h.confirms.at(-1)).toContain("verify: npm test");
+		expect(h.confirms.at(-1)).toContain("verify: true");
+		await h.command(SLUG);
+		expect(h.sent).toHaveLength(2);
+		expect(h.sent.at(-1)).toContain("on the committed HEAD: true");
+		await h.fire("agent_settled", { aborted: true });
+	});
+
+	it("a task deleted from PLAN.md after the pin is refused", async () => {
+		const two = `${PLAN}- [ ] T002 [R1] Extend the a module in src/a.ts | verify: npm test\n`;
+		const h = harness({ plan: two });
+		await h.command(SLUG);
+		await h.fire("agent_settled", { aborted: true });
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), PLAN);
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("differ from those pinned");
+	});
+
 	it("delegated dispatch names the executor-handoff agent and still requires the parent's own verification run", async () => {
 		const key = "__kypiQualityRegisteredToolNames";
 		const g = globalThis as Record<string, unknown>;

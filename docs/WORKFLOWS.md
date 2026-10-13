@@ -475,6 +475,16 @@ nothing. `/execute` and `/review` also refuse when SPEC's expected files and
 PLAN's files-touched no longer match the allowance pinned with the base, so
 a model cannot widen its own allowance to absorb drift.
 
+The task list is pinned the same way. The base row also records each task's
+id, path and verification command. `.pi/work/` sits in the work tree and the
+model writes SPEC.md and PLAN.md during `/grill` and `/plan`, so it cannot be
+a protected path; instead `/execute` and `/review` refuse when PLAN.md's tasks
+differ from the pin (a rewritten verification command, a deleted or added
+task). The verification command an attempt is checked against is the pinned
+one, fixed when the run is armed. `/execute <slug> --rebase-base` shows the
+pinned and current task lists side by side and re-pins only on approval. A
+ledger written before tasks were pinned refuses until it is re-pinned this way.
+
 The key is protected by the safety path guard, not by the operating system.
 Any `read`/`write`/`edit` path, or any bash argument, that passes through a
 `kypi-ledger` segment is refused. A process that reads the key by a route

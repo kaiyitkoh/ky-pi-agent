@@ -120,7 +120,7 @@ function setup(extra?: string, aSource = "export const a = 1;\n", opts: { aName?
 	const recordedSha = extras.length === 0 ? sha : head;
 	const entry = renderProgressAppend({ taskId: "T001", commitSha: recordedSha, verificationCommand: "npm test", output: "ok", exitCode: 0, recordedAt: 0 });
 	writeFileSync(join(dir, "PROGRESS.md"), entry);
-	appendLedger(repo, SLUG, { kind: "base", sha: baseSha, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), reason: "test" });
+	appendLedger(repo, SLUG, { kind: "base", sha: baseSha, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), tasks: [{ id: "T001", path: "src/a.ts", verificationCommand: "npm test" }], reason: "test" });
 	appendLedger(repo, SLUG, { kind: "accepted", taskId: "T001", sha: recordedSha, entry });
 	mocks.reviewPath = join(dir, "REVIEW.md");
 
@@ -243,6 +243,14 @@ describe("/review -- the real handler", () => {
 		expect(h.confirms).toHaveLength(0);
 		expect(mocks.calls).toHaveLength(0);
 		expect(h.notes.at(-1)?.text).toContain("not opening an MR");
+	});
+
+	it("refuses when PLAN.md's verification command no longer matches the one /execute pinned", async () => {
+		const h = setup();
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), "- [ ] T001 [R1] Create the a module in src/a.ts | verify: true\n");
+		await h.run(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("changed since /execute pinned them");
+		expect(mocks.calls).toHaveLength(0);
 	});
 
 	it("refuses when no slug has a PROGRESS.md", async () => {
