@@ -609,7 +609,7 @@ Plans:
 - [x] 11-01-PLAN.md — Recording UI context, harness uiContext/mode/fauxModels options, event-firing probe test
 - [x] 11-02-PLAN.md — Authored `ky` theme validated against the installed schema and Pi's loader; `"theme": "ky"` in settings
 - [x] 11-03-PLAN.md — Pure helpers: statusline formatter, subagent tracker, throttled git probe (TDD)
-- [ ] 11-06-PLAN.md — Live wire-dump check script (`scripts/ui-wire-check.sh`) with tested parser
+- [x] 11-06-PLAN.md — Live wire-dump check script (`scripts/ui-wire-check.sh`) with tested parser
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
@@ -671,7 +671,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 17/17 | Complete    | 2026-10-12 |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
-| 11. Terminal UI | 3/7 | In Progress|  |
+| 11. Terminal UI | 4/7 | In Progress|  |
 
 ### Phase 12: OpenSpec Opt-in Skill
 

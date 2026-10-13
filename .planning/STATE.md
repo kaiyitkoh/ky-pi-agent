@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: milestone
 status: executing
 stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-13T02:28:59.283Z"
+last_updated: "2026-10-13T02:31:13.170Z"
 last_activity: 2026-10-13
 progress:
   total_phases: 15
   completed_phases: 13
   total_plans: 141
-  completed_plans: 137
+  completed_plans: 138
   percent: 87
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 11 (terminal-ui) — EXECUTING
-Plan: 4 of 7
+Plan: 5 of 7
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-10-13
 
-Progress: [██████████] 97%
+Progress: [██████████] 98%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -175,6 +175,7 @@ credentials can do has been done".
 | Phase 08.1 P05 | ~1h | 4 tasks | 25 files |
 | Phase 09 P15 | 25min | 3 tasks | 6 files |
 | Phase 10 P05 | 25m | 2 tasks | 2 files |
+| Phase 11 P06 | 10min | 2 tasks | 4 files |
 
 ## Accumulated Context
 
@@ -471,6 +472,7 @@ Recent decisions affecting current work:
 - [Phase 09-11]: Verified-fact selection for a handoff packet is a declared substring rule, not 'all of them' — a fact travels with the packet iff its claim text appears case-insensitively inside the task's concatenated requirement excerpts -- real and checkable, asserted with both a presence and an absence case
 - [Phase 09]: QUAL-08: gateDepthFor is a pure selector beside shouldRunDesignReview in gates.ts -- quick runs deterministic only, ceremonial workflows run all four, proved by equality in both directions and falsified by inversion; /quick's own command file never touched
 - [Phase 08.1]: 08.1-05: pi-background-tasks@2.6.9 vendored process-only at .pi/extensions/background-tasks/ (not vendor/); npm pin removed
+- [Phase 11]: 11-06: wire check exits 64 on usage errors, 2 on missing logs; truncation noted but non-failing
 
 ### Pending Todos
 
@@ -523,7 +525,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-10-13T02:28:59.273Z
+Last session: 2026-10-13T02:31:07.771Z
 Stopped at: Completed 09-12-PLAN.md
 Resume file: None
 
