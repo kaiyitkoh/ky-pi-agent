@@ -664,12 +664,12 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 4. Bootstrap/runbook documents install + upgrade; third-party wrapper `openspec-pi` evaluated and rejected or vendored with justification.
 
 **Depends on:** Phase 9 (runs before Phase 11, which awaits a user decision on terminal vs GUI front-end)
-**Plans:** 4 plans in 3 waves
+**Plans:** 1/4 plans executed
 
 Plans:
 **Wave 1**
 
-- [ ] 12-01-PLAN.md — `openspec` arm in the safety guard (archive/read-only allow, init/update/completion/feedback confirm, unknown confirm), rooted `/openspec/` ignore + untracked test, SAFETY.md
+- [x] 12-01-PLAN.md — `openspec` arm in the safety guard (archive/read-only allow, init/update/completion/feedback confirm, unknown confirm), rooted `/openspec/` ignore + untracked test, SAFETY.md
 - [ ] 12-02-PLAN.md — Zero per-turn cost proof via Pi's loader and a session byte-identity test (skills + opsx prompts), harness env opt-outs (telemetry, update check, auto-config)
 
 **Wave 2** *(blocked on Wave 1 completion)*
