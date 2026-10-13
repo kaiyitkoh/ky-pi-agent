@@ -309,42 +309,72 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.on("model_select", async (event, ctx) => {
 		const slot = globalThis as Record<string, unknown>;
 		if (slot[REVERTING_KEY] === true || event.source === "restore") return;
+		// NEVER THROWS: a guard bug must not break a model switch Pi already completed.
 		try {
-			const verdict = guardRoute(event.model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
+			const need = deriveNeed(ctx, { usesToolLoop: true });
+			const verdict = guardRoute(event.model, "executor", need);
 			if (verdict.ok) return;
-			const previous = event.previousModel;
-			if (previous === undefined || !guardRoute(previous, "executor", deriveNeed(ctx, { usesToolLoop: true })).ok) {
-				ctx.ui.notify(`${verdict.reason}. Switch to a capable model with /cheap, /balanced or /max.`, "error");
+			const ref = `${event.model.provider}/${event.model.id}`;
+			// Pi resets thinking to the default on every switch, so the user cannot turn it off first; turning it off here is the only way in.
+			if (guardRoute(event.model, "executor", { ...need, thinkingRequested: false }).ok) {
+				pi.setThinkingLevel("off");
+				ctx.ui.notify(`${ref} receives no thinking field on Bedrock, so thinking is now off for it.`, "warning");
 				return;
 			}
-			ctx.ui.notify(`${verdict.reason}. Reverting to ${previous.provider}/${previous.id}.`, "error");
+			const settings = pi.getSettings();
+			const savedDefault =
+				settings.defaultProvider === event.model.provider && settings.defaultModel === event.model.id
+					? ` ${ref} is still saved as your default model, so the next start boots on it; pick another default in /model.`
+					: "";
+			const previous = event.previousModel;
+			if (previous === undefined || !guardRoute(previous, "executor", need).ok) {
+				ctx.ui.notify(`${verdict.reason}. Switch to a capable model with /cheap, /balanced or /max.${savedDefault}`, "error");
+				return;
+			}
+			const back = `${previous.provider}/${previous.id}`;
 			slot[REVERTING_KEY] = true;
+			let reverted: boolean | string;
 			try {
-				await pi.setModel(previous);
+				reverted = await pi.setModel(previous);
+			} catch (err) {
+				reverted = String(err);
 			} finally {
 				slot[REVERTING_KEY] = false;
 			}
+			ctx.ui.notify(
+				reverted === true
+					? `${verdict.reason}. Reverted to ${back}; thinking is now ${pi.getThinkingLevel()}.${savedDefault}`
+					: `${verdict.reason}. Reverting to ${back} failed (${reverted === false ? "no configured auth" : reverted}); switch with /cheap, /balanced or /max.${savedDefault}`,
+				"error",
+			);
 		} catch {
-			// A guard bug must not break a model switch Pi already completed.
+			return;
 		}
 	});
 	// Covers a restored session whose model fails the guard, and any switch the revert could not undo.
 	pi.on("input", (event, ctx) => {
+		// NEVER THROWS: a guard bug must not block a prompt.
 		try {
-			if (ctx.model === undefined) return;
-			const verdict = guardRoute(ctx.model, "executor", deriveNeed(ctx, { usesToolLoop: true, promptChars: event.text.length, image: (event.images?.length ?? 0) > 0 }));
-			if (verdict.ok) return;
+			// A workflow prompt was routed and guarded by its command, and refusing it here would leak the run it armed.
+			if (ctx.model === undefined || event.source === "extension") return;
+			const need = deriveNeed(ctx, { usesToolLoop: true, promptChars: event.text.length, image: (event.images?.length ?? 0) > 0 });
+			// An overfull context is left to Pi's own compaction and retry; only the other three blocks refuse a prompt.
+			const verdict = guardRoute(ctx.model, "executor", { ...need, estimatedInputTokens: undefined });
+			if (verdict.ok) {
+				if (!guardRoute(ctx.model, "executor", need).ok) ctx.ui.notify(`about ${need.estimatedInputTokens} tokens against a ${ctx.model.contextWindow}-token window; run /compact if Pi does not compact first.`, "warning");
+				return;
+			}
 			ctx.ui.notify(`${verdict.reason}. Prompt not sent; switch with /cheap, /balanced or /max.`, "error");
 			return { action: "handled" as const };
 		} catch {
 			return;
 		}
 	});
-	// Best-effort like safety/index.ts's session_start prune: a bad payload must not stop session start.
 	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
 	// Pi gives extensions no view of a `--tools` allowlist, so read argv; the user's named tools must never be narrowed.
 	const profile = () => (hasExplicitToolAllowlist(process.argv) ? "full" : resolveProfile(pi.getFlag("ky-profile")));
 	pi.on("session_start", (event, ctx) => {
+		// NEVER THROWS, like safety/index.ts's session_start prune: a bad payload must not stop session start.
 		try {
 			const branch = ctx.sessionManager.getBranch();
 			// Pins whose owning processes have all ended are undone, then re-derived for this session's mode.

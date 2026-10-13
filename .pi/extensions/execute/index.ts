@@ -14,6 +14,7 @@ import { gateDepthFor } from "../quality/gates.ts";
 import { registeredToolNames, runChangeGateStage, runTypecheckAt } from "../quality/index.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
+import { deriveNeed, guardRoute } from "../routing/guard.ts";
 import { acceptedReason, disarmRun, endRun, isRunArmed, isRunPending, startRun, writeRunEvidence } from "../workflows/evidence.ts";
 import { IN_FLIGHT, notePrompt } from "../workflows/settle.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
@@ -97,6 +98,9 @@ export default function (pi: ExtensionAPI): void {
 				if (task === undefined || verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
 				if (isRunArmed() || !ctx.isIdle()) return fail(`execute: ${IN_FLIGHT}`);
+				// The routing input backstop lets this command's prompt through, so the executor guard runs here, before anything is armed.
+				const guard = ctx.model === undefined ? { ok: true as const } : guardRoute(ctx.model, "executor", { ...deriveNeed(ctx, { usesToolLoop: true }), estimatedInputTokens: undefined });
+				if (!guard.ok) return fail(`execute: ${guard.reason}`);
 
 				const prior = reset ? { attempts: 0, stalled: false } : attemptState(rows, task.id);
 				if (prior.attempts > REVISION_CAP || prior.stalled) {

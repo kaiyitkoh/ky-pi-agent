@@ -219,13 +219,26 @@ it fires after the switch and its return value is ignored. Enforcement is
 therefore undo plus refuse:
 
 - On `model_select` with source `set` or `cycle`, the executor guard runs on
-  the new model. If it refuses, the reason is shown as an error and the
-  previous model is restored with one `setModel` call, guarded against
-  re-entry. The previous model is only restored if it passes the guard itself.
+  the new model. If it refuses, the previous model is restored with one
+  `setModel` call, guarded against re-entry, and the message says whether the
+  revert worked and which thinking level the session now has (Pi applies the
+  per-model or global default on every switch). A failed revert is reported as
+  failed. The previous model is only restored if it passes the guard itself.
+- A Bedrock reasoning model that fails only the thinking block is kept and its
+  thinking is set to `off`: Pi resets thinking on every switch, so the user
+  could never turn it off first.
+- If the refused model is also the saved default (the picker's "set as
+  default" persists before `model_select` fires, and an extension cannot write
+  Pi's default), the message says so: the next start would boot on it.
 - A `restore` event (resuming a session) is never reverted.
-- An `input` handler refuses the prompt (`{ action: "handled" }`) whenever the
-  current model fails the guard, which covers a restored session and any
-  switch the revert could not undo. Slash commands run before `input`, so
+- An `input` handler refuses an interactive prompt (`{ action: "handled" }`)
+  whenever the current model fails the image, thinking or R1 block, which
+  covers a restored session and any switch the revert could not undo. A
+  context larger than the window only warns and points at `/compact`; Pi's
+  own compaction and retry handle it. Prompts a workflow command sends itself
+  (`source: "extension"`) pass, because the command already guarded them and
+  refusing one would leak the run it armed; `/execute` runs the executor
+  guard before it arms anything. Slash commands run before `input`, so
   `/cheap`, `/balanced` and `/max` always remain available to recover.
 - An internal error in either handler is swallowed: a guard bug must not
   brick a session.
