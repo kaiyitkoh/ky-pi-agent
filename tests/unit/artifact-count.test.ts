@@ -224,6 +224,7 @@ describe("every artifact and every section has a named consumer", () => {
 		"Scope Drift": "the human reviewer and the MR body",
 		"Checked and cleared": "the human reviewer",
 		Classification: "the MR body",
+		"Design review": "the human reviewer (whether the design-level pass ran, and on which signal)",
 	};
 
 	it("PLAN.md's rendered sections are exactly those with a declared consumer", () => {
