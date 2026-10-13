@@ -737,6 +737,28 @@ does on this machine, because that command was never run. `RB-07-02`
 (OUTSTANDING, plan 07-13) is what will close that gap, alongside the
 already-outstanding `RB-07-01` end-to-end smoke ritual.
 
+## Global install (every repo)
+
+`sh bin/bootstrap.sh --global-setup` (also part of a full run) merges into `<agent-dir>/settings.json`, additively:
+
+- `packages`: the four composed packages at the exact pins in `.pi/settings.json`. A different pinned version of one of them already in user settings is refused, naming both versions.
+- `extensions`: the four `-builtin:` disables (`mcp`, `llama.cpp`, `codemode`, `tool-search`).
+- `theme`: `ky`, only when the user has not set one. `<agent-dir>/themes/ky.json` is copied byte-for-byte.
+- `subagents.agentScanDirs`: this checkout's `.pi/agents`, so `planner` and `executor-handoff` are discoverable in every repository from a single source. pi-subagents 0.76.1 documents the key in `docs/configuration.md` ("Extra agent scan directories") and ranks fixed user and project agent directories above scan roots.
+- `kyPiAgent`: only `bootstrapVersion`, `hardenedNpmRoot` and `piPinned` are written; every other key survives.
+
+Git-package users get the same agents through the manifest key `pi.subagents.agents` in `package.json` (pi-subagents `docs/agents.md`, "Where agents live"). No project agent may share a name with a pi-subagents builtin, and agent bodies carry no HTML comments because the body is the child's system prompt. `.pi/agents/reviewer.md` was removed for that reason: it shadowed the builtin `reviewer`.
+
+The agent files declare no `model:` or `fallbackModels:`. pi-subagents 0.76.1 assigns a settings-level `agentOverrides` model unconditionally, so the rule is a conservative invariant kept by `tests/unit/subagent-agents-config.test.ts`, not a requirement.
+
+Subagent children always load the safety guard: the harness registers it as a required child extension through pi-subagents `src/api/required-child-extensions.js` (pinned 0.76.1), and a launch fails closed when registration fails.
+
+### One delivery path
+
+The user-scope stub (`<agent-dir>/extensions/ky-safety/index.ts`) loads this checkout's guard by absolute path. A git package of this repository carries its own copy. Exactly one may be active per machine: `sh bin/bootstrap.sh --check-only` exits 1 when both are configured, and prints a warning when a user-level git or local package resolves to this checkout. If the stub's target is missing (checkout moved or deleted) the stub blocks every tool call rather than loading nothing.
+
+Accepted residual: a user who also installs the git package globally double-loads the harness inside this repository. See `docs/RUNBOOK.md`, Phase 12.1.
+
 ## Pi 1.x capabilities not adopted - inputs for Phases 10/11
 
 Notes. Phase 10 decided the first two bullets (see "Context budget and tool profiles" below); the rest remain candidates. Source: pi-coding-agent / pi-ai 1.1.0 types and CHANGELOG.

@@ -101,7 +101,7 @@ would exercise the update path rather than the first-install path.
 
 1. Start from a clean profile, or point Pi's agent directory at an empty one:
    `export PI_CODING_AGENT_DIR=/tmp/pi-clean-check`
-2. `pi install https://github.com/kaiyitkoh/ky-pi-agent`
+2. `pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0` (the tag is created at milestone archive; until it exists, use `@<commit>`)
 3. `pi --list-models`
 
 **Expected output:** the sentinel model id `ky-harness-selftest` appears in the
@@ -112,9 +112,8 @@ extension directory was collected, and the extension loaded.
 into `settings.json`. If a throwaway `PI_CODING_AGENT_DIR` was used, deleting
 that directory is sufficient.
 
-**Note on the URL.** The form above carries no ref, so it is *not* pinned —
-`pi update --extensions` will reconcile it to the tracked default branch.
-Pinning requires an explicit `@<tag-or-commit>` suffix.
+**Note on the ref.** The `@<tag-or-commit>` suffix is what pins the install;
+an unrefed URL is never moved by `pi update` and is not used.
 
 **Offline proxy:** `tests/integration/load-paths.test.ts` case 2 — clones this
 repository locally and runs `npm install --omit=dev` in the clone, then loads
@@ -1859,3 +1858,91 @@ Phase 12 added opt-in OpenSpec skills at user level at zero per-turn cost, prove
 **Expected output.** A passing `--check` at the new version and a recorded line.
 
 **Offline proxy:** `tests/unit/openspec-docs.test.ts` fails if the docs and the script name different versions.
+
+## Phase 12.1 - v1.0 gap closure
+
+Plan 08 made the harness available in every repository through user-level Pi settings (`sh bin/bootstrap.sh --global-setup`), declared the agent definitions in `package.json`, and left exactly one safety delivery path per machine. `docs/EXTENSIONS.md`, "Global install (every repo)", holds the model. Three checks need a live session, the work laptop or an RPC front-end and are governed here.
+
+### Install log
+
+Global installs performed on the development machine under the owner's standing authorisation, exact pins only, through `sh bin/bootstrap.sh --global-setup`.
+
+- Date (UTC): 2026-10-13T07:41Z, on the development machine (Windows, Git Bash, Node 24), `pi --version` printed `1.1.0`.
+- Command: `sh bin/bootstrap.sh --global-setup` against the real agent directory, after `sh bin/bootstrap.sh --assert-hardening` reported all three scopes hardened. Exit code 0.
+- Result: user `settings.json` gained the four packages, the four `-builtin:` disables, `theme: "ky"` and `subagents.agentScanDirs`; `themes/ky.json` was copied; `pi list` shows the four packages under `~/.pi/agent/npm`; a following `sh bin/bootstrap.sh --check-only` exited 0 and reported one delivery path.
+- Not touched: `auth.json`, `models.json`, the safety stub and the subagent config. The existing safety stub was written by an earlier bootstrap and keeps its old shape (no missing-target block) until a full run rewrites it.
+
+| Spec | Command | Exit | Outcome |
+|------|---------|------|---------|
+| `npm:@narumitw/pi-lsp@0.49.9` | `pi install npm:@narumitw/pi-lsp@0.49.9` | 0 | installed |
+| `npm:pi-session-finder@0.5.6` | `pi install npm:pi-session-finder@0.5.6` | 0 | installed |
+| `npm:pi-subagents@0.76.1` | `pi install npm:pi-subagents@0.76.1` | 0 | installed |
+| `npm:pi-web-access@0.38.0` | `pi install npm:pi-web-access@0.38.0` | 0 | installed |
+
+Loading the packages in a live session in another repository is RB-12-05 and stays OUTSTANDING.
+
+### Accepted residuals and deferrals
+
+- Double load: a user who also installs the git package globally double-loads the harness inside this repository (two absolute paths, no deduplication). The README one-path rule and the `--check-only` warning mitigate it; the stub plus a git package is a hard `--check-only` failure.
+- Release tag: README pins the git install to `v1.0.0`. Creating and pushing that tag at milestone archive is a user action; the harness never pushes. Until it exists the Path A command does not resolve.
+- Transitive caret ranges: `pi-web-access` resolves some dependency ranges outside any lockfile at install time. Deferred: Pi installs into its own prefix and the repo cannot hold a lockfile for it.
+- Loop-police state: `pi update` resets a git-package clone and wipes the loop-police state file. Deferred: the state is advisory and rebuilt within a session.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-12-05 | Global setup live in a work repo outside this checkout | OUTSTANDING |
+| RB-12-06 | Bedrock serves the apac Sonnet 4.5 profile on the work laptop | OUTSTANDING |
+| RB-12-07 | An RPC front-end shows the push confirm card and refuses on decline or timeout | OUTSTANDING |
+
+### RB-12-05 - global setup in a repo outside this checkout
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs an interactive Pi session in a work repository and the work laptop's agent directory.
+
+**Procedure.**
+
+1. `sh bin/bootstrap.sh --global-setup` from the checkout, then `sh bin/bootstrap.sh --check-only`.
+2. Start `pi` in a work repo outside this checkout and confirm the four composed packages load.
+3. `/theme` lists and selects `ky`.
+4. The `subagent` tool lists `planner` and `executor-handoff`.
+5. Launch a subagent and have the child run `git push origin HEAD:main`; the guard must block it.
+6. `/plan`, `/execute`, `/review` and `/quick` exist under their plain names, with no `:1` suffix.
+7. Record the result: `echo "RB-12-05 packages loaded=<yes|no>, theme ky=<yes|no>, agents listed=<yes|no>, child push blocked=<yes|no>, plain command names=<yes|no>, $(date -u +%FT%TZ)" >> RB-12-05-RESULT.md`
+
+**Expected output.** Five `yes` answers and a `--check-only` that exits 0.
+
+**Offline proxy:** `tests/integration/templates-install.test.ts` runs the global setup against a throwaway agent directory and a stub `pi`, and `tests/integration/bootstrap-check-only.test.ts` covers the delivery-path report. Neither starts a real Pi session.
+
+### RB-12-06 - Bedrock serves the apac Sonnet 4.5 profile
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs the work laptop's AWS SSO session and region.
+
+**Procedure.**
+
+1. `aws bedrock list-inference-profiles --region <region>` must list `apac.anthropic.claude-sonnet-4-5-20250929-v1:0`.
+2. If it does not, set `kyPiAgent.bedrockProfilePrefix` in `~/.pi/agent/settings.json` to a prefix that is listed and run `/mode` again.
+3. Record the result: `echo "RB-12-06 apac profile listed=<yes|no>, prefix in use=<prefix>, $(date -u +%FT%TZ)" >> RB-12-06-RESULT.md`
+
+**Expected output.** The profile id appears in the list, or a listed prefix is recorded.
+
+**Offline proxy:** `tests/unit/model-metadata.test.ts` pins the template entry's shape. It cannot tell whether AWS serves the profile in a given region.
+
+### RB-12-07 - RPC push confirm
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs an RPC front-end that renders extension confirm dialogs, which arrives with the Orca integration.
+
+**Procedure.**
+
+1. In the front-end, ask the agent to `git push` a feature branch; a confirm card must appear.
+2. Decline it; the push must be refused.
+3. Ask again and leave the card untouched for 5 minutes; the push must be refused.
+4. Record the result: `echo "RB-12-07 confirm card shown=<yes|no>, decline refused=<yes|no>, timeout refused=<yes|no>, $(date -u +%FT%TZ)" >> RB-12-07-RESULT.md`
+
+**Expected output.** Three `yes` answers.
+
+**Offline proxy:** `tests/unit/push-confirm.test.ts` drives the confirm path with a recording UI, including the timeout. It does not use a real RPC client.

@@ -171,7 +171,7 @@ const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
 const PHASE_NINE_IDS = ["RB-09-01", "RB-09-02", "RB-09-03"] as const;
 const PHASE_TEN_IDS = ["RB-10-01", "RB-10-02", "RB-10-03"] as const;
 const PHASE_ELEVEN_IDS = ["RB-11-01", "RB-11-02", "RB-11-03"] as const;
-const PHASE_TWELVE_IDS = ["RB-12-01", "RB-12-02", "RB-12-03", "RB-12-04"] as const;
+const PHASE_TWELVE_IDS = ["RB-12-01", "RB-12-02", "RB-12-03", "RB-12-04", "RB-12-05", "RB-12-06", "RB-12-07"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
@@ -359,7 +359,7 @@ describe("Group A — README states what the supply-chain control does not cover
 /** The command each entry must name, so the reader has nothing to guess at. */
 const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-01-01": ["sh scripts/check-gh-unauthenticated.sh", "gh auth logout"],
-	"RB-01-02": ["pi install https://github.com/kaiyitkoh/ky-pi-agent", "pi --list-models"],
+	"RB-01-02": ["pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0", "pi --list-models"],
 	"RB-01-03": ["/reload"],
 	// Fragments, not whole command lines: each is short enough to survive a
 	// reflow of the surrounding markdown and specific enough that a rewrite
@@ -587,6 +587,18 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-12-04": [
 		"npm view @fission-ai/openspec time --json",
 		'echo "RB-12-04 bumped <old> -> <new>, tarball reviewed=<yes|no>, --check exit <code>, $(date -u +%FT%TZ)" >> RB-12-04-RESULT.md',
+	],
+	"RB-12-05": [
+		"sh bin/bootstrap.sh --global-setup",
+		'echo "RB-12-05 packages loaded=<yes|no>, theme ky=<yes|no>, agents listed=<yes|no>, child push blocked=<yes|no>, plain command names=<yes|no>, $(date -u +%FT%TZ)" >> RB-12-05-RESULT.md',
+	],
+	"RB-12-06": [
+		"aws bedrock list-inference-profiles --region <region>",
+		"apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+		'echo "RB-12-06 apac profile listed=<yes|no>, prefix in use=<prefix>, $(date -u +%FT%TZ)" >> RB-12-06-RESULT.md',
+	],
+	"RB-12-07": [
+		'echo "RB-12-07 confirm card shown=<yes|no>, decline refused=<yes|no>, timeout refused=<yes|no>, $(date -u +%FT%TZ)" >> RB-12-07-RESULT.md',
 	],
 };
 
