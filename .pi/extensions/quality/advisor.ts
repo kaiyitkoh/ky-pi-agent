@@ -4,12 +4,10 @@
  * this file only defines the mechanism. A thrown routing refusal propagates uncaught (Pi turns it into
  * `isError`, `pi-agent-core/dist/agent-loop.js`) and is never charged.
  */
-import type { AssistantMessage, Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { addQualityCost } from "../diagnostics/quality-cost.ts";
-import { runSingleShotRole } from "../routing/modes.ts";
+import { callRole, replyText } from "./role-call.ts";
 
 /** Tool name used at registration. */
 export const CONSULT_ADVISOR_TOOL_NAME = "consult_advisor";
@@ -46,27 +44,7 @@ const ADVISOR_SYSTEM_PROMPT =
 
 /** Dispatches one consult through `runSingleShotRole` and returns the advisor's text; cost goes to `addQualityCost`. */
 export async function executeConsultAdvisor(ctx: ExtensionContext, args: ConsultAdvisorArgs): Promise<string> {
-	const messages: Message[] = [
-		{
-			role: "user",
-			content: `Question: ${args.question}\n\nContext:\n${args.context}`,
-			timestamp: Date.now(),
-		},
-	];
-
-	const start = process.hrtime.bigint();
-	const message: AssistantMessage = await runSingleShotRole(ctx, {
-		role: "advisor",
-		systemPrompt: ADVISOR_SYSTEM_PROMPT,
-		messages,
-	});
-	const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
-	addQualityCost({ ms: elapsedMs, tokens: message.usage.totalTokens });
-
-	// Returns a plain string; the registration wrapper must not set `terminate`, since a consult continues the turn.
-	return message.content
-		.filter((block): block is Extract<AssistantMessage["content"][number], { type: "text" }> => block.type === "text")
-		.map((block) => block.text)
-		.join(" ")
-		.trim();
+	const content = `Question: ${args.question}\n\nContext:\n${args.context}`;
+	const message = await callRole(ctx, { role: "advisor", systemPrompt: ADVISOR_SYSTEM_PROMPT, messages: [{ role: "user", content, timestamp: Date.now() }] });
+	return replyText(message);
 }

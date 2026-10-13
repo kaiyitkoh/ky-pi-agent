@@ -3,13 +3,11 @@
  * import graph) and dispatch through `runSingleShotRole`, the only route to a model. Registers nothing.
  * The prompt only asks; `validateReview` (review-schema.ts) is the enforcement.
  */
-import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
+import type { Message } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-import { addQualityCost } from "../diagnostics/quality-cost.ts";
 import { redactForModel } from "../diagnostics/redact.ts";
 import { isProseToolCall } from "../diagnostics/prose.ts";
-import { runSingleShotRole } from "../routing/modes.ts";
 import {
 	NIT_CAP,
 	SUBMIT_REVIEW_DESCRIPTION,
@@ -18,6 +16,7 @@ import {
 	validateReview,
 	type ReviewValidation,
 } from "./review-schema.ts";
+import { callRole, replyText, toolCallNamed } from "./role-call.ts";
 
 /** One touched file in full; whole contents catch the bug of omission a diff hides. */
 export interface TouchedFile {
@@ -48,25 +47,14 @@ export interface ReviewerContractInput {
 }
 
 /** Throws naming the absent contract element; a missing element is an error, never an empty section. */
-function requireNonEmptyString(name: string, value: string): void {
-	if (value.trim().length === 0) {
-		throw new Error(
-			`buildReviewerContext: the "${name}" contract element is absent (empty or whitespace-only string) -- ` +
-				"a missing element is an error, not an empty section; the reviewer's fixed context contract " +
-				"(diff, full file contents, gate report, requirements, files-touched union, import graph) is " +
-				"all six or none",
-		);
-	}
-}
-
-function requireNonEmptyArray<T>(name: string, value: readonly T[]): void {
-	if (value.length === 0) {
-		throw new Error(
-			`buildReviewerContext: the "${name}" contract element is absent (empty array) -- a missing element ` +
-				"is an error, not an empty section; the reviewer's fixed context contract (diff, full file " +
-				"contents, gate report, requirements, files-touched union, import graph) is all six or none",
-		);
-	}
+function requirePresent(name: string, value: string | readonly unknown[]): void {
+	const empty = typeof value === "string" ? value.trim().length === 0 : value.length === 0;
+	if (!empty) return;
+	throw new Error(
+		`buildReviewerContext: the "${name}" contract element is absent (${typeof value === "string" ? "empty or whitespace-only string" : "empty array"}) -- ` +
+			"a missing element is an error, not an empty section; the reviewer's fixed context contract " +
+			"(diff, full file contents, gate report, requirements, files-touched union, import graph) is all six or none",
+	);
 }
 
 /** A Markdown fenced code block, backtick-count bumped when the body itself contains a run of backticks. */
@@ -78,18 +66,8 @@ function fenced(body: string, lang = ""): string {
 	return `${fence}${lang}\n${body}\n${fence}`;
 }
 
-function renderTouchedFiles(files: readonly TouchedFile[]): string {
-	return files
-		.map((file) => `### ${file.path}\n\n${fenced(file.contents)}`)
-		.join("\n\n");
-}
-
-function renderRequirements(requirements: readonly ReviewRequirement[]): string {
+export function renderRequirements(requirements: readonly ReviewRequirement[]): string {
 	return requirements.map((r) => `- ${r.id}: ${r.text}`).join("\n");
-}
-
-function renderFilesTouchedUnion(paths: readonly string[]): string {
-	return paths.map((p) => `- ${p}`).join("\n");
 }
 
 /** One line per declared target, or "(no declared imports)"; an entry with empty `to` is a real measurement. */
@@ -110,18 +88,14 @@ function renderImportGraph(entries: readonly ImportGraphEntry[]): string {
  * diffs and file contents can surface credentials read earlier in the session.
  */
 export function buildReviewerContext(input: ReviewerContractInput): string {
-	requireNonEmptyString("diff", input.diff);
-	requireNonEmptyArray("touchedFiles", input.touchedFiles);
-	requireNonEmptyString("gateReport", input.gateReport);
-	requireNonEmptyArray("requirements", input.requirements);
-	requireNonEmptyArray("filesTouchedUnion", input.filesTouchedUnion);
+	for (const name of ["diff", "touchedFiles", "gateReport", "requirements", "filesTouchedUnion"] as const) requirePresent(name, input[name]);
 
 	const sections = [
 		`# Diff\n\n${fenced(input.diff, "diff")}`,
-		`# Full Contents of Every Touched File\n\n${renderTouchedFiles(input.touchedFiles)}`,
+		`# Full Contents of Every Touched File\n\n${input.touchedFiles.map((f) => `### ${f.path}\n\n${fenced(f.contents)}`).join("\n\n")}`,
 		`# Test/Typecheck Output (Deterministic Gate Stage Report)\n\n${fenced(input.gateReport)}`,
 		`# Stated Requirements\n\n${renderRequirements(input.requirements)}`,
-		`# Files-Touched Union\n\n${renderFilesTouchedUnion(input.filesTouchedUnion)}`,
+		`# Files-Touched Union\n\n${input.filesTouchedUnion.map((p) => `- ${p}`).join("\n")}`,
 		`# Import Graph (declared \`import ... from\` and \`export ... from\`, syntax-level only -- see buildImportGraph)\n\n${renderImportGraph(input.importGraph)}`,
 	];
 
@@ -136,18 +110,7 @@ const IMPORT_FROM_RE = /\b(?:import|export)\b[\s\S]*?\bfrom\s+["']([^"']+)["']/g
 
 /** Declared graph: one entry per source, specifiers as written and unresolved, in file order; `to` may be empty. */
 export function buildImportGraph(sources: readonly { path: string; text: string }[]): ImportGraphEntry[] {
-	return sources.map((source) => {
-		const to: string[] = [];
-		IMPORT_FROM_RE.lastIndex = 0;
-		let match: RegExpExecArray | null;
-		while ((match = IMPORT_FROM_RE.exec(source.text)) !== null) {
-			const specifier = match[1];
-			if (specifier !== undefined) {
-				to.push(specifier);
-			}
-		}
-		return { from: source.path, to };
-	});
+	return sources.map((source) => ({ from: source.path, to: Array.from(source.text.matchAll(IMPORT_FROM_RE), (m) => m[1] ?? "") }));
 }
 
 /**
@@ -183,23 +146,9 @@ export interface RunReviewInput {
 export async function runReview(ctx: ExtensionContext, input: RunReviewInput): Promise<ReviewValidation> {
 	const context = buildReviewerContext(input.contract);
 
-	const tools: Tool[] = [
-		{
-			name: SUBMIT_REVIEW_TOOL_NAME,
-			description: SUBMIT_REVIEW_DESCRIPTION,
-			parameters: submitReviewParameters,
-		},
-	];
-
+	const tools = [{ name: SUBMIT_REVIEW_TOOL_NAME, description: SUBMIT_REVIEW_DESCRIPTION, parameters: submitReviewParameters }];
 	const messages: Message[] = [{ role: "user", content: context, timestamp: Date.now() }];
-
-	const callOnce = async (): Promise<AssistantMessage> => {
-		// A thrown guard refusal never reaches a model, so nothing is charged and it propagates.
-		const start = process.hrtime.bigint();
-		const reply = await runSingleShotRole(ctx, { role: "reviewer", systemPrompt: REVIEWER_SYSTEM_PROMPT, messages, tools });
-		addQualityCost({ ms: Number(process.hrtime.bigint() - start) / 1_000_000, tokens: reply.usage.totalTokens });
-		return reply;
-	};
+	const callOnce = () => callRole(ctx, { role: "reviewer", systemPrompt: REVIEWER_SYSTEM_PROMPT, messages, tools });
 
 	let message = await callOnce();
 	// A cheap model that writes the call out as text gets one corrective turn; a second miss fails closed below.
@@ -212,17 +161,9 @@ export async function runReview(ctx: ExtensionContext, input: RunReviewInput): P
 		message = await callOnce();
 	}
 
-	const toolCall = message.content.find(
-		(block): block is Extract<AssistantMessage["content"][number], { type: "toolCall" }> =>
-			block.type === "toolCall" && block.name === SUBMIT_REVIEW_TOOL_NAME,
-	);
-
+	const toolCall = toolCallNamed(message, SUBMIT_REVIEW_TOOL_NAME);
 	if (toolCall === undefined) {
-		const proseText = message.content
-			.filter((block): block is Extract<AssistantMessage["content"][number], { type: "text" }> => block.type === "text")
-			.map((block) => block.text)
-			.join(" ")
-			.trim();
+		const proseText = replyText(message);
 		return {
 			ok: false,
 			reason:
@@ -232,6 +173,5 @@ export async function runReview(ctx: ExtensionContext, input: RunReviewInput): P
 				}). submit_review is the only accepted output; nothing outside it is a review.`,
 		};
 	}
-
 	return validateReview(toolCall.arguments, input.requirementIds);
 }

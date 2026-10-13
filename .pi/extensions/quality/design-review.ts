@@ -2,24 +2,22 @@
  * Design-level review pass: derives the firing signals from the change and, when they fire, asks one extra
  * reviewer call for complexity, scalability and abstraction-fit findings. Registers nothing.
  */
-import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
+import { StringEnum } from "@earendil-works/pi-ai";
+import type { AssistantMessage } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
-import { StringEnum } from "@earendil-works/pi-ai";
 
-import { addQualityCost } from "../diagnostics/quality-cost.ts";
 import { redactForModel } from "../diagnostics/redact.ts";
-import { runSingleShotRole } from "../routing/modes.ts";
-import type { DesignReviewSignals } from "./gates.ts";
-import { isFileLine, type ReviewFinding } from "./review-schema.ts";
-import type { ReviewRequirement } from "./reviewer.ts";
+import { CODE_FILE, type DesignReviewSignals } from "./gates.ts";
+import { isFileLine, SEVERITIES, type ReviewFinding } from "./review-schema.ts";
+import { renderRequirements, type ReviewRequirement } from "./reviewer.ts";
+import { callRole, toolCallNamed } from "./role-call.ts";
 
 const LOOP_START = /\b(?:for|while)\s*\(|\.(?:forEach|map|flatMap)\(|^\s*for\s+\w+\s+in\b|^\s*async\s+for\b/;
 const QUERY_CALL = /\.(?:query|find|findOne|findMany|execute)\(|\bfetch\(|\bawait\s+db\.|\bSELECT\b/;
 // Lines after a loop header that still count as inside its body; a heuristic, a false positive costs one call.
 const LOOP_BODY_WINDOW = 8;
 const DATA_MODEL_PATH = /(?:^|[\/])(?:migrations?|models)[\/]|schema|\.(?:prisma|sql|graphql|gql)$/i;
-const CODE_FILE = /\.[cm]?[tj]sx?$/;
 const EXPORT_LINE = /^[+-]\s*export\s/;
 
 /** Pure over the unified diff text; `escalated` comes from the routing mode state. */
@@ -45,12 +43,9 @@ export function computeDesignSignals(input: {
 			sinceLoop = Number.POSITIVE_INFINITY;
 			continue;
 		}
-		if (line.startsWith("+++") || line.startsWith("---") || line.startsWith("-")) {
-			if (EXPORT_LINE.test(line) && CODE_FILE.test(currentFile)) publicInterfaceChanged = true;
-			continue;
-		}
+		if (EXPORT_LINE.test(line) && CODE_FILE.test(currentFile)) publicInterfaceChanged = true;
+		if (line.startsWith("+++") || line.startsWith("-")) continue;
 		const body = line.startsWith("+") || line.startsWith(" ") ? line.slice(1) : "";
-		if (line.startsWith("+") && EXPORT_LINE.test(line) && CODE_FILE.test(currentFile)) publicInterfaceChanged = true;
 		if (LOOP_START.test(body)) sinceLoop = 0;
 		if (sinceLoop <= LOOP_BODY_WINDOW && QUERY_CALL.test(body) && line.startsWith("+")) loopWrapsQuery = true;
 		sinceLoop += 1;
@@ -85,8 +80,6 @@ export interface DesignReviewResult {
 	readonly notice?: string;
 }
 
-const SEVERITIES = new Set(["BLOCKER", "WARNING", "NIT"]);
-
 /** Each well-formed finding, and how many malformed ones were dropped; one bad item never discards the rest. */
 function parseFindings(raw: unknown): { readonly findings: ReviewFinding[]; readonly dropped: number } | undefined {
 	const list = (raw as { findings?: unknown } | undefined)?.findings;
@@ -117,32 +110,19 @@ export async function runDesignReview(
 			"# Changed files",
 			input.changed.map((p) => `- ${p}`).join("\n"),
 			"# Stated requirements",
-			input.requirements.map((r) => `- ${r.id}: ${r.text}`).join("\n"),
+			renderRequirements(input.requirements),
 			"# Diff",
 			input.diffText,
 		].join("\n\n"),
 	);
-	const tools: Tool[] = [
-		{ name: DESIGN_TOOL_NAME, description: "Report the design-level findings. The only accepted output.", parameters: designParameters },
-	];
-	const messages: Message[] = [{ role: "user", content, timestamp: Date.now() }];
-	const start = process.hrtime.bigint();
+	const tools = [{ name: DESIGN_TOOL_NAME, description: "Report the design-level findings. The only accepted output.", parameters: designParameters }];
 	let message: AssistantMessage;
 	try {
-		message = await runSingleShotRole(ctx, {
-			role: "reviewer",
-			systemPrompt: DESIGN_SYSTEM_PROMPT,
-			messages,
-			tools,
-		});
+		message = await callRole(ctx, { role: "reviewer", systemPrompt: DESIGN_SYSTEM_PROMPT, messages: [{ role: "user", content, timestamp: Date.now() }], tools });
 	} catch (err) {
 		return { findings: [], notice: `the design pass failed (${err instanceof Error ? err.message : String(err)}); it added no findings` };
 	}
-	addQualityCost({ ms: Number(process.hrtime.bigint() - start) / 1_000_000, tokens: message.usage.totalTokens });
-
-	const call = message.content.find(
-		(b): b is Extract<AssistantMessage["content"][number], { type: "toolCall" }> => b.type === "toolCall" && b.name === DESIGN_TOOL_NAME,
-	);
+	const call = toolCallNamed(message, DESIGN_TOOL_NAME);
 	const parsed = call === undefined ? undefined : parseFindings(call.arguments);
 	if (parsed === undefined) return { findings: [], notice: `the design pass returned no usable ${DESIGN_TOOL_NAME} call; it added no findings` };
 	return parsed.dropped === 0 ? { findings: parsed.findings } : { findings: parsed.findings, notice: `the design pass dropped ${parsed.dropped} malformed finding(s) and kept ${parsed.findings.length}` };

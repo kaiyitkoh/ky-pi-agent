@@ -14,7 +14,7 @@ export type LegStatus =
 /** The four legs, in binding evaluation order. */
 export const GATE_LEGS = ["typecheck", "lint", "lsp", "anti-pattern"] as const;
 
-export type LegId = (typeof GATE_LEGS)[number];
+export const CODE_FILE = /\.[cm]?[tj]sx?$/;
 
 /** Tool names `@narumitw/pi-lsp` registers (`src/pi-lsp.ts`); both must be present. */
 const LSP_TOOL_NAMES = ["lsp_diagnostics", "lsp_fix"] as const;
@@ -44,18 +44,18 @@ export function probeLspAvailability(registeredToolNames: readonly string[]): Ex
  */
 export function runAntiPatternLeg(sources: readonly QualitySource[]): LegStatus {
 	const findings = runAntiPatternRules(sources);
-	const hasError = findings.some((f) => f.tier === "error");
-	if (!hasError) {
-		return { status: "pass" };
-	}
-	return {
-		status: "fail",
-		findings: findings.map((f) => `[${f.tier}] ${f.path}:${f.line} ${f.ruleId}: ${f.message}`),
-	};
+	if (!findings.some((f) => f.tier === "error")) return { status: "pass" };
+	return { status: "fail", findings: findings.map((f) => `[${f.tier}] ${f.path}:${f.line} ${f.ruleId}: ${f.message}`) };
 }
 
 /** Injected subprocess runner; a runner that throws degrades its leg to `unavailable`. */
-export type ExecRunner = (cmd: string, args: readonly string[], cwd: string) => { code: number; stdout: string; stderr: string };
+export type ExecRunner = (cmd: string, args: readonly string[], cwd: string) => ExecResult;
+
+export interface ExecResult {
+	readonly code: number;
+	readonly stdout: string;
+	readonly stderr: string;
+}
 
 /** Non-empty output lines, trimmed of trailing whitespace. */
 export function outputLines(result: { stdout: string; stderr: string }): string[] {
@@ -71,19 +71,17 @@ export function outputLines(result: { stdout: string; stderr: string }): string[
  * `exec` throwing -> `unavailable`, never `pass`.
  */
 export function runTypecheckLeg(cwd: string, exec: ExecRunner): LegStatus {
-	let result: { code: number; stdout: string; stderr: string };
+	let result: ExecResult;
 	try {
 		result = exec("tsc", ["--noEmit"], cwd);
 	} catch (err) {
-		return {
-			status: "unavailable",
-			reason: `tsc could not be run: ${err instanceof Error ? err.message : String(err)}`,
-		};
+		return { status: "unavailable", reason: `tsc could not be run: ${errorText(err)}` };
 	}
-	if (result.code !== 0) {
-		return { status: "fail", findings: outputLines(result) };
-	}
-	return { status: "pass" };
+	return result.code === 0 ? { status: "pass" } : { status: "fail", findings: outputLines(result) };
+}
+
+export function errorText(err: unknown): string {
+	return err instanceof Error ? err.message : String(err);
 }
 
 /** File-span threshold at which a diff alone warrants a design-level pass; untuned. */

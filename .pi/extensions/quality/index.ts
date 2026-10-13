@@ -18,7 +18,16 @@ import {
 	consultAdvisorParameters,
 	executeConsultAdvisor,
 } from "./advisor.ts";
-import { type ExecRunner, type LegStatus, outputLines, probeLspAvailability, runTypecheckLeg } from "./gates.ts";
+import {
+	CODE_FILE,
+	errorText,
+	type ExecResult,
+	type ExecRunner,
+	type LegStatus,
+	outputLines,
+	probeLspAvailability,
+	runTypecheckLeg,
+} from "./gates.ts";
 import { type QualityFinding, runAntiPatternRules } from "./rules.ts";
 import { commandFor } from "../../lib/win-quote.ts";
 
@@ -42,15 +51,18 @@ function localBin(cwd: string, name: string): string | undefined {
 
 /**
  * A `cmd.exe` "command not found" message, which must read as `unavailable`, not as a compiler `fail`.
- * Not exhaustive (`%VAR%` in a path yields other messages), hence the `%` guard in {@link productionExec}.
+ * Not exhaustive (`%VAR%` in a path yields other messages), hence the `%` guard in {@link execLocalBin}.
  */
 const CMD_EXE_SPAWN_FAILURE = /is not recognized as an internal or external command/i;
 
-/** Production `ExecRunner`: the pinned local binary (or an ancestor's, up to the git top level) via {@link commandFor}, never `npx`. */
-export const productionExec: ExecRunner = (cmd, args, cwd) => execLocalBin(cwd, cmd, args, cwd);
+/** An `ExecRunner` that runs the local binary found from `binFrom` (default: the run's own cwd). */
+const execFrom = (binFrom?: string): ExecRunner => (cmd, args, cwd) => execLocalBin(binFrom ?? cwd, cmd, args, cwd);
 
-/** Runs `cmd` from the local binary found from `binFrom`, with `cwd` as its working directory. */
-function execLocalBin(binFrom: string, cmd: string, args: readonly string[], cwd: string): { code: number; stdout: string; stderr: string } {
+/** Production `ExecRunner`: the pinned local binary (or an ancestor's, up to the git top level) via {@link commandFor}, never `npx`. */
+export const productionExec: ExecRunner = execFrom();
+
+function execLocalBin(binFrom: string, cmd: string, args: readonly string[], cwd: string): ExecResult {
+	const isWindows = process.platform === "win32";
 	const bin = localBin(binFrom, cmd);
 	if (bin === undefined) {
 		// Unavailable, naming the missing binary: never a network fetch, never a silent pass.
@@ -59,7 +71,7 @@ function execLocalBin(binFrom: string, cmd: string, args: readonly string[], cwd
 	// `cmd.exe` expands `%VAR%` inside double quotes before quote processing, which `commandFor` cannot suppress.
 	// The check covers `bin` and `args`, the whole command line. Win32 only.
 	const pctBearing = [bin, ...args].filter((a) => a.includes("%"));
-	if (process.platform === "win32" && pctBearing.length > 0) {
+	if (isWindows && pctBearing.length > 0) {
 		throw new Error(
 			`${cmd} command line contains '%' in ${pctBearing.join(", ")} -- cmd.exe expands %VAR% inside quotes, ` +
 				"so this command line cannot be built safely; the leg is unavailable, not failed",
@@ -73,7 +85,6 @@ function execLocalBin(binFrom: string, cmd: string, args: readonly string[], cwd
 		);
 	}
 	// `commandFor` quotes every argument on Windows (cwd may hold spaces or `&`); POSIX passes the array through.
-	const isWindows = process.platform === "win32";
 	const [file, spawnArgs] = commandFor(bin, [...args], isWindows);
 	const result = spawnSync(file, spawnArgs, {
 		cwd,
@@ -101,19 +112,15 @@ export function setQuickGateExecOverrideForTests(exec: ExecRunner | undefined): 
  * The `ExecRunner` the change gate uses. A test override always wins (a stub never spawns); otherwise an untrusted
  * `cwd` is refused before any spawn, which the legs turn into `unavailable`.
  */
-function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
+function resolveExec(cwd: string, projectTrusted: boolean, binFrom?: string): ExecRunner {
 	const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
-	if (typeof override === "function") {
-		return override as ExecRunner;
-	}
+	if (typeof override === "function") return override as ExecRunner;
 	if (!projectTrusted) {
 		return () => {
-			throw new Error(
-				`the project at ${cwd} is not trusted -- the typecheck and lint legs will not execute a binary from this cwd until it is`,
-			);
+			throw new Error(`the project at ${cwd} is not trusted -- the typecheck and lint legs will not execute a binary from this cwd until it is`);
 		};
 	}
-	return productionExec;
+	return execFrom(binFrom);
 }
 
 /**
@@ -128,16 +135,20 @@ function realPath(p: string): string {
 	}
 }
 
+const GIT_MAX_BUFFER = 16_777_216;
+
+const git = (args: readonly string[], cwd: string) => spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true, maxBuffer: GIT_MAX_BUFFER });
+
 /** The real git top level of `cwd`, or `cwd` outside a repository. `git diff` paths are relative to it, not to `cwd`. */
-export function repoTop(cwd: string): string {
-	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+function repoTop(cwd: string): string {
+	const top = git(["rev-parse", "--show-toplevel"], cwd);
 	return realPath(top.status === 0 ? top.stdout.trim() : cwd);
 }
 
 /** The nearest directory from `cwd` up to the git top level for which `holds` is true; never above the project. */
-function findUp(cwd: string, holds: (dir: string) => boolean): string | undefined {
+function findUp(cwd: string, holds: (dir: string) => boolean, top = repoTop(cwd)): string | undefined {
 	const norm = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
-	const stop = norm(repoTop(cwd));
+	const stop = norm(top);
 	let dir = realPath(cwd);
 	for (;;) {
 		if (holds(dir)) return dir;
@@ -183,7 +194,6 @@ const QUIET_CHECKOUT = (hooks: string): string[] =>
  * the repository's own node_modules without a link. NEVER THROWS: anything that stops the check is an `error`, not a verdict.
  */
 export function typecheckAtCommit(cwd: string, sha: string, projectTrusted: boolean): BaseTypecheck {
-	const git = (args: string[], at: string) => spawnSync("git", args, { cwd: at, encoding: "utf-8", shell: false, windowsHide: true });
 	const failed = (what: string, r: ReturnType<typeof git>): BaseTypecheck => ({ error: `${what} failed: ${(r.stderr || r.error?.message || `exit ${r.status}`).trim()}` });
 	const top = repoTop(cwd);
 	let worktree: string | undefined;
@@ -196,13 +206,11 @@ export function typecheckAtCommit(cwd: string, sha: string, projectTrusted: bool
 		worktree = dir;
 		const added = git([...QUIET_CHECKOUT(hooks), "worktree", "add", "--detach", dir, sha], top);
 		if (added.status !== 0) return failed(`git worktree add ${sha}`, added);
-		const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
-		const exec: ExecRunner =
-			typeof override === "function" || !projectTrusted ? resolveExec(cwd, projectTrusted) : (cmd, args, at) => execLocalBin(cwd, cmd, args, at);
-		const leg = runTypecheckLeg(join(dir, relative(top, realPath(cwd))), exec);
+		// The base checkout has no node_modules of its own, so its tsc comes from the live tree.
+		const leg = runTypecheckLeg(join(dir, relative(top, realPath(cwd))), resolveExec(cwd, projectTrusted, cwd));
 		return leg.status === "unavailable" ? { error: leg.reason } : leg.status === "fail" ? "fails" : "passes";
 	} catch (err) {
-		return { error: err instanceof Error ? err.message : String(err) };
+		return { error: errorText(err) };
 	} finally {
 		// A locked file (antivirus, indexer) must not turn a finished check into a throw; a leftover dir is pruned next time.
 		try {
@@ -212,21 +220,16 @@ export function typecheckAtCommit(cwd: string, sha: string, projectTrusted: bool
 				git(["worktree", "prune"], top);
 				if (/ky-review-base-[0-9a-f]{12}$/.test(worktree)) rmSync(worktree, { recursive: true, force: true });
 			}
-		} catch {
-			// Swallowed deliberately.
-		}
+		} catch {}
 	}
 }
 
 /** What a typecheck failure at HEAD means for /review: a refusal only when the merge base passes, else the doubt to ask about. */
 export function typecheckBaseline(cwd: string, base: string, projectTrusted: boolean, report: string): { refusal?: string; doubt?: string } {
 	const atBase = typecheckAtCommit(cwd, base, projectTrusted);
-	if (atBase === "passes") return { refusal: `review: the change breaks the typecheck (it passes at the merge base ${base}) -- not reviewing:
-${report}` };
-	if (atBase === "fails") return { doubt: `the typecheck fails at HEAD and already failed at the merge base, so this change did not introduce it:
-${report}` };
-	return { doubt: `the typecheck fails at HEAD, and the merge base ${base} could not be checked (${atBase.error}), so whether this change introduced it is unknown:
-${report}` };
+	if (atBase === "passes") return { refusal: `review: the change breaks the typecheck (it passes at the merge base ${base}) -- not reviewing:\n${report}` };
+	if (atBase === "fails") return { doubt: `the typecheck fails at HEAD and already failed at the merge base, so this change did not introduce it:\n${report}` };
+	return { doubt: `the typecheck fails at HEAD, and the merge base ${base} could not be checked (${atBase.error}), so whether this change introduced it is unknown:\n${report}` };
 }
 
 const ESLINT_CONFIGS = [
@@ -275,15 +278,15 @@ const IGNORED_FILE = /^File ignored\b/;
  */
 function runLintAt(cwd: string, top: string, projectTrusted: boolean, files: readonly string[]): LegStatus {
 	if (files.length === 0) return { status: "unavailable", reason: "no changed TypeScript/JavaScript file for eslint to check" };
-	const configDir = findUp(cwd, hasEslintConfig);
+	const configDir = findUp(cwd, hasEslintConfig, top);
 	if (configDir === undefined) {
 		return { status: "unavailable", reason: `no ESLint config at or above ${cwd} (up to the git top level), so there is no lint rule set to apply` };
 	}
-	let result: { code: number; stdout: string; stderr: string };
+	let result: ExecResult;
 	try {
 		result = resolveExec(configDir, projectTrusted)("eslint", ["--format", "json", "--", ...files.map((f) => relative(configDir, join(top, f)))], configDir);
 	} catch (err) {
-		return { status: "unavailable", reason: `eslint could not be run: ${err instanceof Error ? err.message : String(err)}` };
+		return { status: "unavailable", reason: `eslint could not be run: ${errorText(err)}` };
 	}
 	const bound = (lines: readonly string[]) => (lines.length > LINT_OUTPUT_MAX_LINES ? [...lines.slice(0, LINT_OUTPUT_MAX_LINES), `... ${lines.length - LINT_OUTPUT_MAX_LINES} more line(s)`] : [...lines]);
 	const raw = bound(outputLines(result));
@@ -301,8 +304,6 @@ function runLintAt(cwd: string, top: string, projectTrusted: boolean, files: rea
 	return { status: "pass" };
 }
 
-const CODE_FILE = /\.[cm]?[tj]sx?$/;
-
 export interface ChangeGateResult {
 	readonly typecheck: LegStatus;
 	readonly lint: LegStatus;
@@ -316,14 +317,28 @@ export interface ChangeGateResult {
 	readonly report: string;
 }
 
-const GIT_SHOW_MAX_BUFFER = 16_777_216;
-
 function showAt(cwd: string, sha: string, path: string): string | undefined {
-	const r = spawnSync("git", ["show", `${sha}:${path}`], { cwd, encoding: "utf-8", shell: false, windowsHide: true, maxBuffer: GIT_SHOW_MAX_BUFFER });
+	const r = git(["show", `${sha}:${path}`], cwd);
 	return r.status === 0 ? r.stdout : undefined;
 }
 
 const findingKey = (f: QualityFinding): string => `${f.path}\0${f.ruleId}\0${f.message}`;
+
+/** Error-tier findings in `code` that `baseSha` did not already have, counted per path, rule and message. */
+function antiPatternDelta(cwd: string, top: string, baseSha: string, code: readonly string[]): LegStatus {
+	const before = new Map<string, number>();
+	const baseSources = code.flatMap((path) => {
+		const text = showAt(cwd, baseSha, path);
+		return text === undefined ? [] : [{ path, text }];
+	});
+	for (const f of runAntiPatternRules(baseSources)) before.set(findingKey(f), (before.get(findingKey(f)) ?? 0) + 1);
+	const added = runAntiPatternRules(code.map((path) => ({ path, text: readFileSync(join(top, path), "utf-8") }))).filter((f) => {
+		const left = before.get(findingKey(f)) ?? 0;
+		before.set(findingKey(f), left - 1);
+		return left <= 0 && f.tier === "error";
+	});
+	return added.length === 0 ? { status: "pass" } : { status: "fail", findings: added.map((f) => `${f.path}:${f.line} ${f.ruleId}: ${f.message}`) };
+}
 
 /**
  * The deterministic stage for a work repo's change between `baseSha` and the tree on disk: anti-pattern rules on
@@ -340,21 +355,8 @@ export function runChangeGateStage(input: {
 }): ChangeGateResult {
 	const top = repoTop(input.cwd);
 	const code = input.changed.filter((p) => CODE_FILE.test(p) && existsSync(join(top, p)));
-	let antiPattern: LegStatus = { status: "unavailable", reason: "no changed TypeScript/JavaScript file to scan" };
-	if (code.length > 0) {
-		const before = new Map<string, number>();
-		const baseSources = code.flatMap((path) => {
-			const text = showAt(input.cwd, input.baseSha, path);
-			return text === undefined ? [] : [{ path, text }];
-		});
-		for (const f of runAntiPatternRules(baseSources)) before.set(findingKey(f), (before.get(findingKey(f)) ?? 0) + 1);
-		const added = runAntiPatternRules(code.map((path) => ({ path, text: readFileSync(join(top, path), "utf-8") }))).filter((f) => {
-			const left = before.get(findingKey(f)) ?? 0;
-			before.set(findingKey(f), left - 1);
-			return left <= 0 && f.tier === "error";
-		});
-		antiPattern = added.length === 0 ? { status: "pass" } : { status: "fail", findings: added.map((f) => `${f.path}:${f.line} ${f.ruleId}: ${f.message}`) };
-	}
+	const antiPattern: LegStatus =
+		code.length === 0 ? { status: "unavailable", reason: "no changed TypeScript/JavaScript file to scan" } : antiPatternDelta(input.cwd, top, input.baseSha, code);
 	const typecheck: LegStatus = !input.changed.some((p) => CODE_FILE.test(p))
 		? { status: "unavailable", reason: "no changed TypeScript/JavaScript file for tsc to check" }
 		: input.baseTypecheckFailed

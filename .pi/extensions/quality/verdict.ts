@@ -3,14 +3,12 @@
  * Models are reached only via runSingleShotRole, and the raw-source lints hold this file to that.
  */
 import { StringEnum } from "@earendil-works/pi-ai";
-import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { addQualityCost } from "../diagnostics/quality-cost.ts";
-import { runSingleShotRole } from "../routing/modes.ts";
 import type { ReviewArtifact, ReviewFinding } from "./review-schema.ts";
 import { buildReviewerContext, type ReviewerContractInput } from "./reviewer.ts";
+import { callRole, toolCallNamed } from "./role-call.ts";
 
 /** Two arms; `needsApproval` separates a classification stop (someone must sign off) from a BLOCKER stop. */
 export type WorkflowStop =
@@ -73,20 +71,9 @@ function normaliseFinding(finding: ReviewFinding): string {
 
 /** Order-independent comparison of severity|location|concreteFailure; a stall means a fix-then-re-review cycle changed nothing. */
 export function detectStall(previous: readonly ReviewFinding[], current: readonly ReviewFinding[]): boolean {
-	if (previous.length !== current.length) {
-		return false;
-	}
 	const previousKeys = new Set(previous.map(normaliseFinding));
 	const currentKeys = new Set(current.map(normaliseFinding));
-	if (previousKeys.size !== currentKeys.size) {
-		return false;
-	}
-	for (const key of previousKeys) {
-		if (!currentKeys.has(key)) {
-			return false;
-		}
-	}
-	return true;
+	return previous.length === current.length && previousKeys.size === currentKeys.size && [...previousKeys].every((k) => currentKeys.has(k));
 }
 
 /** Two is the smallest bound where both "fixed on the first try" and "genuinely stuck" can be observed. */
@@ -110,9 +97,6 @@ const refuteFindingParameters = Type.Object({
 	}),
 });
 
-/** One BLOCKER that survived its refutation pass, or was never given one. */
-export type PromotedFinding = ReviewFinding;
-
 /** One BLOCKER whose refutation pass genuinely withdrew it, and why. */
 export interface WithdrawnFinding {
 	readonly finding: ReviewFinding;
@@ -121,7 +105,8 @@ export interface WithdrawnFinding {
 
 /** What {@link runRefuteOrPromote} hands back — never a boolean, never a mutated `findings` array in place. */
 export interface RefuteOrPromoteResult {
-	readonly promoted: readonly PromotedFinding[];
+	/** BLOCKERs that survived their refutation pass. */
+	readonly promoted: readonly ReviewFinding[];
 	readonly withdrawn: readonly WithdrawnFinding[];
 }
 
@@ -160,55 +145,24 @@ export async function runRefuteOrPromote(
 	contract: ReviewerContractInput,
 ): Promise<RefuteOrPromoteResult> {
 	const blockers = review.findings.filter((finding) => finding.severity === "BLOCKER");
-
-	const promoted: PromotedFinding[] = [];
+	const promoted: ReviewFinding[] = [];
 	const withdrawn: WithdrawnFinding[] = [];
-
-	if (blockers.length === 0) {
-		return { promoted, withdrawn };
-	}
+	if (blockers.length === 0) return { promoted, withdrawn };
 
 	const context = buildReviewerContext(contract);
-
-	const tools: Tool[] = [
-		{
-			name: REFUTE_FINDING_TOOL_NAME,
-			description: REFUTE_FINDING_DESCRIPTION,
-			parameters: refuteFindingParameters,
-		},
-	];
-
+	const tools = [{ name: REFUTE_FINDING_TOOL_NAME, description: REFUTE_FINDING_DESCRIPTION, parameters: refuteFindingParameters }];
 	for (const finding of blockers) {
-		const prompt = buildRefutationMessage(finding, context);
-		const messages: Message[] = [{ role: "user", content: prompt, timestamp: Date.now() }];
-
-		const start = process.hrtime.bigint();
-		const message: AssistantMessage = await runSingleShotRole(ctx, {
+		const message = await callRole(ctx, {
 			role: "reviewer",
 			systemPrompt: REFUTATION_SYSTEM_PROMPT,
-			messages,
+			messages: [{ role: "user", content: buildRefutationMessage(finding, context), timestamp: Date.now() }],
 			tools,
 		});
-		const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
-		addQualityCost({ ms: elapsedMs, tokens: message.usage.totalTokens });
-
-		const toolCall = message.content.find(
-			(block): block is Extract<AssistantMessage["content"][number], { type: "toolCall" }> =>
-				block.type === "toolCall" && block.name === REFUTE_FINDING_TOOL_NAME,
-		);
-
-		const rawArgs = toolCall?.arguments as Record<string, unknown> | undefined;
-		const rawOutcome = rawArgs?.outcome;
-		const rawRationale = typeof rawArgs?.rationale === "string" ? rawArgs.rationale : "";
-
+		const args = toolCallNamed(message, REFUTE_FINDING_TOOL_NAME)?.arguments as Record<string, unknown> | undefined;
 		// Fail-safe: anything but an explicit "withdrawn" stays upheld.
-		if (rawOutcome === "withdrawn") {
-			withdrawn.push({ finding, rationale: rawRationale });
-		} else {
-			promoted.push(finding);
-		}
+		if (args?.outcome === "withdrawn") withdrawn.push({ finding, rationale: typeof args.rationale === "string" ? args.rationale : "" });
+		else promoted.push(finding);
 	}
-
 	return { promoted, withdrawn };
 }
 
@@ -230,20 +184,11 @@ export interface IterationWithdrawal extends WithdrawnFinding {
  *   - "blocked": MAX_REVIEW_ITERATIONS reached with BLOCKERs still surviving and changing.
  *   - "stalled": two consecutive iterations kept an identical surviving BLOCKER set (detectStall).
  */
-export type BoundedReviewLoopResult =
-	| {
-			readonly outcome: "clean";
-			readonly iterations: number;
-			readonly review: ReviewArtifact;
-			readonly withdrawn: readonly IterationWithdrawal[];
-	  }
-	| {
-			readonly outcome: "approval-required" | "blocked" | "stalled";
-			readonly iterations: number;
-			readonly review: ReviewArtifact;
-			readonly withdrawn: readonly IterationWithdrawal[];
-			readonly stop: WorkflowStop;
-	  };
+export type BoundedReviewLoopResult = {
+	readonly iterations: number;
+	readonly review: ReviewArtifact;
+	readonly withdrawn: readonly IterationWithdrawal[];
+} & ({ readonly outcome: "clean" } | { readonly outcome: "approval-required" | "blocked" | "stalled"; readonly stop: WorkflowStop });
 
 /** Build the post-refutation review: non-BLOCKER findings unchanged, BLOCKER findings replaced with only what survived. */
 function reviewAfterRefutation(review: ReviewArtifact, promoted: readonly ReviewFinding[]): ReviewArtifact {
@@ -262,55 +207,18 @@ export async function runBoundedReviewLoop(
 ): Promise<BoundedReviewLoopResult> {
 	let previousPromoted: readonly ReviewFinding[] | undefined;
 	const allWithdrawn: IterationWithdrawal[] = [];
-
-	for (let iteration = 1; iteration <= MAX_REVIEW_ITERATIONS; iteration++) {
-		const review = await opts.review();
-		const { promoted, withdrawn } = await runRefuteOrPromote(ctx, review, opts.contract);
-		for (const w of withdrawn) {
-			allWithdrawn.push({ ...w, iteration });
-		}
-
-		const postRefutation = reviewAfterRefutation(review, promoted);
-		const stopDecision = decideWorkflowStop(postRefutation);
-
-		if (!stopDecision.stop) {
-			return { outcome: "clean", iterations: iteration, review: postRefutation, withdrawn: allWithdrawn };
-		}
-
-		if (stopDecision.needsApproval) {
-			return {
-				outcome: "approval-required",
-				iterations: iteration,
-				review: postRefutation,
-				withdrawn: allWithdrawn,
-				stop: stopDecision,
-			};
-		}
-
+	for (let iteration = 1; ; iteration++) {
+		const raw = await opts.review();
+		const { promoted, withdrawn } = await runRefuteOrPromote(ctx, raw, opts.contract);
+		allWithdrawn.push(...withdrawn.map((w) => ({ ...w, iteration })));
+		const review = reviewAfterRefutation(raw, promoted);
+		const stop = decideWorkflowStop(review);
+		const result = { iterations: iteration, review, withdrawn: allWithdrawn };
+		if (!stop.stop) return { outcome: "clean", ...result };
+		if (stop.needsApproval) return { outcome: "approval-required", ...result, stop };
 		// BLOCKER-driven stop: identical to the previous iteration means stalled.
-		if (previousPromoted !== undefined && detectStall(previousPromoted, promoted)) {
-			return {
-				outcome: "stalled",
-				iterations: iteration,
-				review: postRefutation,
-				withdrawn: allWithdrawn,
-				stop: stopDecision,
-			};
-		}
-
-		if (iteration === MAX_REVIEW_ITERATIONS) {
-			return {
-				outcome: "blocked",
-				iterations: iteration,
-				review: postRefutation,
-				withdrawn: allWithdrawn,
-				stop: stopDecision,
-			};
-		}
-
+		if (previousPromoted !== undefined && detectStall(previousPromoted, promoted)) return { outcome: "stalled", ...result, stop };
+		if (iteration >= MAX_REVIEW_ITERATIONS) return { outcome: "blocked", ...result, stop };
 		previousPromoted = promoted;
 	}
-
-	// Unreachable: the loop above always returns by MAX_REVIEW_ITERATIONS.
-	throw new Error("runBoundedReviewLoop: fell through the bounded loop without returning -- this is a bug");
 }

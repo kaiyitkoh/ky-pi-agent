@@ -54,39 +54,24 @@ const SEVERITY_RANK: Readonly<Record<ScorableFinding["severity"], number>> = {
  */
 const MIN_DISTINCT_NEEDLES = 2;
 
-/** Count of `needles` entries present as a substring of `haystack`, each counted at most once. */
-function countMatchingNeedles(haystack: string, needles: readonly string[]): number {
-	return needles.reduce((count, needle) => (haystack.includes(needle) ? count + 1 : count), 0);
+/** True when `haystack` holds MIN_DISTINCT_NEEDLES of the expectation's needles, or all of them when it has fewer. */
+function clearsNeedleBar(haystack: string, expectation: SeededDefectExpectation): boolean {
+	const matched = expectation.mustMentionAny.filter((needle) => haystack.includes(needle)).length;
+	return matched >= Math.min(MIN_DISTINCT_NEEDLES, expectation.mustMentionAny.length);
 }
 
 /**
  * True iff the finding names `locationFile`, carries enough distinct needles, has at least the minimum severity,
  * and does NOT also clear a different expectation's needle bar (boilerplate reused across every file).
  */
-function findingCatches(
-	finding: ScorableFinding,
-	expectation: SeededDefectExpectation,
-	allExpectations: readonly SeededDefectExpectation[],
-): boolean {
-	if (!finding.location.includes(expectation.locationFile)) {
-		return false;
-	}
+function findingCatches(finding: ScorableFinding, expectation: SeededDefectExpectation, all: readonly SeededDefectExpectation[]): boolean {
 	const haystack = `${finding.concreteFailure} ${finding.location}`;
-	const matchedNeedleCount = countMatchingNeedles(haystack, expectation.mustMentionAny);
-	const requiredNeedleCount = Math.min(MIN_DISTINCT_NEEDLES, expectation.mustMentionAny.length);
-	if (matchedNeedleCount < requiredNeedleCount) {
-		return false;
-	}
-	for (const other of allExpectations) {
-		if (other.id === expectation.id) {
-			continue;
-		}
-		const otherRequiredCount = Math.min(MIN_DISTINCT_NEEDLES, other.mustMentionAny.length);
-		if (countMatchingNeedles(haystack, other.mustMentionAny) >= otherRequiredCount) {
-			return false;
-		}
-	}
-	return SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[expectation.minimumSeverity];
+	return (
+		finding.location.includes(expectation.locationFile) &&
+		clearsNeedleBar(haystack, expectation) &&
+		!all.some((other) => other.id !== expectation.id && clearsNeedleBar(haystack, other)) &&
+		SEVERITY_RANK[finding.severity] >= SEVERITY_RANK[expectation.minimumSeverity]
+	);
 }
 
 /** Marks each expectation caught by any finding; `caught` counts classes once, so quantity of findings cannot raise it. */
@@ -94,28 +79,14 @@ export function scoreCalibration(
 	expected: readonly SeededDefectExpectation[],
 	findings: readonly ScorableFinding[],
 ): CalibrationResult {
-	const perDefectClass: Record<string, boolean> = {};
-	for (const expectation of expected) {
-		perDefectClass[expectation.id] = false;
-	}
-
+	const perDefectClass: Record<string, boolean> = Object.fromEntries(expected.map((e) => [e.id, false]));
 	let unmatchedFindings = 0;
 	for (const finding of findings) {
-		let matchedAnyExpectation = false;
-		for (const expectation of expected) {
-			if (findingCatches(finding, expectation, expected)) {
-				perDefectClass[expectation.id] = true;
-				matchedAnyExpectation = true;
-			}
-		}
-		if (!matchedAnyExpectation) {
-			unmatchedFindings += 1;
-		}
+		const caughtBy = expected.filter((expectation) => findingCatches(finding, expectation, expected));
+		for (const expectation of caughtBy) perDefectClass[expectation.id] = true;
+		if (caughtBy.length === 0) unmatchedFindings += 1;
 	}
-
 	const total = expected.length;
-	const caught = expected.reduce((count, expectation) => count + (perDefectClass[expectation.id] ? 1 : 0), 0);
-	const catchRate = total === 0 ? 0 : caught / total;
-
-	return { caught, total, catchRate, perDefectClass, unmatchedFindings };
+	const caught = expected.filter((expectation) => perDefectClass[expectation.id]).length;
+	return { caught, total, catchRate: total === 0 ? 0 : caught / total, perDefectClass, unmatchedFindings };
 }

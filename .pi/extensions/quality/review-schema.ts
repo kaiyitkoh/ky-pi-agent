@@ -118,8 +118,10 @@ export type ReviewValidation =
 	| { readonly ok: false; readonly reason: string };
 
 const VALID_STATUSES = new Set(["Implemented", "Partial", "Missing"]);
-const VALID_SEVERITIES = new Set(["BLOCKER", "WARNING", "NIT"]);
+export const SEVERITIES: ReadonlySet<string> = new Set(["BLOCKER", "WARNING", "NIT"]);
 const VALID_CLASSIFICATIONS = new Set(["root-cause", "symptomatic", "workaround"]);
+
+const reject = (reason: string): ReviewValidation => ({ ok: false, reason });
 
 const FILE_LINE_PATTERN = /^.+:(\d+)(?:-(\d+))?$/;
 
@@ -135,22 +137,11 @@ function isPlainObject(value: unknown): value is Record<string, unknown> {
 }
 
 function describeType(value: unknown): string {
-	if (value === undefined) {
-		return "undefined";
-	}
-	if (value === null) {
-		return "null";
-	}
-	if (Array.isArray(value)) {
-		return "array";
-	}
-	return typeof value;
+	return value === null ? "null" : Array.isArray(value) ? "array" : typeof value;
 }
 
 function describeValue(value: unknown): string {
-	if (value === undefined) {
-		return "undefined (absent)";
-	}
+	if (value === undefined) return "undefined (absent)";
 	if (typeof value === "string") {
 		return value.trim().length === 0 ? `${JSON.stringify(value)} (empty or whitespace-only)` : JSON.stringify(value);
 	}
@@ -160,6 +151,10 @@ function describeValue(value: unknown): string {
 		// NEVER THROWS: JSON.stringify can throw on a circular structure, and a reject reason must still be constructible.
 		return describeType(value);
 	}
+}
+
+function isMember(set: ReadonlySet<string>, value: unknown): value is string {
+	return typeof value === "string" && set.has(value);
 }
 
 function isNonEmptyString(value: unknown): value is string {
@@ -181,288 +176,166 @@ function isNonEmptyString(value: unknown): value is string {
  *   (9) accept. A review with zero findings and a non-empty checkedAndCleared passes, so the reviewer is never pushed to invent findings.
  */
 export function validateReview(raw: unknown, expectedRequirementIds: readonly string[]): ReviewValidation {
-	if (!isPlainObject(raw)) {
-		return {
-			ok: false,
-			reason: `submit_review arguments must be an object, received ${describeType(raw)} (${describeValue(raw)})`,
-		};
-	}
+	if (!isPlainObject(raw)) return reject(`submit_review arguments must be an object, received ${describeType(raw)} (${describeValue(raw)})`);
 
 	// Drift is computed from git; a model-supplied value would be a verdict on its own work, and ignoring it would hide the attempt.
 	const driftKey = Object.keys(raw).find((k) => /drift/i.test(k));
 	if (driftKey !== undefined) {
-		return {
-			ok: false,
-			reason: `submit_review must not carry "${driftKey}": scope drift is computed from git by the harness, not reported by the reviewer`,
-		};
+		return reject(`submit_review must not carry "${driftKey}": scope drift is computed from git by the harness, not reported by the reviewer`);
 	}
 
 	const { verdicts, findings, checkedAndCleared, classification, classificationJustification, properFix, deferralReason } = raw;
+	if (!Array.isArray(verdicts)) return reject(`submit_review.verdicts must be an array, received ${describeType(verdicts)}`);
+	if (!Array.isArray(findings)) return reject(`submit_review.findings must be an array, received ${describeType(findings)}`);
+	const field = (item: unknown, key: string): unknown => (isPlainObject(item) ? item[key] : undefined);
 
-	if (!Array.isArray(verdicts)) {
-		return {
-			ok: false,
-			reason: `submit_review.verdicts must be an array, received ${describeType(verdicts)}`,
-		};
+	const badSeverity = findings.findIndex((f) => !isMember(SEVERITIES, field(f, "severity")));
+	if (badSeverity !== -1) {
+		return reject(`findings[${badSeverity}].severity must be exactly one of BLOCKER, WARNING, or NIT -- received ${describeValue(field(findings[badSeverity], "severity"))}`);
 	}
-	if (!Array.isArray(findings)) {
-		return {
-			ok: false,
-			reason: `submit_review.findings must be an array, received ${describeType(findings)}`,
-		};
-	}
-
-	for (let i = 0; i < findings.length; i++) {
-		const finding = findings[i];
-		const severity = isPlainObject(finding) ? finding.severity : undefined;
-		if (typeof severity !== "string" || !VALID_SEVERITIES.has(severity)) {
-			return {
-				ok: false,
-				reason:
-					`findings[${i}].severity must be exactly one of BLOCKER, WARNING, or NIT -- ` +
-					`received ${describeValue(severity)}`,
-			};
-		}
+	const badStatus = verdicts.findIndex((v) => !isMember(VALID_STATUSES, field(v, "status")));
+	if (badStatus !== -1) {
+		return reject(`verdicts[${badStatus}].status must be exactly one of Implemented, Partial, or Missing -- received ${describeValue(field(verdicts[badStatus], "status"))}`);
 	}
 
-	for (let i = 0; i < verdicts.length; i++) {
-		const status = isPlainObject(verdicts[i]) ? (verdicts[i] as Record<string, unknown>).status : undefined;
-		if (typeof status !== "string" || !VALID_STATUSES.has(status)) {
-			return {
-				ok: false,
-				reason: `verdicts[${i}].status must be exactly one of Implemented, Partial, or Missing -- received ${describeValue(status)}`,
-			};
-		}
-	}
-
-	const verdictRequirementIds = verdicts.map((v) => (isPlainObject(v) && typeof v.requirementId === "string" ? v.requirementId : ""));
-	const coveredIds = new Set(verdictRequirementIds);
-	const expectedSet = new Set(expectedRequirementIds);
-
-	const missingIds = expectedRequirementIds.filter((id) => !coveredIds.has(id));
+	const ids = verdicts.map((v) => { const id = field(v, "requirementId"); return typeof id === "string" ? id : ""; });
+	const covered = new Set(ids);
+	const expected = new Set(expectedRequirementIds);
+	const missingIds = expectedRequirementIds.filter((id) => !covered.has(id));
 	if (missingIds.length > 0) {
-		return {
-			ok: false,
-			reason:
-				`submit_review is missing a verdict for stated requirement id(s): ${missingIds.join(", ")} -- ` +
-				"every stated requirement needs exactly one verdict",
-		};
+		return reject(`submit_review is missing a verdict for stated requirement id(s): ${missingIds.join(", ")} -- every stated requirement needs exactly one verdict`);
 	}
-
-	const inventedIds = verdictRequirementIds.filter((id, index, all) => id.length > 0 && !expectedSet.has(id) && all.indexOf(id) === index);
+	const inventedIds = [...covered].filter((id) => id.length > 0 && !expected.has(id));
 	if (inventedIds.length > 0) {
-		return {
-			ok: false,
-			reason:
-				`submit_review carries a verdict for requirement id(s) not among the stated requirements: ${inventedIds.join(", ")} -- ` +
+		return reject(
+			`submit_review carries a verdict for requirement id(s) not among the stated requirements: ${inventedIds.join(", ")} -- ` +
 				"inventing a requirement id is the same failure as omitting one",
-		};
+		);
 	}
-
-	const duplicateIds = verdictRequirementIds.filter((id, i, all) => id.length > 0 && all.indexOf(id) !== i);
-	if (duplicateIds.length > 0) {
-		return {
-			ok: false,
-			reason:
-				`submit_review carries more than one verdict for requirement id(s): ${[...new Set(duplicateIds)].join(", ")} -- ` +
+	const duplicateIds = new Set(ids.filter((id, i) => id.length > 0 && ids.indexOf(id) !== i));
+	if (duplicateIds.size > 0) {
+		return reject(
+			`submit_review carries more than one verdict for requirement id(s): ${[...duplicateIds].join(", ")} -- ` +
 				"every stated requirement needs exactly ONE verdict; two verdicts for one id is not a review, it is two",
-		};
+		);
 	}
 
-	for (let i = 0; i < verdicts.length; i++) {
-		const verdict = verdicts[i];
-		const requirementId = isPlainObject(verdict) && typeof verdict.requirementId === "string" ? verdict.requirementId : `verdicts[${i}]`;
-		const evidence = isPlainObject(verdict) && typeof verdict.evidence === "string" ? verdict.evidence : "";
-		if (!isFileLine(evidence)) {
-			return {
-				ok: false,
-				reason:
-					`verdict for requirement "${requirementId}" has a malformed evidence string -- expected a ` +
-					`"path:line" or "path:start-end" shape, received ${describeValue(evidence)}`,
-			};
+	for (const [i, verdict] of verdicts.entries()) {
+		const evidence = field(verdict, "evidence");
+		if (typeof evidence !== "string" || !isFileLine(evidence)) {
+			const requirementId = typeof field(verdict, "requirementId") === "string" ? ids[i] : `verdicts[${i}]`;
+			return reject(
+				`verdict for requirement "${requirementId}" has a malformed evidence string -- expected a ` +
+					`"path:line" or "path:start-end" shape, received ${describeValue(typeof evidence === "string" ? evidence : "")}`,
+			);
 		}
 	}
 
 	if (!isNonEmptyString(checkedAndCleared)) {
-		return {
-			ok: false,
-			reason:
-				"checkedAndCleared must be a non-empty, non-whitespace-only string describing what was examined " +
+		return reject(
+			"checkedAndCleared must be a non-empty, non-whitespace-only string describing what was examined " +
 				`and found fine -- received ${describeValue(checkedAndCleared)}`,
-		};
+		);
 	}
-
-	if (typeof classification !== "string" || !VALID_CLASSIFICATIONS.has(classification)) {
-		return {
-			ok: false,
-			reason:
-				"classification must be exactly one of root-cause, symptomatic, or workaround -- " +
-				`received ${describeValue(classification)}`,
-		};
+	if (!isMember(VALID_CLASSIFICATIONS, classification)) {
+		return reject(`classification must be exactly one of root-cause, symptomatic, or workaround -- received ${describeValue(classification)}`);
 	}
 	if (!isNonEmptyString(classificationJustification)) {
-		return {
-			ok: false,
-			reason:
-				`classificationJustification must be a non-empty string explaining the "${classification}" ` +
+		return reject(
+			`classificationJustification must be a non-empty string explaining the "${classification}" ` +
 				`classification -- received ${describeValue(classificationJustification)}`,
-		};
+		);
 	}
-
 	if (classification === "workaround") {
-		const missingWorkaroundFields: string[] = [];
-		if (!isNonEmptyString(properFix)) {
-			missingWorkaroundFields.push("properFix");
-		}
-		if (!isNonEmptyString(deferralReason)) {
-			missingWorkaroundFields.push("deferralReason");
-		}
-		if (missingWorkaroundFields.length > 0) {
-			return {
-				ok: false,
-				reason:
-					`classification "workaround" requires a non-empty properFix and deferralReason -- ` +
-					`missing: ${missingWorkaroundFields.join(", ")}`,
-			};
-		}
+		const missing = [["properFix", properFix], ["deferralReason", deferralReason]].filter(([, v]) => !isNonEmptyString(v)).map(([k]) => k);
+		if (missing.length > 0) return reject(`classification "workaround" requires a non-empty properFix and deferralReason -- missing: ${missing.join(", ")}`);
 	}
 
-	const nitCount = findings.filter((f) => isPlainObject(f) && f.severity === "NIT").length;
+	const nitCount = findings.filter((f) => field(f, "severity") === "NIT").length;
 	if (nitCount > NIT_CAP) {
-		return {
-			ok: false,
-			reason: `submit_review carries ${nitCount} NIT findings, exceeding the cap of ${NIT_CAP} -- NITs are capped because a reviewer told to find gaps invents them`,
-		};
+		return reject(`submit_review carries ${nitCount} NIT findings, exceeding the cap of ${NIT_CAP} -- NITs are capped because a reviewer told to find gaps invents them`);
 	}
 
-	// status is cast, not defaulted: branch (2b) already rejected anything outside VALID_STATUSES.
-	const normalisedVerdicts: ReviewVerdict[] = verdicts.map((v) => {
-		const obj = v as Record<string, unknown>;
-		return {
-			requirementId: String(obj.requirementId ?? ""),
-			status: obj.status as ReviewVerdict["status"],
-			evidence: String(obj.evidence ?? ""),
-		};
-	});
-
-	const normalisedFindings: ReviewFinding[] = findings.map((f) => {
-		const obj = f as Record<string, unknown>;
-		return {
-			severity: obj.severity as ReviewFinding["severity"],
-			location: String(obj.location ?? ""),
-			concreteFailure: String(obj.concreteFailure ?? ""),
-			suggestedFix: String(obj.suggestedFix ?? ""),
-		};
-	});
-
-	const review: ReviewArtifact = {
-		verdicts: normalisedVerdicts,
-		findings: normalisedFindings,
-		checkedAndCleared,
-		classification: classification as ReviewArtifact["classification"],
-		classificationJustification,
-		...(isNonEmptyString(properFix) ? { properFix } : {}),
-		...(isNonEmptyString(deferralReason) ? { deferralReason } : {}),
+	const text = (item: unknown, key: string): string => String(field(item, key) ?? "");
+	// Enum fields are cast, not defaulted: the checks above already rejected anything outside their sets.
+	return {
+		ok: true,
+		review: {
+			verdicts: verdicts.map((v) => ({ requirementId: text(v, "requirementId"), status: field(v, "status") as ReviewVerdict["status"], evidence: text(v, "evidence") })),
+			findings: findings.map((f) => ({
+				severity: field(f, "severity") as ReviewFinding["severity"],
+				location: text(f, "location"),
+				concreteFailure: text(f, "concreteFailure"),
+				suggestedFix: text(f, "suggestedFix"),
+			})),
+			checkedAndCleared,
+			classification: classification as ReviewArtifact["classification"],
+			classificationJustification,
+			...(isNonEmptyString(properFix) ? { properFix } : {}),
+			...(isNonEmptyString(deferralReason) ? { deferralReason } : {}),
+		},
 	};
+}
 
-	return { ok: true, review };
+function pathTable(title: string, paths: readonly string[]): string[] {
+	return paths.length === 0 ? [] : [title, "", "| Path |", "| --- |", ...paths.map((p) => `| ${p} |`), ""];
+}
+
+function driftLines(drift: ScopeDriftReport | undefined): string[] {
+	if (drift === undefined) return ["Scope drift NOT COMPUTED: no git diff was compared against the declared files."];
+	const clean = drift.drifted.length === 0 && drift.undelivered.length === 0;
+	const table = [...pathTable("Changed but not declared:", drift.drifted), ...pathTable("Declared but not changed:", drift.undelivered)];
+	if (drift.undelivered.length > 0) table.pop();
+	return clean ? [`No drift detected: ${drift.changed.length} changed file(s), all declared, all declared files changed.`] : table;
 }
 
 /** Takes only a validateReview-accepted artifact, so it does no shape validation. */
 export function renderReviewMarkdown(review: ReviewArtifact): string {
-	const lines: string[] = [];
-
-	lines.push("# REVIEW");
-	lines.push("");
-
-	lines.push("## Verdicts");
-	lines.push("");
-	lines.push("| Requirement | Status | Evidence |");
-	lines.push("| --- | --- | --- |");
-	for (const verdict of review.verdicts) {
-		lines.push(`| ${verdict.requirementId} | ${verdict.status} | ${verdict.evidence} |`);
-	}
-	lines.push("");
-
-	lines.push("## Findings");
-	lines.push("");
-	if (review.findings.length === 0) {
-		lines.push("None. See \"Checked and cleared\" below for what was actually examined.");
-	} else {
-		for (const finding of review.findings) {
-			lines.push(`- **${finding.severity}** at \`${finding.location}\`: ${finding.concreteFailure}`);
-			lines.push(`  - Suggested fix: ${finding.suggestedFix}`);
-		}
-	}
-	lines.push("");
-
-	lines.push("## Scope Drift");
-	lines.push("");
-	const drift = review.scopeDrift;
-	if (drift === undefined) {
-		lines.push("Scope drift NOT COMPUTED: no git diff was compared against the declared files.");
-	} else {
-		if (drift.drifted.length === 0 && drift.undelivered.length === 0) {
-			lines.push(`No drift detected: ${drift.changed.length} changed file(s), all declared, all declared files changed.`);
-		}
-		if (drift.drifted.length > 0) {
-			lines.push("Changed but not declared:");
-			lines.push("");
-			lines.push("| Path |");
-			lines.push("| --- |");
-			for (const path of drift.drifted) {
-				lines.push(`| ${path} |`);
-			}
-			lines.push("");
-		}
-		if (drift.undelivered.length > 0) {
-			lines.push("Declared but not changed:");
-			lines.push("");
-			lines.push("| Path |");
-			lines.push("| --- |");
-			for (const path of drift.undelivered) {
-				lines.push(`| ${path} |`);
-			}
-		}
-	}
-	lines.push("");
-
-	lines.push("## Design review");
-	lines.push("");
 	const design = review.designPass;
-	if (design === undefined) {
-		lines.push("No design-pass record was supplied.");
-	} else {
-		const signalText = Object.entries(design.signals).map(([k, v]) => `${k}=${String(v)}`).join(", ");
-		lines.push(`${design.ran ? "Ran" : "Did not fire"}: ${design.note} (${signalText}).`);
-	}
-	lines.push("");
-
-	lines.push("## Checked and cleared");
-	lines.push("");
-	lines.push(review.checkedAndCleared);
-	lines.push("");
-
-	lines.push("## Classification");
-	lines.push("");
-	lines.push(`**${review.classification}** -- ${review.classificationJustification}`);
-	if (review.classification === "workaround") {
-		lines.push("");
-		lines.push(`- Proper fix: ${review.properFix ?? ""}`);
-		lines.push(`- Deferred because: ${review.deferralReason ?? ""}`);
-	}
-	lines.push("");
-
-	lines.push(
+	const designLine =
+		design === undefined
+			? "No design-pass record was supplied."
+			: `${design.ran ? "Ran" : "Did not fire"}: ${design.note} (${Object.entries(design.signals).map(([k, v]) => `${k}=${String(v)}`).join(", ")}).`;
+	const findings =
+		review.findings.length === 0
+			? ['None. See "Checked and cleared" below for what was actually examined.']
+			: review.findings.flatMap((f) => [`- **${f.severity}** at \`${f.location}\`: ${f.concreteFailure}`, `  - Suggested fix: ${f.suggestedFix}`]);
+	const workaround = review.classification === "workaround" ? ["", `- Proper fix: ${review.properFix ?? ""}`, `- Deferred because: ${review.deferralReason ?? ""}`] : [];
+	return [
+		"# REVIEW",
+		"",
+		"## Verdicts",
+		"",
+		"| Requirement | Status | Evidence |",
+		"| --- | --- | --- |",
+		...review.verdicts.map((v) => `| ${v.requirementId} | ${v.status} | ${v.evidence} |`),
+		"",
+		"## Findings",
+		"",
+		...findings,
+		"",
+		"## Scope Drift",
+		"",
+		...driftLines(review.scopeDrift),
+		"",
+		"## Design review",
+		"",
+		designLine,
+		"",
+		"## Checked and cleared",
+		"",
+		review.checkedAndCleared,
+		"",
+		"## Classification",
+		"",
+		`**${review.classification}** -- ${review.classificationJustification}`,
+		...workaround,
+		"",
 		"---",
-	);
-	lines.push("");
-	lines.push(
+		"",
 		"*Evidence and location strings above are the reviewer's own claims, not verified facts -- see " +
 			"`review-schema.ts`'s own \"WHAT THIS DOES NOT PROVE\" section. Scope drift compares path sets from git, not " +
 			"whether a change inside a declared file was in scope.*",
-	);
-	lines.push("");
-
-	return lines.join("\n");
+		"",
+	].join("\n");
 }

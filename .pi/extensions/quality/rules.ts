@@ -40,164 +40,44 @@ export const SCAN_EXEMPT_PREFIXES = ["tests/fixtures/"] as const;
  */
 export const SUPPRESSION_MARKER = "quality-allow:";
 
-function lineOf(sourceFile: ts.SourceFile, pos: number): number {
-	return sourceFile.getLineAndCharacterOfPosition(pos).line + 1;
-}
+// A cached tree is reused only while its object still holds the same path and text.
+const parsed = new WeakMap<QualitySource, ts.SourceFile>();
 
 function parse(source: QualitySource): ts.SourceFile {
-	// setParentNodes: every rule climbs .parent.
-	return ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, true);
+	let sourceFile = parsed.get(source);
+	if (sourceFile === undefined || sourceFile.text !== source.text || sourceFile.fileName !== source.path) {
+		// setParentNodes: every rule climbs .parent.
+		sourceFile = ts.createSourceFile(source.path, source.text, ts.ScriptTarget.Latest, true);
+		parsed.set(source, sourceFile);
+	}
+	return sourceFile;
+}
+
+/** Every descendant of `root`, depth first, excluding `root` itself. */
+function descendants(root: ts.Node): ts.Node[] {
+	const nodes: ts.Node[] = [];
+	const visit = (node: ts.Node): void => {
+		nodes.push(node);
+		ts.forEachChild(node, visit);
+	};
+	ts.forEachChild(root, visit);
+	return nodes;
+}
+
+type Report = (pos: number, message: string) => void;
+
+/** Parses `source` and hands `body` a reporter that records findings for one rule and tier. */
+function runRule(source: QualitySource, ruleId: RuleId, tier: QualityFinding["tier"], body: (sf: ts.SourceFile, report: Report) => void): QualityFinding[] {
+	const sourceFile = parse(source);
+	const findings: QualityFinding[] = [];
+	body(sourceFile, (pos, message) =>
+		findings.push({ ruleId, path: source.path, line: sourceFile.getLineAndCharacterOfPosition(pos).line + 1, tier, message }),
+	);
+	return findings;
 }
 
 /** Smallest counting numbers plus 100/1000 for percentages and byte magnitudes; deliberately not widened. */
 const MAGIC_NUMBER_ALLOWLIST = new Set([0, 1, 2, 100, 1000]);
-
-const COMPARISON_OPERATORS = new Set<ts.SyntaxKind>([
-	ts.SyntaxKind.EqualsEqualsToken,
-	ts.SyntaxKind.EqualsEqualsEqualsToken,
-	ts.SyntaxKind.ExclamationEqualsToken,
-	ts.SyntaxKind.ExclamationEqualsEqualsToken,
-	ts.SyntaxKind.LessThanToken,
-	ts.SyntaxKind.GreaterThanToken,
-	ts.SyntaxKind.LessThanEqualsToken,
-	ts.SyntaxKind.GreaterThanEqualsToken,
-]);
-
-function collectNumericLiterals(sourceFile: ts.SourceFile): ts.NumericLiteral[] {
-	const found: ts.NumericLiteral[] = [];
-	function visit(node: ts.Node): void {
-		if (ts.isNumericLiteral(node)) {
-			found.push(node);
-		}
-		ts.forEachChild(node, visit);
-	}
-	ts.forEachChild(sourceFile, visit);
-	return found;
-}
-
-/** True for a const initialiser, including nested object/array/paren wrappers (the named-constant shape). */
-function isConstDeclarationPosition(node: ts.NumericLiteral): boolean {
-	let current: ts.Node = node;
-	let parent: ts.Node | undefined = node.parent;
-	while (parent !== undefined) {
-		if (ts.isVariableDeclaration(parent)) {
-			if (parent.initializer !== current) {
-				return false;
-			}
-			const list = parent.parent;
-			return ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0;
-		}
-		if (ts.isPropertyAssignment(parent) && parent.initializer === current) {
-			current = parent;
-			parent = parent.parent;
-			continue;
-		}
-		if (ts.isObjectLiteralExpression(parent) || ts.isArrayLiteralExpression(parent) || ts.isParenthesizedExpression(parent)) {
-			current = parent;
-			parent = parent.parent;
-			continue;
-		}
-		return false;
-	}
-	return false;
-}
-
-function isEnumMemberValue(node: ts.NumericLiteral): boolean {
-	const parent = node.parent;
-	return parent !== undefined && ts.isEnumMember(parent) && parent.initializer === node;
-}
-
-function isSmallArrayIndex(node: ts.NumericLiteral): boolean {
-	if (node.text !== "0" && node.text !== "1") {
-		return false;
-	}
-	const parent = node.parent;
-	return parent !== undefined && ts.isElementAccessExpression(parent) && parent.argumentExpression === node;
-}
-
-/** `-1` parses as a `PrefixUnaryExpression` around the literal `1`, never a literal `-1` of its own. */
-function isNegativeOne(node: ts.NumericLiteral): boolean {
-	if (node.text !== "1") {
-		return false;
-	}
-	const parent = node.parent;
-	return (
-		parent !== undefined &&
-		ts.isPrefixUnaryExpression(parent) &&
-		parent.operator === ts.SyntaxKind.MinusToken &&
-		parent.operand === node
-	);
-}
-
-function isAllowlistedValue(node: ts.NumericLiteral): boolean {
-	return MAGIC_NUMBER_ALLOWLIST.has(Number(node.text));
-}
-
-function isComparedAgainstCallResult(node: ts.NumericLiteral): boolean {
-	const parent = node.parent;
-	if (parent === undefined || !ts.isBinaryExpression(parent)) {
-		return false;
-	}
-	if (!COMPARISON_OPERATORS.has(parent.operatorToken.kind)) {
-		return false;
-	}
-	const other = parent.left === node ? parent.right : parent.right === node ? parent.left : undefined;
-	return other !== undefined && ts.isCallExpression(other);
-}
-
-/**
- * Flags a non-declaration literal that repeats 2+ times in the file or is compared directly to a call result.
- * Excluded: const initialisers, enum values, 0/1 indexes, -1, and MAGIC_NUMBER_ALLOWLIST.
- */
-export function ruleMagicNumber(source: QualitySource): QualityFinding[] {
-	const sourceFile = parse(source);
-	const literals = collectNumericLiterals(sourceFile);
-	const candidates = literals.filter(
-		(n) =>
-			!isAllowlistedValue(n) &&
-			!isConstDeclarationPosition(n) &&
-			!isEnumMemberValue(n) &&
-			!isSmallArrayIndex(n) &&
-			!isNegativeOne(n),
-	);
-
-	const findings: QualityFinding[] = [];
-
-	const byValue = new Map<string, ts.NumericLiteral[]>();
-	for (const literal of candidates) {
-		const list = byValue.get(literal.text) ?? [];
-		list.push(literal);
-		byValue.set(literal.text, list);
-	}
-	for (const [value, nodes] of byValue) {
-		if (nodes.length < 2) {
-			continue;
-		}
-		for (const node of nodes) {
-			findings.push({
-				ruleId: "magic-number",
-				path: source.path,
-				line: lineOf(sourceFile, node.getStart(sourceFile)),
-				tier: "error",
-				message: `literal ${value} appears ${nodes.length} times in this file with no named constant`,
-			});
-		}
-	}
-
-	for (const literal of candidates) {
-		if (isComparedAgainstCallResult(literal)) {
-			findings.push({
-				ruleId: "magic-number",
-				path: source.path,
-				line: lineOf(sourceFile, literal.getStart(sourceFile)),
-				tier: "error",
-				message: `literal ${literal.text} is compared directly against a call result instead of a named constant`,
-			});
-		}
-	}
-
-	return findings;
-}
 
 const EQUALITY_OPERATORS = new Set<ts.SyntaxKind>([
 	ts.SyntaxKind.EqualsEqualsToken,
@@ -206,106 +86,121 @@ const EQUALITY_OPERATORS = new Set<ts.SyntaxKind>([
 	ts.SyntaxKind.ExclamationEqualsEqualsToken,
 ]);
 
-function isFunctionLikeNode(node: ts.Node): node is ts.FunctionLikeDeclaration {
-	return (
-		ts.isFunctionDeclaration(node) ||
-		ts.isFunctionExpression(node) ||
-		ts.isArrowFunction(node) ||
-		ts.isMethodDeclaration(node)
-	);
+const COMPARISON_OPERATORS = new Set<ts.SyntaxKind>([
+	...EQUALITY_OPERATORS,
+	ts.SyntaxKind.LessThanToken,
+	ts.SyntaxKind.GreaterThanToken,
+	ts.SyntaxKind.LessThanEqualsToken,
+	ts.SyntaxKind.GreaterThanEqualsToken,
+]);
+
+/** True for a const initialiser, including nested object/array/paren wrappers (the named-constant shape). */
+function isConstDeclarationPosition(node: ts.NumericLiteral): boolean {
+	let current: ts.Node = node;
+	for (let parent = node.parent; parent !== undefined; current = parent, parent = parent.parent) {
+		if (ts.isVariableDeclaration(parent)) {
+			const list = parent.parent;
+			return parent.initializer === current && ts.isVariableDeclarationList(list) && (list.flags & ts.NodeFlags.Const) !== 0;
+		}
+		const wraps =
+			(ts.isPropertyAssignment(parent) && parent.initializer === current) ||
+			ts.isObjectLiteralExpression(parent) ||
+			ts.isArrayLiteralExpression(parent) ||
+			ts.isParenthesizedExpression(parent);
+		if (!wraps) return false;
+	}
+	return false;
 }
 
-function functionParamNames(fn: ts.FunctionLikeDeclaration): Set<string> {
-	const names = new Set<string>();
-	for (const param of fn.parameters) {
-		if (ts.isIdentifier(param.name)) {
-			names.add(param.name.text);
-		}
-	}
-	return names;
+/** Enum values, 0/1 indexes and `-1` (a `PrefixUnaryExpression` around the literal `1`) name themselves. */
+function isExemptLiteral(node: ts.NumericLiteral): boolean {
+	const parent = node.parent;
+	if (MAGIC_NUMBER_ALLOWLIST.has(Number(node.text)) || isConstDeclarationPosition(node)) return true;
+	if (ts.isEnumMember(parent) && parent.initializer === node) return true;
+	const smallIndex = node.text === "0" || node.text === "1";
+	if (smallIndex && ts.isElementAccessExpression(parent) && parent.argumentExpression === node) return true;
+	return node.text === "1" && ts.isPrefixUnaryExpression(parent) && parent.operator === ts.SyntaxKind.MinusToken && parent.operand === node;
 }
+
+function isComparedAgainstCallResult(node: ts.NumericLiteral): boolean {
+	const parent = node.parent;
+	if (!ts.isBinaryExpression(parent) || !COMPARISON_OPERATORS.has(parent.operatorToken.kind)) return false;
+	const other = parent.left === node ? parent.right : parent.right === node ? parent.left : undefined;
+	return other !== undefined && ts.isCallExpression(other);
+}
+
+/** First-seen key order, which the findings inherit. */
+function groupBy<T>(items: readonly T[], key: (item: T) => string): Map<string, T[]> {
+	const groups = new Map<string, T[]>();
+	for (const item of items) {
+		const k = key(item);
+		const group = groups.get(k);
+		if (group === undefined) groups.set(k, [item]);
+		else group.push(item);
+	}
+	return groups;
+}
+
+/**
+ * Flags a non-declaration literal that repeats 2+ times in the file or is compared directly to a call result.
+ * Excluded: const initialisers, enum values, 0/1 indexes, -1, and MAGIC_NUMBER_ALLOWLIST.
+ */
+export function ruleMagicNumber(source: QualitySource): QualityFinding[] {
+	return runRule(source, "magic-number", "error", (sf, report) => {
+		const candidates = descendants(sf).filter(ts.isNumericLiteral).filter((n) => !isExemptLiteral(n));
+		for (const [value, nodes] of groupBy(candidates, (n) => n.text)) {
+			if (nodes.length < 2) continue;
+			for (const node of nodes) report(node.getStart(sf), `literal ${value} appears ${nodes.length} times in this file with no named constant`);
+		}
+		for (const literal of candidates.filter(isComparedAgainstCallResult)) {
+			report(literal.getStart(sf), `literal ${literal.text} is compared directly against a call result instead of a named constant`);
+		}
+	});
+}
+
+function isFunctionLikeNode(node: ts.Node): node is ts.FunctionLikeDeclaration {
+	return ts.isFunctionDeclaration(node) || ts.isFunctionExpression(node) || ts.isArrowFunction(node) || ts.isMethodDeclaration(node);
+}
+
+const isLiteral = (node: ts.Node): node is ts.StringLiteralLike | ts.NumericLiteral => ts.isStringLiteralLike(node) || ts.isNumericLiteral(node);
 
 /** Warning tier: a parameter-vs-literal if/switch looks identical to a legitimate dispatch table; a human must judge. */
 export function ruleLiteralSpecialCase(source: QualitySource): QualityFinding[] {
-	const sourceFile = parse(source);
-	const findings: QualityFinding[] = [];
+	return runRule(source, "literal-special-case", "warning", (sf, report) => {
+		for (const fn of descendants(sf).filter(isFunctionLikeNode)) {
+			const params = new Set(fn.parameters.flatMap((p) => (ts.isIdentifier(p.name) ? [p.name.text] : [])));
+			if (params.size === 0 || fn.body === undefined) continue;
+			const isParam = (node: ts.Node): node is ts.Identifier => ts.isIdentifier(node) && params.has(node.text);
 
-	function visitFunction(fn: ts.FunctionLikeDeclaration): void {
-		const params = functionParamNames(fn);
-		if (params.size === 0 || fn.body === undefined) {
-			return;
-		}
-
-		function checkComparison(expr: ts.BinaryExpression, atPos: number): void {
-			if (!EQUALITY_OPERATORS.has(expr.operatorToken.kind)) {
-				return;
-			}
-			let identSide: ts.Identifier | undefined;
-			let literalSide: ts.Expression | undefined;
-			if (ts.isIdentifier(expr.left) && params.has(expr.left.text)) {
-				identSide = expr.left;
-				literalSide = expr.right;
-			} else if (ts.isIdentifier(expr.right) && params.has(expr.right.text)) {
-				identSide = expr.right;
-				literalSide = expr.left;
-			}
-			if (identSide === undefined || literalSide === undefined) {
-				return;
-			}
-			if (!ts.isStringLiteralLike(literalSide) && !ts.isNumericLiteral(literalSide)) {
-				return;
-			}
-			findings.push({
-				ruleId: "literal-special-case",
-				path: source.path,
-				line: lineOf(sourceFile, atPos),
-				tier: "warning",
-				message:
-					`if-statement special-cases parameter "${identSide.text}" against literal ` +
-					`${literalSide.getText(sourceFile)} — this may be a legitimate dispatch, not a hack; a human ` +
-					"or reviewer must judge",
-			});
-		}
-
-		function visitBody(node: ts.Node): void {
-			if (node !== fn && isFunctionLikeNode(node)) {
-					// Nested functions are visited on their own with their own parameters.
-				return;
-			}
-			if (ts.isIfStatement(node) && ts.isBinaryExpression(node.expression)) {
-				checkComparison(node.expression, node.getStart(sourceFile));
-			}
-			if (ts.isSwitchStatement(node) && ts.isIdentifier(node.expression) && params.has(node.expression.text)) {
-				for (const clause of node.caseBlock.clauses) {
-					if (ts.isCaseClause(clause) && (ts.isStringLiteralLike(clause.expression) || ts.isNumericLiteral(clause.expression))) {
-						findings.push({
-							ruleId: "literal-special-case",
-							path: source.path,
-							line: lineOf(sourceFile, clause.getStart(sourceFile)),
-							tier: "warning",
-							message:
-								`switch on parameter "${node.expression.text}" special-cases literal ` +
-								`${clause.expression.getText(sourceFile)} — this may be a legitimate dispatch table, ` +
-								"not a hack; a human or reviewer must judge",
-						});
+			const visitBody = (node: ts.Node): void => {
+				// Nested functions are visited on their own with their own parameters; `node` is never `fn` itself.
+				if (isFunctionLikeNode(node)) return;
+				if (ts.isIfStatement(node) && ts.isBinaryExpression(node.expression) && EQUALITY_OPERATORS.has(node.expression.operatorToken.kind)) {
+					const { left, right } = node.expression;
+					const [ident, literal] = isParam(left) ? [left, right] : isParam(right) ? [right, left] : [undefined, undefined];
+					if (ident !== undefined && isLiteral(literal)) {
+						report(
+							node.getStart(sf),
+							`if-statement special-cases parameter "${ident.text}" against literal ${literal.getText(sf)} — this may be a ` +
+								"legitimate dispatch, not a hack; a human or reviewer must judge",
+						);
 					}
 				}
-			}
-			ts.forEachChild(node, visitBody);
+				if (ts.isSwitchStatement(node) && isParam(node.expression)) {
+					for (const clause of node.caseBlock.clauses) {
+						if (!ts.isCaseClause(clause) || !isLiteral(clause.expression)) continue;
+						report(
+							clause.getStart(sf),
+							`switch on parameter "${node.expression.text}" special-cases literal ${clause.expression.getText(sf)} — this may ` +
+								"be a legitimate dispatch table, not a hack; a human or reviewer must judge",
+						);
+					}
+				}
+				ts.forEachChild(node, visitBody);
+			};
+			visitBody(fn.body);
 		}
-
-		visitBody(fn.body);
-	}
-
-	function visitTop(node: ts.Node): void {
-		if (isFunctionLikeNode(node)) {
-			visitFunction(node);
-		}
-		ts.forEachChild(node, visitTop);
-	}
-
-	ts.forEachChild(sourceFile, visitTop);
-	return findings;
+	});
 }
 
 /** Named so this file passes its own magic-number rule. */
@@ -314,259 +209,142 @@ export const COPY_PASTE_MIN_STATEMENTS = 12;
 /** Identifiers collapse to "ID" and literals to "LIT"; statement structure must still match exactly. */
 function normalizeBlockSignature(block: ts.Block): string {
 	const tokens: string[] = [];
-	function visit(node: ts.Node): void {
-		if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) {
-			tokens.push("ID");
-			return;
+	const visit = (node: ts.Node): void => {
+		if (ts.isIdentifier(node) || ts.isPrivateIdentifier(node)) tokens.push("ID");
+		else if (isLiteral(node)) tokens.push("LIT");
+		else {
+			tokens.push(String(node.kind));
+			ts.forEachChild(node, visit);
 		}
-		if (ts.isNumericLiteral(node) || ts.isStringLiteralLike(node)) {
-			tokens.push("LIT");
-			return;
-		}
-		tokens.push(String(node.kind));
-		ts.forEachChild(node, visit);
-	}
-	for (const stmt of block.statements) {
-		visit(stmt);
-	}
+	};
+	block.statements.forEach(visit);
 	return tokens.join(",");
 }
 
 /** Two blocks with identical normalised signatures and at least COPY_PASTE_MIN_STATEMENTS statements each. */
 export function ruleCopyPaste(source: QualitySource): QualityFinding[] {
-	const sourceFile = parse(source);
-	const blocks: ts.Block[] = [];
-	function collect(node: ts.Node): void {
-		if (ts.isBlock(node) && node.statements.length >= COPY_PASTE_MIN_STATEMENTS) {
-			blocks.push(node);
-		}
-		ts.forEachChild(node, collect);
-	}
-	ts.forEachChild(sourceFile, collect);
-
-	const bySignature = new Map<string, ts.Block[]>();
-	for (const block of blocks) {
-		const signature = normalizeBlockSignature(block);
-		const list = bySignature.get(signature) ?? [];
-		list.push(block);
-		bySignature.set(signature, list);
-	}
-
-	const findings: QualityFinding[] = [];
-	for (const group of bySignature.values()) {
-		if (group.length < 2) {
-			continue;
-		}
-		for (const block of group) {
-			findings.push({
-				ruleId: "copy-paste",
-				path: source.path,
-				line: lineOf(sourceFile, block.getStart(sourceFile)),
-				tier: "error",
-				message:
+	return runRule(source, "copy-paste", "error", (sf, report) => {
+		const blocks = descendants(sf).filter((n): n is ts.Block => ts.isBlock(n) && n.statements.length >= COPY_PASTE_MIN_STATEMENTS);
+		for (const group of groupBy(blocks, normalizeBlockSignature).values()) {
+			if (group.length < 2) continue;
+			for (const block of group) {
+				report(
+					block.getStart(sf),
 					`this block duplicates another block of at least ${COPY_PASTE_MIN_STATEMENTS} statements ` +
-					"elsewhere in this file, differing only in identifier names and literal values",
-			});
+						"elsewhere in this file, differing only in identifier names and literal values",
+				);
+			}
 		}
-	}
-	return findings;
+	});
 }
 
 /** Marker that excuses a swallowed catch (as in safety/audit.ts writeAuditRow). */
 export const NEVER_THROWS_MARKERS = ["NEVER THROWS", "never throws"] as const;
 
-function commentTextNear(node: ts.Node, fullText: string): string {
-	const ranges = ts.getLeadingCommentRanges(fullText, node.getFullStart()) ?? [];
-	return ranges.map((range) => fullText.slice(range.pos, range.end)).join("\n");
-}
-
 /** Checks leading comments up to and including the nearest enclosing function; outer scopes do not count. */
 function hasNeverThrowsMarker(catchClause: ts.CatchClause, sourceFile: ts.SourceFile): boolean {
 	const fullText = sourceFile.getFullText();
-	let current: ts.Node | undefined = catchClause;
-	while (current !== undefined) {
-		const text = commentTextNear(current, fullText);
-		if (NEVER_THROWS_MARKERS.some((marker) => text.includes(marker))) {
-			return true;
-		}
-		if (isFunctionLikeNode(current)) {
-			return false;
-		}
-		current = current.parent;
+	for (let current: ts.Node | undefined = catchClause; current !== undefined; current = current.parent) {
+		const ranges = ts.getLeadingCommentRanges(fullText, current.getFullStart()) ?? [];
+		const text = ranges.map((range) => fullText.slice(range.pos, range.end)).join("\n");
+		if (NEVER_THROWS_MARKERS.some((marker) => text.includes(marker))) return true;
+		if (isFunctionLikeNode(current)) return false;
 	}
 	return false;
 }
 
 function isSwallowingBlock(block: ts.Block): boolean {
-	if (block.statements.length === 0) {
-		return true;
-	}
-	if (block.statements.length === 1) {
-		const stmt = block.statements[0];
-		if (ts.isReturnStatement(stmt)) {
-			if (stmt.expression === undefined) {
-				return true;
-			}
-			if (ts.isIdentifier(stmt.expression) && stmt.expression.text === "undefined") {
-				return true;
-			}
-		}
-	}
-	return false;
+	const [only, ...rest] = block.statements;
+	if (only === undefined) return true;
+	if (rest.length > 0 || !ts.isReturnStatement(only)) return false;
+	return only.expression === undefined || (ts.isIdentifier(only.expression) && only.expression.text === "undefined");
 }
 
 /** Empty or bare-return catch, flagged unless a NEVER_THROWS_MARKERS marker leads the catch or its enclosing function. */
 export function ruleSwallowedException(source: QualitySource): QualityFinding[] {
-	const sourceFile = parse(source);
-	const findings: QualityFinding[] = [];
-	function visit(node: ts.Node): void {
-		if (ts.isCatchClause(node) && isSwallowingBlock(node.block) && !hasNeverThrowsMarker(node, sourceFile)) {
-			findings.push({
-				ruleId: "swallowed-exception",
-				path: source.path,
-				line: lineOf(sourceFile, node.getStart(sourceFile)),
-				tier: "error",
-				message: "this catch clause discards the exception with no NEVER THROWS contract documented nearby",
-			});
+	return runRule(source, "swallowed-exception", "error", (sf, report) => {
+		for (const node of descendants(sf)) {
+			if (ts.isCatchClause(node) && isSwallowingBlock(node.block) && !hasNeverThrowsMarker(node, sf)) {
+				report(node.getStart(sf), "this catch clause discards the exception with no NEVER THROWS contract documented nearby");
+			}
 		}
-		ts.forEachChild(node, visit);
-	}
-	ts.forEachChild(sourceFile, visit);
-	return findings;
+	});
 }
 
 const SHIPPED_TODO_TOKENS = ["TODO", "FIXME", "XXX", "HACK"] as const;
 
-const SHIPPED_TODO_PATTERN = /\b(TODO|FIXME|XXX|HACK)\b/;
+const SHIPPED_TODO_PATTERN = new RegExp(`\\b(${SHIPPED_TODO_TOKENS.join("|")})\\b`);
 
 /** Scans comment trivia only, so the word inside a string literal or fixture is not flagged. */
 export function ruleShippedTodo(source: QualitySource): QualityFinding[] {
-	const sourceFile = parse(source);
-	const fullText = sourceFile.getFullText();
-	const findings: QualityFinding[] = [];
-	const seen = new Set<number>();
-
-	function checkRanges(ranges: readonly ts.CommentRange[] | undefined): void {
-		for (const range of ranges ?? []) {
-			if (seen.has(range.pos)) {
-				continue;
+	return runRule(source, "shipped-todo", "error", (sf, report) => {
+		const fullText = sf.getFullText();
+		const seen = new Set<number>();
+		const check = (ranges: readonly ts.CommentRange[] | undefined): void => {
+			for (const range of ranges ?? []) {
+				if (seen.has(range.pos)) continue;
+				seen.add(range.pos);
+				const match = SHIPPED_TODO_PATTERN.exec(fullText.slice(range.pos, range.end));
+				if (match !== null) report(range.pos, `comment carries a shipped ${match[1]} marker instead of a tracked follow-up`);
 			}
-			seen.add(range.pos);
-			const text = fullText.slice(range.pos, range.end);
-			const match = SHIPPED_TODO_PATTERN.exec(text);
-			if (match !== null) {
-				findings.push({
-					ruleId: "shipped-todo",
-					path: source.path,
-					line: lineOf(sourceFile, range.pos),
-					tier: "error",
-					message: `comment carries a shipped ${match[1]} marker instead of a tracked follow-up`,
-				});
-			}
+		};
+		for (const node of descendants(sf)) {
+			check(ts.getLeadingCommentRanges(fullText, node.getFullStart()));
+			check(ts.getTrailingCommentRanges(fullText, node.getEnd()));
 		}
-	}
-
-	function visit(node: ts.Node): void {
-		checkRanges(ts.getLeadingCommentRanges(fullText, node.getFullStart()));
-		checkRanges(ts.getTrailingCommentRanges(fullText, node.getEnd()));
-		ts.forEachChild(node, visit);
-	}
-	ts.forEachChild(sourceFile, visit);
-	// A trailing comment at EOF sits in the EndOfFileToken's leading trivia, which the walk skips.
-	checkRanges(ts.getLeadingCommentRanges(fullText, sourceFile.endOfFileToken.getFullStart()));
-
-	return findings;
+		// A trailing comment at EOF sits in the EndOfFileToken's leading trivia, which the walk skips.
+		check(ts.getLeadingCommentRanges(fullText, sf.endOfFileToken.getFullStart()));
+	});
 }
 
 export const N_PLUS_ONE_CALLEES = ["query", "exec", "fetch", "findMany", "get"] as const;
 
 function calleeName(expr: ts.LeftHandSideExpression): string | undefined {
-	if (ts.isIdentifier(expr)) {
-		return expr.text;
+	if (ts.isIdentifier(expr)) return expr.text;
+	return ts.isPropertyAccessExpression(expr) ? expr.name.text : undefined;
+}
+
+function loopBodyOf(node: ts.Node): ts.Node | undefined {
+	if (ts.isForStatement(node) || ts.isForOfStatement(node) || ts.isForInStatement(node) || ts.isWhileStatement(node) || ts.isDoStatement(node)) {
+		return node.statement;
 	}
-	if (ts.isPropertyAccessExpression(expr)) {
-		return expr.name.text;
+	if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression) && ["map", "forEach"].includes(node.expression.name.text)) {
+		const callback = node.arguments[0];
+		if (callback !== undefined && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) return callback.body;
 	}
 	return undefined;
 }
 
-function loopBodyOf(node: ts.Node): ts.Node | undefined {
-	if (
-		ts.isForStatement(node) ||
-		ts.isForOfStatement(node) ||
-		ts.isForInStatement(node) ||
-		ts.isWhileStatement(node) ||
-		ts.isDoStatement(node)
-	) {
-		return node.statement;
+/** The N+1 message for a loop-body node, or undefined when the node is not an await or a listed callee call. */
+function nPlusOneMessage(node: ts.Node): string | undefined {
+	if (ts.isAwaitExpression(node)) {
+		return (
+			"an await inside a loop body may be an N+1 query — this rule cannot distinguish that from a " +
+			"single legitimate per-item call (e.g. one pi.exec per worktree, where no bulk API exists)"
+		);
 	}
-	if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)) {
-		const method = node.expression.name.text;
-		if (method === "map" || method === "forEach") {
-			const callback = node.arguments[0];
-			if (callback !== undefined && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))) {
-				return callback.body;
-			}
-		}
-	}
-	return undefined;
+	const name = ts.isCallExpression(node) ? calleeName(node.expression) : undefined;
+	if (name === undefined || !(N_PLUS_ONE_CALLEES as readonly string[]).includes(name)) return undefined;
+	return `call to "${name}" inside a loop body may be an N+1 query — this rule cannot distinguish that from a single legitimate per-item call`;
 }
 
 /** Warning tier: cannot tell a legitimate per-item call (one pi.exec per worktree) from a real N+1. */
 export function ruleNPlusOne(source: QualitySource): QualityFinding[] {
-	const sourceFile = parse(source);
-	const findings: QualityFinding[] = [];
-	const flagged = new Set<number>();
-
-	function scanBody(body: ts.Node): void {
-		function visit(node: ts.Node): void {
-			if (ts.isAwaitExpression(node)) {
-				const pos = node.getStart(sourceFile);
-				if (!flagged.has(pos)) {
-					flagged.add(pos);
-					findings.push({
-						ruleId: "n-plus-one",
-						path: source.path,
-						line: lineOf(sourceFile, pos),
-						tier: "warning",
-						message:
-							"an await inside a loop body may be an N+1 query — this rule cannot distinguish that from a " +
-							"single legitimate per-item call (e.g. one pi.exec per worktree, where no bulk API exists)",
-					});
-				}
+	return runRule(source, "n-plus-one", "warning", (sf, report) => {
+		const flagged = new Set<number>();
+		for (const loop of descendants(sf)) {
+			const body = loopBodyOf(loop);
+			if (body === undefined) continue;
+			for (const node of [body, ...descendants(body)]) {
+				const message = nPlusOneMessage(node);
+				if (message === undefined) continue;
+				const pos = node.getStart(sf);
+				if (flagged.has(pos)) continue;
+				flagged.add(pos);
+				report(pos, message);
 			}
-			if (ts.isCallExpression(node)) {
-				const name = calleeName(node.expression);
-				if (name !== undefined && (N_PLUS_ONE_CALLEES as readonly string[]).includes(name)) {
-					const pos = node.getStart(sourceFile);
-					if (!flagged.has(pos)) {
-						flagged.add(pos);
-						findings.push({
-							ruleId: "n-plus-one",
-							path: source.path,
-							line: lineOf(sourceFile, pos),
-							tier: "warning",
-							message:
-								`call to "${name}" inside a loop body may be an N+1 query — this rule cannot distinguish ` +
-								"that from a single legitimate per-item call",
-						});
-					}
-				}
-			}
-			ts.forEachChild(node, visit);
 		}
-		visit(body);
-	}
-
-	function visitTop(node: ts.Node): void {
-		const body = loopBodyOf(node);
-		if (body !== undefined) {
-			scanBody(body);
-		}
-		ts.forEachChild(node, visitTop);
-	}
-	ts.forEachChild(sourceFile, visitTop);
-	return findings;
+	});
 }
 
 const RULE_FNS: Record<RuleId, (source: QualitySource) => QualityFinding[]> = {
@@ -578,51 +356,29 @@ const RULE_FNS: Record<RuleId, (source: QualitySource) => QualityFinding[]> = {
 	"n-plus-one": ruleNPlusOne,
 };
 
-function isExemptPath(path: string): boolean {
-	return SCAN_EXEMPT_PREFIXES.some((prefix) => path.startsWith(prefix));
-}
-
 /** Valid only with a non-empty reason after the em dash, on the finding's line or the line above. */
-function isSuppressed(source: QualitySource, ruleId: RuleId, line: number): boolean {
-	const lines = source.text.split("\n");
-	for (const idx of [line - 1, line - 2]) {
-		const text = lines[idx];
-		if (text === undefined) {
-			continue;
-		}
-		const markerAt = text.indexOf(SUPPRESSION_MARKER);
-		if (markerAt === -1) {
-			continue;
-		}
+function isSuppressed(lines: readonly string[], ruleId: RuleId, line: number): boolean {
+	return [lines[line - 1], lines[line - 2]].some((text) => {
+		const markerAt = text?.indexOf(SUPPRESSION_MARKER) ?? -1;
+		if (text === undefined || markerAt === -1) return false;
 		const rest = text.slice(markerAt + SUPPRESSION_MARKER.length).trim();
-		const idMatch = /^([a-z-]+)/.exec(rest);
-		if (idMatch === null || idMatch[1] !== ruleId) {
-			continue;
-		}
-		const afterId = rest.slice(idMatch[1].length).trim();
-		if (!afterId.startsWith("—")) {
-			continue;
-		}
-		const reason = afterId.slice("—".length).trim();
-		if (reason.length > 0) {
-			return true;
-		}
-	}
-	return false;
+		const id = /^([a-z-]+)/.exec(rest)?.[1];
+		if (id !== ruleId) return false;
+		const afterId = rest.slice(id.length).trim();
+		return afterId.startsWith("—") && afterId.slice("—".length).trim().length > 0;
+	});
 }
 
 /** Runs all six rules over non-exempt sources, drops suppressed findings, sorts by path then line. */
 export function runAntiPatternRules(sources: readonly QualitySource[]): QualityFinding[] {
 	const findings: QualityFinding[] = [];
 	for (const source of sources) {
-		if (isExemptPath(source.path)) {
-			continue;
-		}
+		if (SCAN_EXEMPT_PREFIXES.some((prefix) => source.path.startsWith(prefix))) continue;
+		let lines: string[] | undefined;
 		for (const ruleId of RULE_IDS) {
 			for (const finding of RULE_FNS[ruleId](source)) {
-				if (!isSuppressed(source, ruleId, finding.line)) {
-					findings.push(finding);
-				}
+				lines ??= source.text.split("\n");
+				if (!isSuppressed(lines, ruleId, finding.line)) findings.push(finding);
 			}
 		}
 	}
