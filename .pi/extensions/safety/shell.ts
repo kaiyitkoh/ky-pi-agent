@@ -1,6 +1,7 @@
 /**
  * bash command parsing: a fail-closed node-type deny predicate, then wrapper
- * resolution to a canonical invocation so policy sees `git push`, never `env` or `sudo`.
+ * resolution to a canonical invocation, so policy classifies `git push` behind a tabulated
+ * wrapper (`env`, `sudo`, `npx`) and a wrapper it cannot resolve fails closed.
  *
  * Invariants:
  * - unbash is tolerant: `errors.length === 0` for `git $(echo push)`, `sh -c "git push"`,

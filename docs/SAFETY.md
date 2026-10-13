@@ -44,11 +44,15 @@ docstring for the structural argument). Concretely, it catches:
 - **Wrapper indirection** (`env A=1 git push`, `env --`, `sudo --`, `exec`,
   `timeout 5`, `nice -n 5`, `doas`, `ionice`, `stdbuf`, `nohup`, ...) — each
   wrapper's options, operands and `NAME=value` words are consumed from a
-  per-wrapper table, so the real executable is classified exactly as if it
-  were typed plainly. A word the table cannot account for (an unknown option,
-  `env -S "..."`, an assignment after a wrapper that does not take one) in
-  front of a guarded verb is refused rather than resolved to an unclassified
-  executable. `watch` joins its operands into an `sh -c` string, so it is
+  per-wrapper table, and the word the wrapper runs is what gets classified.
+  A shell variable among the wrapper words or in the resolved command
+  position (`g=git; env $g push`) is refused, as it is without a wrapper. A
+  word the table cannot account for (an unknown option, `env -S "..."`, an
+  assignment after a wrapper that does not take one) in front of a guarded
+  verb is refused rather than resolved to an unclassified executable. The
+  table only covers the wrappers it lists. `env -C` and `sudo -D` directories
+  feed the protected-branch check. `command -v X` is a lookup and runs
+  nothing. `watch` joins its operands into an `sh -c` string, so it is
   treated as a shell runner.
 - **Heredoc-to-script smuggling** (`<<EOF`, `<<-EOF`, `<<<`) — denied on the
   redirect operator alone, before the smuggled script ever executes.
