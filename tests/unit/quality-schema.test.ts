@@ -363,3 +363,17 @@ describe("clone() sanity", () => {
 		expect(cloned.nested).not.toBe(original.nested);
 	});
 });
+
+describe("evidence and location ranges", () => {
+	it.each(["src/a.ts:10-20", "src/b.ts:7", "src/c.ts:5-5"])("accepts %s", (evidence) => {
+		const review = baseline();
+		(review.verdicts as { evidence: string }[])[0].evidence = evidence;
+		expectAccepts(review);
+	});
+
+	it.each(["src/a.ts", "src/a.ts:x", "src/a.ts:20-10", "src/a.ts:1-", "src/a.ts:-3"])("rejects %s", (evidence) => {
+		const review = baseline();
+		(review.verdicts as { evidence: string }[])[0].evidence = evidence;
+		expectRejects(review);
+	});
+});
