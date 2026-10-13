@@ -163,13 +163,8 @@ export default function (pi: ExtensionAPI): void {
 		const verification = verificationRecord();
 		disarmExecuteRun();
 		const cwd = run.cwd;
-		let tree = "";
-		try {
-			tree = currentTree(cwd);
-		} catch {
-			// An unknown tree never matches, so the gate rejects; ending the run here is what keeps it from staying armed.
-		}
-		const ended = endRun(headShaOrEmpty(cwd), tree);
+		// Non-throwing reads: an unknown HEAD rejects, and the run is still ended rather than left armed.
+		const ended = endRun(headShaOrEmpty(cwd), headShaOrEmpty(cwd, "HEAD^{tree}"));
 		let written = false;
 		// Exactly one evidence row per run, carrying the final verdict.
 		const evidence = (verdict: "accept" | "reject", reason: string) => {

@@ -289,9 +289,9 @@ export function ensureHarnessIgnored(cwd: string): string | undefined {
 	return `added ${missing.join(", ")} to ${file} so harness state is never committed`;
 }
 
-/** HEAD at `cwd`, or "" when git cannot say; "" never equals a recorded commit, so an unknown HEAD fails the check. */
-export function headShaOrEmpty(cwd: string): string {
-	const r = spawnSync("git", ["rev-parse", "HEAD"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+/** HEAD (or `rev`) at `cwd`, or "" when git cannot say; "" never equals a recorded commit, so an unknown HEAD fails the check. */
+export function headShaOrEmpty(cwd: string, rev = "HEAD"): string {
+	const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", rev], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
 	return r.status === 0 ? (r.stdout ?? "").trim() : "";
 }
 

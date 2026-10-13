@@ -173,12 +173,8 @@ const ESLINT_CONFIGS = [
 const LINT_OUTPUT_MAX_LINES = 40;
 
 function hasEslintConfig(dir: string): boolean {
-	if (ESLINT_CONFIGS.some((name) => existsSync(join(dir, name)))) return true;
-	try {
-		return "eslintConfig" in (JSON.parse(readFileSync(join(dir, "package.json"), "utf-8")) as object);
-	} catch {
-		return false;
-	}
+	const pkg = join(dir, "package.json");
+	return ESLINT_CONFIGS.some((name) => existsSync(join(dir, name))) || (existsSync(pkg) && /"eslintConfig"\s*:/.test(readFileSync(pkg, "utf-8")));
 }
 
 interface EslintResult {
@@ -186,7 +182,7 @@ interface EslintResult {
 	readonly messages: readonly { readonly ruleId?: string | null; readonly severity?: number; readonly fatal?: boolean; readonly message?: string; readonly line?: number }[];
 }
 
-/** ESLint's own per-file report; undefined when stdout is not one. */
+/** ESLint's own per-file report; undefined when stdout is not one. NEVER THROWS: unparseable output is an answer, not an error. */
 function parseEslintJson(stdout: string): readonly EslintResult[] | undefined {
 	try {
 		const parsed: unknown = JSON.parse(stdout);
