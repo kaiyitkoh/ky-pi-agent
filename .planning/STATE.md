@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: "Gap Closure: audit + deep review fixes"
 status: executing
 stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-13T06:08:23.258Z"
-last_activity: 2026-10-13 -- Phase 12.1 planning complete
+last_updated: "2026-10-13T06:18:59.033Z"
+last_activity: 2026-10-13
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 10
-  completed_plans: 0
+  completed_plans: 1
   percent: 0
 ---
 
@@ -21,19 +21,19 @@ progress:
 See: .planning/PROJECT.md (updated 2026-08-13)
 
 **Core value:** A harness that makes a cheap model produce work you'd trust from an expensive one — without the harness itself becoming the bottleneck.
-**Current focus:** Phase 13 — Zed editor front-end (optional); Phase 11 live checks RB-11-01..03 OUTSTANDING
+**Current focus:** Phase 12.1 — v1.0 Gap Closure
 
 ## Current Position
 
-Phase: 13
-Plan: Not started
+Phase: 12.1 (v1.0 Gap Closure) — EXECUTING
+Plan: 2 of 10
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
-Last activity: 2026-10-13 -- Phase 12.1 planning complete
+Last activity: 2026-10-13
 
-Progress: [██████████] 100%
+Progress: [█░░░░░░░░░] 10%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -474,6 +474,7 @@ Recent decisions affecting current work:
 - [Phase 09]: QUAL-08: gateDepthFor is a pure selector beside shouldRunDesignReview in gates.ts -- quick runs deterministic only, ceremonial workflows run all four, proved by equality in both directions and falsified by inversion; /quick's own command file never touched
 - [Phase 08.1]: 08.1-05: pi-background-tasks@2.6.9 vendored process-only at .pi/extensions/background-tasks/ (not vendor/); npm pin removed
 - [Phase 11]: 11-06: wire check exits 64 on usage errors, 2 on missing logs; truncation noted but non-failing
+- [Phase 12.1]: Plan 01: implement profile floor rose 2344 to 4179 tokens because questionnaire and bg_* are default-active
 
 ### Pending Todos
 
@@ -532,7 +533,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-10-13T02:38:22.345Z
+Last session: 2026-10-13T06:18:54.687Z
 Stopped at: Completed 09-12-PLAN.md
 Resume file: None
 
