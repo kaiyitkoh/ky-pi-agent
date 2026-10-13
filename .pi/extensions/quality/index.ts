@@ -4,7 +4,8 @@
  * Authored in this repo, not vendored; the "vendored" kind in the tool-count registry means in-repo source only.
  */
 import { randomBytes } from "node:crypto";
-import { existsSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 import * as ts from "typescript";
@@ -161,6 +162,10 @@ export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus 
 
 export type BaseTypecheck = "fails" | "passes" | { readonly error: string };
 
+// Hooks (husky, post-checkout) and LFS smudge would run, or download, inside a throwaway checkout; an empty hooks dir works on Windows Git too.
+const QUIET_CHECKOUT = (hooks: string): string[] =>
+	["-c", `core.hooksPath=${hooks}`, "-c", "filter.lfs.smudge=", "-c", "filter.lfs.process=", "-c", "filter.lfs.required=false"];
+
 /**
  * `tsc --noEmit` on `sha`, in a detached worktree created inside the git dir so module and @types resolution walk up to
  * the repository's own node_modules without a link. NEVER THROWS: anything that stops the check is an `error`, not a verdict.
@@ -170,12 +175,14 @@ export function typecheckAtCommit(cwd: string, sha: string, projectTrusted: bool
 	const failed = (what: string, r: ReturnType<typeof git>): BaseTypecheck => ({ error: `${what} failed: ${(r.stderr || r.error?.message || `exit ${r.status}`).trim()}` });
 	const top = repoTop(cwd);
 	let worktree: string | undefined;
+	let hooks: string | undefined;
 	try {
 		const common = git(["rev-parse", "--path-format=absolute", "--git-common-dir"], top);
 		if (common.status !== 0) return failed("git rev-parse --git-common-dir", common);
+		hooks = mkdtempSync(join(tmpdir(), "ky-no-hooks-"));
 		const dir = join(resolve(common.stdout.trim()), `ky-review-base-${randomBytes(6).toString("hex")}`);
 		worktree = dir;
-		const added = git(["worktree", "add", "--detach", dir, sha], top);
+		const added = git([...QUIET_CHECKOUT(hooks), "worktree", "add", "--detach", dir, sha], top);
 		if (added.status !== 0) return failed(`git worktree add ${sha}`, added);
 		const override = (globalThis as Record<string, unknown>)[EXEC_OVERRIDE_KEY];
 		const exec: ExecRunner =
@@ -187,6 +194,7 @@ export function typecheckAtCommit(cwd: string, sha: string, projectTrusted: bool
 	} finally {
 		// A locked file (antivirus, indexer) must not turn a finished check into a throw; a leftover dir is pruned next time.
 		try {
+			if (hooks !== undefined) rmSync(hooks, { recursive: true, force: true });
 			if (worktree !== undefined) {
 				git(["worktree", "remove", "--force", worktree], top);
 				git(["worktree", "prune"], top);

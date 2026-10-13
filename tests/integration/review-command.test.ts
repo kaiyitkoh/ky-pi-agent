@@ -434,6 +434,19 @@ describe("/review -- the real handler", () => {
 			expect(readdirSync(join(h.repo, ".git")).filter((n) => n.startsWith("ky-review-base-"))).toEqual([]);
 		});
 
+		it("builds the base worktree without running the repository's checkout hook", () => {
+			const h = setup(undefined, undefined, { tsconfig: true });
+			fakeTsc({ baseFails: false });
+			const marker = join(h.repo, "hook-ran").split("\\").join("/");
+			const hook = join(h.repo, ".git", "hooks", "post-checkout");
+			writeFileSync(hook, `#!/bin/sh\ntouch "${marker}"\n`, { mode: 0o755 });
+			const base = execFileSync("git", ["rev-parse", "staging"], { cwd: h.repo, encoding: "utf-8" }).trim();
+			expect(typecheckAtCommit(h.repo, base, false)).toBe("passes");
+			expect(existsSync(marker)).toBe(false);
+			git(h.repo, ["checkout", "-q", "--detach", base]);
+			expect(existsSync(marker), "the hook must be live, or the assertion above proves nothing").toBe(true);
+		});
+
 		it("leaves no worktree behind", async () => {
 			const h = setup(undefined, undefined, { tsconfig: true });
 			fakeTsc({ baseFails: false });
