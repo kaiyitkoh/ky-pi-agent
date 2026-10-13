@@ -193,7 +193,7 @@ const MODEL_FLAGS = ["--model", "--provider", "--models"];
 /**
  * Whether a session start resets to the default mode and applies its executor. Only a model flag on the command line
  * opts out: Pi saves `defaultModel` on /login, so a saved default is not a choice
- * (pi-coding-agent dist/modes/interactive/interactive-mode.js:5078 `setModel(selectedModel, { persist: true })`).
+ * (pi 1.1.0 dist/modes/interactive/interactive-mode.js:5078).
  */
 export function freshSessionPlan(input: FreshSessionInput): { readonly reset: boolean; readonly applyExecutor: boolean } {
 	if (input.reason === "reload" || input.hasModeEntry) return { reset: false, applyExecutor: false };

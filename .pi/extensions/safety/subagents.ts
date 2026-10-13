@@ -69,6 +69,7 @@ export function setRequiredChildLoaderForTests(loader: ((cwd: string) => Promise
 
 const REGISTRY_FILE = ["src", "api", "required-child-extensions.js"];
 
+// NEVER THROWS: an unreadable manifest leaves the package undetermined, and the caller then fails closed.
 function packageRootNamed(start: string, name: string): string | undefined {
 	for (let dir = dirname(start); ; dir = dirname(dir)) {
 		const manifest = join(dir, "package.json");
