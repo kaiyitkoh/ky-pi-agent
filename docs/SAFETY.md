@@ -290,7 +290,10 @@ Read classification also covers:
   like such a glob is also refused when it is only a regular expression
   (`rg '.e*'`), a deliberate false positive;
 - case variants of `.env*`, NTFS `name:stream` suffixes and 8.3 short names
-  (refused; use the long name), and the home credential files `~/.aws/**`,
+  (refused; use the long name): a file name of 8.3 shape, and any path
+  segment that is an 8.3 alias of a protected name (`AWS~1` for `.aws`,
+  `SSH~1`, `GIT~1`, and the hashed form `PIC454~1` for `.pi`), for reads and
+  writes, and the home credential files `~/.aws/**`,
   `~/.ssh/**`, `~/.git-credentials`, `~/.docker/config.json` and
   `~/.pi/agent/auth.json`.
 

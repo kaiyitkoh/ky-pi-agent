@@ -239,6 +239,11 @@ const READ_TABLE: readonly ReadRow[] = [
 	{ label: ".env::$DATA stream suffix", rawText: ".env::$DATA", expected: "block", patternId: "dotenv" },
 	{ label: "8.3 alias ENV~1", rawText: "ENV~1", expected: "block", patternId: "short-name-alias" },
 	{ label: "8.3 alias DOTENV~2.LOC", rawText: "DOTENV~2.LOC", expected: "block", patternId: "short-name-alias" },
+	{ label: "8.3 alias of ~/.aws as a directory segment", rawText: "~/AWS~1/credentials", expected: "block", patternId: "short-name-protected" },
+	{ label: "8.3 alias of ~/.ssh as a directory segment", rawText: "~/SSH~1/id_rsa", expected: "block", patternId: "short-name-protected" },
+	{ label: "hashed 8.3 alias of ~/.pi", rawText: "~/PIC454~1/agent/auth.json", expected: "block", patternId: "short-name-protected" },
+	{ label: "8.3 alias of a tfstate file", rawText: "infra/PROD~1.TFS", expected: "block", patternId: "short-name-alias" },
+	{ label: "an 8.3 directory segment of an unprotected name", rawText: "PROGRA~1/x", expected: "allow" },
 	{ label: "notes~draft.md is not an 8.3 alias", rawText: "notes~draft.md", expected: "allow" },
 	// Paired negatives -- the false positives that matter (04-CONTEXT.md `<specifics>`).
 	{ label: ".env.example (deliberate carve-out)", rawText: ".env.example", expected: "allow" },

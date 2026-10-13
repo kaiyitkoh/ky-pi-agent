@@ -240,7 +240,33 @@ function stripStreamSuffix(canonicalPath: string): string {
 }
 
 /** Windows short-name alias shape (`DOTENV~1.LOC`): it names a long file the policy tables cannot see. */
-const SHORT_NAME_ALIAS = /^[^~.]{1,6}~\d{1,6}(\.[^.]{0,3})?$/i;
+const SHORT_NAME_ALIAS = /^([^~.]{1,6})~\d{1,6}(\.[^.]{0,3})?$/i;
+
+/** Long names whose 8.3 alias (`AWS~1` for `.aws`, `PIC454~1` for `.pi`) must be refused in any path segment. */
+const PROTECTED_LONG_NAMES = [
+	...[".aws", ".ssh", ".kube", ".gnupg", ".docker", ".pi", ".git", ".github", ".gitlab-ci.yml", ".husky", ".agents", ".config"],
+	...[".git-credentials", ".gitconfig", ".bashrc", ".bash_profile", ".profile", ".env", ".netrc", ".npmrc", ".terraform.d"],
+	...["credentials", "id_rsa", "id_ed25519", "auth.json", "kypi-ledger"],
+];
+
+/** The base an 8.3 alias is cut from: leading dots dropped, the extension removed, inner dots and spaces squeezed out. */
+function shortNameBase(name: string): string {
+	const upper = name.replace(/^\.+/, "").toUpperCase();
+	const dot = upper.lastIndexOf(".");
+	return (dot === -1 ? upper : upper.slice(0, dot)).replace(/[. ]/g, "");
+}
+
+const PROTECTED_SHORT_BASES = PROTECTED_LONG_NAMES.map(shortNameBase);
+
+/** An 8.3 segment whose prefix is a truncation of a protected base, or the hashed form (two letters plus four hex digits). */
+function aliasesProtectedName(segment: string): boolean {
+	const match = SHORT_NAME_ALIAS.exec(segment);
+	if (match === null) return false;
+	const prefix = match[1].toUpperCase();
+	if (match[2]?.toUpperCase() === ".TFS") return true;
+	const hashed = prefix.length === 6 && /^[0-9A-F]{4}$/.test(prefix.slice(2));
+	return PROTECTED_SHORT_BASES.some((base) => base.startsWith(prefix) || (hashed && base.startsWith(prefix.slice(0, 2))));
+}
 
 function homePath(facts: PathPolicyFacts, ...segments: string[]): string {
 	return [facts.home.replace(/[/\\]+$/, ""), ...segments].join("/");
@@ -296,6 +322,11 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 		id: "short-name-alias",
 		match: (path) => SHORT_NAME_ALIAS.test(basenameOf(path)),
 		reason: (path) => `"${path}" looks like a Windows 8.3 short name, which can alias a protected file; use the long file name`,
+	},
+	{
+		id: "short-name-protected",
+		match: (path) => rootedSegmentsOf(path).parts.some(aliasesProtectedName),
+		reason: (path) => `"${path}" has a Windows 8.3 short-name segment that can alias a credentials or configuration directory; use the long name`,
 	},
 	{
 		id: "home-aws",
@@ -540,9 +571,9 @@ export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFac
 			return { kind: "block", reason: target.reason(canonicalPath) };
 		}
 	}
-	const ledger = SENSITIVE_READ_PATTERNS.find((p) => p.id === "harness-ledger");
-	if (ledger?.match(canonicalPath, facts) === true) {
-		return { kind: "block", reason: ledger.reason(canonicalPath) };
+	for (const id of ["harness-ledger", "short-name-protected"]) {
+		const pattern = SENSITIVE_READ_PATTERNS.find((p) => p.id === id);
+		if (pattern?.match(canonicalPath, facts) === true) return { kind: "block", reason: pattern.reason(canonicalPath) };
 	}
 	if (!isWithinRoot(canonicalPath, facts.projectRoot)) {
 		return {
