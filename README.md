@@ -20,8 +20,13 @@ It is built for one person's workflow. It is public because there is no reason
 for it not to be, not because it is intended as a general-purpose tool.
 
 **Setting up a new machine?** Follow `docs/RUNBOOK.md`, section
-"Work laptop: start here": prerequisites, bootstrap, credentials, protected
-branches, then every outstanding live check in order.
+"Work laptop: start here", top to bottom. It is self-contained: what works
+without each provider, prerequisites, every environment variable and where to
+persist it in Git Bash, clone and bootstrap, loading the harness in every
+repository, Bedrock through AWS SSO (profile, region, prefix, model access and
+the hand-written `auth.json` entry), a verify command with expected output for
+each provider, every setting, the live checks, update, rollback, uninstall and
+a troubleshooting table.
 
 ## Install
 
@@ -48,9 +53,16 @@ they travel with it.
 git clone https://github.com/kaiyitkoh/ky-pi-agent
 cd ky-pi-agent
 sh bin/bootstrap.sh
+npm ci --ignore-scripts
 sh bin/bootstrap.sh --global-setup
 sh bin/bootstrap.sh --check-only
 ```
+
+`npm ci` is required: the guard imports `unbash` from the checkout, and
+without it every tool call is blocked. Bootstrap alone puts only the guard, the
+composed packages, the agents and the theme into other repositories; the
+harness commands (`/mode`, `/quick`, `/plan`, ...) need the checkout added as a
+filtered user package, which is step 5 of the runbook's start-here section.
 
 The full run hardens every npm scope, installs Pi 1.1.0, the four composed
 packages at exact pins, the `ky` theme, the `models.json`/`auth.json` templates
@@ -66,10 +78,10 @@ configured). `sh bin/bootstrap.sh --help` lists every mode.
 Do one or the other, **not both**. The stub loads this checkout's guard; a git
 package carries its own copy, and two copies can diverge.
 `sh bin/bootstrap.sh --check-only` fails when both are configured. Separately,
-installing globally *and* dogfooding by `cd`-ing into the repo loads the
-extension twice from two different absolute paths, which Pi does not
-deduplicate. It is non-fatal, so the rule is: dogfood, or install globally,
-never both.
+a user-level copy of the harness plus a *trusted* project load of this checkout
+loads the safety extension twice, and Pi refuses to start
+(`Tool "bash" conflicts with ...`). So never trust the checkout as a project
+once the harness is installed for your user.
 
 ## Commands and modes
 

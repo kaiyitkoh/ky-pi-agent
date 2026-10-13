@@ -2,85 +2,363 @@
 
 ## Work laptop: start here
 
-From a clean Windows machine to a verified install, in order. Run everything
-in Git Bash. Each live check names its RB entry below, which holds the full
-procedure; record results there, flipping the summary row and the `**Status:**`
-line together. Never paste a key, account id, profile name or work hostname
-into this repository.
+From a clean Windows machine to a verified install, in order. This section is
+self-contained: every credential, file, environment variable and setting the
+harness reads is listed here, with the command that proves it worked. Run every
+command in **Git Bash** (not PowerShell, not cmd): the variables below live in
+`~/.bashrc`, and only Git Bash reads it. Placeholders look like
+`<your-sso-profile>`; never paste a real key, account id, profile name,
+workspace id or work hostname into this repository. Each live check in step 9
+names its RB entry further down, which holds the full procedure; record results
+there, flipping the summary row and the `**Status:**` line together.
 
 ### 0. Account identifiers (done)
 
 RB-07-03 is PASSED: the unpushed history was rewritten before the first push, so
 no account id, IAM ARN or admin profile name reached the remote.
 
-### 1. Prerequisites
+### 1. What you need, and what works without it
 
-- Node >= 22.19.0: `node --version`
-- Git for Windows (provides Git Bash and `sh`): `git --version`
-- Pi is pinned at 1.1.0 and installed by bootstrap; do not install it by hand.
-  Close every Pi session before bootstrap (Windows EBUSY otherwise).
+| Piece | Needed for | Without it |
+|---|---|---|
+| DeepSeek key | the default executor `deepseek/deepseek-flash` and `deepseek/deepseek-v4-pro` | Every DeepSeek route falls through to DashScope. |
+| DashScope key | `dashscope/deepseek-v4-flash` and `dashscope/deepseek-v4-pro`, the second hop of every cheap route | No fallback: a DeepSeek outage or 429 is an error. |
+| At least one of the two above | every text role (executor, planner, reviewer, advisor in `/cheap`, summariser) | Nothing works; `/mode` reports `executor not applied`. |
+| Bedrock (AWS SSO) | Claude Sonnet 4.5: the `vision` role in every mode, `advisor` in `/balanced`, and `planner`, `reviewer`, `advisor` in `/max` | `/cheap` works fully except images; those roles are refused with a reason. |
+| Qoder (three ids) | the `qoder_delegate` tool, active only under `pi --ky-profile full` | The tool refuses and says which variable is missing. |
+| `glab`, logged in | `/review` opening the merge request | `/review` still writes `REVIEW.md`; the MR step fails with a message. |
+| AWS CLI v2 | `aws sso login` for Bedrock | No Bedrock. |
 
-### 2. Clone and bootstrap
+`gh` is never needed. If it is installed it must end up **logged out** (step
+9, RB-01-01): Pi's `/share` uploads the whole session to a gist whenever `gh`
+is logged in.
+
+### 2. Prerequisites
+
+| Tool | Install | Verify | Expected |
+|---|---|---|---|
+| Git for Windows (Git Bash) | git-scm.com | `git --version` | `git version 2.` or later |
+| Node >= 22.19.0 and npm | nodejs.org (LTS installer) | `node --version && npm --version` | `v22.19.0` or later, then an npm version |
+| AWS CLI v2 (Bedrock only) | AWS's MSI installer | `aws --version` | starts `aws-cli/2.` |
+| glab (MRs only) | GitLab's Windows release (a native `glab.exe`; a `.cmd` shim is not found) | `glab --version` | a version line |
+
+Then, in the same Git Bash window:
+
+```
+node -p "require('os').homedir()"
+cygpath -m "$HOME"
+```
+
+Expected: the same folder twice (case aside). Pi finds `~/.pi/agent` through
+the first and bootstrap writes it through the second; if they differ, fix
+`HOME` before going on.
+
+Do not install Pi by hand: bootstrap installs the pinned 1.1.0. Close every Pi
+session before bootstrap, an update or any `pi install` (Windows otherwise
+fails with EBUSY or EPERM on files Pi holds open).
+
+### 3. Environment variables (`~/.bashrc`)
+
+Keys are read from the environment when Pi starts. Append each one without it
+landing in shell history (`read -rs` prompts silently):
+
+```
+read -rs -p 'DeepSeek API key: ' k && printf 'export DEEPSEEK_API_KEY=%s\n' "$k" >> ~/.bashrc && unset k && echo
+read -rs -p 'DashScope API key: ' k && printf 'export DASHSCOPE_API_KEY=%s\n' "$k" >> ~/.bashrc && unset k && echo
+```
+
+- **DeepSeek**: platform.deepseek.com, API keys page. The account needs a
+  positive balance.
+- **DashScope**: Alibaba Cloud Model Studio console (international site),
+  region **Singapore**, API Key page. Keys are region- and workspace-scoped: a
+  Singapore key fails against Beijing, and a key from another workspace sees a
+  different model list ("model does not exist").
+- **DashScope endpoint** (not a secret, but it names your workspace): without
+  it the harness uses the shared host
+  `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. If your key belongs
+  to a workspace-dedicated endpoint, export it **before** bootstrap and keep it
+  in `~/.bashrc`, because every bootstrap run rewrites
+  `providers.dashscope` in `models.json` and an unset variable puts the shared
+  host back:
+
+  ```
+  echo 'export KYPI_DASHSCOPE_BASE_URL="https://<workspace-id>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"' >> ~/.bashrc
+  ```
+
+  Bootstrap refuses anything that is not an `https://` URL.
+- **Qoder** (optional): a personal access token starting `pt-`, shown once at
+  qoder.com/account/integrations, plus an agent id and an environment id
+  created once in the Qoder console. `QODER_BASE_URL` is an optional override
+  (https or a `127.0.0.1` URL only).
+
+  ```
+  read -rs -p 'Qoder PAT: ' k && printf 'export QODER_PERSONAL_ACCESS_TOKEN=%s\n' "$k" >> ~/.bashrc && unset k && echo
+  echo 'export QODER_AGENT_ID=<agent-id> QODER_ENVIRONMENT_ID=<environment-id>' >> ~/.bashrc
+  ```
+
+Do **not** export `AWS_PROFILE` (step 6 stores it in `auth.json`; a stored
+value wins over the environment), and do not export `npm_config_*` variables
+(bootstrap refuses to run under them).
+
+Open a **new** Git Bash window, then verify (prints names only, never values):
+
+```
+printenv | cut -d= -f1 | grep -E '^(DEEPSEEK_API_KEY|DASHSCOPE_API_KEY|KYPI_DASHSCOPE_BASE_URL|QODER_)'
+```
+
+Expected: the name of each variable you configured, and no value.
+
+Notes:
+
+- Pi passes its environment to every command it runs, so the model's `bash`
+  tool can read these variables. To keep a key out of the environment, put a
+  command in `~/.pi/agent/auth.json` instead of `"$DEEPSEEK_API_KEY"`, for
+  example `"key": "!cat ~/.config/ky-pi-agent/deepseek.key"`. A `!command` in
+  `auth.json` runs once per Pi process and is cached. Never put a `!command` in
+  `models.json`: that file is re-resolved on every request with no cache.
+- A literal key pasted into `auth.json` also works (it wins over the
+  environment). `auth.json` and `~/.bashrc` are plaintext; the `0600` mode Pi
+  sets is not enforced by Windows ACLs.
+- Launching Pi from PowerShell, cmd or an editor terminal that is not Git Bash
+  does not read `~/.bashrc`. If you must, set the same variables in the Windows
+  user environment (Settings, "Edit environment variables for your account").
+
+### 4. Clone, install dependencies, bootstrap
+
+Pick the checkout's final location first. The safety stub, the subagent scan
+directory, the worktree hook and the harness package (step 5) all point at its
+absolute path; moving or deleting it later blocks every tool call until step 4
+is re-run from the new location.
 
 ```
 git clone https://github.com/kaiyitkoh/ky-pi-agent
 cd ky-pi-agent
-export KYPI_DASHSCOPE_BASE_URL="https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"   # optional: workspace-dedicated DashScope host; unset keeps the shared intl host
+git checkout v1.0.1
 sh bin/bootstrap.sh
+npm ci --ignore-scripts
 sh bin/bootstrap.sh --global-setup
 sh bin/bootstrap.sh --check-only
 sh bin/bootstrap.sh --assert-hardening
 pi --version
 ```
 
-Order matters. The full run comes first: it hardens every npm scope, installs
-Pi 1.1.0, the composed packages, the theme, the `models.json`/`auth.json`
-templates, and rewrites the user-scope safety stub at
-`~/.pi/agent/extensions/ky-safety/index.ts` into its fail-closed form (a guard
-that fails to load blocks every tool call instead of loading nothing).
-`--global-setup` refuses until that stub exists. Expected: every command exits
-0, `--check-only` reports one delivery path, and `pi --version` prints `1.1.0`.
+What each line does, and what it must print:
+
+- `git checkout v1.0.1` pins the release (today `main` is the same commit).
+  Skip it to track `main`.
+- `sh bin/bootstrap.sh` (the full run) hardens every npm scope Pi can reach,
+  installs Pi 1.1.0 globally, merges `~/.pi/agent/settings.json` (the four
+  composed packages at exact pins, four `-builtin:` disables, theme `ky`, this
+  checkout's `.pi/agents` as a subagent scan directory), writes
+  `~/.pi/agent/themes/ky.json`, merges `providers.dashscope` and the
+  `apac.` Sonnet 4.5 model into `~/.pi/agent/models.json`, adds the `dashscope`
+  and `deepseek` entries to `~/.pi/agent/auth.json`, writes the fail-closed
+  safety stub `~/.pi/agent/extensions/ky-safety/index.ts`, wires the worktree
+  hook into `~/.pi/agent/extensions/subagent/config.json`, and runs
+  `pi install` for the four packages. It ends with `Bootstrap complete.` One
+  line is expected and is not a failure:
+  `auth.json entries NOT installed (still hold a REPLACE_WITH_ placeholder): amazon-bedrock`
+  (step 6 adds that entry). Existing files are merged, never overwritten; an
+  invalid JSON file is refused, not rewritten.
+- `npm ci --ignore-scripts` installs this checkout's own dependencies
+  (`unbash`, `typescript`, the test tools). **Required**: the guard imports
+  `unbash` from this checkout, and without it the stub blocks every tool call
+  with `Cannot find module 'unbash'`.
+- `--global-setup` re-asserts the hardening and the safety delivery path and
+  re-merges settings; after a full run it changes nothing and ends
+  `Global setup complete.`
+- `--check-only` changes nothing and needs network. Expected: exit 0, the stub
+  line ends `(target exists)`, the delivery-path line reads
+  `one delivery path (no user-level package loads this checkout)` (after step 5
+  it is a `WARN user-level package ... loads this checkout` line instead, which
+  is expected), and it ends `check-only complete.`
+- `--assert-hardening` ends `All npm scopes are hardened.`
+- `pi --version` prints `1.1.0`.
+
 Use this path or the git package (README, Install), never both.
 
-### 3. Credentials (runtime only, nothing committed)
+### 5. Load the harness in every repository
 
-`~/.pi/agent/auth.json` holds `"$DEEPSEEK_API_KEY"` and `"$DASHSCOPE_API_KEY"`,
-resolved from the environment when Pi starts. Export both in `~/.bashrc`, or
-replace the value in `auth.json` itself; that file lives outside the repo.
+Bootstrap puts only the safety guard, the four composed packages, the subagent
+definitions and the theme into other repositories. The harness itself
+(`/mode`, `/cheap`, `/quick`, `/grill`, `/plan`, `/execute`, `/review`,
+`/budget`, diagnostics, quality gates, the header and statusline) loads only
+when this checkout is also a user-level package. Add it **with the safety
+extension filtered out**, because the stub already loads the guard and Pi
+refuses to start when two extensions register the same tools
+(`Tool "bash" conflicts with ...`). `pi install <path>` cannot add a filter, so
+run this from the checkout:
 
-- **DeepSeek** (built-in provider): `export DEEPSEEK_API_KEY=<key>`
-- **DashScope**: `export DASHSCOPE_API_KEY=<key>`; the endpoint came from
-  `KYPI_DASHSCOPE_BASE_URL` at bootstrap (re-run `sh bin/bootstrap.sh` after
-  setting it).
-- **Bedrock (SSO)**: `aws sso login --profile <profile>`. Bootstrap deliberately
-  installs no `amazon-bedrock` entry. Pi 1.1.0 has no `pi auth login` (its
-  `/login` asks for a Bedrock API key), so add the entry to
-  `~/.pi/agent/auth.json` by hand:
-  `"amazon-bedrock": { "type": "api_key", "env": { "AWS_PROFILE": "<profile>" } }`.
-  The Sonnet 4.5 route requests the inference profile
-  `kyPiAgent.bedrockProfilePrefix` + bare id, default `apac.`. If your region
-  serves another prefix, set it in `~/.pi/agent/settings.json`:
-  `{ "kyPiAgent": { "bedrockProfilePrefix": "us." } }` (`""` means the bare id).
-- **Qoder** (optional, `qoder_delegate` only): `QODER_PERSONAL_ACCESS_TOKEN`,
-  `QODER_AGENT_ID`, `QODER_ENVIRONMENT_ID`.
+```
+node -e '
+const fs = require("fs"), path = require("path"), os = require("os");
+const file = path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "settings.json");
+const s = JSON.parse(fs.readFileSync(file, "utf8"));
+const src = process.argv[1];
+s.packages = (s.packages || []).filter((p) => (typeof p === "string" ? p : p.source) !== src);
+s.packages.push({ source: src, extensions: ["!.pi/extensions/safety/**"] });
+fs.writeFileSync(file, JSON.stringify(s, null, 2) + "\n");
+console.log("added " + src + " to " + file);
+' "$(pwd -W)"
+pi list
+```
 
-Expected: `pi --list-models | grep -E 'deepseek|dashscope|amazon-bedrock'`
-lists models from all three providers.
+Expected: `added <checkout path> to <settings path>`, and `pi list` shows the
+four `npm:` packages plus `<checkout path> (filtered)`. Bootstrap keeps this
+entry on every later run.
 
-### 4. Protected branches
+**Never trust the ky-pi-agent checkout as a project.** If you start `pi`
+inside the checkout and it asks whether to trust the project, answer no: the
+package above already loads the harness from it, and trusting it loads
+`.pi/extensions/safety` a second time, so Pi exits with the tool-conflict
+error. Work repositories have no `.pi/extensions` and never ask.
 
-`main`, `master` and `staging` are built in and cannot be removed. Add more in
-`~/.pi/agent/settings.json` (or a project's `.pi/settings.json`); lists are
-add-only:
+### 6. Bedrock through AWS SSO (optional)
+
+1. Get the SSO start URL and SSO region from your AWS admin (the AWS access
+   portal), then create the profile:
+
+   ```
+   aws configure sso
+   ```
+
+   Answer the prompts: a session name of your choice, the start URL, the SSO
+   region, the default scope; approve in the browser; pick the account and the
+   role with Bedrock access; **Default client Region** = the region you will
+   call Bedrock in (`<your-region>`, for example an `ap-` region for the
+   `apac.` profile); output `json`; a profile name (`<your-sso-profile>`). This
+   writes `~/.aws/config`. Nothing from it belongs in this repository.
+2. Log in and prove the session:
+
+   ```
+   aws sso login --profile <your-sso-profile>
+   aws sts get-caller-identity --profile <your-sso-profile>
+   ```
+
+   Expected: a JSON object with `UserId`, `Account` and `Arn` (do not paste
+   it anywhere). The session lasts roughly 8 to 12 hours; repeat the login when
+   it expires.
+3. Enable the model: Bedrock console, region `<your-region>`, Model access,
+   and make sure **Claude Sonnet 4.5** (Anthropic) shows access granted.
+   Anthropic models need a one-time use-case form. The role also needs
+   `bedrock:InvokeModel` and `bedrock:InvokeModelWithResponseStream` on the
+   inference profile and its foundation models, and
+   `bedrock:ListInferenceProfiles` for the next command.
+4. Find the inference-profile prefix your region serves:
+
+   ```
+   aws bedrock list-inference-profiles --region <your-region> --profile <your-sso-profile> --query "inferenceProfileSummaries[?contains(inferenceProfileId,'claude-sonnet-4-5')].inferenceProfileId" --output text
+   ```
+
+   Expected: one or more ids such as `apac.anthropic.claude-sonnet-4-5-20250929-v1:0`.
+   The harness requests `apac.` by default. If `apac.` is not listed, pick a
+   listed prefix (`au.`, `eu.`, `global.`, `jp.` or `us.`) and add it inside
+   the existing `"kyPiAgent"` object in `~/.pi/agent/settings.json`:
+   `"bedrockProfilePrefix": "jp."` (`""` means the bare model id). Only the
+   user-level settings file is read for this key.
+5. Prove the model answers, outside Pi:
+
+   ```
+   aws bedrock-runtime converse --region <your-region> --profile <your-sso-profile> --model-id <prefix>anthropic.claude-sonnet-4-5-20250929-v1:0 --messages '[{"role":"user","content":[{"text":"Reply with the single word OK"}]}]' --query 'output.message.content[0].text' --output text
+   ```
+
+   Expected: `OK`. An `AccessDeniedException` is step 3.
+6. Store the profile **and the region** for Pi. Pi 1.1.0 has no `pi auth login`
+   (its `/login` asks for a Bedrock API key instead), and bootstrap deliberately
+   withholds this entry, so write it with:
+
+   ```
+   node -e '
+   const fs = require("fs"), path = require("path"), os = require("os");
+   const file = path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "auth.json");
+   const a = JSON.parse(fs.readFileSync(file, "utf8"));
+   a["amazon-bedrock"] = { type: "api_key", env: { AWS_PROFILE: process.argv[1], AWS_REGION: process.argv[2] } };
+   fs.writeFileSync(file, JSON.stringify(a, null, 2) + "\n");
+   console.log("amazon-bedrock entry written to " + file);
+   ' '<your-sso-profile>' '<your-region>'
+   ```
+
+   The finished `~/.pi/agent/auth.json`:
+
+   ```json
+   {
+     "dashscope": { "type": "api_key", "key": "$DASHSCOPE_API_KEY" },
+     "deepseek": { "type": "api_key", "key": "$DEEPSEEK_API_KEY" },
+     "amazon-bedrock": { "type": "api_key", "env": { "AWS_PROFILE": "<your-sso-profile>", "AWS_REGION": "<your-region>" } }
+   }
+   ```
+
+   `env` values are literal strings; `$NAME` is expanded only in `key`.
+   `AWS_REGION` is not optional: with the profile stored here and no region,
+   Pi sends the request to the endpoint baked into the model entry
+   (`us-east-1`) and ignores the profile's region, so an `apac.` profile fails
+   there (pi-ai `dist/api/bedrock-converse-stream.js`, region resolution).
+   An entry of `{ "type": "api_key" }` with no `env` configures nothing.
+
+### 7. Verify every provider
+
+```
+pi auth check --provider deepseek
+pi auth check --provider dashscope
+pi auth check --provider amazon-bedrock
+pi --list-models apac.anthropic.claude-sonnet-4-5
+```
+
+Expected: `ready` for each provider you configured (`not_ready` and exit 1
+otherwise; `ready` for Bedrock means the profile is stored, not that the SSO
+session is live, which step 6.2 proves). The model list shows the Sonnet 4.5
+id for your prefix. Then one real turn per provider, from a scratch repository
+so the logs land there:
+
+```
+mkdir -p ~/kypi-scratch && cd ~/kypi-scratch && git init -q
+pi -p --model deepseek/deepseek-flash "Reply with the single word OK"
+pi -p --model dashscope/deepseek-v4-flash "Reply with the single word OK"
+pi -p --model amazon-bedrock/<prefix>anthropic.claude-sonnet-4-5-20250929-v1:0 "Reply with the single word OK"
+```
+
+Expected: each prints `OK` (a warning that thinking is off for the Bedrock
+model may come first; that is normal). Then start `pi` in the scratch repository and run `/mode`: expected
+`mode: cheap (not escalated)` and `executor: deepseek/deepseek-flash` (or
+`dashscope/deepseek-v4-flash` without a DeepSeek key), with no
+`executor not applied` warning.
+
+### 8. Settings you may change
+
+All in `~/.pi/agent/settings.json` (strict JSON). Check the file after any hand
+edit:
+
+```
+node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log("valid")' ~/.pi/agent/settings.json
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| `kyPiAgent.bedrockProfilePrefix` | `"apac."` | Inference-profile prefix for Sonnet 4.5 (step 6.4). |
+| `safety.protectedBranches` | `[]` | Extra branches that block commits and pushes. |
+| `safety.pushProtectedBranches` | `[]` | Extra branches that block pushes only. |
+| `theme` | `"ky"` | Set by bootstrap only when you had none. |
+| `kyPiAgent.bootstrapVersion`, `hardenedNpmRoot`, `piPinned` | written by bootstrap | Do not edit. |
+
+`main`, `master` and `staging` are built in and cannot be removed. The two
+`safety` lists are add-only and are also read from a project's
+`.pi/settings.json`:
 
 ```
 { "safety": { "protectedBranches": ["release"], "pushProtectedBranches": ["production"] } }
 ```
 
-`protectedBranches` blocks commits and pushes; `pushProtectedBranches` blocks
-pushes only. A malformed value keeps the previous list and warns.
+A malformed value keeps the previous list and warns.
 
-### 5. Live checks, in order
+Optional environment variables: `KYPI_LOOP_POLICE_HOOK_CMD` and
+`KYPI_LOOP_POLICE_HOOK_LOG` (a command run on each loop detection),
+`PI_BG_MAX_OUTPUT_BYTES` (background-task output cap, default 20 MiB),
+`KUBECONFIG` (read by the guard to protect that file). Flags:
+`pi --ky-profile recon|review|implement|full` and `pi --plan`. Bootstrap test
+seams, not for daily use: `PI_CODING_AGENT_DIR`, `KYPI_PI_PINNED`,
+`KYPI_SKIP_INSTALL`.
+
+### 9. Live checks, in order
 
 Install and load:
 
@@ -90,34 +368,32 @@ Install and load:
 2. RB-12-05 global setup, from a work repo outside this checkout: start `pi`;
    the four packages load, `ky` is the theme, the `subagent` tool lists
    `planner` and `executor-handoff`, a child's `git push origin HEAD:main` is
-   blocked, and `/plan`, `/execute`, `/review`, `/quick` have no `:1` suffix.
+   blocked, and `/plan`, `/execute`, `/review`, `/quick` have no `:1` suffix
+   (these come from the step 5 package).
 3. RB-07-02 reconcile installs: `pi list` shows exactly the four specs in
-   `.pi/settings.json` at their pins; `npx vitest run tests/unit/extension-pins.test.ts` exits 0.
+   `.pi/settings.json` at their pins (plus the step 5 checkout entry);
+   `npx vitest run tests/unit/extension-pins.test.ts` exits 0.
 4. RB-01-01 `/share` control: `sh scripts/check-gh-unauthenticated.sh` exits 1,
    `gh auth logout`, re-run exits 0, and `/share` in Pi aborts. Set up SSH for
-   git first if this laptop pushes over HTTPS.
+   git first if this laptop pushes to GitHub over HTTPS.
 5. RB-01-02 clean-profile install (tag `v1.0.1`):
    `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.1`,
    then `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi --list-models` shows
    `ky-harness-selftest`.
-6. RB-01-03 `/reload`: in this checkout, edit `SELFTEST_MODEL_ID` in
-   `.pi/extensions/harness/index.ts`, run `/reload`; the new id appears.
+6. RB-01-03 `/reload`: in this checkout (untrusted, step 5), edit
+   `SELFTEST_MODEL_ID` in `.pi/extensions/harness/index.ts`, run `/reload`; the
+   new id appears.
 
 Providers and routing:
 
-7. Default mode. In a work repo run `pi`, then `/mode`. Expected:
-   `mode: cheap (not escalated)` and `executor: deepseek/deepseek-flash` (or
-   `dashscope/deepseek-v4-flash` without a DeepSeek key), with no
-   `executor not applied` warning. Then quit and run
+7. Default mode: step 7's `/mode` result. Then quit and run
    `pi --model dashscope/deepseek-v4-pro`, then `/mode`. Expected: the executor
    stays `dashscope/deepseek-v4-pro` with no notice; `/cheap` then applies the
    default route.
 8. RB-03-03 Bedrock from a fresh shell with nothing exported: one turn on a
    Bedrock Claude model; the last `amazon-bedrock` turns row has
    `outcome: "ok"`. Record the real SSO-expiry message when it next occurs.
-9. RB-12-06 apac profile: `aws bedrock list-inference-profiles --region <region>`
-   lists the apac Sonnet 4.5 profile, or set `kyPiAgent.bedrockProfilePrefix`
-   (step 3) and re-run `/mode`.
+9. RB-12-06 apac profile: step 6.4's listing, recorded in that entry.
 10. RB-03-01 and RB-03-02 DashScope: one turn, then a two-turn tool call; the
     wire dump shows the explicit compat keys and `status: 200` on both turns.
 11. RB-03-05 DashScope cap and price from the Model Studio console into
@@ -153,7 +429,8 @@ Composed packages, quality, UI and context:
 26. RB-10-01 minimal-vs-full experiment, only from an OS account that holds no
     cloud credentials.
 
-Workflows:
+Workflows (need `glab auth login --hostname <your-gitlab-host>` and
+`glab auth status` showing you logged in):
 
 27. RB-09-01 one real feature through `/grill`, `/plan`, `/execute`, `/review`.
 28. RB-09-02 the merge request `/review` opens targets `staging`.
@@ -177,7 +454,82 @@ Over time:
 35. RB-12-04 at the next OpenSpec bump; RB-12-07 with an RPC front-end (Orca
     chat mode).
 
-### 6. Next up
+### 10. Update, roll back, uninstall
+
+**Update.** Close every Pi session, then from the checkout:
+
+```
+git pull --ff-only
+npm ci --ignore-scripts
+sh bin/bootstrap.sh
+sh bin/bootstrap.sh --check-only
+pi --version
+```
+
+To move to a tag instead, `git fetch --tags && git checkout <tag>` replaces the
+first line. Bootstrap installs the checkout's Pi pin and keeps your entries. If
+a composed package's pin changed it stops with
+`FATAL: ... already pins npm:<name>@<old> but this checkout pins npm:<name>@<new>`;
+run `pi remove npm:<name>@<old>` for each one it names and re-run it. Never run
+a bare `pi update`: with no argument it updates Pi itself past the pin.
+`pi update --extensions` skips the pinned packages and changes nothing here.
+
+**Roll back.** `git checkout <previous tag or commit>`, then the same four
+commands as an update. Bootstrap re-installs that checkout's Pi pin. Back up
+the agent directory before the first bootstrap if it already exists
+(`cp -r ~/.pi/agent ~/.pi/agent.bak-$(date +%F)`); the copy holds `auth.json`,
+so keep it on this machine.
+
+**Uninstall.** Remove the packages first and the guard last, so nothing runs
+unguarded in between. From the checkout:
+
+```
+pi remove "$(pwd -W)"
+pi remove npm:pi-subagents@0.76.1
+pi remove npm:@narumitw/pi-lsp@0.49.9
+pi remove npm:pi-web-access@0.38.0
+pi remove npm:pi-session-finder@0.5.6
+rm -rf ~/.pi/agent/extensions/ky-safety
+rm -f ~/.pi/agent/themes/ky.json
+npm uninstall -g @earendil-works/pi-coding-agent
+```
+
+Then by hand: in `~/.pi/agent/settings.json` delete `kyPiAgent`, `"theme": "ky"`,
+this checkout's path under `subagents.agentScanDirs`, and the four
+`-builtin:` entries if you want those built-ins back; in
+`~/.pi/agent/extensions/subagent/config.json` delete `worktreeSetupHook` and
+`worktreeSetupHookTimeoutMs`; in `~/.pi/agent/models.json` delete
+`providers.dashscope` and the `apac.anthropic...` model; in
+`~/.pi/agent/auth.json` delete the `dashscope`, `deepseek` and
+`amazon-bedrock` entries; delete the `export` lines from `~/.bashrc`. The
+hardened `~/.pi/agent/npm/.npmrc` can stay. Delete the checkout last: a stub
+left behind with no checkout blocks every tool call, by design.
+
+### 11. Troubleshooting
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| `EBUSY` or `EPERM` during bootstrap, `npm install -g` or `pi install` | A running Pi (a `node.exe`) holds the files | Quit every Pi session (check Task Manager for `node.exe`), re-run the same command. |
+| Every tool call blocked: `ky-safety: the safety extension at <path> is missing` | The checkout was moved or deleted | Re-run step 4 from the checkout's current location, then step 5. |
+| Every tool call blocked: `... failed to load (Cannot find module 'unbash' ...)` | `npm ci` was not run in the checkout | `npm ci --ignore-scripts` in the checkout, restart Pi. |
+| Pi exits at start: `Tool "bash" conflicts with ...` | The guard loads twice: the checkout was trusted as a project, the step 5 entry lacks its filter, or a git package of this repo is installed beside the stub | Answer no to trust in the checkout; re-run the step 5 command; `pi remove` the git package. |
+| `/mode` or `/quick` is an unknown command in a work repo | Step 5 was skipped | Run step 5. |
+| `default mode cheap: executor not applied: ...` | No DeepSeek or DashScope key in this shell | Step 3, then a new Git Bash window. |
+| `pi auth check --provider <p>` prints `not_ready` | The variable is unset in this shell, or no entry | `echo "${DEEPSEEK_API_KEY:+set}"` in a new window; for Bedrock, step 6.6. |
+| `AWS SSO credentials are expired or missing. Run: aws sso login --profile <name>` | The SSO session expired | Run that command; restart Pi if the next turn still fails. |
+| The same line ending `no AWS profile is configured; see ...` | No `amazon-bedrock` entry, or it still holds `REPLACE_WITH_` | Step 6.6. |
+| Bedrock `ValidationException` (invalid model identifier) | No `AWS_REGION` in the entry (the request went to `us-east-1`), or your region does not serve the prefix | Step 6.6 with the region; step 6.4 for the prefix. |
+| Bedrock `AccessDeniedException` | Model access not granted, or the role lacks the invoke permissions | Step 6.3; ask the AWS admin. |
+| Bedrock works in one shell, not another | A stale `export AWS_PROFILE` (the stored entry wins only when present), or a renamed profile | Remove the export from `~/.bashrc`; re-run step 6.6 with the current name. |
+| The Sonnet 4.5 `apac.` id is missing from `pi --list-models` | `models.json` predates the template entry | `sh bin/bootstrap.sh`. |
+| DashScope 401, or "model does not exist" | Key from another region or workspace, or the endpoint reverted to the shared host after a bootstrap run without `KYPI_DASHSCOPE_BASE_URL` | Check the key's region and workspace; keep the variable in `~/.bashrc` and re-run bootstrap. |
+| Bootstrap: `FATAL: npm configuration is being overridden by environment variables` | Run through `npm run`/`npx`, or an `npm_config_*` export | A new Git Bash window; remove the export. |
+| Bootstrap: `FATAL: ... already pins ... but this checkout pins ...` | A pin moved between versions | `pi remove` the old spec, re-run (step 10). |
+| Bootstrap: `FATAL: pinned Pi version ... is no longer published` | Upstream unpublished the pin | Follow the fallback the message prints. |
+| `--global-setup`: `FATAL: --global-setup would install subagents and web access in every repository without the safety guard` | No current stub yet | Run `sh bin/bootstrap.sh` (full run) first. |
+| `/review`: `glab could not be started without a shell` | glab missing, or only a `.cmd` shim on `PATH` | Install the native `glab.exe`; `glab auth status`. |
+
+### 12. Next up
 
 - **Orca desktop setup** (Phase 13): `.planning/research/ORCA-DESKTOP-SETUP.md`.
   Terminal mode first; chat (RPC) mode needs the push guard to accept `rpc`
@@ -746,16 +1098,19 @@ also prove that a real session authenticates.
 
    `X` is the profile name from `~/.aws/config`. Do not paste the real profile
    name, an account id or an SSO start URL into this file — it is public. **An
-   empty echo means Bedrock will not work regardless of a successful SSO
-   login**: `aws sso login` writes a token cache under `~/.aws/sso/cache/` and
-   sets no environment variable at all, so with nothing in `AWS_PROFILE` Pi
-   reports no Bedrock credentials even though the AWS SDK itself would resolve
-   fine. A single `[default]` SSO profile does not help.
+   empty echo means Bedrock will not work without step 2's stored entry,
+   regardless of a successful SSO login**: `aws sso login` writes a token cache
+   under `~/.aws/sso/cache/` and sets no environment variable at all, so with
+   nothing in `AWS_PROFILE` and no stored entry Pi reports no Bedrock
+   credentials even though the AWS SDK itself would resolve fine. A single `[default]` SSO profile does not help.
 2. Configure the persisting form by hand: Pi 1.1.0 has no `pi auth login` (its
    CLI has only `pi auth check|print-api-key|print-bearer-token`, and `/login`
    asks for a Bedrock API key). Add to `~/.pi/agent/auth.json`:
-   `"amazon-bedrock": { "type": "api_key", "env": { "AWS_PROFILE": "<profile>" } }`,
-   then confirm with `pi auth check --provider amazon-bedrock`. An entry of
+   `"amazon-bedrock": { "type": "api_key", "env": { "AWS_PROFILE": "<profile>", "AWS_REGION": "<region>" } }`
+   (start here, step 6.6, has a command that writes it),
+   then confirm with `pi auth check --provider amazon-bedrock`. `AWS_REGION` is
+   required: with only a stored profile, Pi pins the model entry's `us-east-1`
+   endpoint and ignores the profile's region. An entry of
    `{ "type": "api_key" }` with no `key` and no `env` is a no-op that looks like
    configuration.
 
