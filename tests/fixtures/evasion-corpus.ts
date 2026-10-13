@@ -268,6 +268,87 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		why: "the Pitfall-2 regression case verbatim -- sudo's -u value-consuming flag is correctly resolved (not mistaken for the executable), so `git push` is classified and blocked normally.",
 		reference: "04-RESEARCH.md Pitfall 2 (sudo -u root git push resolving to executable 'root')",
 	},
+	{
+		id: "EV-85",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "env A=1 git push origin main" },
+		expect: "BLOCKED",
+		why: "env consumes NAME=value words before the command, so the resolved executable is git, not the assignment word, and the protected-branch push blocks.",
+		reference: "shell.ts#consumeWrapperOptions (assignments)",
+	},
+	{
+		id: "EV-86",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "env A=1 terraform apply" },
+		expect: "BLOCKED",
+		why: "same resolution as EV-85 for the infra arm: the call confirms exactly as plain `terraform apply` does.",
+		reference: "shell.ts#consumeWrapperOptions (assignments); infra.ts#classifyInfraInvocation",
+	},
+	{
+		id: "EV-87",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "env A=1 sh -c 'terraform apply'" },
+		expect: "BLOCKED",
+		why: "once the assignment is consumed the resolved executable is sh, so the shell-runner denial fires as for plain `sh -c`.",
+		reference: "shell.ts#findShellRunnerDenial",
+	},
+	{
+		id: "EV-88",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "exec terraform apply" },
+		expect: "BLOCKED",
+		why: "exec replaces the shell with its operand; it is a tabulated wrapper, so terraform is what gets classified.",
+		reference: "shell.ts WRAPPER_GRAMMARS (exec)",
+	},
+	{
+		id: "EV-89",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "timeout 5 terraform apply" },
+		expect: "BLOCKED",
+		why: "timeout's positional duration is consumed as an operand, not mistaken for the executable.",
+		reference: "shell.ts WRAPPER_GRAMMARS (timeout operands)",
+	},
+	{
+		id: "EV-90",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "nice -n 5 terraform apply" },
+		expect: "BLOCKED",
+		why: "nice's -n takes the next word as its value, so `5` is not the executable.",
+		reference: "shell.ts WRAPPER_GRAMMARS (nice)",
+	},
+	{
+		id: "EV-91",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "sudo -- terraform apply" },
+		expect: "BLOCKED",
+		why: "`--` ends sudo's options rather than stopping resolution on an unrecognised flag.",
+		reference: "shell.ts#consumeWrapperOptions (end of options)",
+	},
+	{
+		id: "EV-92",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "env -- openspec update" },
+		expect: "BLOCKED",
+		why: "same end-of-options handling for env; the openspec confirm row applies.",
+		reference: "shell.ts#consumeWrapperOptions (end of options); infra.ts OPENSPEC_CONFIRM_SUBCOMMANDS",
+	},
+	{
+		id: "EV-93",
+		class: "env-wrapper",
+		tool: "bash",
+		input: { command: "env -S 'git push'" },
+		expect: "BLOCKED",
+		why: "-S hands env a command string with no separable executable; an unresolvable wrapper in front of a guarded verb is refused, not allowed.",
+		reference: "shell.ts unresolved-wrapper refusal",
+	},
 
 	// -------------------------------------------------------------------------
 	// CR-03: exact-string executable matching -- `git.exe`, path-qualified and
@@ -384,7 +465,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 
 	// -------------------------------------------------------------------------
 	// CR-10: resolveWrappers' OWN three bare-verb gates (env, sudo,
-	// PASSTHROUGH_WRAPPERS) were not routed through normaliseExecutable either
+	// WRAPPER_GRAMMARS) were not routed through normaliseExecutable either
 	// -- CR-08 fixed shell.ts's other two gates (findShellRunnerDenial,
 	// extractGitCwdOverride) but missed this one. A path-qualified or
 	// .exe-suffixed wrapper was therefore never recognised as a wrapper at
@@ -425,7 +506,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: "/usr/bin/nohup git push" },
 		expect: "BLOCKED",
-		why: "same class as EV-66, for the PASSTHROUGH_WRAPPERS gate: a path-qualified /usr/bin/nohup was never recognised as a pass-through wrapper.",
+		why: "same class as EV-66, for the WRAPPER_GRAMMARS gate: a path-qualified /usr/bin/nohup was never recognised as a pass-through wrapper.",
 		reference: "CR-10; shell.ts#resolveWrappers",
 	},
 	{
@@ -509,7 +590,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: { command: "setsid git push" },
 		expect: "BLOCKED",
-		why: "setsid is a PASSTHROUGH_WRAPPERS member and is resolved away, so the classifier sees plain `git push` and blocks it through the ordinary protected-branch write rule rather than the background cause.",
+		why: "setsid is a WRAPPER_GRAMMARS member and is resolved away, so the classifier sees plain `git push` and blocks it through the ordinary protected-branch write rule rather than the background cause.",
 		reference: "PITFALLS.md:463 (backgrounding, setsid form)",
 	},
 

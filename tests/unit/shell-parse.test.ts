@@ -79,7 +79,7 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 		cmd: "time git push",
 		expectedExecutable: "git",
 		expectedWrappers: [],
-		why: "executed against unbash: 'time' parses as Pipeline.time === true, a structural keyword -- the Command node unbash hands back is already just 'git push' with no 'time' word in it at all, so PASSTHROUGH_WRAPPERS's 'time' entry never fires for this exact fixture (it exists for defence-in-depth / a quoted \"time\" literal). Deviation from a literal reading of the plan's <behavior>, documented per CLAUDE.md 'verify at source, not docs'.",
+		why: "executed against unbash: 'time' parses as Pipeline.time === true, a structural keyword -- the Command node unbash hands back is already just 'git push' with no 'time' word in it at all, so WRAPPER_GRAMMARS's 'time' entry never fires for this exact fixture (it exists for defence-in-depth / a quoted \"time\" literal). Deviation from a literal reading of the plan's <behavior>, documented per CLAUDE.md 'verify at source, not docs'.",
 	},
 	{
 		label: "nice",
@@ -162,7 +162,7 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 		cmd: "/usr/bin/nohup git push",
 		expectedExecutable: "git",
 		expectedWrappers: ["nohup"],
-		why: "same class as the env/sudo rows above, for resolveWrappers' own PASSTHROUGH_WRAPPERS gate.",
+		why: "same class as the env/sudo rows above, for resolveWrappers' own WRAPPER_GRAMMARS gate.",
 	},
 	{
 		label: "/usr/bin/env with a non-guarded verb (CR-10 paired negative)",
@@ -173,6 +173,55 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 			"a paired negative proving the CR-10 fix does not degenerate into 'any path-qualified env " +
 			"blocks': the wrapper still resolves generically to whatever real executable follows it, " +
 			"guarded or not -- policy.ts is what decides whether 'echo' itself is interesting, and it isn't.",
+	},
+	{
+		label: "env NAME=value assignment",
+		cmd: "env A=1 git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["env"],
+		why: "env consumes NAME=value words before the command; stopping at the first non-flag word resolved to 'A=1' and let the git arm never run",
+	},
+	{
+		label: "env -- end of options",
+		cmd: "env -- git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["env"],
+		why: "'--' ends env's options; it is not an unrecognised flag to stop on",
+	},
+	{
+		label: "sudo -- end of options",
+		cmd: "sudo -- git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["sudo"],
+		why: "same as env --, for sudo",
+	},
+	{
+		label: "exec builtin",
+		cmd: "exec git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["exec"],
+		why: "exec replaces the shell with its operand, so the operand is what runs",
+	},
+	{
+		label: "timeout with its duration operand",
+		cmd: "timeout -s KILL 5 git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["timeout"],
+		why: "timeout takes a value option and then one positional duration before the command",
+	},
+	{
+		label: "nice -n with a separate value",
+		cmd: "nice -n 5 git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["nice"],
+		why: "-n takes the next word; skipping flags one at a time resolved to '5'",
+	},
+	{
+		label: "chained wrappers",
+		cmd: "sudo -u root env A=1 timeout 5 git push",
+		expectedExecutable: "git",
+		expectedWrappers: ["sudo", "env", "timeout"],
+		why: "each wrapper's grammar is applied in turn until a non-wrapper word is reached",
 	},
 	{
 		label: "npm run deploy (task-runner indirection)",
@@ -317,6 +366,13 @@ const SHELL_RUNNER_TABLE: readonly ShellRunnerRow[] = [
 		expected: "refused",
 		cause: "shell-runner",
 		why: "CR-08: a path-qualified xargs invocation must classify identically to the bare 'xargs' spelling already covered above.",
+	},
+	{
+		label: "watch with a guarded verb",
+		cmd: 'watch -n 5 "git push"',
+		expected: "refused",
+		cause: "shell-runner",
+		why: "watch joins its operands into an sh -c string, so a quoted guarded verb has no separable executable to classify",
 	},
 	{
 		label: "sh.exe -c with NO guarded verb, path-qualified (CR-08 paired negative)",

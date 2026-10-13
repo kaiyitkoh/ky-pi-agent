@@ -127,6 +127,26 @@ const TABLE: readonly DenyRow[] = [
 		why: "a dynamic EXECUTABLE (not just a dynamic argument) must also be refused -- Command.name itself carries the expansion here",
 	},
 	{
+		label: "unknown wrapper option in front of a guarded verb",
+		cmd: "env --frobnicate git push",
+		expected: "refused",
+		cause: "unresolved-wrapper",
+		why: "the option is outside env's grammar, so the word after it may not be what runs; with a guarded verb in the segment that uncertainty must deny, not resolve to an unclassified executable",
+	},
+	{
+		label: "assignment left in command position after a non-assigning wrapper",
+		cmd: "nohup A=1 terraform apply",
+		expected: "refused",
+		cause: "unresolved-wrapper",
+		why: "nohup does not consume NAME=value, so the resolved executable would be the assignment word, never terraform",
+	},
+	{
+		label: "unknown wrapper option with no guarded verb",
+		cmd: "env --frobnicate ls",
+		expected: "ok",
+		why: "the unresolved-wrapper refusal is gated on a guarded verb in the segment, so an ordinary command is not over-blocked",
+	},
+	{
 		label: "unparseable input (final catch-all)",
 		cmd: 'git "push',
 		expected: "refused",

@@ -13,8 +13,10 @@
  *   `git` name and the expansion in `suffix[0]`. Refuse expansion in `Command.name` always, and
  *   in `suffix[]` when the name is literally a guarded verb (`echo "$HOME"` stays allowed).
  * - `git $((1+1))` does not yield `ArithmeticCommandExpansion`; the fixture is `echo $(( $(echo 1) ))`.
- * - env/sudo option arity is tabulated: a wrong flag arity silently mis-resolves
+ * - Every wrapper's option arity is tabulated: a wrong flag arity silently mis-resolves
  *   (`sudo -u root git push` must not resolve to `root`); shell-parse.test.ts pins `-u` and `-C`.
+ *   An option, operand or `NAME=value` the table cannot account for marks the resolution
+ *   unconfident, and an unconfident segment carrying a guarded verb is refused, never allowed.
  * - A shell runner carrying a guarded verb (`sh -c "git push"`) is denied outright, never routed
  *   to approval, by substring over the raw segment rather than a recursive re-parse.
  *
@@ -57,6 +59,8 @@ export const SHELL_RUNNERS = new Set([
 	// `eval STRING` runs in the current shell: same hidden-verb shape as `sh -c`. Closes the literal
 	// case only; `CMD="git push"; eval "$CMD"` is a published residual gap (docs/SAFETY.md).
 	"eval",
+	// Joins its operands into one `sh -c` string, so `watch "git push"` has no separable executable.
+	"watch",
 ]);
 
 /** Every cause {@link canonicalise} can return; tests iterate it to prove each is reachable. */
@@ -68,6 +72,7 @@ export const SHELL_REFUSAL_CAUSES = [
 	"background",
 	"unresolved-expansion-in-command-position",
 	"shell-runner",
+	"unresolved-wrapper",
 	"parse-error",
 ] as const;
 
@@ -84,7 +89,7 @@ const CAUSE_BY_DENIED_TYPE: Record<string, ShellRefusalCause> = {
 const ENV_BOOLEAN_OPTIONS = new Set(["-i", "--ignore-environment", "-0", "--null", "-v", "--verbose", "--debug"]);
 
 /** `env` flags that consume the NEXT word as their value — `-C`/`--chdir` is the directory override. */
-const ENV_VALUE_OPTIONS = new Set(["-u", "--unset", "-C", "--chdir", "-S", "--split-string"]);
+const ENV_VALUE_OPTIONS = new Set(["-u", "--unset", "-C", "--chdir"]);
 
 /** `sudo` flags that take no value argument. */
 const SUDO_BOOLEAN_OPTIONS = new Set([
@@ -106,6 +111,8 @@ const SUDO_BOOLEAN_OPTIONS = new Set([
 	"--validate",
 	"-A",
 	"--askpass",
+	"-s",
+	"--shell",
 ]);
 
 /** `sudo` flags that consume the NEXT word as their value — `-u`/`--user` is the Pitfall-2 regression case. */
@@ -130,19 +137,65 @@ const SUDO_VALUE_OPTIONS = new Set([
 	"--other-user",
 ]);
 
-/** Pass-through wrappers: flag-like words after the name are skipped generically (`stdbuf -o0` packs its value). */
-const PASSTHROUGH_WRAPPERS = new Set([
-	"nohup",
-	"chronic",
-	"setsid",
-	"time",
-	"nice",
-	"stdbuf",
-	"command",
-	"builtin",
-	"toybox",
-	"busybox",
+/** One wrapper's option grammar; anything outside it makes resolution unconfident. */
+interface WrapperGrammar {
+	readonly boolean: ReadonlySet<string>;
+	/** Options taking a value, as the next word, `--long=value`, or packed short `-o0`. */
+	readonly value: ReadonlySet<string>;
+	/** Options whose value is itself a command string, so no separable executable follows. */
+	readonly shellString?: ReadonlySet<string>;
+	/** Positional words before the command (`timeout DURATION`). */
+	readonly operands?: number;
+	/** Accepts `NAME=value` words before the command, as `env` and `sudo` do. */
+	readonly assignments?: boolean;
+	/** Accepts a bare numeric option (`nice -5`). */
+	readonly numericOption?: boolean;
+}
+
+const NO_OPTIONS: ReadonlySet<string> = new Set();
+
+const WRAPPER_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, WrapperGrammar>([
+	[
+		"env",
+		{
+			boolean: ENV_BOOLEAN_OPTIONS,
+			value: ENV_VALUE_OPTIONS,
+			shellString: new Set(["-S", "--split-string"]),
+			assignments: true,
+		},
+	],
+	["sudo", { boolean: SUDO_BOOLEAN_OPTIONS, value: SUDO_VALUE_OPTIONS, assignments: true }],
+	["doas", { boolean: new Set(["-n", "-s"]), value: new Set(["-u", "-C"]) }],
+	["exec", { boolean: new Set(["-c", "-l"]), value: new Set(["-a"]) }],
+	[
+		"timeout",
+		{
+			boolean: new Set(["--preserve-status", "--foreground", "-v", "--verbose"]),
+			value: new Set(["-s", "--signal", "-k", "--kill-after"]),
+			operands: 1,
+		},
+	],
+	["nice", { boolean: NO_OPTIONS, value: new Set(["-n", "--adjustment"]), numericOption: true }],
+	["ionice", { boolean: new Set(["-t", "--ignore"]), value: new Set(["-c", "--class", "-n", "--classdata"]) }],
+	["nohup", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
+	["chronic", { boolean: new Set(["-e", "-v"]), value: NO_OPTIONS }],
+	["setsid", { boolean: new Set(["-c", "--ctty", "-f", "--fork", "-w", "--wait"]), value: NO_OPTIONS }],
+	[
+		"time",
+		{
+			boolean: new Set(["-p", "--portability", "-v", "--verbose", "-a", "--append", "-q", "--quiet"]),
+			value: new Set(["-f", "--format", "-o", "--output"]),
+		},
+	],
+	["stdbuf", { boolean: NO_OPTIONS, value: new Set(["-i", "--input", "-o", "--output", "-e", "--error"]) }],
+	["unbuffer", { boolean: new Set(["-p"]), value: NO_OPTIONS }],
+	["command", { boolean: new Set(["-p", "-v", "-V"]), value: NO_OPTIONS }],
+	["builtin", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
+	["toybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
+	["busybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 ]);
+
+const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 
 /** One command's canonical form after wrapper resolution — what policy evaluates. */
@@ -376,6 +429,8 @@ function describeCause(cause: ShellRefusalCause, command: string): string {
 			return `"${command}" resolves its executable or a guarded verb's subcommand from an unresolved shell variable`;
 		case "shell-runner":
 			return `"${command}" hands a guarded verb to a shell runner (${[...SHELL_RUNNERS].join(", ")}) as a script argument`;
+		case "unresolved-wrapper":
+			return `"${command}" puts a guarded verb behind a wrapper option, operand or assignment this guard cannot resolve to the real executable`;
 		case "parse-error":
 			return `"${command}" did not parse cleanly; this catch-all denies rather than falls through to allow`;
 		default: {
@@ -391,6 +446,75 @@ interface ResolvedWrappers {
 	readonly cwdOverride: string | undefined;
 	/** Index into `values[]` of the first word AFTER every recognised wrapper. */
 	readonly index: number;
+	/** False when some wrapper word fell outside its grammar, so `values[index]` may not be what runs. */
+	readonly confident: boolean;
+}
+
+interface ConsumedOptions {
+	readonly index: number;
+	readonly confident: boolean;
+}
+
+/** Consume one wrapper's options and operands from `start`; `onValue` sees each value option. */
+function consumeWrapperOptions(
+	values: readonly string[],
+	start: number,
+	grammar: WrapperGrammar,
+	onValue: (option: string, value: string) => void,
+): ConsumedOptions {
+	let i = start;
+	while (i < values.length) {
+		const word = values[i];
+		if (word === "--") {
+			i += 1;
+			break;
+		}
+		if (grammar.assignments === true && ASSIGNMENT_WORD.test(word)) {
+			i += 1;
+			continue;
+		}
+		if (!word.startsWith("-") || word === "-") {
+			break;
+		}
+		const eq = word.indexOf("=");
+		const longName = word.startsWith("--") && eq > 0 ? word.slice(0, eq) : word;
+		const shortName = word.startsWith("--") ? word : word.slice(0, 2);
+		if (grammar.shellString?.has(longName) === true || grammar.shellString?.has(shortName) === true) {
+			return { index: i, confident: false };
+		}
+		if (grammar.boolean.has(word)) {
+			i += 1;
+			continue;
+		}
+		if (grammar.value.has(word)) {
+			if (i + 1 >= values.length) {
+				return { index: values.length, confident: false };
+			}
+			onValue(word, values[i + 1]);
+			i += 2;
+			continue;
+		}
+		if (longName !== word && grammar.value.has(longName)) {
+			onValue(longName, word.slice(eq + 1));
+			i += 1;
+			continue;
+		}
+		if (shortName !== word && grammar.value.has(shortName)) {
+			onValue(shortName, word.slice(2));
+			i += 1;
+			continue;
+		}
+		if (grammar.numericOption === true && /^-\d+$/.test(word)) {
+			i += 1;
+			continue;
+		}
+		return { index: i, confident: false };
+	}
+	const operands = grammar.operands ?? 0;
+	if (i + operands > values.length) {
+		return { index: values.length, confident: false };
+	}
+	return { index: i + operands, confident: true };
 }
 
 /**
@@ -401,60 +525,34 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 	const wrappers: string[] = [];
 	let cwdOverride: string | undefined;
 	let i = 0;
+	let confident = true;
 
 	while (i < values.length) {
-		const word = values[i];
-		const verb = normaliseExecutable(word);
-
-		if (verb === "env") {
-			wrappers.push("env");
-			i += 1;
-			while (i < values.length && values[i].startsWith("-")) {
-				const flag = values[i];
-				if (ENV_VALUE_OPTIONS.has(flag)) {
-					if (flag === "-C" || flag === "--chdir") {
-						cwdOverride = values[i + 1];
-					}
-					i += 2;
-				} else if (ENV_BOOLEAN_OPTIONS.has(flag)) {
-					i += 1;
-				} else {
-					// Unrecognised flag: stop rather than over-consume into the real command (inert, never a bypass).
-					break;
-				}
-			}
-			continue;
+		const verb = normaliseExecutable(values[i]);
+		const grammar = WRAPPER_GRAMMARS.get(verb);
+		if (grammar === undefined) {
+			break;
 		}
-
-		if (verb === "sudo") {
-			wrappers.push("sudo");
-			i += 1;
-			while (i < values.length && values[i].startsWith("-")) {
-				const flag = values[i];
-				if (SUDO_VALUE_OPTIONS.has(flag)) {
-					i += 2;
-				} else if (SUDO_BOOLEAN_OPTIONS.has(flag)) {
-					i += 1;
-				} else {
-					break;
-				}
+		wrappers.push(verb);
+		const consumed = consumeWrapperOptions(values, i + 1, grammar, (option, value) => {
+			if (verb === "env" && (option === "-C" || option === "--chdir")) {
+				cwdOverride = value;
 			}
-			continue;
+		});
+		i = consumed.index;
+		if (!consumed.confident) {
+			confident = false;
+			break;
 		}
-
-		if (PASSTHROUGH_WRAPPERS.has(verb)) {
-			wrappers.push(verb);
-			i += 1;
-			while (i < values.length && values[i].startsWith("-")) {
-				i += 1;
-			}
-			continue;
-		}
-
-		break;
 	}
 
-	return { wrappers, cwdOverride, index: i };
+	// A wrapper that left an option or assignment in command position has not reached the real executable.
+	const next = values[i];
+	if (wrappers.length > 0 && next !== undefined && (next.startsWith("-") || ASSIGNMENT_WORD.test(next))) {
+		confident = false;
+	}
+
+	return { wrappers, cwdOverride, index: i, confident };
 }
 
 /** `git -C <dir>` / `--git-dir[=]<dir>`; normalised so `git.exe -C /other push` keeps its override. */
@@ -474,16 +572,21 @@ function extractGitCwdOverride(executable: string, args: readonly string[]): str
 	return undefined;
 }
 
+interface ExtractedInvocation {
+	readonly invocation: CanonicalInvocation;
+	readonly confident: boolean;
+}
+
 /** One entry per `Command` node, wrapper indirection resolved. */
 function extractInvocations(
 	script: ParsedScript,
 	command: string,
 	commandNodes: readonly Command[],
-): CanonicalInvocation[] {
+): ExtractedInvocation[] {
 	// Backtick-decoded scripts index the decoded `ParsedScript.source`, not the caller's string.
 	const sourceText = script.source ?? command;
 
-	const invocations: CanonicalInvocation[] = [];
+	const extracted: ExtractedInvocation[] = [];
 	for (const node of commandNodes) {
 		if (node.name === undefined) {
 			// Assignment-only statement (`g=push`): nothing executes.
@@ -495,15 +598,18 @@ function extractInvocations(
 		const args = values.slice(resolved.index + 1);
 		const cwdOverride = extractGitCwdOverride(executable, args) ?? resolved.cwdOverride;
 
-		invocations.push({
-			executable,
-			args,
-			wrappers: resolved.wrappers,
-			rawSegment: sourceText.slice(node.pos, node.end),
-			...(cwdOverride !== undefined ? { cwdOverride } : {}),
+		extracted.push({
+			invocation: {
+				executable,
+				args,
+				wrappers: resolved.wrappers,
+				rawSegment: sourceText.slice(node.pos, node.end),
+				...(cwdOverride !== undefined ? { cwdOverride } : {}),
+			},
+			confident: resolved.confident,
 		});
 	}
-	return invocations;
+	return extracted;
 }
 
 /** Deny when a resolved invocation hands a guarded verb to a shell runner; executable normalised so `/bin/sh -c` and `bash.exe -c` match. */
@@ -535,11 +641,17 @@ export function canonicalise(command: string): ShellVerdict {
 		return { kind: "refused", cause, detail: describeCause(cause, command) };
 	}
 
-	const invocations = extractInvocations(script, command, commandNodes);
+	const extracted = extractInvocations(script, command, commandNodes);
+	const invocations = extracted.map((e) => e.invocation);
 
 	const shellRunnerHit = findShellRunnerDenial(invocations);
 	if (shellRunnerHit !== undefined) {
 		return { kind: "refused", cause: "shell-runner", detail: describeCause("shell-runner", command) };
+	}
+
+	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
+	if (extracted.some((e) => !e.confident && GUARDED_VERB_PATTERN.test(e.invocation.rawSegment))) {
+		return { kind: "refused", cause: "unresolved-wrapper", detail: describeCause("unresolved-wrapper", command) };
 	}
 
 	const redirects = new Set<string>();
