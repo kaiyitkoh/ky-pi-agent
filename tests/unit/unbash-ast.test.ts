@@ -1,32 +1,7 @@
 /**
- * SAFE-02 / SAFE-03 -- the unbash AST vocabulary, proven by execution.
- *
- * WHY THIS FILE IS A CHARACTERISATION TEST, NOT A UNIT TEST OF OUR CODE. There
- * is no `shell.ts` yet -- this is Wave 0. Every fact below is a fact about the
- * THIRD-PARTY PARSER: when `unbash` moves (it ships every few days per
- * CLAUDE.md), this file goes red first and names exactly which fact died,
- * before a single line of policy code has to take the blame.
- *
- * WHY "errors.length === 0" MATTERS AT ALL. `04-RESEARCH.md` Pattern 1 is the
- * phase's central finding: `unbash` is a TOLERANT parser. `git $(echo push)`,
- * `nohup git push &`, `sh -c "git push"` and friends all parse with no error --
- * proven below -- which is exactly why SAFE-03's fail-closed mechanism cannot
- * be "deny on parse error." It must be "deny on the PRESENCE of specific AST
- * node types," and this file is the executed proof of the vocabulary that
- * predicate will be written against.
- *
- * ONE CORRECTION TO 04-RESEARCH.md, RECORDED HERE RATHER THAN SILENTLY FIXED:
- * the research document's code examples write `errors.length === 0` as though
- * `errors` were always an array. Executed against unbash 4.0.10, a clean parse
- * returns `errors: undefined`, not `errors: []` -- `ParsedScript.errors` is
- * declared `ParseError[] | undefined` in `dist/types.d.ts`. Every assertion
- * below reads `(script.errors ?? []).length`, which is correct for both shapes
- * and is the form Plan 03's deny predicate must also use.
- *
- * VACUOUS-PASS GUARD, this repo's house rule (see tests/unit/redact.test.ts's
- * own docstring): every fixture table below asserts its own length against the
- * count this file's own docstring/acceptance criteria claim, BEFORE the loop
- * that consumes it runs. A table emptied by a bad merge must fail loudly.
+ * Characterises the third-party unbash parser, so a parser change fails here first. unbash is tolerant (`git
+ * $(echo push)`, `sh -c "git push"` parse cleanly), so the guard must deny on node types, not parse errors. A clean
+ * parse returns `errors: undefined`, hence `(script.errors ?? []).length`. Each table asserts its own length first.
  */
 import { parse } from "unbash";
 import type { ParsedScript, Statement, Word } from "unbash";
@@ -63,18 +38,8 @@ function suffixWord(script: ParsedScript, index = 0): Word {
 }
 
 /**
- * `Word.value` and `Word.parts` -- confirmed by direct execution -- are
- * SELF-MEMOIZING GETTERS on unbash's internal `WordImpl` class, not own
- * enumerable properties: `Object.keys(word)` reports only `["text", "pos",
- * "end"]` until `.value`/`.parts` is actually read, even though `"value" in
- * word` and `"parts" in word` are both `true` from the start (an `in` check
- * walks the prototype chain; `Object.keys` does not). A walker built purely
- * on `Object.keys` therefore silently never descends into a command
- * substitution, process substitution or expansion hidden inside a `Word` --
- * exactly the omission that would make Plan 03's deny predicate blind to
- * every adversarial fixture in the tolerance table above. The two lazy names
- * are added to every level's key set explicitly, via direct property access
- * (which forces the getter), rather than trusted to `Object.keys`.
+ * `Word.value` and `Word.parts` are lazy prototype getters absent from Object.keys, so a walk built on Object.keys
+ * never descends into a substitution inside a Word; both are read explicitly at every level.
  */
 const LAZY_WORD_KEYS = ["value", "parts"] as const;
 
@@ -88,15 +53,7 @@ function walkableKeys(obj: Record<string, unknown>): string[] {
 	return [...keys];
 }
 
-/**
- * Every value found under any `type` field anywhere in the parsed tree.
- *
- * A generic, untyped walk -- deliberately. This file characterises the
- * parser's OUTPUT shape; it is not, and must not become, a preview of
- * Plan 03's `shell.ts` deny-predicate walk. `pos`/`end` are skipped only
- * because they are numeric position fields present on every node and would
- * otherwise add nothing but noise to a `type`-collecting walk.
- */
+/** Every `type` value anywhere in the tree, by a generic walk; numeric pos/end fields are skipped. */
 function collectNodeTypes(node: unknown, found: Set<string>): void {
 	if (node === null || typeof node !== "object") {
 		return;
@@ -171,8 +128,7 @@ describe("SAFE-02/SAFE-03 -- import surface (Assumption A2)", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group 1: the tolerance table -- every construct SAFE-03 must fail-closed on,
-// each one proven here to parse WITHOUT a parse error.
+// Group 1: every construct the guard must fail closed on parses without error
 // ---------------------------------------------------------------------------
 
 interface ToleranceRow {
@@ -237,8 +193,7 @@ describe("SAFE-03 -- tolerance table: unbash reports NO parse error for any of t
 });
 
 // ---------------------------------------------------------------------------
-// Group 2: the vocabulary table -- the exact node-type / operator / background
-// literals a recursive deny-predicate walk (Plan 03's shell.ts) can key on.
+// Group 2: the node-type, operator and background literals a deny walk keys on
 // ---------------------------------------------------------------------------
 
 interface VocabRow {
@@ -317,10 +272,7 @@ describe("SAFE-02/SAFE-03 -- vocabulary table: the exact literals a deny-predica
 	}
 
 	it("a CLEAN command exhibits none of the eight vocabulary facts (negative control)", () => {
-		// Pairs every positive row above with the one fixture that could produce
-		// the opposite answer -- the same discipline redact.test.ts uses. Without
-		// this, a deny predicate that always returns true would pass every row
-		// above and this file would have proven nothing about precision.
+		// Each positive row's opposite: without it a predicate that always returns true passes.
 		const script = parseOne("git push");
 		const types = new Set<string>();
 		collectNodeTypes(script, types);
@@ -342,9 +294,7 @@ describe("SAFE-02/SAFE-03 -- vocabulary table: the exact literals a deny-predica
 });
 
 // ---------------------------------------------------------------------------
-// Group 3: the Windows-path asymmetry -- text vs value, and the non-expansion
-// of `~` and `$HOME`. The single most important settled unknown named in
-// 04-RESEARCH.md Pitfall 3.
+// Group 3: Windows paths, text vs value, and the non-expansion of `~` and `$HOME`
 // ---------------------------------------------------------------------------
 
 describe("SAFE-06/SAFE-08 -- Windows path asymmetry: word.text vs word.value", () => {

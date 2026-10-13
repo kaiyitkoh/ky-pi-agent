@@ -1,16 +1,6 @@
 /**
- * EXT-07 — the checkpoint store's own contracts, added by the Phase 7 code
- * review fix pass (WR-09, WR-10, WR-11, WR-14, WR-16).
- *
- * `tests/integration/git-checkpoint.test.ts` drives real git and covers capture
- * and restore. Nothing covered the STORE's own guarantees: that a corrupt row
- * cannot reach a consumer that will dereference it, that a bounded index is
- * actually bounded, that two concurrent recorders do not lose each other's
- * entries, or that the store's `label` is the human-readable one the commit
- * carries rather than a duplicate of `entryId`.
- *
- * Everything below writes only into `os.tmpdir()`. No case touches this
- * repository, `~/.pi/agent`, or any real checkpoint store.
+ * The checkpoint store's own guarantees: a corrupt row never reaches a consumer, the index is bounded, concurrent
+ * recorders lose nothing, and `label` is the human-readable one. Everything writes only into `os.tmpdir()`.
  */
 import { spawn, spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -59,10 +49,7 @@ function plantStore(root: string, text: string): string {
 }
 
 describe("WR-11 -- readCheckpoints validates every element and never hands a consumer something it will dereference", () => {
-	// index.ts does `e.sha.slice(0, 12)` and `e.sha.startsWith(...)`. A store of
-	// `[1,2,3]` used to reach both -- an unhandled rejection in the command
-	// handler, and a throw out of an event handler in session_before_fork on a
-	// path the user reached by asking to fork.
+	// index.ts calls `e.sha.slice` and `e.sha.startsWith`, so a `[1,2,3]` store would throw from an event handler.
 	const MALFORMED: { label: string; text: string }[] = [
 		{ label: "an array of numbers", text: "[1,2,3]" },
 		{ label: "an array of nulls", text: "[null,null]" },
@@ -190,16 +177,8 @@ interface WriterHandle {
 }
 
 /**
- * Spawn one writer child over an IPC channel (`stdio: [..., "ipc"]`), never a
- * wall-clock barrier -- see the WR-09 describe block docstring below for why.
- * The child sends `{ type: "ready", tag }` the instant its own dynamic
- * `import()` of `store.ts` resolves; the parent collects `ready` across every
- * child and only THEN releases each with `child.send("go")`. `timeout: 120_000`
- * is kept unchanged -- it is a real outer bound, not the margin being removed.
- *
- * A child that exits or errors before sending `ready` REJECTS `ready` with its
- * exit code and stderr, so a dead child can never leave the parent awaiting
- * `Promise.all(handles.map((h) => h.ready))` forever [threat T-09-01-01].
+ * Spawns one writer child over IPC. It sends `ready` once its `import()` of store.ts resolves and then waits for
+ * `go`; a child that dies first rejects `ready`, so the parent never waits forever.
  */
 function spawnWriter(script: string, args: string[]): WriterHandle {
 	const readyGate = createDeferred<void>();
@@ -214,9 +193,7 @@ function spawnWriter(script: string, args: string[]): WriterHandle {
 
 	let stdout = "";
 	let stderr = "";
-	// `stdio` includes `"ipc"`, so TypeScript's `spawn()` overload resolution
-	// still infers `stdout`/`stderr` as possibly-null unless narrowed here --
-	// the runtime value is never null with `"pipe"` at those two slots.
+	// With "ipc" in stdio TypeScript still types stdout/stderr as nullable; with "pipe" they never are.
 	if (child.stdout === null || child.stderr === null) {
 		throw new Error("spawnWriter: child.stdout/stderr is null despite requesting pipe stdio");
 	}
@@ -272,59 +249,16 @@ function spawnWriter(script: string, args: string[]): WriterHandle {
 }
 
 /**
- * Minimum adjacent-tag-switch count required in the store's own row order to
- * prove genuine interleaving among the four WR-09 writers, rather than four
- * contiguous per-tag blocks. Four strictly-serial blocks
- * (`AAAA...BBBB...CCCC...DDDD`) produce exactly 3 switches (A->B, B->C,
- * C->D); this must be > 3 for FALSIFICATION (b) (forcing the four writers to
- * run strictly serially, one released at a time) to turn the assertion red.
- *
- * MEASURED, not guessed: instrumented locally over ~150 solo runs of this
- * case plus 3 runs of the full suite (where this case competes with every
- * other vitest fork for CPU). Solo-run tag-switch counts ranged 5-33 (typical
- * mid-teens); full-suite-load runs were HIGHER (27-33), because contention
- * for the store's own lock file adds more, finer-grained interleaving, not
- * less. The observed solo floor across every sample was 5. `4` sits directly
- * below that floor -- the tightest value that never once flaked across the
- * measurement runs while still failing outright on the serial case's `3`.
+ * Adjacent tag switches in the store's row order needed to prove interleaving: four serial blocks give exactly 3.
+ * Measured floor across ~150 solo runs was 5, so 4 never flakes yet fails the serial case.
  */
 const MIN_TAG_SWITCHES = 4;
 
 describe("WR-09 -- concurrent recorders do not lose each other's entries", () => {
 	/**
-	 * `recordCheckpoint` is read-modify-write, and `git.ts` explicitly designs for
-	 * "two concurrent checkpoints -- the main session and a subagent's own turn"
-	 * by giving each a uniquely-named scratch index. Those same two processes then
-	 * write THIS one shared file. Interleave read-A, read-B, write-A, write-B and
-	 * A's entry is gone: a checkpoint the user can never restore, lost silently,
-	 * because `recordCheckpoint` still returns a path and looks successful.
-	 *
-	 * THE CHILDREN ARE NOT SPAWNED WITH `spawnSync`. The first version of this
-	 * case used `spawnSync` in a loop, which BLOCKS -- four strictly serial
-	 * processes, 100 rows, green against a completely unlocked store. It was
-	 * caught by mutation (removing the lock left it passing), which is exactly
-	 * the vacuous-pass shape this repository keeps hitting.
-	 *
-	 * (2026-08-15, Phase 09 plan 09-01, WR-09 de-flake) The overlap barrier used
-	 * to be a fixed `Date.now() + 800` wall-clock instant every child slept
-	 * until, proved by comparing recorded `startedAt`/`finishedAt` timestamps.
-	 * Under load the children's own boot cost (measured 587-970ms) could exceed
-	 * the 800ms margin, so the barrier could fire before every child had
-	 * actually reached it -- an intermittent false result unrelated to the
-	 * store's real locking behaviour. That duration is gone. Each child is now
-	 * spawned with an IPC channel (`stdio: [..., "ipc"]`), sends
-	 * `{ type: "ready", tag }` the INSTANT its own dynamic `import()` of
-	 * `store.ts` resolves, then blocks on its own incoming `"go"` message. The
-	 * parent collects every child's `ready` event, THEN releases all four at
-	 * once with `child.send("go")` -- an event, never a duration. The overlap
-	 * proof is likewise no longer a `Date.now()` comparison: it reads the
-	 * STORE'S OWN row order and asserts the four writers' entries are
-	 * genuinely interleaved (see `MIN_TAG_SWITCHES` above), a property the
-	 * store itself produced rather than a side channel the test raced against.
-	 *
-	 * Same discipline as `tests/helpers/qoder-loopback.ts`'s
-	 * `firstChunkWritten`/`releaseSecondChunk` gate pair and
-	 * `tests/integration/jsonl-concurrency.test.ts`'s DIAG-08.
+	 * recordCheckpoint is read-modify-write over one shared file, and a subagent's turn can race the main session's.
+	 * Children are released together by an IPC event, never a wall-clock barrier or spawnSync (which ran them serially
+	 * and passed against an unlocked store), and overlap is read from the store's own row order.
 	 */
 	it("four overlapping OS processes each recording 150 entries produce all 600 rows", async () => {
 		const root = scratch();
@@ -398,9 +332,7 @@ describe("WR-09 -- concurrent recorders do not lose each other's entries", () =>
 
 describe("WR-14 / WR-16 -- the shipped wiring records the human label and writes an observable headless row", () => {
 	it("turn_start stores the timestamp label, not a duplicate of entryId", async () => {
-		// Before WR-14 the store's `label` was set to `currentEntryId`, which is
-		// already on the same row in `entryId` -- two columns holding one value,
-		// and a listing showing opaque 8-hex ids where a timestamp was meant.
+		// `label` must not duplicate `entryId`; a listing should show a timestamp, not an opaque id.
 		const repo = mkdtempSync(join(tmpdir(), "kypi-cpwire-"));
 		tempDirs.push(repo);
 		for (const args of [

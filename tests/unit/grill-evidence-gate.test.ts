@@ -1,17 +1,6 @@
 /**
- * FLOW-03 -- `gateRequirementsAuthorship` proved, both directions, falsified.
- *
- * `.planning/phases/09-ceremonial-workflows/09-VALIDATION.md` line 46's
- * falsification: "remove the gate -> an evidence-free SPEC must be
- * rejected." `09-CONTEXT.md` decision 6 ("be suspicious of green" -- Phase 6's
- * evidence gate accepted a fabricated completion claim through three
- * consecutive rounds of green tests) is why every reject case below asserts
- * on the REASON TEXT, not merely on `ok === false` -- a reason-blind
- * assertion passes on a `return { ok: false, reason: "no" }` constant just as
- * happily as on the real predicate.
- *
- * Table shape follows `tests/unit/git-policy.test.ts:37-59`'s `Row` /
- * `it.each` precedent: every case carries its own `why`.
+ * `gateRequirementsAuthorship`, both directions. Every reject case asserts on the reason text, because a reason-blind
+ * assertion passes on a constant `{ ok: false }` just as happily as on the real predicate.
  */
 import { describe, expect, it } from "vitest";
 import { gateRequirementsAuthorship } from "../../.pi/extensions/grill/spec-schema.ts";
@@ -36,11 +25,7 @@ function factsTable(rows: readonly FactRow[]): string {
 	return `${header}\n${body}`;
 }
 
-/**
- * Builds a full SPEC.md-shaped markdown document. `factsRows` of `undefined`
- * omits §2 entirely; `includeRequirements` controls whether §3's heading
- * (with placeholder body text) is present.
- */
+/** A SPEC.md-shaped document; `factsRows` undefined omits §2, `includeRequirements` controls §3's heading. */
 function spec(opts: { factsRows?: readonly FactRow[]; includeRequirements: boolean }): string {
 	const parts: string[] = ["## 1. Goal", "", "A falsifiable one-sentence goal.", ""];
 	if (opts.factsRows !== undefined) {
@@ -83,13 +68,7 @@ const CASES: readonly Case[] = [
 	{
 		name: "a row with an empty claim AND a malformed evidence cell",
 		markdown: spec({
-			// Evidence is DELIBERATELY also malformed (not a file:line / command
-			// output shape), not merely absent -- so that branches (3) and (4)
-			// disagree about which defect to report first. This is what makes
-			// FALSIFICATION (c) (reordering (3) and (4)) observable: with a
-			// well-formed evidence cell, swapping the branches would report the
-			// SAME "empty claim" reason either way, and the falsification would
-			// prove nothing about binding order.
+			// Evidence is also malformed, so branches (3) and (4) disagree on the first defect and their order is observable.
 			factsRows: [{ claim: "", evidence: "read the file directly", howVerified: "read the file directly" }],
 			includeRequirements: true,
 		}),
@@ -187,10 +166,7 @@ describe("FLOW-03 -- gateRequirementsAuthorship over the fixture table", () => {
 });
 
 // ---------------------------------------------------------------------------
-// T-09-05-03 (DoS): a 500-row table must not exhibit catastrophic regex
-// backtracking. Every EVIDENCE_PATTERN alternative is bounded (no nested
-// quantifier over an unbounded group), so this is a genuine proof that the
-// bound holds, not merely a repetition of the fixture cases above.
+// A 500-row table must not backtrack catastrophically: every EVIDENCE_PATTERN alternative is bounded.
 // ---------------------------------------------------------------------------
 
 describe("FLOW-03 -- T-09-05-03: a large facts table returns within the default test timeout", () => {
@@ -209,10 +185,7 @@ describe("FLOW-03 -- T-09-05-03: a large facts table returns within the default 
 });
 
 // ---------------------------------------------------------------------------
-// The test writes nothing outside a temp dir -- in fact it needs no
-// filesystem at all, since the subject under test is pure. This describe
-// block documents that property as an explicit assertion rather than leaving
-// it merely true by omission.
+// The subject is pure, so the test touches no filesystem; asserted rather than left true by omission.
 // ---------------------------------------------------------------------------
 
 describe("FLOW-03 -- the subject under test is pure (no filesystem access)", () => {

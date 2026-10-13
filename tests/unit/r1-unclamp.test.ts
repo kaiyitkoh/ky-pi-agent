@@ -1,75 +1,8 @@
 /**
- * PROV-07 — the R1 experiment is *executable*. Nothing more.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE IS, AND WHAT IT IS NOT — the [RUNBOOK] honesty paragraph
- * ---------------------------------------------------------------------------
- * This file proves one preparation step works: that a one-line `modelOverrides`
- * entry in `models.json` makes Pi able to *select* `reasoning_effort: "low"` for
- * `deepseek/deepseek-flash`, which the built-in catalogue makes impossible.
- *
- * It does **not** answer whether `api.deepseek.com` accepts that value, and it
- * does not answer whether the value yields materially fewer reasoning tokens
- * than `"high"`. Neither question can be answered from a desk, and this file
- * issues no request to anything. That is `RB-03-04` in `docs/RUNBOOK.md`, status
- * **OUTSTANDING**, and a green run here may never be used to mark PROV-07 as
- * passing (Trap T12).
- *
- * **The threshold is pre-committed, deliberately:** "materially fewer" means
- * `low.reasoning <= 0.6 * high.reasoning`, measured from the two `turns-*.jsonl`
- * rows RB-03-04 collects. Pre-committing is the whole point — choosing the line
- * after seeing the numbers is how a null result becomes a positive one.
- *
- * **The fourth outcome is a result, not a failed run.** RB-03-04 enumerates
- * accepted-and-cheaper, accepted-but-not-cheaper and rejected; the fourth is an
- * absent `reasoning` key on BOTH legs, which means "DeepSeek V4 Flash reports no
- * reasoning-token breakdown through this adapter". That is worth recording and
- * settles PROV-07 just as firmly as a number would.
- *
- * ---------------------------------------------------------------------------
- * WHY TWO RESEARCHERS DISAGREED, AND WHY BOTH WERE RIGHT
- * ---------------------------------------------------------------------------
- * They answered different questions. `api.deepseek.com` documents
- * `reasoning_effort` values `"low"`, `"high"` (default) and `"max"` — so the
- * API's contract admits `"low"`. But Pi 0.84.1's built-in catalogue ships
- * `thinkingLevelMap: { minimal: null, low: null, medium: null, high: "high",
- * max: "max" }` for this model [VERIFIED: pi-ai 0.84.1
- * dist/providers/data/deepseek.json], `getSupportedThinkingLevels` drops every
- * null-mapped level, and `clampThinkingLevel(model, "low")` walks forward and
- * returns `"high"` [VERIFIED: pi-ai 0.84.1 src/models.ts:900-932]. So Pi *can
- * never send* `"low"` as shipped. Both statements are true; neither is the
- * token count PROV-07 wants.
- *
- * A mechanical detail that makes the fix a one-liner: if `"low"` did reach the
- * adapter, the deepseek branch emits `model.thinkingLevelMap?.[effort] ?? effort`
- * [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:802-805] and
- * `null ?? "low"` is `"low"`. **The null mapping suppresses selection, not
- * emission.** Unclamping is therefore sufficient and no adapter change is needed.
- *
- * ---------------------------------------------------------------------------
- * WHY `modelOverrides` AND NOT A MODEL ENTRY
- * ---------------------------------------------------------------------------
- * `applyModelOverride` **merges** the map — `{...model.thinkingLevelMap,
- * ...override.thinkingLevelMap}` [VERIFIED: pi 0.84.1
- * src/core/provider-composer.ts:108-110] — so the rest of the map, the compat
- * block and the cost table survive untouched. A full model entry would redefine
- * a catalogued model, which is exactly the cross-provider drift PROV-06 forbids.
- * Case 3 asserts the merge is a merge; without it, an override that clobbered
- * the map would satisfy case 2 while silently removing the two levels the
- * harness actually uses.
- *
- * ---------------------------------------------------------------------------
- * PI'S OWN FUNCTIONS, NOT A LOCAL CLAMP
- * ---------------------------------------------------------------------------
- * `clampThinkingLevel` and `getSupportedThinkingLevels` are imported from
- * `@earendil-works/pi-ai` and called on the model Pi *composed*. A local
- * reimplementation of the walk would assert this file's own arithmetic, and
- * would keep passing after Pi changed the rule underneath it.
- *
- * Pure by construction: no session, no provider, no network, no credentials.
- * `withModelsConfig` is used only because the composition step is what turns a
- * `modelOverrides` block into a `Model` — the thing under test is the
- * composition, so composing it is not incidental.
+ * The R1 experiment is executable: one `modelOverrides` entry lets Pi select reasoning_effort "low" for
+ * deepseek/deepseek-flash, which the catalogue's null mapping clamps to "high" (pi-ai src/models.ts clampThinkingLevel).
+ * Whether DeepSeek accepts it and spends fewer tokens is RB-03-04, outstanding; no request is made here. The override
+ * merges the map (provider-composer applyModelOverride), and the clamp is Pi's own function, never a local copy.
  */
 import { describe, expect, it } from "vitest";
 
@@ -82,22 +15,10 @@ import { withModelsConfig } from "../helpers/models.ts";
 const PROVIDER = "deepseek";
 const MODEL = "deepseek-flash";
 
-/**
- * The level the whole question is about, spelled once. `"low"` is a
- * `ModelThinkingLevel`, so this is typed rather than stringly-typed and a
- * renamed level in a future Pi becomes a compile error rather than a silent
- * clamp to something else.
- */
+/** Typed as a ModelThinkingLevel, so a renamed level in a future Pi is a compile error rather than a silent clamp. */
 const LOW: ModelThinkingLevel = "low";
 
-/**
- * The unclamp exactly as `RB-03-04`'s preparation step writes it into
- * `~/.pi/agent/models.json`. One key, merged.
- *
- * Impact is bounded to the DeepSeek-direct path on purpose (CONTEXT decision 9):
- * DashScope maps `low` -> `high` server-side regardless, so unclamping there
- * would change the payload and nothing else.
- */
+/** The unclamp exactly as RB-03-04 writes it into models.json; DashScope maps low to high server-side anyway. */
 const UNCLAMP_OVERRIDE = {
 	providers: {
 		[PROVIDER]: {
@@ -108,11 +29,7 @@ const UNCLAMP_OVERRIDE = {
 	},
 } as const;
 
-/**
- * The baseline: a models config that declares nothing at all, so the model
- * resolves from Pi's built-in catalogue exactly as it does on a machine that
- * has never edited `models.json`.
- */
+/** A config that declares nothing, so the model resolves from Pi's built-in catalogue. */
 const NO_OVERRIDE = {} as const;
 
 /** Read `thinkingLevelMap` off a composed model without pretending to narrow it. */
@@ -126,9 +43,7 @@ describe("PROV-07 — the R1 unclamp (offline; the answer is RB-03-04, OUTSTANDI
 			const model = handle.requireModel(PROVIDER, MODEL);
 			const map = levelMap(model);
 
-			// Vacuity guard first: every claim below is about this map, and a model
-			// with no thinking-level map at all would make both assertions pass for
-			// reasons that have nothing to do with the finding.
+			// Vacuity guard: a model with no thinking-level map would pass both assertions below.
 			expect(
 				Object.keys(map).length,
 				`the built-in ${PROVIDER}/${MODEL} entry composed with no thinkingLevelMap at ` +
@@ -192,10 +107,7 @@ describe("PROV-07 — the R1 unclamp (offline; the answer is RB-03-04, OUTSTANDI
 	});
 
 	it("case 3 — the merge is a merge: high, max, compat and cost all survive", async () => {
-		// The two registries are composed from configs that differ ONLY by the
-		// override, and the built-in values are read from the baseline rather than
-		// retyped here. A hand-copied expectation table would assert this file's
-		// transcription of the catalogue, not the catalogue.
+		// Built-in values are read from the baseline, never retyped, so this asserts the catalogue itself.
 		const baseline = await withModelsConfig({ models: NO_OVERRIDE }, (handle) => {
 			const model = handle.requireModel(PROVIDER, MODEL);
 			return {
@@ -246,9 +158,7 @@ describe("PROV-07 — the R1 unclamp (offline; the answer is RB-03-04, OUTSTANDI
 					"reset this would breach it from the other direction",
 			).toBe(baseline.contextWindow);
 
-			// The paired positive: without it, a baseline that failed to compose --
-			// leaving every value undefined on both sides -- would satisfy all five
-			// deep-equalities above while proving nothing at all.
+			// Without this, a baseline that failed to compose would satisfy every equality above.
 			expect(
 				baseline.compat,
 				"the BASELINE model composed no compat block, so the equalities above compared " +

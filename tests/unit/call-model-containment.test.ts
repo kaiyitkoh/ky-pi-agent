@@ -1,52 +1,8 @@
 /**
- * DIAG-02 — a diagnostics write failure must not break, or discard, the real
- * nested model call.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE EXISTS
- * ---------------------------------------------------------------------------
- * `tests/unit/wire-nonmutating.test.ts:216-255` proves the MAIN-LOOP half: with
- * a file planted where `logDir(cwd)` wants a directory, `appendJsonl` throws
- * `ENOTDIR`/`EEXIST`, `safeHandler` swallows it, and the outgoing payload
- * survives untouched. There was no counterpart for the nested path, and the
- * nested path is the one where a throw is worse than a lost record:
- *
- *   - `transformHeaders` runs inside `ModelRuntime.prepareRequest`
- *     [VERIFIED: pi 0.84.1 src/core/model-runtime.ts:590-593], so a throw there
- *     becomes a `createSetupErrorMessage` and the completion FAILS;
- *   - `onPayload` throws straight into the adapter and kills the request;
- *   - the SUCCESS-path turns row is appended after the provider has already
- *     billed for an `AssistantMessage`, so a throw there discards a message that
- *     was paid for and hands the caller a filesystem error instead — and
- *     `call-model.ts` says the caller "owns the fallback decision", so it would
- *     then retry or downgrade because a disk was full.
- *
- * ---------------------------------------------------------------------------
- * WHY A STUB REGISTRY AND NOT THE LIVE SESSION
- * ---------------------------------------------------------------------------
- * `tests/integration/call-model.test.ts` drives the real thing, but it does so
- * through ONE shared fixture whose later cases all read the same log files.
- * Sabotaging `logDir(cwd)` inside that session would break every case after it,
- * so the sabotage needs its own working directory. `callModel` reads exactly four
- * things off its context — `cwd`, `sessionManager.getSessionId()`, `signal` and
- * `modelRegistry.complete` — and the completion is the only one that has to
- * behave, so a recording stub drives the REAL function against a REAL sabotaged
- * filesystem, offline, in milliseconds.
- *
- * The stub deliberately INVOKES all three capture callbacks in the order the
- * real adapter does. Without that, a containment bug in `transformHeaders` or
- * `onPayload` would never be reached and this file would prove only that the
- * turns-row append is contained.
- *
- * ---------------------------------------------------------------------------
- * THE PAIRED POSITIVE IS MANDATORY HERE
- * ---------------------------------------------------------------------------
- * "callModel returned its message and no records were written" is satisfied
- * perfectly by a `callModel` that records nothing at all, ever. So the same
- * fixture runs twice: once with `logDir(cwd)` sabotaged and once without. The
- * healthy run must produce the three wire records and the one turns row, and the
- * counter must move; the sabotaged run must produce neither and must leave the
- * counter still. Either half alone proves nothing.
+ * A diagnostics write failure must not break or discard a nested model call: a throw in transformHeaders or onPayload
+ * fails the request (pi src/core/model-runtime.ts prepareRequest), and one after success discards a paid-for message.
+ * A stub registry drives the real callModel against a sabotaged filesystem, invoking the capture callbacks in the
+ * adapter's order; the same fixture runs healthy too, since 'nothing written' alone passes a recorder that never records.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -121,14 +77,7 @@ interface CallbackInvocations {
 	invoked: string[];
 }
 
-/**
- * A context whose `modelRegistry.complete` drives the three capture callbacks in
- * the adapter's own order, then resolves with {@link makeMessage}.
- *
- * The headers map carries a bearer-shaped value so the redactor has something to
- * do on the way to disk — a capture path that is contained but does nothing
- * would otherwise be indistinguishable from one that works.
- */
+/** Drives the three capture callbacks in the adapter's order, with a bearer-shaped header so the redactor has work to do. */
 function fakeCtx(cwd: string, seen: CallbackInvocations): ExtensionContext {
 	return {
 		cwd,
@@ -185,13 +134,7 @@ interface RunResult {
 	seen: CallbackInvocations;
 }
 
-/**
- * Drive one `callModel` against a fresh temp cwd, optionally sabotaged.
- *
- * `sabotage` plants a FILE where `logDir(cwd)` wants a directory, exactly as
- * `wire-nonmutating.test.ts` does, so `mkdirSync` inside `appendJsonl` fails for
- * real on both Windows and POSIX rather than through a mock.
- */
+/** One callModel against a fresh temp cwd; `sabotage` plants a file where logDir(cwd) wants a directory. */
 async function run(sabotage: boolean): Promise<RunResult> {
 	return await withTempLogCwd(async (cwd) => {
 		if (sabotage) {
@@ -221,10 +164,7 @@ async function run(sabotage: boolean): Promise<RunResult> {
 			threw = error;
 		}
 
-		// `existsSync` on the exact paths rather than a directory listing: in the
-		// sabotaged run `logDir(cwd)` IS a file, so `readdirSync` on it throws
-		// ENOTDIR and the fixture would fail with a stack trace instead of the
-		// assertion it exists to make.
+		// existsSync on exact paths: in the sabotaged run logDir(cwd) is a file, so readdirSync would throw.
 		const wirePath = logPath(cwd, WIRE_LOG_BASE);
 		const turnsPath = logPath(cwd, TURNS_LOG_BASE);
 
@@ -284,9 +224,7 @@ describe("DIAG-02 — a diagnostics write failure is swallowed, not propagated",
 	it("still returns the already-billed message when nothing can reach disk", async () => {
 		const broken = await run(true);
 
-		// FIRST, prove the sabotage worked. Without this the two absences below are a
-		// pass over a directory the writer simply had no trouble with, and the whole
-		// file would go green the day the fixture stopped breaking anything.
+		// First prove the sabotage worked, or the absences below are vacuous.
 		expect(
 			broken.rowsDelta,
 			"the appends SUCCEEDED, so this test proved nothing: `noteRowWritten` runs only after " +

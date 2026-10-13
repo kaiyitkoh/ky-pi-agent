@@ -1,33 +1,8 @@
 /**
- * GATE-06 / QUAL-05 — both refutation outcomes, the BLOCKER-only scope, the
- * fail-safe direction, the QUAL-05 stop, and the bounded loop's stall
- * detection, each proved by a case that would fail if the mechanism under
- * test were removed.
- *
- * ---------------------------------------------------------------------------
- * WHY ONE SHARED FAUX PROVIDER, RESPONSES CONSUMED IN A FIXED ORDER
- * ---------------------------------------------------------------------------
- * Mirrors `tests/integration/reviewer-contract.test.ts`'s own house style: one
- * `deepseekFaux` provider, one scripted `setResponses` array consumed in the
- * EXACT order the cases below call `runRefuteOrPromote`/`runBoundedReviewLoop`
- * (case 1, case 2, case 3, case 4a, case 4b, case 6's two iterations — seven
- * calls total). `deepseekFaux.state.callCount` is therefore a running total
- * across the whole file, so every call-count assertion below reads a DELTA
- * (before/after around the specific call under test), never the raw total —
- * the same discipline `advisor-consult.test.ts` and `reviewer-contract.test.ts`
- * both already use for this exact reason.
- *
- * ---------------------------------------------------------------------------
- * WHY `decideWorkflowStop` IS TESTED AGAINST HAND-BUILT ARTIFACTS, NOT
- * `validateReview`'s OUTPUT
- * ---------------------------------------------------------------------------
- * `decideWorkflowStop` and `detectStall` are PURE — their contract is "given
- * this `ReviewArtifact` shape, decide". Whether that shape came from a real
- * reviewer's validated tool call (`review-schema.ts`'s `validateReview`, plan
- * 08-03) or a hand-built fixture makes no difference to the predicate; using
- * hand-built fixtures here keeps this file's REFUTATION proof and its STOP-
- * PREDICATE proof independently readable, matching the module-under-test's
- * own PURE/IMPURE split.
+ * Both refutation outcomes, the BLOCKER-only scope, the fail-safe direction, the stop decision and the bounded
+ * loop's stall detection, each by a case that fails without its mechanism. One shared faux provider consumes a
+ * scripted response list in case order, so call counts are read as deltas. The pure stop and stall predicates are
+ * tested on hand-built artifacts.
  */
 import { fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 
@@ -47,7 +22,7 @@ import { getModeState, setEscalated, setMode } from "../../.pi/extensions/routin
 import { createFauxSession, waitForConfiguredAuth } from "../helpers/session.ts";
 
 // -----------------------------------------------------------------------------
-// Fixture builders — plain data, no model involved.
+// Fixture builders: plain data, no model.
 // -----------------------------------------------------------------------------
 
 const MINIMAL_CONTRACT: ReviewerContractInput = {
@@ -107,8 +82,7 @@ function reviewAfterRefutation(review: ReviewArtifact, promoted: readonly Review
 }
 
 // -----------------------------------------------------------------------------
-// Session/faux plumbing — mirrors tests/integration/reviewer-contract.test.ts
-// and tests/integration/advisor-consult.test.ts.
+// Session/faux plumbing
 // -----------------------------------------------------------------------------
 
 interface Run {

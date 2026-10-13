@@ -1,21 +1,6 @@
 /**
- * GATE-03 / GATE-04 / GATE-05 / QUAL-04 / QUAL-06 -- `validateReview` proven
- * live in both directions.
- *
- * Following `chokepoint-lint.test.ts`/`contributing-boundary.test.ts`'s
- * vacuity-guard discipline and this repo's own `quality-rules.test.ts`
- * mutation-baseline pattern: every rejection case below mutates EXACTLY ONE
- * field of a single valid baseline review object, so each rejection is
- * attributable to that field and nothing else. The vacuity-guard case (the
- * unmutated baseline validates OK) runs first and is named as such --
- * without it, every rejection case below could be passing for the wrong
- * reason (a validator that rejects everything would pass every "reject"
- * assertion here and nothing would catch it).
- *
- * Every rejection case also asserts its reason string CONTAINS the
- * offending value or the field name -- an opaque rejection is one the
- * executor cannot act on, and this project has already shipped that mistake
- * once (evidence.ts's pre-CR-01 fabricated-claim hole).
+ * validateReview in both directions: every rejection mutates exactly one field of one valid baseline, which validates
+ * first, and every reason names the offending field or value so the executor can act on it.
  */
 import { describe, expect, it } from "vitest";
 
@@ -28,12 +13,7 @@ function clone<T>(value: T): T {
 	return JSON.parse(JSON.stringify(value)) as T;
 }
 
-/**
- * The ONE valid baseline every rejection case mutates exactly one field of.
- * Covers both `EXPECTED_IDS`, carries one non-NIT finding, a non-empty
- * `checkedAndCleared`, and a `root-cause` classification (so the workaround
- * fields are legitimately absent here).
- */
+/** The valid baseline: both expected ids, one non-NIT finding, checkedAndCleared, and a root-cause classification. */
 function baseline(): Record<string, unknown> {
 	return {
 		verdicts: [
@@ -126,9 +106,9 @@ describe("verdict", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// WR-01 -- duplicate, contradictory verdicts for the same requirement id
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// Duplicate, contradictory verdicts for the same requirement id
+// -------------------------------------------------------------------------
 
 describe("WR-01 -- duplicate verdicts for one requirement id", () => {
 	it("rejects two verdicts for the SAME requirement id (contradictory statuses), naming the duplicated id", () => {
@@ -143,9 +123,9 @@ describe("WR-01 -- duplicate verdicts for one requirement id", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// WR-02 -- an unrecognised verdict status is rejected, never silently coerced
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// An unrecognised verdict status is rejected, never coerced
+// -------------------------------------------------------------------------
 
 describe("WR-02 -- verdict status must be exactly one of Implemented/Partial/Missing", () => {
 	it('rejects status "implemented" (wrong case), naming the offending value -- must NOT be silently coerced to "Missing"', () => {
@@ -178,9 +158,9 @@ describe("WR-02 -- verdict status must be exactly one of Implemented/Partial/Mis
 	});
 });
 
-// ---------------------------------------------------------------------------
-// "malformed" -- GATE-05, an unclassified finding rejected by code
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// "malformed" -- an unclassified finding is rejected by code
+// -------------------------------------------------------------------------
 
 describe("malformed", () => {
 	it('rejects severity "blocker" (wrong case), naming the offending value', () => {
@@ -223,9 +203,9 @@ describe("malformed", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// "checked and cleared" -- GATE-04, silence must be structurally impossible
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// "checked and cleared" -- silence must be structurally impossible
+// -------------------------------------------------------------------------
 
 describe("checked and cleared", () => {
 	it("rejects an absent checkedAndCleared, naming the field", () => {
@@ -256,9 +236,9 @@ describe("checked and cleared", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// "classification" -- QUAL-04
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// "classification"
+// -------------------------------------------------------------------------
 
 describe("classification", () => {
 	it("rejects an absent classification, naming the field", () => {
@@ -283,9 +263,9 @@ describe("classification", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// "workaround" -- QUAL-06, a workaround must be recorded with its debt
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// "workaround" -- a workaround must be recorded with its debt
+// -------------------------------------------------------------------------
 
 describe("workaround", () => {
 	it("rejects classification=workaround with no properFix, naming properFix", () => {
@@ -342,10 +322,9 @@ describe("NIT cap", () => {
 	});
 });
 
-// ---------------------------------------------------------------------------
-// clone() sanity -- guards against a shared-reference bug silently coupling
-// two "independent" mutation cases above through one shared baseline object.
-// ---------------------------------------------------------------------------
+// -------------------------------------------------------------------------
+// clone() sanity: a shared reference would couple two "independent" mutation cases
+// -------------------------------------------------------------------------
 
 describe("clone() sanity", () => {
 	it("two separate baseline() calls do not share array/object references", () => {

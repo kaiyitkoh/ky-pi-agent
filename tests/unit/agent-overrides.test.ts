@@ -1,47 +1,8 @@
 /**
- * ROUTE-05 — `.pi/extensions/routing/agent-overrides.ts`, proven against real
- * files in a temp directory: shape, refusals, sibling-key preservation and
- * idempotence.
- *
- * ---------------------------------------------------------------------------
- * WHY EVERY CASE OWNS ITS OWN TEMP DIRECTORY
- * ---------------------------------------------------------------------------
- * `writeAgentOverrides` mutates a real settings.json file. Every case below
- * passes an explicit `settingsPath` inside a fresh `mkdtempSync` directory
- * (removed in `afterEach`) — this file NEVER lets `resolveSettingsPath()`
- * resolve to this machine's real `getAgentDir()` location except in the one
- * case that specifically tests the default-path branch, and that case ALSO
- * points `PI_CODING_AGENT_DIR` at a temp directory first.
- *
- * ---------------------------------------------------------------------------
- * REFUSAL CASES ASSERT BYTES, NOT JUST `ok:false`
- * ---------------------------------------------------------------------------
- * A writer that refuses and truncates is worse than one that throws — only a
- * byte comparison of the file before/after tells them apart. Every refusal
- * case below captures the file's exact text (or its absence) before calling
- * `writeAgentOverrides`, and re-reads it afterward to prove nothing moved.
- *
- * ---------------------------------------------------------------------------
- * IDEMPOTENCE ASSERTS `mtimeMs`, NOT ONLY CONTENT
- * ---------------------------------------------------------------------------
- * Content equality alone would pass against an implementation that rewrites
- * identical bytes on every call — exactly the mtime churn the plan's
- * byte-idempotence discipline exists to prevent (mirroring
- * `bin/bootstrap.sh`'s own "settings.json kyPiAgent already current --
- * unchanged" no-op path). `statSync(path).mtimeMs` is compared across both
- * writes.
- *
- * ---------------------------------------------------------------------------
- * FALSIFICATION RECORDED IN THE SUMMARY, NOT HERE
- * ---------------------------------------------------------------------------
- * Per the plan's own acceptance criteria, a falsification was executed after
- * this file was committed: `writeAgentOverrides`'s merge step was mutated
- * from `subagents.agentOverrides = overrides` (preserving `subagents`'
- * other keys) to `root.subagents = { agentOverrides: overrides }` (replacing
- * the whole `subagents` object, clobbering `subagents.defaultModel`). The
- * "preserves kyPiAgent and subagents.defaultModel" case went red as
- * expected; the mutation was then reverted. See 05-05-SUMMARY.md for the
- * exact failure message.
+ * routing/agent-overrides.ts against real files in temp directories: shape, refusals, sibling-key preservation and
+ * idempotence. Every case passes an explicit settingsPath, so the real agent dir is never written. Refusals compare
+ * bytes, since a writer that refuses and truncates looks like one that refuses cleanly; idempotence compares mtimeMs,
+ * since rewriting identical bytes passes a content check.
  */
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -61,7 +22,7 @@ import {
 import { AGENT_NAME_BY_ROLE, MODES, ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 
 // -----------------------------------------------------------------------------
-// Temp-dir hygiene (mirrors tests/helpers/logs.ts#withTempLogCwd)
+// Temp-dir hygiene
 // -----------------------------------------------------------------------------
 
 let tempDirs: string[] = [];
@@ -72,13 +33,7 @@ function freshSettingsPath(): string {
 	return join(dir, "settings.json");
 }
 
-/**
- * CR-01: the suite-wide value `tests/setup/agent-dir.ts`'s `beforeAll`
- * already set for this file, captured here so the "resolves under
- * PI_CODING_AGENT_DIR" case below can restore it instead of `delete`-ing the
- * variable outright -- deleting would punch a hole in the suite-wide guard
- * for the rest of this file's cases. See that file's own docstring.
- */
+/** The suite-wide value tests/setup/agent-dir.ts set, restored rather than deleted so its guard holds for later cases. */
 let suiteAgentDir: string | undefined;
 beforeAll(() => {
 	suiteAgentDir = process.env.PI_CODING_AGENT_DIR;
@@ -193,9 +148,7 @@ describe("agentOverridesFor -- regression gate: the REAL ROLE_MAP never guard-bl
 
 describe("agentOverridesFor -- guard-blocked fixture (ROUTE-08 wired through ROUTE-05)", () => {
 	it("a fixture role map whose only planner candidate is a no-tool-calling model yields ok:false naming the role", () => {
-		// Built from the REAL ROLE_MAP (never hand-typed from scratch) with only
-		// planner's candidate list replaced, so every other role's shape stays
-		// realistic and only the one guard-blocked candidate is under test.
+		// The real ROLE_MAP with only planner's candidates replaced, so only the guard-blocked candidate is under test.
 		const blockedRoleMap: AgentOverridesForOptions["roleMap"] = {
 			cheap: {
 				...ROLE_MAP.cheap,
@@ -216,24 +169,8 @@ describe("agentOverridesFor -- guard-blocked fixture (ROUTE-08 wired through ROU
 	});
 
 	it("writeAgentOverrides is never reached for a guard-blocked derivation -- no settings file is created", () => {
-		// WR-10: this case is DELIBERATELY SELF-FULFILLING at the unit level --
-		// it derives an ok:false result, chooses not to call writeAgentOverrides,
-		// and then asserts the file it never touched does not exist. That
-		// assertion would hold unchanged even if `applyMode` (the REAL caller,
-		// in `.pi/extensions/routing/index.ts`) unwrapped an ok:false derivation
-		// and wrote `{}` anyway -- this test cannot see that regression because
-		// it never drives the caller at all. The claim this case name states
-		// ("writeAgentOverrides is never REACHED") is actually proven by
-		// `tests/integration/mode-switch.test.ts` case 5, which drives the REAL
-		// `/balanced` command (via `routing/index.ts`'s WR-10 test-only
-		// `agentOverridesFor` seam) against a role map with the SAME guard-
-		// blocked planner candidate used here, and asserts the CALLER's own
-		// observable behaviour: the step-6 notification names the refusal and
-		// the role, and the injected settings.json carries no "subagents" key.
-		// This unit case is kept as a narrower, faster proof of
-		// `agentOverridesFor`'s own derivation (ok:false, naming the role and
-		// reason) -- it is not, on its own, evidence about `writeAgentOverrides`
-		// or any caller.
+		// Proves only agentOverridesFor's own ok:false derivation. That the real caller never writes on it is proven by
+		// tests/integration/mode-switch.test.ts, which drives /balanced against the same guard-blocked candidate.
 		const settingsPath = freshSettingsPath();
 		expect(existsSync(settingsPath), "vacuity guard: the fresh path must not already exist").toBe(false);
 
@@ -249,12 +186,6 @@ describe("agentOverridesFor -- guard-blocked fixture (ROUTE-08 wired through ROU
 		const result = agentOverridesFor({ mode: "cheap" }, { roleMap: blockedRoleMap });
 		expect(result.ok).toBe(false);
 
-		// The caller discipline `writeAgentOverrides`'s own doc comment states:
-		// a caller must not invoke it on an ok:false derivation. This case proves
-		// that discipline by simply never calling it, and asserting the file
-		// still does not exist -- the settings write path was never touched BY
-		// THIS TEST. See this case's own updated comment above for what it does
-		// NOT prove.
 		expect(existsSync(settingsPath)).toBe(false);
 	});
 });
@@ -334,11 +265,7 @@ describe("writeAgentOverrides -- sibling-key preservation", () => {
 
 describe("writeAgentOverrides -- WR-02: a filesystem error refuses, it never throws", () => {
 	it("a settingsPath whose parent directory does not exist -> ok:false, never throws", () => {
-		// A fresh temp dir owned by this test (removed in afterEach via
-		// tempDirs), but the settings.json target sits under a NESTED
-		// subdirectory that is never created -- writeFileSync's temp-file write
-		// hits ENOENT for want of a parent directory, exactly the "missing
-		// ~/.pi/agent parent directory on a fresh machine" case WR-02 names.
+		// The settings target sits under a parent that is never created, as on a fresh machine with no ~/.pi/agent.
 		const dir = mkdtempSync(join(tmpdir(), "kypi-agent-overrides-missing-parent-"));
 		tempDirs.push(dir);
 		const settingsPath = join(dir, "does-not-exist", "settings.json");
@@ -371,14 +298,8 @@ describe("writeAgentOverrides -- WR-02: the write is atomic, no temp file is lef
 });
 
 describe("writeAgentOverrides -- WR-07: a renameSync failure cleans up the temp file and still refuses (never throws)", () => {
-	// `renameSync` cannot be made to fail reliably, cross-platform, through
-	// filesystem tricks alone: a rename onto an existing regular file target
-	// SUCCEEDS by design (that is what atomicity relies on), and a directory
-	// target instead fails EARLIER, at the `readFileSync(path)` guard above
-	// the write/rename section, never reaching it at all -- neither shape
-	// proves the temp file was cleaned up. `node:fs` is mocked for this ONE
-	// case, real everywhere else in this file, and unmocked/reset immediately
-	// after so no other case in this file is affected.
+	// renameSync cannot be made to fail through the filesystem alone (a file target succeeds, a directory fails earlier),
+	// so node:fs is mocked for this one case and reset straight after.
 	afterEach(() => {
 		vi.doUnmock("node:fs");
 		vi.resetModules();
@@ -411,10 +332,7 @@ describe("writeAgentOverrides -- WR-07: a renameSync failure cleans up the temp 
 
 		expect(result?.ok, `expected ok:false, got ${JSON.stringify(result)}`).toBe(false);
 
-		// THE LOAD-BEARING ASSERTION: no `*.tmp` file survives in the target's
-		// directory -- before this fix, the temp file `writeFileSync` created
-		// was left orphaned in the user's GLOBAL ~/.pi/agent/ directory forever
-		// whenever renameSync failed.
+		// No temp file may survive a failed rename in the user's global agent directory.
 		const dir = dirname(settingsPath);
 		const leftover = existsSync(dir) ? readdirSync(dir).filter((name) => name.includes(".tmp")) : [];
 		expect(leftover, `stray temp file(s) left behind after a renameSync failure: ${JSON.stringify(leftover)}`).toHaveLength(0);
@@ -503,9 +421,7 @@ describe("writeAgentOverrides -- byte-idempotence", () => {
 		const textAfterFirst = readFileSync(settingsPath, "utf-8");
 		const mtimeAfterFirst = statSync(settingsPath).mtimeMs;
 
-		// A small real delay so a buggy implementation that DOES rewrite would
-		// show a detectably different mtime -- a same-tick write could otherwise
-		// coincidentally share a millisecond and mask the bug.
+		// A real delay, so a rewrite cannot hide inside the same millisecond.
 		await new Promise((resolve) => setTimeout(resolve, 20));
 
 		const second = writeAgentOverrides(overrides, { settingsPath });

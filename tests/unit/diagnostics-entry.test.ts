@@ -1,24 +1,7 @@
 /**
- * The diagnostics extension cannot fail silently. [threats T-02-03-05, T-02-03-06]
- *
- * NOT IN PLAN 02-03's FILE LIST, AND ADDED ANYWAY. The plan's own success
- * criteria include "a throwing diagnostics handler leaves a `diagnostics.error`
- * row instead of vanishing", and nothing in the listed files asserts it. That
- * claim is the whole reason `safeHandler` exists, so shipping it unasserted
- * would be a green tick over the exact behaviour the phase is about.
- *
- * WHY IT MATTERS. Pi catches every exception thrown by an extension handler and
- * routes it to `emitError`, which produces no visible output
- * [VERIFIED: pi 0.84.1 src/core/extensions/runner.ts:861-870 — observed live
- * during Phase 2 research, where a bad regex produced no error anywhere until a
- * local try/catch was added]. An instrument that dies that way looks exactly
- * like an instrument with nothing to report.
- *
- * NO SESSION IS NEEDED. `ExtensionAPI` and `ExtensionContext` are plain
- * interfaces, and the only members this file's code touches are `pi.on` and
- * `ctx.cwd`. A recording stub of each exercises the real registration and the
- * real handler against a real temp filesystem, offline, in milliseconds. The
- * in-session behaviour is plan 02-05's integration test; this is the unit half.
+ * The diagnostics extension cannot fail silently: Pi routes a handler exception to emitError, which shows nothing
+ * (pi src/core/extensions/runner.ts:861-870), so a throwing handler must leave a diagnostics.error row. Recording stubs
+ * of `pi.on` and `ctx.cwd` drive the real handlers against a temp filesystem, with no session.
  */
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 
@@ -138,16 +121,8 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 
 	it("coerces a handler's null return to undefined so it cannot replace a provider payload", async () => {
 		await withTempLogCwd(async (cwd) => {
-			// [WR-03R] IN-07 removed the `?? undefined` on the grounds that "some Pi
-			// hooks distinguish null from undefined". No Pi event-result type declares
-			// `null` as meaningful — the only documented `null` in the extension API is
-			// a header-map value meaning "delete this header"
-			// [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:511] — while
-			// `BeforeProviderRequestEventResult` is `unknown`
-			// [VERIFIED: types.d.ts:777], so `null` IS a well-typed return there, and
-			// the runner replaces the outgoing payload on anything that is not
-			// `undefined` [VERIFIED: dist/core/extensions/runner.js:789-792]. The
-			// coercion is therefore load-bearing, not cosmetic. [threat T-02-05-03]
+			// before_provider_request's result is `unknown`, so `null` is a well-typed return, and the runner replaces the
+			// payload on anything not undefined (pi dist/core/extensions/runner.js:789-792): the coercion is load-bearing.
 			const wrapped = safeHandler<undefined, null>("null_probe", () => null);
 
 			const returned = await wrapped(undefined, fakeCtx(cwd));
@@ -159,11 +134,7 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 					"request body to `null`, and nothing anywhere would report it",
 			).toBeUndefined();
 
-			// Pi's own replacement rule, transcribed from
-			// dist/core/extensions/runner.js:789-792, applied to what the wrapper
-			// actually returned. Asserting `toBeUndefined()` alone would pass if the
-			// coercion moved somewhere that did not protect this specific path; this
-			// asserts the CONSEQUENCE the coercion exists to prevent.
+			// Pi's replacement rule (runner.js:789-792) applied to the wrapper's result: asserts the consequence, not the value.
 			const realPayload = { model: "deepseek-chat", messages: [{ role: "user" }] };
 			let currentPayload: unknown = realPayload;
 			if (returned !== undefined) {
@@ -207,25 +178,9 @@ describe("safeHandler — a throwing handler leaves a row instead of vanishing",
 
 describe("the rows-written counter is per PROCESS, not per module instance", () => {
 	/**
-	 * WHY THIS IS NOT AN ACADEMIC CASE. Pi loads each extension through jiti, which
-	 * keeps its own module registry, so `.pi/extensions/foo` importing
-	 * `call-model.ts` and the diagnostics entry point importing `index.ts` hold two
-	 * separate copies of that file in one process. It was OBSERVED during plan 02-07
-	 * — it is why `wire.ts`'s request counter lives on `globalThis` and why
-	 * `turns-log.test.ts:196-201` and `prose-retry.test.ts:216-219` both read bytes
-	 * on disk instead of this number.
-	 *
-	 * With a module-level `let`, Phase 5 or Phase 8 importing `call-model.ts` — its
-	 * documented cross-phase contract — would increment a counter `/budget` never
-	 * reads, and `/budget` would print a figure silently excluding every nested-call
-	 * row. That is exactly the failure `noteRowWritten`'s own docstring says the
-	 * export exists to prevent.
-	 *
-	 * A SECOND MODULE INSTANCE CANNOT BE MANUFACTURED PORTABLY, so the property is
-	 * asserted where it actually lives: the process-wide slot. Reading and writing
-	 * `globalThis[ROWS_WRITTEN_KEY]` from OUTSIDE the module is precisely what a
-	 * second instance does, and the key is imported rather than re-typed — a second
-	 * spelling of that string is a second counter nothing reports on.
+	 * jiti gives each import graph its own copy of a module, so a module-level counter would miss nested-call rows
+	 * written by another copy. A second instance cannot be made portably, so the shared globalThis slot is asserted
+	 * directly, through the imported key.
 	 */
 	const scope = globalThis as Record<string, unknown>;
 
@@ -247,9 +202,7 @@ describe("the rows-written counter is per PROCESS, not per module instance", () 
 	});
 
 	it("reads a count written by something that is not this module instance", () => {
-		// The other direction, which is the half that matters for `/budget`: rows
-		// appended by the copy of the module living in ANOTHER import graph must show
-		// up in the number this instance prints.
+		// The direction /budget needs: rows another module copy appended show up in this instance's number.
 		const planted = rowsWrittenThisSession() + 17;
 		scope[ROWS_WRITTEN_KEY] = planted;
 
@@ -277,10 +230,7 @@ describe("the extension entry point registers session_start and prunes there", (
 			const commands: string[] = [];
 			const handlers = new Map<string, (event: unknown, ctx: ExtensionContext) => unknown>();
 
-			// `registerCommand` is on the stub because plan 02-10 added `/budget`.
-			// Without it the entry point throws a TypeError here and the eight-hook
-			// assertion below never runs -- a stub that models only half the API
-			// turns a real regression into a crash nobody reads.
+			// The entry point also registers /budget; without registerCommand on the stub it would throw a TypeError first.
 			const pi = {
 				on(event: string, fn: (e: unknown, c: ExtensionContext) => unknown) {
 					registered.push(event);

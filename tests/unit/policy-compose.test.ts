@@ -1,18 +1,6 @@
 /**
- * SAFE-03 / SAFE-10 -- `.pi/extensions/safety/policy.ts`, table-driven.
- *
- * A `{ name, toolName, input, facts, expected }` table over `evaluate()`,
- * covering every row in the plan's `<behavior>` block plus the
- * `<acceptance_criteria>`'s multi-segment, strongest-verdict and
- * path-classifier-not-git-or-infra cases. Also proves, directly rather than
- * only by fixture, the three deny-by-default mechanisms the module docstring
- * names: a classifier throwing, a malformed input shape, and every
- * `Verdict.kind` being reachable.
- *
- * VACUOUS-PASS GUARD (this repo's house rule -- `tests/unit/infra-policy.test.ts`,
- * `tests/unit/git-policy.test.ts`): the row table asserts its own length
- * before use, and a dedicated test collects every `Verdict.kind` actually
- * observed across the table and asserts it covers all three.
+ * safety/policy.ts `evaluate()`, table-driven, plus its deny-by-default mechanisms: a throwing classifier, a
+ * malformed input, and every Verdict.kind reachable. The table asserts its own length before use.
  */
 import { readFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
@@ -52,7 +40,7 @@ interface Row {
 
 const ROWS: readonly Row[] = [
 	// -------------------------------------------------------------------------
-	// Every named row in the plan's <behavior> block
+	// Named behaviour rows
 	// -------------------------------------------------------------------------
 	{ name: "git status -- read subcommand, allowed", toolName: "bash", input: { command: "git status" }, expected: "allow" },
 	{
@@ -120,7 +108,7 @@ const ROWS: readonly Row[] = [
 	},
 
 	// -------------------------------------------------------------------------
-	// <acceptance_criteria> rows
+	// Multi-segment and strongest-verdict rows
 	// -------------------------------------------------------------------------
 	{
 		name: "cd /tmp && git push on protected main -- strongest verdict wins over segments",
@@ -144,8 +132,7 @@ const ROWS: readonly Row[] = [
 	},
 
 	// -------------------------------------------------------------------------
-	// Negative controls -- the orientation/escape-hatch commands must stay usable
-	// through the composed function, not just through their own module's tests
+	// Negative controls: orientation and escape-hatch commands stay usable through evaluate()
 	// -------------------------------------------------------------------------
 	{
 		name: "git worktree add -b feat main on protected main -- still allowed (escape hatch)",
@@ -160,9 +147,7 @@ const ROWS: readonly Row[] = [
 	{ name: "write src/index.ts inside project root -- allowed", toolName: "write", input: { path: "src/index.ts" }, expected: "allow" },
 
 	// -------------------------------------------------------------------------
-	// WR-06 -- a leading git GLOBAL option before the subcommand must not be
-	// mistaken for the subcommand itself. Paired positive (read, allowed even
-	// on protected main) and negative (write, still blocked on protected main).
+	// A leading git global option is not the subcommand: reads pass on protected main, writes still block
 	// -------------------------------------------------------------------------
 	{
 		name: "git -C /repo status on protected main -- allowed, -C is a global option, not the subcommand",
@@ -232,15 +217,10 @@ const ROWS: readonly Row[] = [
 	},
 
 	// -------------------------------------------------------------------------
-	// Garbage / unknown-shape inputs -- T-04-38, every one of these must block,
-	// never throw and never fall through to allow
+	// Garbage inputs must block, never throw and never fall through to allow
 	// -------------------------------------------------------------------------
 	// -------------------------------------------------------------------------
-	// PLAN 09-04 (FLOW-08) -- glab mr create/mr merge through the COMPOSED
-	// evaluator (never classifyGlabInvocation directly), proving the
-	// signature change (protectedBranches now threaded from PolicyFacts)
-	// composes correctly and evaluation order is unchanged: mr merge stays
-	// blocked even when it carries a target-branch flag.
+	// glab mr create/merge through evaluate(): mr merge stays blocked even with a target-branch flag
 	// -------------------------------------------------------------------------
 	{
 		name: "glab mr create --target-branch staging -- allowed through the composed evaluator",
@@ -808,32 +788,9 @@ describe("SAFE-03 -- purity: policy.ts never reads ctx, process.env, hasUI or no
 });
 
 /**
- * WR-14 -- CR-07's own `isSensitiveSearchRoot` over-blocked one shape, fail-
- * closed (never a security defect) but the "annoying enough to get the guard
- * disabled" class this project's own `<specifics>` names as the real risk
- * once `grep`/`find`/`ls` are active anywhere: `isSensitiveSearchRoot`
- * matched a `.aws`/`.kube`/`.ssh`/`.gnupg` segment ANYWHERE in the path,
- * unanchored -- a legitimate in-project path merely CONTAINING one of those
- * segment names (`tests/fixtures/.ssh/...`, `node_modules/<pkg>/.aws/`) was
- * denied. That half of WR-14 is still correct and unaffected by WR-17 below.
- *
- * WR-14's OTHER half -- exempting an ABSENT `path` outright whenever
- * `projectRoot === home` -- is REVERTED here as **WR-17**: that exemption
- * reopened the exact SAFE-06 leak CR-07 exists to close, for the one case
- * where the danger is highest. A bare `grep { pattern:
- * "aws_secret_access_key" }` with no `path` at all, in a session rooted
- * directly at `$HOME`, recurses straight through `~/.aws` and returned
- * `allow` -- confirmed by execution. There is no principled difference
- * between that default and an EXPLICIT `path: "."` from the same session,
- * which correctly still blocks (see the case below) -- so the exemption is
- * removed outright: an absent path is evaluated through
- * `isSensitiveSearchRoot` exactly like every other search root.
- *
- * Every case here is paired with a CR-07 RE-RUN -- the exact fixtures
- * CR-07's own corpus rows (EV-61..EV-64) already prove, reproduced directly
- * here against `evaluate()` so this fix's own test file is self-contained
- * proof that neither WR-14's segment-anchoring fix nor WR-17's reversal
- * reopens CR-07, not merely a claim that the corpus elsewhere still passes.
+ * A sensitive segment (.aws, .ssh, ...) blocks a search root only when anchored at home, not anywhere in an
+ * in-project path. An absent `path` in a session rooted at $HOME is evaluated like `.`, because grep with no path
+ * recurses through ~/.aws. Each case re-runs the corpus fixtures so the anchoring cannot reopen that leak.
  */
 describe("WR-14/WR-17 -- grep/find/ls search-root false positives are fixed WITHOUT reopening CR-07 or SAFE-06", () => {
 	it("a legitimate in-project path containing a .ssh segment, NOT under $HOME, is allowed", () => {

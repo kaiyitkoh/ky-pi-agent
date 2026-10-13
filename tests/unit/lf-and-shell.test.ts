@@ -1,50 +1,9 @@
 /**
- * BOOT-06, local half: line endings and macOS portability.
- *
- * BOOT-06 has two halves and only one of them can be asserted here.
- *
- *   LINE ENDINGS (this file). A shell script checked out with CRLF fails on
- *   macOS with a misleading `bad interpreter: /bin/sh^M` error. `.gitattributes`
- *   (`* text=auto eol=lf`) is the fix -- proven on this machine to win even with
- *   `core.autocrlf=true` set locally [RESEARCH.md 4.1, executed 2026-08-13, git
- *   2.54.0.windows.1]. This test is the PROOF, not the remedy: it reads the
- *   working-tree bytes and fails if any CR survived. The same scan runs on both
- *   CI matrix legs, because the platform that could break it is the platform
- *   that must assert it.
- *
- *   PORTABILITY (this file, partially). macOS runners ship bash 3.2.57 and BSD
- *   userland [CITED: actions/runner-images macos-15-arm64-Readme.md]. The
- *   constructs that die there -- `[[`, `sort -V`, `declare -A`, `${v^^}` -- are
- *   asserted absent.
- *
- *   CONFORMANCE (partially here). Executing a script under `sh` does not prove
- *   it is POSIX `sh`: Git-for-Windows `sh` and macOS `/bin/sh` are both bash in
- *   POSIX mode, so `sh script.sh` passing proves only that bash-in-posix-mode
- *   accepted it. ShellCheck under `--shell=sh` is the full conformance gate and
- *   is preinstalled on ubuntu-24.04 only -- that is the `posix-lint` job in
- *   `.github/workflows/ci.yml`.
- *
- *   But `dash` IS a genuine POSIX shell rather than bash in a costume, and it
- *   ships with Git for Windows (`/usr/bin/dash`) and is `/bin/sh` itself on
- *   every Debian-family runner. `dash -n` therefore parses each script under a
- *   real `sh` grammar, which catches `local`, `echo -e`, `${var:offset:len}`,
- *   `$'…'`, `function f()`, arrays and `+=` -- none of which the four-pattern
- *   bashism regex below can see. That gate runs here. It is not a substitute
- *   for ShellCheck (a parse is not a lint: `dash -n` says nothing about
- *   unquoted expansions or BSD-vs-GNU flag differences), and it is not a fake
- *   local conformance check either -- it is a real POSIX parser giving a real
- *   verdict.
- *
- *   The `dash -n` cases SKIP when no `dash` is on the machine, which is the one
- *   place this file departs from the repo's usual throw-rather-than-skip rule.
- *   The reason is specific: macOS ships no `dash` at all, so throwing would
- *   turn the macos-latest leg red for a tool that platform has never had, and a
- *   red build nobody can fix is how a gate gets deleted. The resolution outcome
- *   is asserted and printed by its own always-running case, so a skip is
- *   visible rather than silent.
- *
- * Why bytes and not `grep -P` / `file`: neither behaves identically on Windows,
- * macOS and Linux. A Buffer byte comparison behaves identically everywhere.
+ * Line endings and macOS portability for tracked shell scripts. A CRLF script fails on macOS with `bad interpreter`,
+ * so working-tree bytes are scanned for CR. Bash-4/GNU constructs that die on macOS bash 3.2 or BSD userland are
+ * asserted absent. `dash -n` parses each script under a real POSIX grammar (sh is bash in POSIX mode on both
+ * targets); it skips only where no dash exists (macOS), and its resolution is reported by an always-running case.
+ * ShellCheck in CI is the full conformance gate.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -57,15 +16,7 @@ import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
 const ROOT = repoRoot();
 
-/**
- * A real POSIX shell, if this machine has one.
- *
- * Ordered by specificity. `/usr/bin/dash` is where Git for Windows puts it;
- * `/bin/dash` is Debian/Ubuntu, where it is also `/bin/sh`; a bare `dash` picks
- * up a PATH install. Deliberately does NOT fall back to `sh` -- the entire
- * point is that `sh` is bash in POSIX mode on both platforms this project
- * targets, so accepting it would turn a real gate into a tautology.
- */
+/** A real POSIX shell, if present; never falls back to `sh`, which is bash in POSIX mode on both targets. */
 export function resolvePosixShell(): string | undefined {
 	for (const candidate of ["/usr/bin/dash", "/bin/dash", "dash"]) {
 		const probe = spawnSync(candidate, ["-c", ":"], { encoding: "utf-8", windowsHide: true });
@@ -87,40 +38,9 @@ export function hasCarriageReturn(bytes: Buffer): boolean {
 }
 
 /**
- * Constructs that are valid bash-4/GNU and are NOT valid on a macOS runner.
- *
- * Deliberately narrow. Every entry is something observed to break on bash 3.2
- * or BSD userland, not a stylistic preference:
- *
- *   `[[`        bash/ksh keyword; `sh` has only `[`.
- *   `sort -V`   GNU version sort; absent on BSD sort.
- *   `declare`   bash builtin; `sh` has none. `-A` additionally needs bash 4.
- *   `typeset`   ksh/bash builtin; dash has none.
- *   `local`     not in POSIX (shellcheck SC3043); dash accepts it, other `sh`
- *               implementations do not, and the header of `bin/bootstrap.sh`
- *               forbids it outright.
- *   `${v^^}`    bash-4 case modification; a syntax error on bash 3.2.
- *   `${v,,}`    same.
- *
- * `declare`, `typeset` and `local` are invisible to `dash -n` below: a parse
- * does not resolve builtins, so `dash -n` exits 0 on all three while
- * `sh bin/bootstrap.sh` would die with `declare: not found` on the ubuntu CI
- * leg, where /bin/sh IS dash. This table is therefore the only offline gate
- * that sees them, and the reason they are listed here rather than left to
- * shellcheck (ubuntu-only in CI, and not installed on the Windows dev box).
- * They are anchored to statement position so prose in a comment or the word
- * "local" inside a string cannot trip them.
- *
- * The `[[` pattern excludes a following `:`, because `[[:space:]]`, `[[:alpha:]]`
- * and friends are POSIX bracket-expression character classes -- fully portable,
- * and the correct way to write a whitespace class in a portable `grep` BRE. The
- * naive `/\[\[/` flagged `grep -v '^[[:space:]]*ignore-scripts'` in
- * `bin/bootstrap.sh` as a bashism, which is precisely the kind of false positive
- * that gets a lint disabled rather than fixed.
- *
- * A shell script legitimately needing any of these is a script that must
- * declare `#!/bin/bash` and be excluded from the POSIX guarantee -- at which
- * point the shebang assertion below goes red first, which is the desired order.
+ * Constructs valid in bash 4/GNU but broken on a macOS runner, or (declare, typeset, local) invisible to `dash -n`
+ * yet fatal where /bin/sh is dash. Anchored to statement position so prose cannot trip them. The `[[` pattern skips
+ * `[[:class:]]`, a portable POSIX bracket expression. A script that needs any of these must declare `#!/bin/bash`.
  */
 const BASHISMS: ReadonlyArray<{ readonly label: string; readonly pattern: RegExp }> = [
 	{ label: "[[ ... ]] double-bracket test", pattern: /\[\[(?!:)/ },
@@ -143,9 +63,7 @@ const shellScripts = trackedFiles("*.sh");
 
 describe("BOOT-06 -- the tracked shell-script set", () => {
 	it("is non-empty and holds both shipped scripts", () => {
-		// A scan over an empty set passes vacuously, which is the failure mode
-		// this whole file exists to avoid. Naming the two known scripts means a
-		// pathspec that silently stops matching goes red instead of green.
+		// Naming the known scripts makes a pathspec that stops matching fail rather than pass vacuously.
 		expect(shellScripts.length).toBeGreaterThanOrEqual(2);
 		expect(shellScripts).toContain("bin/bootstrap.sh");
 		expect(shellScripts).toContain("scripts/check-gh-unauthenticated.sh");
@@ -167,9 +85,7 @@ describe("BOOT-06 -- no CR byte survives checkout", () => {
 	}
 
 	it("detects a CR when one is present (the assertion is live)", () => {
-		// Proven against a synthetic buffer rather than by mutating a tracked
-		// file: a test that only ever sees clean input has never demonstrated
-		// that it can fail.
+		// A synthetic buffer proves the scan can fail, without mutating a tracked file.
 		expect(hasCarriageReturn(Buffer.from("#!/bin/sh\necho hi\n", "utf-8"))).toBe(false);
 		expect(hasCarriageReturn(Buffer.from("#!/bin/sh\r\necho hi\r\n", "utf-8"))).toBe(true);
 		expect(hasCarriageReturn(Buffer.from([0x61, CR, 0x62]))).toBe(true);
@@ -218,10 +134,7 @@ describe("BOOT-06 -- every shipped script is POSIX sh, not bash", () => {
 		expect(findBashisms('echo "${name,,}"')).toContain(
 			"${v^^} / ${v,,} bash 4 case modification",
 		);
-		// Near-misses that must NOT trip it, or the lint becomes noise someone
-		// disables: a bracket expression inside a case pattern, a plain parameter
-		// expansion, and POSIX bracket-expression character classes -- which open
-		// with a literal `[[` and are the portable way to write a whitespace class.
+		// Near-misses that must not trip it, including POSIX character classes, which open with a literal `[[`.
 		expect(findBashisms('case "$p" in [A-Za-z]:*) : ;; esac')).toEqual([]);
 		expect(findBashisms('echo "${out#*error}"')).toEqual([]);
 		expect(findBashisms("grep -v '^[[:space:]]*ignore-scripts[[:space:]]*='")).toEqual([]);
@@ -240,10 +153,7 @@ describe("BOOT-06 -- every shipped script is POSIX sh, not bash", () => {
 
 describe("BOOT-06 -- every shipped script parses under a REAL POSIX shell", () => {
 	it("reports whether a real POSIX shell was found (a skip must be visible)", () => {
-		// This case always runs. Without it, `dash` silently vanishing from the
-		// machine would turn the whole block below into skipped-and-green, which
-		// is the same false assurance as having no gate. On Windows and on any
-		// Debian-family runner this must resolve; only macOS legitimately cannot.
+		// Always runs, so dash vanishing cannot turn the block below into skipped-and-green; only macOS may lack it.
 		if (POSIX_SHELL === undefined) {
 			expect(
 				process.platform,
@@ -279,11 +189,7 @@ describe("BOOT-06 -- every shipped script parses under a REAL POSIX shell", () =
 	it.skipIf(POSIX_SHELL === undefined)(
 		"rejects a bashism the four-pattern regex cannot see (the gate is live)",
 		() => {
-			// A parse gate that only ever sees valid input has never demonstrated
-			// that it can fail. `function f() { ... }` is a ksh/bash function
-			// definition, is a syntax error in POSIX sh, and matches none of the
-			// BASHISMS patterns above -- which is precisely why this gate is worth
-			// having alongside them.
+			// `function f() { ... }` is invalid POSIX sh and matches no BASHISMS pattern, so this proves the gate can fail.
 			const dir = mkdtempSync(join(tmpdir(), "kypi-dash-"));
 			try {
 				const bad = join(dir, "bashism.sh");
@@ -316,9 +222,7 @@ describe("BOOT-06 -- every shipped script parses under a REAL POSIX shell", () =
 });
 
 describe("BOOT-06 -- .gitattributes is what makes the byte assertion hold", () => {
-	// The byte scan above reads THIS machine's working tree. It stays true on a
-	// fresh clone only because of these rules, so assert the rules exist rather
-	// than reimplementing their semantics.
+	// The byte scan holds on a fresh clone only because of these rules, so assert they exist.
 	const attributes = readFileSync(join(ROOT, ".gitattributes"), "utf-8");
 
 	it("normalises every text file to LF", () => {

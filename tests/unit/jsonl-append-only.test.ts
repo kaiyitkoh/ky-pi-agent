@@ -1,62 +1,8 @@
 /**
- * DIAG-08 / SAFE-14 — the writer is open-write-close per record, and a stream
- * is a build failure, wherever in the tree it might be opened.
- *
- * ---------------------------------------------------------------------------
- * THE GATE `jsonl.ts` ALREADY CLAIMED TO HAVE
- * ---------------------------------------------------------------------------
- * `.pi/lib/jsonl.ts`'s module docstring states the rule and its enforcement:
- * the stream constructor "is deliberately NOT spelled anywhere in this file
- * ... A plain-substring grep over this file for that constructor is the
- * mechanical proof that no stream is opened here."
- *
- * That grep did not exist when this file was first written for the
- * diagnostics-only writer. This file is the check.
- *
- * ---------------------------------------------------------------------------
- * WHY THE SCANNED SET WIDENED PAST DIAGNOSTICS
- * ---------------------------------------------------------------------------
- * The writer moved to `.pi/lib/jsonl.ts` (04-02) so the safety audit log
- * (SAFE-14) could reuse it without `safety/` importing from `diagnostics/`.
- * That means TWO more directories can now reach `appendFileSync`-equivalent
- * territory: `.pi/lib` itself, and `.pi/extensions/safety`, which binds to it
- * the same way `.pi/extensions/diagnostics` does. A gate that kept scanning
- * only the old directory would silently stop protecting the file that
- * actually writes, and would never see a second writer introduced next to it
- * in `safety/`.
- *
- * ---------------------------------------------------------------------------
- * WHY IT MATTERS MORE THAN A STYLE RULE
- * ---------------------------------------------------------------------------
- * RESEARCH §10.3 measured four concurrent Node processes appending ~950 B records
- * to one shared file: 6000 of 6000 lines, zero unparseable, and `renameSync`
- * succeeding with an append handle open in this process and in a child
- * [VERIFIED: executed 2026-08-13, win32, node v24.16.0]. That result depends
- * ENTIRELY on open-write-close per record. A held file descriptor keeps writing
- * into the file that was renamed away, so every record after a rotation would land
- * in the rotated file and be lost from the live one.
- *
- * `tests/integration/jsonl-concurrency.test.ts` cannot catch that: it uses raw
- * `appendFileSync` in its generated child and only borrows `logPath` for the
- * filename, so it proves an OPERATING-SYSTEM property (which its own header says)
- * and would stay green if `appendJsonl` were swapped for a buffered stream
- * tomorrow. `tests/unit/jsonl-rotation.test.ts` would not catch it either: it
- * writes from one process, where a stream's buffer is flushed by the same process
- * that reads it back.
- *
- * ---------------------------------------------------------------------------
- * THE VACUOUS-PASS GUARDS, ALL THREE
- * ---------------------------------------------------------------------------
- * The shape is `chokepoint-lint.test.ts`'s, for the same reasons and with the same
- * failure modes in mind:
- *
- *   1. the scanned set is asserted non-empty — a grep over no files is a green run
- *      that verified nothing;
- *   2. every pattern is run against an inline offending fixture and asserted to
- *      fire, because a dead pattern and a clean tree produce byte-identical output;
- *   3. `jsonl.ts` is asserted to still CONTAIN the append call, so gutting the
- *      writer entirely cannot turn this gate green by removing everything it
- *      objects to.
+ * The JSONL writer is open-write-close per record, and no stream is opened anywhere it could reach (.pi/lib,
+ * diagnostics, safety). A held descriptor keeps writing into a file that was renamed away, losing every record after
+ * a rotation, and neither the concurrency nor the rotation test can see that. Vacuity guards: the scanned set is
+ * non-empty, every pattern fires on a fixture, and jsonl.ts still contains the append call.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -65,32 +11,16 @@ import { describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
-/**
- * The scanned tree: every directory that can reach the shared writer, or write
- * a log directly. Diagnostics binds to it, safety binds to it, and the writer
- * itself lives in `.pi/lib`.
- */
+/** Every directory that can reach the shared writer or write a log directly. */
 const SCANNED_DIRS = [".pi/extensions/diagnostics", ".pi/lib", ".pi/extensions/safety"] as const;
 
 /** The one file that does the writing, and the one this rule is really about. */
 const WRITER_FILE = ".pi/lib/jsonl.ts";
 
-/**
- * The sanctioned call, spelled once, in the one file allowed to make it.
- *
- * Asserted PRESENT in the writer, so a change that removed the append along with
- * the stream cannot pass this gate by leaving nothing to object to.
- */
+/** The sanctioned call, asserted present so removing the writer cannot pass by leaving nothing to object to. */
 const SANCTIONED_WRITE = "appendFileSync";
 
-/**
- * Every route to a held file descriptor, each with the reason it is banned.
- *
- * All three are matched against RAW SOURCE, comments included, exactly as
- * BOOT-10's boundary rule and DIAG-03's chokepoint gate are. That is what makes
- * the check survive an alias or a destructured import — and it is why `jsonl.ts`
- * still describes the constructor in words rather than naming it.
- */
+/** Every route to a held file descriptor, matched against raw source (comments included) so aliases cannot hide it. */
 const FORBIDDEN: readonly { readonly pattern: RegExp; readonly why: string }[] = [
 	{
 		pattern: /createWriteStream/,
@@ -110,13 +40,7 @@ const FORBIDDEN: readonly { readonly pattern: RegExp; readonly why: string }[] =
 	},
 ];
 
-/**
- * A synthetic source carrying one offending form per pattern.
- *
- * INLINE, and asserted below never to be read from disk. A fixture file under
- * `.pi/extensions/` would be enumerated by the scan itself and fail the gate it
- * exists to prove.
- */
+/** One offending form per pattern, inline: a fixture file under .pi/extensions/ would fail the gate it proves. */
 const OFFENDING_FIXTURE = [
 	'import { createWriteStream, openSync, appendFile } from "node:fs";',
 	'const s = createWriteStream(file, { flags: "a" });',
@@ -177,10 +101,7 @@ describe("DIAG-08 / SAFE-14 — no writer module opens a stream or a raw descrip
 	});
 
 	it("proves every forbidden pattern is live against an inline offending fixture", () => {
-		// A pattern set proven only against a clean tree is a set that could be
-		// uniformly broken — a stray anchor, an escaping slip during a rename — and
-		// never noticed, because a dead pattern and a clean repository produce
-		// byte-identical output.
+		// A dead pattern and a clean tree produce identical output, so each pattern must fire on something.
 		const dead = FORBIDDEN.filter(({ pattern }) => !pattern.test(OFFENDING_FIXTURE)).map(
 			({ pattern, why }) => `${String(pattern)} — ${why}`,
 		);

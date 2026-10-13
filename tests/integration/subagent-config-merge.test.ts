@@ -1,39 +1,8 @@
 /**
- * WR-01 / WR-02 — `bin/bootstrap.sh#merge_subagent_config` writes into
- * `pi-subagents`' own USER-scope config file, and its only coverage was three
- * greps over the shell source.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE EXISTS
- * ---------------------------------------------------------------------------
- * `merge_subagent_config()` `mkdir -p`s and writes
- * `$PI_AGENT_DIR/extensions/subagent/config.json` — on a real run, the
- * developer's own `~/.pi/agent/...`. Its entire coverage was
- * `bootstrapSource.includes("merge_subagent_config() {")`, a regex that
- * `run_full()`'s body mentions the name, and that the hook path is tracked.
- * **All three pass if the function body is `:`.** None would catch a JSON
- * corruption, a clobbered unrelated key, a non-idempotent write, or a wrong
- * path — while `tests/integration/templates-install.test.ts` already
- * established the exact harness for this and it was not used.
- *
- * WR-02 adds the missing `--check-only` counterpart. `install_safety_extension`
- * has had a paired `report_safety_extension` since T-04-48, whose reasoning is
- * stated inline there: "a stale stub is silently unguarded rather than loudly
- * broken". `merge_subagent_config` writes an ABSOLUTE path into a
- * machine-scope config, so a moved or deleted clone breaks every subagent
- * worktree spawn on the machine, in every repository. The identical hazard got
- * a guard for the safety stub and none here.
- *
- * ---------------------------------------------------------------------------
- * TWO INDEPENDENT GUARDS AGAINST TOUCHING THIS MACHINE
- * ---------------------------------------------------------------------------
- * Inherited verbatim from `templates-install.test.ts`, whose header states the
- * discipline in full. Every run below sets `PI_CODING_AGENT_DIR` to a fresh
- * directory under `os.tmpdir()` AND `KYPI_SKIP_INSTALL=1`, with a stubbed `npm`
- * first on PATH whose invocation log is asserted before anything else. Two
- * guards rather than one, because the cost of either failing alone is running
- * the real installer against the developer's real `~/.pi/agent`. `REPO_ROOT` is
- * a throwaway copy per run, so nothing writes into this repository either.
+ * bin/bootstrap.sh merge_subagent_config writes pi-subagents' user-scope config.json: JSON shape, unrelated keys
+ * preserved, idempotence, and a `--check-only` report that is loud when the configured clone has moved, since that
+ * breaks every subagent worktree spawn on the machine. Every run uses a temp PI_CODING_AGENT_DIR, KYPI_SKIP_INSTALL=1
+ * and a stubbed npm, plus a throwaway REPO_ROOT.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -98,13 +67,7 @@ function runBootstrap(agentDir: string, args: string[], repoCopy: BootstrapRepoC
 	});
 }
 
-/**
- * The stub's own call log, asserted BEFORE anything about the written file.
- *
- * Without it every case here could be an assertion about the developer's REAL
- * npm, and a run that never reached the script at all -- a PATH mistake, a
- * silent spawn failure -- would look identical from the outside.
- */
+/** The stub's call log, asserted first: otherwise a run that never reached the script would look identical. */
 function assertStubWasUsed(run: Run): void {
 	expect(
 		run.log,
@@ -233,9 +196,7 @@ describe("WR-01 -- merge_subagent_config writes the hook wiring, idempotently, w
 
 describe("WR-02 -- --check-only reports the wiring, and fails loudly on a stale one", () => {
 	it("absent config -> WARN with a remedy, and check-only still exits 0", () => {
-		// A machine that has never run the full bootstrap has nothing BROKEN, it
-		// has something not yet DONE. --check-only must exit 0 on a clean runner
-		// (bootstrap's own documented split from --assert-hardening).
+		// A machine that never ran the full bootstrap has nothing broken: --check-only exits 0.
 		const agentDir = tempDir("kypi-agent-");
 		const run = runBootstrap(agentDir, ["--check-only"], bootstrapRepoCopy());
 		assertStubWasUsed(run);
@@ -252,10 +213,7 @@ describe("WR-02 -- --check-only reports the wiring, and fails loudly on a stale 
 		const run = runBootstrap(agentDir, ["--check-only"], repo);
 		assertStubWasUsed(run);
 		expect(run.status, `--check-only must exit 0 on a healthy wiring: ${run.stderr}`).toBe(0);
-		// The SUBAGENT config's own line, not just the substring "(target exists)"
-		// -- report_safety_extension prints that same phrase, so the loose form was
-		// satisfied by a different reporter entirely. Found by the drop-report-call
-		// mutation, which left this case green while the other three went red.
+		// The subagent config's own line: report_safety_extension prints the same "(target exists)" phrase.
 		const reported = run.stdout
 			.split("\n")
 			.filter((line) => line.includes(configPath(agentDir).replace(/\\/g, "/")) && line.includes("(target exists)"));
@@ -267,12 +225,7 @@ describe("WR-02 -- --check-only reports the wiring, and fails loudly on a stale 
 	});
 
 	it("STALE config -- the clone that wrote it is gone -> FATAL, non-zero exit", () => {
-		// This is the whole point of WR-02, and it is the hazard report_safety_
-		// extension already guarded for the safety stub. The config is USER-scope,
-		// so a moved or deleted clone breaks every subagent worktree spawn on the
-		// machine, in every repository -- and whether pi-subagents then fails
-		// loudly or degrades silently is not something this repo controls
-		// (RB-07-01 leg 2 is OUTSTANDING). Loud on THIS side of the boundary.
+		// A moved or deleted clone breaks every subagent worktree spawn; whether pi-subagents fails loudly is not ours, so we are.
 		const agentDir = tempDir("kypi-agent-");
 		mkdirSync(join(agentDir, "extensions", "subagent"), { recursive: true });
 		writeFileSync(

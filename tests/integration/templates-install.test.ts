@@ -1,45 +1,9 @@
 /**
- * PROV-01 / PROV-04 — `bin/bootstrap.sh` installs the two config templates into
- * the directory Pi actually reads, and never destroys a credential that was
- * already there.
- *
- * ---------------------------------------------------------------------------
- * WHY THIS FILE EXISTS
- * ---------------------------------------------------------------------------
- * Pi resolves `models.json` and `auth.json` from the agent directory only
- * [VERIFIED: pi 0.84.1 dist/config.js:423-425; docs/providers.md:111]. There is
- * no project-scope form of either, so `.pi/templates/models-template.json` and
- * `.pi/templates/auth-template.json` are read by NOTHING until the installer
- * puts them somewhere Pi looks. Plan 03-02 proved the two templates are valid
- * documents; this file proves the other half — that they arrive, that arriving
- * twice changes nothing, and above all that arriving does not overwrite
- * `~/.pi/agent/auth.json`, which on a real machine holds live credentials for
- * every provider the user has ever configured. That overwrite is the worst
- * outcome available anywhere in this phase. [threat T-03-06-01]
- *
- * ---------------------------------------------------------------------------
- * TWO INDEPENDENT GUARDS AGAINST TOUCHING THIS MACHINE
- * ---------------------------------------------------------------------------
- * Every run below sets `PI_CODING_AGENT_DIR` to a fresh directory under
- * `os.tmpdir()` **and** `KYPI_SKIP_INSTALL=1`, with a stubbed `npm` first on
- * PATH whose invocation log is asserted. Two guards rather than one, because
- * the cost of either failing alone is running the real installer against the
- * developer's real agent directory and real global npm prefix — a test that
- * forgot a seam would do exactly what this file exists to forbid.
- * [threat T-03-06-05]
- *
- * The single tracked file a full run legitimately writes — `.env.example` — is
- * snapshotted and restored around every case.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE DOES NOT PROVE
- * ---------------------------------------------------------------------------
- * Nothing here contacts a provider and nothing here could: this machine has no
- * credentials. That the installed `models.json` makes DashScope answer is
- * `RB-03-01` / `RB-03-02` and remains OUTSTANDING; that the installed
- * `auth.json` authenticates Bedrock is `RB-03-03`. Case 6 proves only that Pi
- * resolves the credential document offline, which is a statement about Pi and
- * about the template, never about a provider.
+ * `bin/bootstrap.sh` installs the two config templates into the agent directory, the only place Pi reads them, and
+ * never overwrites an existing `auth.json`, which holds live credentials on a real machine. Every run sets
+ * `PI_CODING_AGENT_DIR` to a temp dir and `KYPI_SKIP_INSTALL=1` with a logged npm stub: two guards, so neither alone
+ * can touch this machine. No provider is contacted (RB-03-01..03 stay OUTSTANDING); case 6 only shows Pi resolves the
+ * installed credential document offline.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -77,12 +41,7 @@ interface Run {
 const scratch = scratchDirs();
 const tempDir = scratch.make;
 
-/**
- * A throwaway `REPO_ROOT` for one bootstrap run, registered for cleanup the
- * same way every other scratch directory in this suite is. See
- * `tests/helpers/bootstrap-repo.ts` for why this exists and why it is nested
- * under this repo's own `tmp/` rather than `os.tmpdir()`.
- */
+/** A throwaway REPO_ROOT under this repo's `tmp/`, registered for cleanup (see tests/helpers/bootstrap-repo.ts). */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
 	scratch.track(copy.root);
@@ -90,18 +49,8 @@ function bootstrapRepoCopy(): BootstrapRepoCopy {
 }
 
 /**
- * Run the real script as a subprocess, exactly as a user or CI would.
- *
- * `sh` is spawned with an args array and `shell: false`: it resolves through
- * PATH as a genuine executable on both platforms, unlike the `.cmd` shims that
- * force `shell: true` for `npm` and `pi` (see `tests/helpers/stub-bin.ts`).
- *
- * `repoCopy` defaults to a fresh throwaway `REPO_ROOT` per call (see
- * `bootstrapRepoCopy` / `tests/helpers/bootstrap-repo.ts`), so `SCRIPT_DIR/..`
- * inside the script resolves to that copy and the run's `.env.example` write
- * never reaches the real, tracked file. A caller that needs to pre-seed the
- * copy's `.env.example` before running (case 5c) creates its own copy and
- * passes it in.
+ * Runs the real script against `repoCopy` (a fresh REPO_ROOT copy by default), so its `.env.example` write never
+ * reaches the tracked file. Case 5c pre-seeds its own copy.
  */
 function runFullBootstrap(
 	agentDir: string,
@@ -119,9 +68,7 @@ function runFullBootstrap(
 				PI_CODING_AGENT_DIR: agentDir,
 				// Both guards, every run. [threat T-03-06-05]
 				KYPI_SKIP_INSTALL: "1",
-				// Blanked rather than inherited: an ambient value on the developer's
-				// machine would silently rewrite the base URL under every case that
-				// did not ask for one, and case 5 would then pass by coincidence.
+				// Blanked, not inherited: an ambient value would rewrite the base URL in every case and let case 5 pass by chance.
 				KYPI_DASHSCOPE_BASE_URL: "",
 				...extraEnv,
 			},
@@ -142,13 +89,7 @@ function runFullBootstrap(
 	});
 }
 
-/**
- * The stub's own call log, asserted BEFORE anything about the installed files.
- *
- * Without it every case here could be an assertion about the developer's REAL
- * npm, and a run that never reached the script at all — a PATH mistake, a
- * silent spawn failure — would look identical from the outside.
- */
+/** The stub's call log, asserted first: a run that never reached the script would otherwise look the same. */
 function expectReachedTheScript(run: Run): void {
 	expect(
 		run.log,
@@ -165,14 +106,8 @@ function expectReachedTheScript(run: Run): void {
 }
 
 /**
- * Parse the models template the way `bin/bootstrap.sh` does.
- *
- * WHOLE-LINE ONLY, which is what the template promises in its own header:
- * `models.json` is comment-stripped by Pi (src/core/model-config.ts:261) so
- * every number in it carries its source, but a naive strip of every `//` would
- * eat the `https://` inside `baseUrl`. This duplicates four lines of the
- * installer deliberately — case 1 deep-equals the INSTALLED block against this
- * parse, so a drift between the two strips fails loudly rather than silently.
+ * The models template parsed as the installer does: whole-line comments only, since a naive `//` strip eats
+ * `https://`. Case 1 deep-equals the installed block against this parse, so the two strips cannot drift silently.
  */
 function parseModelsTemplate(text: string): Record<string, unknown> {
 	return JSON.parse(
@@ -212,13 +147,7 @@ function carriesSentinel(node: unknown): boolean {
 	return false;
 }
 
-/**
- * The auth template split the way `merge_auth_json` splits it.
- *
- * Computed from the committed bytes rather than written down as two id lists:
- * a hand-typed list is how an assertion silently stops describing the file it
- * claims to be about. [CR-01]
- */
+/** The auth template split as `merge_auth_json` splits it, computed from the committed bytes, not a typed list. */
 function authTemplatePartition(): { installable: string[]; withheld: string[] } {
 	const tpl = readJson(AUTH_TEMPLATE);
 	const installable: string[] = [];
@@ -230,13 +159,8 @@ function authTemplatePartition(): { installable: string[]; withheld: string[] } 
 }
 
 /**
- * Every environment variable Pi's Bedrock `resolve()` consults, in its own
- * order [VERIFIED: pi-ai 0.84.1 src/providers/amazon-bedrock.ts:54-79].
- *
- * Duplicated from `tests/unit/bedrock-auth.test.ts` for the reason recorded
- * there: a case that blanked only the variable it talks about would still
- * resolve through an ambient bearer token on a machine that has one, and would
- * then pass for the wrong reason.
+ * Every variable Pi's Bedrock `resolve()` consults (pi-ai src/providers/amazon-bedrock.ts:54-79); blanking only one
+ * would let an ambient bearer token answer and pass for the wrong reason.
  */
 const AWS_CHAIN_VARIABLES = [
 	"AWS_BEARER_TOKEN_BEDROCK",
@@ -257,10 +181,7 @@ function scopedAwsEnv(overrides: Record<string, string> = {}): Record<string, st
 }
 
 describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
-	// No real, tracked file is snapshotted here any more: every case below runs
-	// against a throwaway `REPO_ROOT` copy (`bootstrapRepoCopy`), so a full
-	// run's `.env.example` write lands in that copy, not in the committed file.
-	// `scratch` (which every copy's root is also pushed onto) is enough.
+	// Every case runs against a throwaway REPO_ROOT copy, so scratch cleanup is all that is needed.
 	afterEach(scratch.cleanup);
 
 	// One clean install into a directory the script must create, shared by the cases that only read its result.
@@ -348,12 +269,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	}, TIMEOUT_MS);
 
 	it("case 1b -- CR-01: a working ambient AWS_PROFILE survives a bootstrap run", async () => {
-		// THE REGRESSION THIS PHASE SHIPPED AND THIS CASE CLOSES. On a laptop where
-		// `export AWS_PROFILE=...` already made Bedrock work, running bootstrap used
-		// to write the template's placeholder into ~/.pi/agent/auth.json, and Pi
-		// prefers the stored value over the ambient one -- so every subsequent
-		// Bedrock request resolved a profile that does not exist, with no error and
-		// no output saying so.
+		// Pi prefers a stored AWS_PROFILE over the ambient one, so installing the template's placeholder silently broke
+		// Bedrock on a laptop where `export AWS_PROFILE=...` already worked.
 		const agentDir = cleanDir;
 		const run = clean;
 		expectReachedTheScript(run);
@@ -362,15 +279,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		const ambient = "kypi-fixture-ambient-profile";
 		const installedAuth = readJson(join(agentDir, "auth.json"));
 
-		// WHAT PI ACTUALLY REPORTS ON THE AMBIENT BRANCH, read at source rather
-		// than assumed: `resolve()` returns `{ auth: {}, env: credential?.env,
-		// source: credential?.env?.AWS_PROFILE ? "stored credential" : "AWS_PROFILE" }`
-		// [VERIFIED: pi-ai 0.84.1 dist/providers/amazon-bedrock.js:64-71]. So the
-		// ambient value is NEVER echoed back in `env` -- `env` is undefined on that
-		// branch. `source` is the discriminator, and it is the exact field that
-		// flips from "AWS_PROFILE" to "stored credential" the moment a placeholder
-		// is installed. Asserting on `env.AWS_PROFILE === ambient` would be
-		// asserting something Pi cannot produce.
+		// On the ambient branch Pi returns `env: credential?.env` (undefined) and `source: "AWS_PROFILE"`
+		// (pi-ai dist/providers/amazon-bedrock.js:64-71); `source` flips to "stored credential" once a placeholder is stored.
 		await withModelsConfig(
 			{
 				models: join(agentDir, "models.json"),
@@ -408,15 +318,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	}, TIMEOUT_MS);
 
 	it("case 1c -- CR-02: the agent directory and auth.json are created with Pi's own modes", () => {
-		// WHY THIS MATTERS EVEN THOUGH BOOTSTRAP WRITES NO SECRET. Pi creates
-		// ~/.pi/agent 0700 and auth.json 0600, but only when they are ABSENT
-		// [VERIFIED: pi 0.84.1 dist/core/auth-storage.js:21-31 -- both guards are
-		// `if (!existsSync(...))`]. Bootstrap gets there first, so a plain
-		// `mkdir -p` permanently disables that control: Pi re-chmods auth.json on
-		// every write and repairs the FILE at the first `pi auth login`, but it
-		// never re-chmods the DIRECTORY. That directory then holds auth.json,
-		// models.json and Pi's session transcripts at 0755 for the life of the
-		// machine.
+		// Pi creates ~/.pi/agent 0700 and auth.json 0600 only when absent (pi dist/core/auth-storage.js:21-31), and never
+		// re-chmods the directory, so bootstrap creating it first must use the same modes.
 		// cleanDir is a path the script created: mkdtempSync makes 0700 directories, which would pass whatever it did.
 		const agentDir = cleanDir;
 		const run = clean;
@@ -431,12 +334,7 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		).toBe(true);
 
 		if (process.platform === "win32") {
-			// STATED, NOT SKIPPED. Windows has no POSIX mode bits: Node synthesises
-			// 0o666/0o444 from the read-only attribute, so an assertion here would be
-			// about Node's synthesis rather than about the script. The real check runs
-			// on the macos-latest matrix leg. What IS checkable here is that both
-			// paths exist and are the kinds of thing the modes would apply to -- a
-			// script that never created them would look identical to a tightened one.
+			// Windows has no POSIX mode bits, so only existence and kind are checkable; the mode check runs on macOS CI.
 			expect(statSync(agentDir).isDirectory()).toBe(true);
 			expect(statSync(authPath).isFile()).toBe(true);
 			return;
@@ -498,9 +396,7 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		const agentDir = tempDir("kypi-agentdir-");
 		const authPath = join(agentDir, "auth.json");
 
-		// A provider this template has never heard of, plus OUR OWN provider key
-		// holding a value the user chose. Merge-if-absent means absent, never
-		// "absent or different". [threat T-03-06-01]
+		// A foreign provider plus our own key holding a user-chosen value: merge-if-absent means absent, never different.
 		const existing = {
 			"some-other-vendor": { type: "api_key", key: "$KYPI_FIXTURE_FOREIGN_VENDOR_KEY" },
 			dashscope: { type: "api_key", key: "!kypi-fixture-secret-tool --print" },
@@ -610,14 +506,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	it("case 5 -- KYPI_DASHSCOPE_BASE_URL reaches the installed file, never the repo", () => {
 		const agentDir = tempDir("kypi-agentdir-");
 
-		// Loopback-shaped and obviously synthetic: a workspace-dedicated host names
-		// the caller's own workspace id, which is exactly the value that may not
-		// enter a public repository. [threat T-03-06-03]
-		//
-		// https, not http: the installer now refuses a cleartext endpoint outright,
-		// because Pi sends the resolved $DASHSCOPE_API_KEY as a bearer token on
-		// every request (WR-07). Port 9 (discard) is never connected to by this
-		// suite either way -- nothing here issues a request.
+		// Loopback-shaped and synthetic: a workspace host would name a real workspace id. https, because the installer
+		// refuses cleartext (the key is sent as a bearer token); nothing here connects.
 		const dedicated = "https://127.0.0.1:9/compatible-mode/v1";
 		const templateBefore = readFileSync(MODELS_TEMPLATE);
 
@@ -705,14 +595,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	);
 
 	it("case 5c -- WR-06: .env.example with markers out of order is refused, not duplicated", () => {
-		// `ds >= 0 && de >= 0` tested presence and never ORDER. With END above
-		// START the two slices OVERLAP -- cur.slice(0, ds) still contains END, and
-		// cur.slice(de + END.length) still contains START and everything after it
-		// -- so the file gained duplicated content AND duplicated markers, and grew
-		// further on every later run. Written into this case's own throwaway
-		// `REPO_ROOT` copy (`bootstrapRepoCopy`), never into the real, tracked
-		// `.env.example` -- the copy is torn down by the suite's normal
-		// `scratch` cleanup, no restore needed.
+		// Presence alone does not catch END above START: the slices overlap and the file grows on every run. Written into
+		// this case's own REPO_ROOT copy.
 		const START = "# ky-pi-agent managed:start";
 		const END = "# ky-pi-agent managed:end";
 		const scrambled = [
@@ -791,16 +675,8 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 			},
 		);
 
-		// The negative control. Blanking rather than reading process.env is the
-		// recorded technique from plan 03-05: Pi's auth context treats an empty
-		// value as absent, so this asserts machine state instead of depending on it.
-		//
-		// STATED RATHER THAN LEFT IMPLICIT: with the variable blank, Pi resolves
-		// the entry to `undefined` outright rather than to the literal or to an
-		// empty string [VERIFIED: executed 2026-08-13 against this exact pair]. So
-		// the two `not.toBe` assertions below are true but weak on their own, and
-		// the `toBeUndefined` is what carries the case — it is the assertion that
-		// would fail the day the literal started passing through.
+		// Negative control: blanking makes this independent of machine state. With the variable blank Pi resolves the
+		// entry to undefined, so `toBeUndefined` carries the case; the `not.toBe` checks are weak on their own.
 		await withModelsConfig(
 			{
 				models: join(agentDir, "models.json"),
@@ -835,32 +711,12 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 	}, TIMEOUT_MS);
 });
 
-/**
- * A run of 40+ characters drawn only from the token alphabet.
- *
- * Borrowed verbatim from `tests/unit/docs-policy.test.ts:184`. This is a paste
- * guard, not a secret scanner: both templates are public and are edited on a
- * machine that will hold live credentials, and the realistic accident is a
- * terminal paste that carried a token along with the command.
- * [threat T-03-06-04]
- */
+/** A paste guard, not a secret scanner: 40+ token-alphabet characters, as in docs-policy.test.ts. */
 const TOKEN_SHAPED = /[A-Za-z0-9+/=_-]{40,}/g;
 
 /**
- * Runs the paste guard must not report, and why.
- *
- * NARROWED DELIBERATELY, NOT ALLOWLISTED. Two shapes in the models template
- * trip the raw pattern and neither can be a credential:
- *
- *   - a rule line, i.e. one character repeated. `// ---------` opens every
- *     section of the template's header;
- *   - a pure-alphabetic run. `requiresReasoningContentOnAssistantMessages` is
- *     43 characters of the compat vocabulary. Every credential format in scope
- *     here — DashScope `sk-`, DeepSeek `sk-`, AWS `AKIA`, a base64 secret —
- *     carries a digit or a non-alphanumeric, so excluding pure letters excludes
- *     identifiers and prose without excluding tokens.
- *
- * The exclusions are asserted live below, in both directions.
+ * Runs the paste guard must not report: rule lines (one repeated character) and pure-alphabetic identifiers, since
+ * every credential format in scope carries a digit or a non-alphanumeric. Asserted live below, both directions.
  */
 function isStructuralRun(run: string): boolean {
 	return /^(.)\1*$/.test(run) || /^[A-Za-z]+$/.test(run);
@@ -892,15 +748,7 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 		[".pi/templates/auth-template.json", readFileSync(AUTH_TEMPLATE, "utf-8")],
 	];
 
-	// THE WHOLE PARSED DOCUMENT, NOT ONE KEY. This used to read
-	// `templateDashscope()`, i.e. `providers.dashscope` alone, so the value-level
-	// checks never saw anything outside that one sub-object. The text-level
-	// TOKEN_SHAPED scan does cover the whole file but needs a 40+ character run
-	// and excludes pure-alphabetic runs of any length, so a second provider added
-	// to the template with a SHORT key -- `"scratch": { "apiKey": "sk-abc123def456" }`,
-	// 14 characters -- evaded both. `tests/unit/command-interpolation.test.ts`
-	// already walks every leaf of the same file, so the two scans disagreed about
-	// their own scope. [WR-02]
+	// The whole parsed document, not one provider: a short key under a second provider evades the 40-character scan.
 	const parsed: ReadonlyArray<readonly [string, string[]]> = [
 		[
 			".pi/templates/models-template.json",
@@ -920,17 +768,8 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 			expect(values.length, `${path} parsed to zero string values`).toBeGreaterThan(0);
 		}
 
-		// COVERAGE, AND AN HONEST NOTE ABOUT WHAT IT CAN CATCH TODAY. The scanned
-		// set must contain every string value in the document.
-		//
-		// The template currently declares exactly one provider, so a walk of
-		// `providers.dashscope` and a walk of the whole document produce the SAME
-		// set and this assertion cannot distinguish them right now. Stated rather
-		// than dressed up: it is a tripwire for the day a second provider, a model
-		// override or a top-level field is added -- at which point narrowing the
-		// walk fails here loudly. The LIVE proof that the scan walks depth-wise
-		// past one key is case 7b, which drives a document that does discriminate
-		// and shows the old walk missing both plants. [WR-02]
+		// Every string value must be scanned. With one provider today this cannot tell a narrow walk from a full one; it is
+		// a tripwire, and case 7b is the live proof that the walk goes past one key.
 		const scanned = new Set(parsed[0]?.[1] ?? []);
 		const whole = stringValues(parseModelsTemplate(readFileSync(MODELS_TEMPLATE, "utf-8")));
 		expect(
@@ -955,9 +794,7 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 
 	for (const [path, values] of parsed) {
 		it(`case 7 -- ${path} has no credential-shaped value`, () => {
-			// `\b` on the sk- prefix, per the Phase 2 decision: the bare substring
-			// matches ordinary identifiers, and a redactor or scanner that mangles
-			// ordinary text gets disabled rather than fixed.
+			// `\b` on the sk- prefix: the bare substring matches ordinary identifiers.
 			expect(
 				values.filter((value) => /\bsk-/.test(value)),
 				`${path} carries an sk- prefixed value -- that is the shape of both a DashScope ` +
@@ -978,12 +815,7 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 	}
 
 	it("case 7b -- WR-02: the value scan reaches a provider that is not dashscope", () => {
-		// THE PAIRED NEGATIVE FOR THE WIDENED WALK. The committed template is
-		// clean, so every assertion above is a `[] === []` that a one-key walk
-		// satisfies just as well as a whole-document one. This drives a synthetic
-		// document shaped like the evasion the narrow scan allowed: a second
-		// provider whose key is SHORT enough to slip under TOKEN_SHAPED's 40-char
-		// floor and which lives outside providers.dashscope entirely.
+		// Paired negative: a synthetic document with a short key under a second provider, which a one-key walk misses.
 		const evasive = {
 			providers: {
 				dashscope: { name: "DashScope", baseUrl: "https://example.invalid/v1" },
@@ -1021,18 +853,8 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 	});
 
 	it("case 7c -- IN-01: every variable in the env template is one this harness reads", () => {
-		// A NAME IN .env.example IS AN INVITATION TO MINT A CREDENTIAL. The
-		// template used to advertise a personal-access-token variable for a vendor
-		// 03-CONTEXT decision 8 rules out of v1 entirely -- it publishes no
-		// inference endpoint at all, only agent orchestration -- so nothing in this
-		// harness could ever call it and docs/RUNBOOK.md never mentions it. Asking
-		// an operator to create a secret for no reason is the whole of the harm.
-		//
-		// A MECHANISM, NOT AN ALLOWLIST. An allowlist of approved names is a second
-		// copy of the template that drifts from it. The rule is instead: every name
-		// in the managed block must be READ by something tracked outside the two
-		// env templates themselves. A variable nothing consumes has no business
-		// asking for a value. [IN-01]
+		// A name in .env.example invites the operator to mint a credential, so every managed name must be read by something
+		// tracked outside the env templates; a rule, not an allowlist that would drift.
 		const template = readFileSync(join(repoRoot(), ".pi", "templates", "env.example"), "utf-8");
 		const managed = template.slice(
 			template.indexOf("# ky-pi-agent managed:start"),
@@ -1046,21 +868,8 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 				"this case would pass over a template that had been emptied [IN-01]",
 		).toBeGreaterThanOrEqual(4);
 
-		// Everything tracked except the two env templates, which are where the
-		// names are DECLARED rather than consumed.
-		//
-		// AND EXCEPT `tests/`. A test that names a variable is DOCUMENTING A
-		// CHECK, not consuming a credential, so counting it as a consumer lets a
-		// variable certify itself: re-adding an out-of-scope vendor's
-		// personal-access-token line to the template AND naming that string
-		// anywhere under tests/ — a fixture, a table like AWS_CHAIN_VARIABLES, a
-		// comment — makes this case green again, and the operator is back to being
-		// asked to mint a credential for a vendor 03-CONTEXT decision 8 rules out.
-		// Tightening costs nothing today: all four managed names have non-test
-		// consumers (DASHSCOPE_API_KEY and DEEPSEEK_API_KEY in
-		// .pi/templates/auth-template.json, AWS_PROFILE in
-		// .pi/extensions/providers/schema.ts, KYPI_DASHSCOPE_BASE_URL in
-		// bin/bootstrap.sh and docs/RUNBOOK.md). [IN-04]
+		// Consumers exclude the env templates (where names are declared) and tests/, where naming a variable documents a
+		// check and would let a variable certify itself.
 		const consumers = trackedFiles()
 			.filter(
 				(path) =>
@@ -1089,9 +898,7 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 	});
 
 	it("case 7 -- the scan is live: it flags a synthetic token in every shape", () => {
-		// A scan that has only ever seen clean input has never demonstrated that it
-		// can fail. Assembled from pieces so this file never contains a literal
-		// that looks like a key.
+		// Proves the scan can fail; assembled from pieces so this file holds no key-like literal.
 		const synthetic = `sk${"-"}0aB1cD2eF3gH4iJ5kL6mN7oP8qR9sT0uV1wX2yZ3a4b5c6d`;
 		expect(
 			tokenShapedRuns(synthetic),

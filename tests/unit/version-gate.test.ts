@@ -1,32 +1,7 @@
 /**
- * BOOT-04 -- the unpublished-pin gate tells the truth about WHY it failed.
- *
- * Earendil Works unpublishes old versions of `@earendil-works/pi-coding-agent`:
- * 40 versions survive and the oldest is 0.74.0 [VERIFIED: npm registry,
- * executed 2026-08-13]. A pinned harness therefore has a real, non-hypothetical
- * failure mode -- the pin evaporates -- and the bootstrap must say so in a way
- * that names the version and the way out.
- *
- * ---------------------------------------------------------------------------
- * The discrimination is on the literal E404 token, NOT on the exit code
- * ---------------------------------------------------------------------------
- * Both failure shapes exit non-zero, so the exit code carries no information
- * about which one happened [VERIFIED: executed 2026-08-13, npm 11.13.0]:
- *
- *   npm view <pkg>@1.1.0 version --json  -> exit 0, stdout `"1.1.0"`
- *   npm view <pkg>@0.73.0 version --json  -> exit 1, stdout
- *       {"error":{"code":"E404","summary":"No match found for version 0.73.0"}}
- *   registry unreachable                  -> exit 1, no E404 anywhere
- *
- * A gate that treats "non-zero" as "unpublished" therefore tells a user on a
- * flaky connection that Pi has been withdrawn, and sends them off to edit a
- * perfectly good pin -- a worse outcome than having no gate at all, because it
- * manufactures a supply-chain change out of a dropped packet. RESEARCH.md 3.2
- * flags this as the critical nuance; case 3 below is what holds the line.
- *
- * Case 1 touches the real registry deliberately. A registry outage is a genuine
- * failure of this test, not a reason to skip: a silently-skipped supply-chain
- * check is a green run that verified nothing.
+ * The unpublished-pin gate says why it failed. npm view exits non-zero both for an unpublished version and for an
+ * unreachable registry, so the gate reads the literal E404 token: treating any failure as unpublished would send a
+ * user on a flaky network off to edit a good pin. Case 1 uses the real registry; an outage fails it, never skips it.
  */
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
@@ -50,15 +25,7 @@ interface Run {
 	status: number | null;
 }
 
-/**
- * Invoke the gate exactly the way a user or CI would: as a subprocess, through
- * `sh`, with no in-process reimplementation of the logic under test.
- *
- * `sh` is spawned with an args array and `shell: false`. That is safe here and
- * elsewhere is not: `sh` resolves through PATH as a real executable on both
- * platforms (Git Bash ships `sh.exe`), unlike the `.cmd` shims that force
- * `shell: true` for `npm`/`pi` -- see the CVE-2024-27980 note in stub-bin.ts.
- */
+/** Runs the gate as a subprocess through `sh`, which is a real executable on both platforms, so no shell is needed. */
 function runCheckVersion(opts: { pinned?: string; env?: NodeJS.ProcessEnv } = {}): Run {
 	const env: NodeJS.ProcessEnv = { ...(opts.env ?? process.env) };
 	if (opts.pinned !== undefined) {
@@ -80,11 +47,7 @@ function runCheckVersion(opts: { pinned?: string; env?: NodeJS.ProcessEnv } = {}
 
 describe("BOOT-04 -- the pinned Pi version gate", () => {
 	it("case 1: a published pin passes", () => {
-		// 1.1.0 is `latest` and is the pin the harness actually ships
-		// [VERIFIED: npm dist-tags, 2026-10-13]. If this goes red, either the
-		// registry is down or Earendil has unpublished the version this project
-		// is built on -- both are things a human must look at, so it must not be
-		// downgraded to a skip.
+		// 1.1.0 is the shipped pin; red means the registry is down or the version was withdrawn, both for a human.
 		const run = runCheckVersion({ pinned: "1.1.0" });
 
 		expect(run.status, `stderr: ${run.stderr}`).toBe(0);
@@ -111,13 +74,7 @@ describe("BOOT-04 -- the pinned Pi version gate", () => {
 	}, TIMEOUT_MS);
 
 	it("case 3: an unreachable registry is not reported as an unpublished pin", () => {
-		// A stub `npm` that fails the way a dead network fails: non-zero exit, a
-		// connection error on stderr, and -- the part that matters -- nothing
-		// anywhere in its output containing E404.
-		//
-		// Stubbed rather than simulated by manipulating the real network: taking
-		// this machine offline is not something a test may do, and a test that
-		// only passes when someone pulls the cable is a test that never runs.
+		// A stub npm that fails like a dead network: non-zero exit, a connection error, and no E404 anywhere.
 		const npmStub = {
 			exitCode: 1,
 			stdout: "",
@@ -135,9 +92,7 @@ describe("BOOT-04 -- the pinned Pi version gate", () => {
 		// It still fails -- an unverifiable pin is not a verified pin.
 		expect(run.status, `stdout: ${run.stdout}`).not.toBe(0);
 
-		// But it must not claim the pin was withdrawn. This assertion is the
-		// entire reason the gate reads the E404 token instead of the exit code;
-		// swap that for a bare non-zero check and this line goes red.
+		// The reason the gate reads E404 rather than the exit code.
 		expect(run.stderr).not.toMatch(/unpublish|yanked|no longer published/i);
 
 		// And it must say something the user can act on.

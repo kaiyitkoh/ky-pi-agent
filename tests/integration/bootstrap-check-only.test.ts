@@ -1,30 +1,7 @@
 /**
- * BOOT-03 -- the bootstrap reports every probe, and re-running it changes
- * nothing.
- *
- * ---------------------------------------------------------------------------
- * These tests deliberately never assert on real machine state
- * ---------------------------------------------------------------------------
- * The developer's `~/.pi/agent`, their global npm prefix and their `gh` login
- * are all OUT OF SCOPE here, and none of them may be read or mutated. Every
- * case redirects `PI_CODING_AGENT_DIR` at a fresh directory under
- * `os.tmpdir()`, so the user-scope half of the script operates entirely inside
- * a throwaway tree. [threat T-01-07]
- *
- * That redirection is not hygiene, it is correctness. `bin/bootstrap.sh` was
- * run for real against this machine's `~/.pi/agent` during Plan 05, so
- * `~/.pi/agent/npm/.npmrc` NOW EXISTS and is hardened. A test that wanted to
- * observe the *unhardened* user scope and forgot to redirect would pass -- for
- * entirely the wrong reason, and it would then keep passing on a machine where
- * the control had been deleted.
- *
- * ---------------------------------------------------------------------------
- * Why byte-equality rather than "looks the same"
- * ---------------------------------------------------------------------------
- * `--check-only` is a CI gate. A gate whose output drifts between two runs on
- * an unchanged machine cannot be diffed, cannot be cached, and cannot be used
- * to answer "did anything change since the last run". Case 2 is what forbids a
- * timestamp, a duration or a run counter from ever creeping into it.
+ * The bootstrap reports every probe, and --check-only is inert and byte-identical across runs, so CI can diff it.
+ * Every case points PI_CODING_AGENT_DIR at a temp dir: this machine's real agent dir is already hardened, so an
+ * unredirected test would pass for the wrong reason.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
@@ -40,12 +17,7 @@ import { withStubBin } from "../helpers/stub-bin.ts";
 const scratch = scratchDirs();
 const tempDir = scratch.make;
 
-/**
- * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
- * the same way every other scratch directory in this suite is. See
- * `tests/helpers/bootstrap-repo.ts`: a full run's `write_env_template` would
- * otherwise write the real, tracked `.env.example`.
- */
+/** A throwaway REPO_ROOT for a full run, which would otherwise write the tracked `.env.example`. */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
 	scratch.track(copy.root);
@@ -89,27 +61,16 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
-		// `glab` is the load-bearing name here: it is absent on this machine and
-		// on both CI runners (GitLab work is Phase 4/9 and lives on the work
-		// laptop). It must still be NAMED on every run, because a probe table
-		// that silently omits the tools you do not have tells you nothing about
-		// what the harness expects.
+		// `glab` is absent here and on CI, yet must still be named: a table omitting missing tools says nothing.
 		expect(run.stdout, "every probed tool must be named, present or not").toContain("glab");
 
-		// And it must be named with its requirement class, because that is the
-		// difference between "install this or nothing works" and "warn and move
-		// on". A missing optional tool must never abort the run -- which exit 0
-		// above, on a machine with no `glab`, is exactly the proof of.
+		// Named with its requirement class; exit 0 above, without glab, proves a missing optional tool never aborts.
 		expect(run.stdout, "the probe table must render the requirement class").toContain("optional");
 		expect(run.stdout).toContain("required");
 	});
 
 	it("case 2 -- two consecutive `--check-only` runs are byte-identical", () => {
-		// ONE agent dir for both runs, deliberately. The script correctly echoes
-		// the user-scope path it is checking, so two different temp dirs would
-		// differ in output for an honest reason and prove nothing. Holding every
-		// input fixed is what makes any remaining difference a defect: a
-		// timestamp, an elapsed time, a counter, a hash of something volatile.
+		// One agent dir for both runs, since the path is echoed: any remaining difference is a defect.
 		const agentDir = tempDir("kypi-agentdir-");
 
 		const first = runBootstrap(["--check-only"], { agentDir });
@@ -123,9 +84,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 				"so nothing time-varying may appear in it",
 		).toBe(first.stdout);
 
-		// Belt and braces on the specific defect class: a date or a clock time
-		// would satisfy nothing above if both runs happened inside the same
-		// second, which is entirely possible on a fast machine.
+		// Both runs may land in the same second, so a date or clock time is checked for directly.
 		expect(first.stdout, "no ISO date may appear in check-only output").not.toMatch(
 			/\d{4}-\d{2}-\d{2}/,
 		);
@@ -143,11 +102,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		const run = runBootstrap(["--check-only"], { agentDir });
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
-		// The whole value of `--check-only` as a CI gate is that it is inert.
-		// Writing even one file -- notably the user-scope `.npmrc` that the full
-		// run legitimately writes -- would make it impossible to use as a
-		// read-only assertion, and would make case 2 pass for the wrong reason
-		// on the second run.
+		// --check-only must write nothing, not even the user-scope .npmrc a full run writes.
 		expect(
 			listRecursive(agentDir),
 			"--check-only must not create the user-scope npm root it reports on",
@@ -164,10 +119,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		const agentDir = tempDir("kypi-agentdir-");
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "npm.log").replace(/\\/g, "/");
-		// A throwaway `REPO_ROOT` -- this is a FULL run, and `write_env_template`
-		// would otherwise write the real, tracked `.env.example`. Its own
-		// `.env.example` (`repoCopy.envExample`) is what the assertions below
-		// read; the copy is torn down by this suite's normal `scratch` cleanup.
+		// A full run against a throwaway REPO_ROOT; its own `.env.example` is what the assertions read.
 		const repoCopy = bootstrapRepoCopy();
 
 		const { first, second, envAfterFirst, envAfterSecond } = withStubBin(
@@ -197,10 +149,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(first.status, `first run stderr:\n${first.stderr}`).toBe(0);
 		expect(second.status, `second run stderr:\n${second.stderr}`).toBe(0);
 
-		// The stub's own call log. Without this the whole case could be an
-		// assertion about the developer's REAL npm: a PATH-ordering mistake
-		// would look identical from the outside, right up to the point where
-		// it installed something globally.
+		// The stub's call log proves the real npm was never reached.
 		const logged = readFileSync(log, "utf-8");
 		expect(logged, "the stubbed npm must be the npm the script consulted").toContain(
 			"npm config get ignore-scripts",

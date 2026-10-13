@@ -1,26 +1,8 @@
 /**
- * SAFE-01's offline proxy -- a REAL server-side `pre-receive` hook, and the
- * harness's own classifier for what a push rejection means.
- *
- * WHAT THIS PROVES. That the harness reads and correctly classifies a
- * server-side push rejection: a real `git push`, against a real local bare
- * repository, refused by a real `pre-receive` hook running as a real
- * subprocess -- not a fixture string handed straight to the classifier. The
- * paired control (case 2) proves the hook is not simply rejecting everything,
- * and the ordinary-failure case (case 4) proves the classifier is not simply
- * answering "protected-branch-rejection" for every non-zero exit.
- *
- * WHAT THIS DOES NOT PROVE. Anything at all about whether GitLab is actually
- * configured with protected branches and push rules on the work laptop. That
- * is `RB-04-01` in `docs/RUNBOOK.md`, and it stays OUTSTANDING -- this file is
- * the offline proxy the runbook entry names, not the check itself.
- *
- * WHY THIS IS NEW COMPOSITION, NOT REUSE. No existing test in this repo drives
- * a real server-side git hook. This composes `tests/helpers/git.ts`'s spawn
- * discipline (`spawnSync(..., { shell: false, windowsHide: true })`) and
- * `tests/helpers/stub-bin.ts`'s disposable-directory-with-cleanup shape, the
- * same way `tests/integration/git-head-main.test.ts` composed them for a
- * disposable CHECKOUT rather than a disposable SERVER.
+ * Offline proxy for protected-branch push rejection: a real `git push` to a real local bare repository, refused by a
+ * real `pre-receive` hook, then classified by the harness. Paired controls show the hook does not reject everything
+ * and the classifier does not call every failure a protected-branch rejection. Whether GitLab is actually configured
+ * that way is RB-04-01 in docs/RUNBOOK.md, still OUTSTANDING.
  */
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -39,17 +21,8 @@ function configureIdentity(dir: string): void {
 }
 
 /**
- * A `pre-receive` hook, written POSIX `sh`, LF-only, with GitLab's own
- * protected-branch rejection wording REPRODUCED (not captured -- this
- * machine has no GitLab access) so the classifier under test is exercised
- * against realistic text rather than a string this repo invented for itself.
- *
- * No `[[`, no `local`, no `declare`, no arrays, no `function` keyword -- the
- * same bashism set `tests/unit/lf-and-shell.test.ts` scans tracked scripts
- * for. This one is written at runtime into a temp dir outside the repo, so it
- * is never scanned by that gate, but it is held to the same shape anyway
- * because a hook that only runs under bash-in-POSIX-mode is not the proxy the
- * plan asked for.
+ * A POSIX-sh, LF-only `pre-receive` hook reproducing GitLab's protected-branch wording (this machine has no GitLab),
+ * free of bashisms like every tracked script.
  */
 const PRE_RECEIVE_HOOK = [
 	"#!/bin/sh",
@@ -81,9 +54,7 @@ function makeBareRepoWithHook(dir: string): void {
 
 	const initWithB = gitResult(["init", "--bare", "-b", "main"], dir);
 	if (initWithB.status !== 0) {
-		// Older git without `-b` on `init`: init plainly, then force the default
-		// ref before any push can create one, per the git-head-main.test.ts
-		// precedent -- never rely on this machine's init.defaultBranch.
+		// Older git has no `init -b`: force the default ref, never relying on init.defaultBranch.
 		runGit(["init", "--bare"], dir);
 		runGit(["symbolic-ref", "HEAD", "refs/heads/main"], dir);
 	}
@@ -110,16 +81,12 @@ describe("SAFE-01 offline proxy -- a real server-side pre-receive hook, parsed c
 
 		runGit(["clone", bareDir, workA], base);
 		configureIdentity(workA);
-		// Force the branch name explicitly, never trust init.defaultBranch/clone
-		// inference, per the plan's explicit instruction (mirrors
-		// git-head-main.test.ts's makeCommittedRepo).
+		// Force the branch name; never trust init.defaultBranch or clone inference.
 		runGit(["symbolic-ref", "HEAD", "refs/heads/main"], workA);
 	});
 
 	afterAll(() => {
-		// Windows-handle convention (tests/integration/jsonl-concurrency.test.ts,
-		// tests/integration/git-head-main.test.ts): force + retry, since a git
-		// process's file handle can linger briefly after it exits.
+		// Force and retry: a git process's file handle can linger briefly on Windows.
 		rmSync(base, { recursive: true, force: true, maxRetries: 3 });
 	});
 
@@ -140,9 +107,7 @@ describe("SAFE-01 offline proxy -- a real server-side pre-receive hook, parsed c
 	});
 
 	it("case 2 (paired control) -- a push to a NON-protected branch, against the SAME repo and hook, SUCCEEDS", () => {
-		// Without this case, case 1's rejection is equally consistent with a hook
-		// that rejects EVERYTHING, or with a broken clone. Same bare repo, same
-		// hook, only the target ref differs.
+		// Same repo and hook, different ref: without this, case 1 is consistent with a hook that rejects everything.
 		runGit(["checkout", "-b", "feature/allowed"], workA);
 		writeFileSync(join(workA, "feature.txt"), "feature commit A\n", "utf-8");
 		runGit(["add", "feature.txt"], workA);
@@ -161,11 +126,7 @@ describe("SAFE-01 offline proxy -- a real server-side pre-receive hook, parsed c
 	});
 
 	it("case 4 -- an ORDINARY failure (non-fast-forward) classifies differently -- the classifier is not one-directional", () => {
-		// A one-directional assertion here would pass on a classifier that
-		// returns "protected-branch-rejection" for everything. This produces a
-		// REAL non-fast-forward rejection -- no hook involved, git's own
-		// receive-pack refuses a non-ff update -- by diverging two clones of the
-		// same non-protected branch.
+		// A real non-fast-forward rejection with no hook, so a classifier that always says protected-branch fails.
 		runGit(["clone", bareDir, workB], base);
 		configureIdentity(workB);
 		runGit(["checkout", "feature/allowed"], workB);

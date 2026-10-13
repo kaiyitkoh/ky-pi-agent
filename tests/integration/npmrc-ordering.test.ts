@@ -1,38 +1,8 @@
 /**
- * BOOT-01 (ordering) -- `ignore-scripts=true` is asserted BEFORE the first
- * install, proven by recorded execution order.
- *
- * ---------------------------------------------------------------------------
- * Why a log, and not reading the script
- * ---------------------------------------------------------------------------
- * "Asserts it holds *before* its first `pi install`" is a claim about
- * EXECUTION order. Source order is a proxy for it, and a lossy one: a
- * conditional branch, an early `return`, a `trap`, a function moved between
- * call sites, or a later refactor that hoists the install into a helper can all
- * reorder execution without reordering a single line in the file. Opening
- * `bin/bootstrap.sh` and agreeing the lines look right is therefore an opinion
- * about the source, not evidence about the run.
- *
- * So: stub `npm` and `pi`, have every invocation append its own name and full
- * argv to one shared log, run the real script, and read the order out of the
- * log. The proof is a recording of what actually happened.
- *
- * The comparison is deliberately the LAST `npm config get ignore-scripts`
- * against the FIRST install, not first-against-first. The script asserts three
- * scopes; if any one of them ran after an install, the guarantee is broken for
- * that scope, and a first-against-first comparison would happily miss it.
- *
- * ---------------------------------------------------------------------------
- * Vacuity is the failure mode this test has to defend against
- * ---------------------------------------------------------------------------
- * `Math.max(...[]) < Math.min(...[])` is `-Infinity < Infinity` -- true. An
- * ordering assertion over an empty log passes with flying colours while
- * proving nothing at all. Both categories are therefore asserted non-empty
- * before the indices are compared. [threat T-01-19]
- *
- * No case here touches the developer's real `~/.pi/agent` or their global npm
- * prefix: `PI_CODING_AGENT_DIR` is redirected under `os.tmpdir()` throughout,
- * and the one case that reaches `install_pi` reaches a stub. [threat T-01-07]
+ * `ignore-scripts=true` is asserted before the first install, proven by recorded execution order: stubbed `npm` and
+ * `pi` append their argv to one log while the real script runs. The last config check is compared against the first
+ * install, so any one late scope fails. Both categories are asserted non-empty first, since an ordering check over an
+ * empty log is `-Infinity < Infinity`. Nothing touches the real agent dir or global npm prefix.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -47,29 +17,13 @@ import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
 const scratch = scratchDirs();
 const tempDir = scratch.make;
 
-/**
- * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
- * the same way every other scratch directory in this suite is. See
- * `tests/helpers/bootstrap-repo.ts`: a full run's `write_env_template` would
- * otherwise write the real, tracked `.env.example`.
- */
+/** A throwaway REPO_ROOT for one full run, so `write_env_template` never writes the tracked `.env.example`. */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
 	scratch.track(copy.root);
 	return copy;
 }
 
-/**
- * BootstrapRun the real script as a subprocess.
- *
- * `sh` takes an args array with `shell: false` -- it is a genuine executable on
- * both platforms (Git Bash ships `sh.exe`), unlike the `.cmd` shims that force
- * `shell: true` for `npm`/`pi` (CVE-2024-27980 note in stub-bin.ts).
- *
- * `repoCopy`, when given, redirects `SCRIPT_DIR/..` (and the subprocess
- * `cwd`) at a throwaway copy instead of the real repo -- see
- * `bootstrapRepoCopy`.
- */
 /** Whether `sh` hands an inherited `key` on to the programs it runs. */
 function shPassesToChildren(key: string): boolean {
 	const r = spawnSync("sh", ["-c", "env"], {
@@ -86,41 +40,10 @@ function piStub(logTo: string): StubSpec {
 }
 
 /**
- * BOOT-01 (sanitiser) -- `npm_config_*` in the environment can never produce a
- * pass for a scope that has no file behind it.
- *
- * npm ranks environment config ABOVE every `.npmrc`, and `npm run`/`npx` export
- * the whole resolved config into their children. So a probe that does not strip
- * `npm_config_*` measures its own launcher rather than the file under test, and
- * `--assert-hardening` would certify a control it never exercised.
- *
- * This has now been a live defect TWICE, and neither time did a test catch it:
- *
- *   01-06  the strip was lower-case only. A Node runner hands children the keys
- *          UPPER-cased, and Windows env names are case-insensitive, so
- *          `NPM_CONFIG_IGNORE_SCRIPTS=true` sailed through.
- *   CR-03-era review (CR-01)  the strip's character class was `[A-Za-z0-9_]`,
- *          which excludes `-`. `npm_config_ignore-scripts=true` -- npm's own
- *          canonical spelling -- matched nothing, was neither unset nor
- *          reported, and `--assert-hardening` printed "All npm scopes are
- *          hardened" for an empty directory. `unset` cannot fix that one: under
- *          `dash` a special-builtin error kills the shell even inside
- *          `|| true` (rc=2), so the script must REFUSE instead.
- *
- * The reason neither was caught is that the only coverage was incidental --
- * `case 1` below happens to run under vitest, which happens to export
- * `NPM_CONFIG_IGNORE_SCRIPTS`. That is a property of the launcher, not an
- * assertion. BootstrapRun the suite from a runner that does not export those keys and
- * the guard silently evaporates. Hence this table: one row per poison shape,
- * asserted explicitly.
- *
- * Two-directional, per the repo's own rule that every control assertion ships
- * with the case that must fail:
- *   - unhardened dir + poison  -> MUST exit 1 (no false certification)
- *   - hardened dir + strippable poison -> MUST exit 0 (the strip really strips;
- *     without this, a script that failed unconditionally would pass the first)
- *   - hardened dir + un-unsettable poison -> MUST exit 1 AND name the key (the
- *     refusal is deliberate, not an accident of the directory being empty)
+ * Environment `npm_config_*` outranks every `.npmrc`, so it must never certify a scope with no file behind it. Both
+ * an upper-cased key and npm's hyphenated spelling once slipped through. One row per poison shape: an unhardened dir
+ * must exit 1; a hardened dir with strippable poison must exit 0; an un-unsettable key (`unset` kills dash) must exit
+ * 1 and name the key.
  */
 describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent control", () => {
 	afterEach(scratch.cleanup);
@@ -133,11 +56,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 		return dir;
 	}
 
-	/**
-	 * Every shape npm honours. `strippable` records whether a POSIX shell can
-	 * `unset` the name at all -- which is what decides between "strip it and
-	 * carry on" and "refuse, because we cannot".
-	 */
+	/** Every shape npm honours; `strippable` is whether a POSIX shell can `unset` the name at all. */
 	const POISON: ReadonlyArray<{
 		readonly key: string;
 		readonly why: string;
@@ -192,11 +111,8 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 
 	for (const { key, why } of POISON.filter((p) => p.strippable)) {
 		it(`strips ${key} and lets the FILE answer (${why})`, () => {
-			// The paired positive. Without it the row above is satisfied by a
-			// script that fails whenever any npm_config_* is present -- which is
-			// not a sanitiser, it is a brick, and it would break every run under
-			// `npm test`. Note the poison says `false` here: if it were NOT
-			// stripped, npm would answer `false` and the run would exit 1.
+			// Paired positive: a script that failed on any npm_config_* would pass the row above. The poison says `false`,
+			// so an unstripped key would make the run exit 1.
 			const run = runBootstrap(["--assert-hardening"], {
 				agentDir: hardenedAgentDir(),
 				env: { ...(process.env as Record<string, string>), [key]: "false" },
@@ -213,12 +129,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 
 	for (const { key, why } of POISON.filter((p) => !p.strippable)) {
 		it(`refuses even a HARDENED root when ${key} is set (${why})`, () => {
-			// The discriminating case. The empty-directory rows above would also
-			// pass if the refusal were merely the ordinary "no .npmrc here"
-			// failure. This one has a real, correct control file on disk, so the
-			// only thing that can produce a non-zero exit is the sanitiser
-			// deliberately refusing -- and it must say which key it choked on,
-			// because the operator cannot `unset` these and needs to know why.
+			// A correct control file is on disk, so only a deliberate refusal can exit non-zero, and it must name the key.
 			const run = runBootstrap(["--assert-hardening"], {
 				agentDir: hardenedAgentDir(),
 				env: { ...(process.env as Record<string, string>), [key]: "true" },
@@ -247,9 +158,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 	}
 
 	it("passes on a hardened root with no poison at all (the baseline is live)", () => {
-		// Anchors the whole table: if this failed, every "exits 1" row above
-		// would be vacuous, because the run would exit 1 for reasons unrelated
-		// to any environment variable.
+		// Anchors the table: if this failed, every exits-1 row would be vacuous.
 		const run = runBootstrap(["--assert-hardening"], { agentDir: hardenedAgentDir() });
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain("All npm scopes are hardened");
@@ -260,11 +169,7 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 	afterEach(scratch.cleanup);
 
 	it("case 1 -- `--assert-hardening` refuses on an unhardened npm root", () => {
-		// An EMPTY temp dir is the whole point. The full bootstrap was run for
-		// real on this machine during Plan 05, so `~/.pi/agent/npm/.npmrc` now
-		// exists and is hardened; asserting against the real home directory would
-		// pass for entirely the wrong reason and would keep passing after someone
-		// deleted the control.
+		// An empty temp dir: the real ~/.pi/agent/npm/.npmrc is hardened on this machine and would pass for the wrong reason.
 		const run = runBootstrap(["--assert-hardening"], { agentDir: tempDir("kypi-agentdir-") });
 
 		expect(run.status, `stdout:\n${run.stdout}`).toBe(1);
@@ -275,9 +180,7 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 	});
 
 	it("case 2 -- `--assert-hardening` passes once the control is written", () => {
-		// The paired positive. Without it, case 1 would be satisfied by a script
-		// that fails unconditionally -- which is not a control, it is a brick.
-		// Same command, same temp root, one file added.
+		// Paired positive: same command and root, one file added; otherwise a script failing unconditionally passes.
 		const agentDir = tempDir("kypi-agentdir-");
 
 		const before = runBootstrap(["--assert-hardening"], { agentDir });
@@ -295,18 +198,11 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 		const agentDir = tempDir("kypi-agentdir-");
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "invocations.log").replace(/\\/g, "/");
-		// A throwaway `REPO_ROOT` -- this is the only case that lets the script
-		// reach a full run, and `write_env_template` would otherwise write the
-		// real, tracked `.env.example`. Torn down by this suite's normal
-		// `scratch` cleanup, no restore needed.
+		// A throwaway REPO_ROOT: this case reaches a full run, which writes .env.example.
 		const repoCopy = bootstrapRepoCopy();
 
 		const run = withStubBin({ npm: bootstrapNpmStub(log), pi: piStub(log) }, (env) => {
-			// PRE-FLIGHT GUARD, not decoration. This case is the only one that
-			// lets the script reach `install_pi` for real, so if the stub were
-			// not the `npm` on PATH the script would run
-			// `npm install -g @earendil-works/pi-coding-agent@1.1.0` against
-			// the developer's real global prefix. Fail before that can happen.
+			// Pre-flight guard: this case reaches install_pi, so a missing stub would run a real global npm install.
 			const which = spawnSync("sh", ["-c", "command -v npm"], {
 				env,
 				encoding: "utf-8",
@@ -342,9 +238,7 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 			}
 		});
 
-		// Non-emptiness FIRST. Math.max of an empty array is -Infinity and
-		// Math.min of an empty array is Infinity, so the comparison below
-		// passes trivially on a log that recorded nothing. [threat T-01-19]
+		// Non-emptiness first: Math.max/min of an empty array make the comparison trivially true.
 		expect(
 			assertions.length,
 			`no \`npm config get ignore-scripts\` was recorded; log was:\n${lines.join("\n")}`,

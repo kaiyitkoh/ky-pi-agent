@@ -1,47 +1,8 @@
 /**
- * CR-01 -- a standing denylist scan over every TRACKED file, so the real
- * account-identifying strings that were committed during Phase 7 cannot be
- * re-introduced silently.
- *
- * ---------------------------------------------------------------------------
- * WHAT HAPPENED, AND WHY THIS FILE EXISTS
- * ---------------------------------------------------------------------------
- * Plan 07-10 verified the install gate's pre-authorisation ground (a) -- "this
- * dev machine has no credentials" -- by running `aws sts get-caller-identity`
- * and found it FALSE. That finding is correct, important, and must survive.
- * What must NOT survive is the way it was recorded: the real 12-digit AWS
- * account number, the full IAM principal ARN and the named admin profile were
- * written verbatim into `docs/EXTENSIONS.md`, `docs/RUNBOOK.md` and three
- * `.planning/` artifacts, in a repository `CLAUDE.md` describes as public.
- *
- * None of it is a secret in the API-key sense. Jointly it is precise targeting
- * information: an account id is the first thing needed for cross-account role
- * enumeration, and "plaintext long-lived admin keys live on this laptop" names
- * the highest-value target on the machine. `PROJECT.md`'s constraint is
- * unqualified -- "Public repo. No credential may ever be committed. Structure
- * complete, values injected at runtime."
- *
- * Every occurrence has been redacted. This file is what stops the next one.
- *
- * ---------------------------------------------------------------------------
- * WHY THE NEEDLES ARE ASSEMBLED FROM FRAGMENTS
- * ---------------------------------------------------------------------------
- * A denylist that spells its own denied strings is a tracked file containing
- * them -- it would either match itself, or need an exemption, and an exempted
- * file is exactly where a re-introduction would hide. Every literal below is
- * built by joining fragments at run time, so this file scans itself with no
- * carve-out at all. `tests/unit/redact.test.ts:61` already uses this idiom for
- * its Slack-token fixture; this is the same trick for the same reason.
- *
- * ---------------------------------------------------------------------------
- * BOTH DIRECTIONS
- * ---------------------------------------------------------------------------
- * Direction 1 scans the real tracked tree and must find nothing. On its own
- * that assertion passes for a scanner that matches nothing at all -- the
- * green-but-vacuous shape this repository has been bitten by before. So
- * Direction 2 runs the SAME scanner over a synthetic corpus that carries every
- * needle and asserts each one is reported, and Direction 3 asserts the real
- * scan actually read a non-trivial number of files.
+ * A standing denylist scan over every tracked file, so redacted account-identifying strings (an AWS account id, an
+ * IAM principal ARN, an admin profile name) cannot return to this public repo. Needles are assembled from fragments
+ * at run time, so this file scans itself with no exemption. A synthetic corpus proves the scanner finds each needle,
+ * and a file-count floor proves the real scan read the tree.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -50,22 +11,13 @@ import { describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 
-/**
- * One denied string, assembled at run time.
- *
- * `label` is what a failure message says, so a developer who trips this knows
- * WHICH class of identifier they re-introduced without the message itself
- * printing the identifier into CI logs.
- */
+/** One denied string, assembled at run time; `label` names the class in failures without printing the identifier. */
 interface DeniedLiteral {
 	readonly label: string;
 	readonly needle: string;
 }
 
-/**
- * The literals redacted by CR-01. Assembled from fragments -- see this file's
- * header for why. Case-insensitive matching is applied at the scan site.
- */
+/** The redacted literals, assembled from fragments and matched case-insensitively. */
 const DENIED_LITERALS: readonly DeniedLiteral[] = [
 	{
 		label: "the developer's real 12-digit AWS account number",
@@ -77,17 +29,11 @@ const DENIED_LITERALS: readonly DeniedLiteral[] = [
 	},
 ];
 
-/**
- * Structural patterns. Unlike {@link DENIED_LITERALS} these generalise beyond
- * the one incident: ANY real AWS account ARN in a tracked file is the same
- * mistake, whoever's account it names.
- */
+/** Structural patterns that generalise beyond one incident: any real AWS account ARN is the same mistake. */
 const DENIED_PATTERNS: readonly { label: string; pattern: RegExp }[] = [
 	{
 		label: "a real AWS IAM ARN (arn:aws:iam:: followed by a 12-digit account id)",
-		// Rebuilt from fragments for the same reason the literals are: the redacted
-		// placeholder form `arn:aws:iam::<redacted>:user/<redacted>` must stay
-		// legal, and only the digit form must not.
+		// From fragments too: the `<redacted>` placeholder form stays legal, only the digit form must not.
 		pattern: new RegExp(["arn:aws:", "iam::", "\\d{12}"].join(""), "i"),
 	},
 ];
@@ -111,11 +57,7 @@ function scan(files: readonly { path: string; text: string }[]): string[] {
 	return hits;
 }
 
-/**
- * Tracked text files, read from disk. Binary-ish paths are skipped by
- * extension rather than by content sniffing -- the denied strings are all
- * ASCII, so a `.png` cannot carry one in a form this scan would need to see.
- */
+/** Tracked text files from disk; binaries skipped by extension, since every needle is ASCII. */
 const BINARY_EXTENSIONS = [".png", ".jpg", ".jpeg", ".gif", ".ico", ".woff", ".woff2", ".pdf"];
 
 function trackedTextFiles(): { path: string; text: string }[] {
@@ -142,10 +84,7 @@ describe("CR-01 -- no account-identifying string may live in a tracked file", ()
 	});
 
 	it("Direction 2 -- the same scanner reports every needle when one is genuinely present", () => {
-		// Vacuity guard. Direction 1 alone is satisfied by a scanner that matches
-		// nothing -- a wrong `needle`, a broken `join`, a regex that never compiles
-		// to anything. This runs the SAME `scan()` over synthetic text carrying each
-		// denied form and asserts each is found.
+		// Vacuity guard: the same scan() over synthetic text carrying each denied form must find each one.
 		const synthetic = [
 			{ path: "synthetic/account.md", text: `Account ${["148", "761", "664", "205"].join("")} is live\n` },
 			{ path: "synthetic/principal.md", text: `profile ${["iam", "admin"].join("")}-production\n` },
@@ -172,9 +111,7 @@ describe("CR-01 -- no account-identifying string may live in a tracked file", ()
 	});
 
 	it("Direction 3 -- the real scan read a non-trivial number of tracked files", () => {
-		// `trackedFiles()` returning [] would make Direction 1 pass while reading
-		// nothing. The repository is well over 200 tracked files; 100 is a floor
-		// that cannot be reached by an empty or single-entry result.
+		// An empty trackedFiles() would pass Direction 1 having read nothing; 100 is a floor well below the real count.
 		expect(
 			files.length,
 			"trackedFiles() returned almost nothing -- Direction 1 scanned an empty tree and proved nothing",
@@ -182,9 +119,7 @@ describe("CR-01 -- no account-identifying string may live in a tracked file", ()
 	});
 
 	it("Direction 4 -- this file is itself scanned, with no exemption", () => {
-		// The obvious way to make Direction 1 green is to exempt the file that
-		// holds the denylist. Assert the opposite: this test file is in the scanned
-		// set, which is only possible because every needle is assembled at run time.
+		// This file is scanned too, which works only because every needle is assembled at run time.
 		expect(
 			files.map((f) => f.path),
 			"tests/unit/secret-scan.test.ts must be inside its own scan -- an exempted file is exactly " +

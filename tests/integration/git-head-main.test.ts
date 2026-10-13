@@ -1,34 +1,7 @@
 /**
- * SAFE-04 — the `currentBranch` HEAD oracle proven against a REAL, MUTABLE
- * disposable git checkout, in both directions.
- *
- * WHY THIS IS AN INTEGRATION TEST AND NOT A UNIT ONE. `tests/unit/git-policy.test.ts`
- * proves the pure classifier half against fixture facts; nothing there proves
- * that `currentBranch(cwd)` actually reads a real repository correctly. No
- * existing helper in this repo drives a real, MUTABLE git checkout as its
- * subject -- `tests/helpers/git.ts`'s `repoRoot()`/`isIgnored()`/`trackedFiles()`
- * only ask git ABOUT this repository -- so this file is new composition of
- * `tests/helpers/git.ts`'s `spawnSync({shell:false})` pattern against a
- * disposable fixture repo, never against `repoRoot()`.
- *
- * THE FIXTURE. `mkdtempSync` OUTSIDE this repository, `git init`, a local
- * `user.email`/`user.name` (so a commit succeeds on a machine with no global
- * git identity configured), one committed file, and the initial branch name
- * forced to `main` EXPLICITLY (`git init -b main`, falling back to
- * `git symbolic-ref HEAD refs/heads/main` before the first commit on an older
- * git that lacks `-b`) -- never relying on this machine's `init.defaultBranch`,
- * per the plan's explicit warning: relying on it would make this test assert a
- * local git config rather than the oracle it claims to prove.
- *
- * THE PAIRED FLIP (cases 1+2). `currentBranch` returning `"main"` on a fixture
- * that has never been anything else would be a restatement of the fixture, not
- * a measurement of the oracle. The SAME repository is checked out onto
- * `feature/x` and re-queried, so the assertion is genuinely "this function
- * tracks a REAL change in HEAD", not "this function returns a hardcoded string".
- *
- * NEVER `it.skip`. If `git` is missing from PATH every case below throws with
- * the git error text as its own remedy -- consistent with the "real subprocess,
- * never skip" rule restated across `tests/helpers/{pi,session,models}.ts`.
+ * currentBranch reads a real, mutable disposable checkout in both directions: the same repo flips from main to
+ * feature/x, so the oracle is measured rather than the fixture restated. The fixture forces `main` explicitly, never
+ * the machine's init.defaultBranch, and sets a local identity. A missing git throws; nothing skips.
  */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -44,17 +17,11 @@ function facts(currentBranch: string): GitPolicyFacts {
 	return { currentBranch, protectedBranches: ["main", "master"] };
 }
 
-/**
- * A disposable, committed repository whose initial branch is EXPLICITLY
- * `main` -- never `init.defaultBranch`. Local identity is set so the commit
- * succeeds regardless of this machine's global git config.
- */
+/** A committed repo on an explicit `main`, with a local identity so the commit works on any machine. */
 function makeCommittedRepo(dir: string): void {
 	const initWithB = gitResult(["init", "-b", "main"], dir);
 	if (initWithB.status !== 0) {
-		// Older git without `-b` on `init`: init plainly, then force the branch
-		// name before the first commit exists, per the plan's explicit warning
-		// against trusting init.defaultBranch.
+		// Older git lacks `init -b`: force the branch name before the first commit.
 		runGit(["init"], dir);
 		runGit(["symbolic-ref", "HEAD", "refs/heads/main"], dir);
 	}
@@ -87,9 +54,7 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 	});
 
 	afterAll(() => {
-		// Windows-handle convention (tests/integration/jsonl-concurrency.test.ts):
-		// force + retry, since a worktree/git-daemon file handle can linger
-		// briefly after the process that held it exits.
+		// force + retries: a git file handle can linger briefly on Windows.
 		rmSync(base, { recursive: true, force: true, maxRetries: 3 });
 	});
 
@@ -149,10 +114,7 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 
 		const originalCwd = process.cwd();
 		try {
-			// Simulate the harness's own ambient cwd being repoA (currently
-			// detached from case 3) -- if currentBranch ever regressed to reading
-			// process.cwd() instead of its own `cwd` parameter, this is the case
-			// that would catch it, because the two answers are provably different.
+			// The process cwd answers differently, so a currentBranch that read process.cwd() fails here.
 			process.chdir(repoA);
 
 			const branchViaResolvedCwd = currentBranch(repoB);

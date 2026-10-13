@@ -1,22 +1,7 @@
 /**
- * SAFE-06 / SAFE-08 / SAFE-13 — `.pi/extensions/safety/paths.ts`, table-driven.
- *
- * WHY THE UNQUOTED/QUOTED FIXTURES ARE BUILT FROM `BS`, NOT A STRING LITERAL
- * ESCAPE. `String.fromCharCode(92)` is one literal backslash built without
- * going through any string-literal escape layer of its own — the same
- * technique `tests/unit/unbash-ast.test.ts` (Plan 01) uses, so a fixture here
- * cannot silently be off by one backslash from what unbash itself would
- * actually see. The exact `word.text`/`word.value` pairs below were VERIFIED
- * by direct execution against unbash 4.0.10 during this plan, not assumed
- * from the plan's prose.
- *
- * VACUOUS-PASS GUARD, this repo's house rule (see `tests/unit/redact.test.ts`,
- * `tests/unit/shell-deny-list.test.ts`): every table asserts its own length
- * before the loop that consumes it runs, and every entry in
- * `SENSITIVE_READ_PATTERNS` / `DETONATION_TARGETS` is asserted reachable by
- * at least one fixture row below — a dead pattern and an absent one produce
- * identical green runs otherwise (`tests/unit/chokepoint-lint.test.ts:212-233`
- * is the model this file follows).
+ * `.pi/extensions/safety/paths.ts`, table-driven. Backslash fixtures are built from `BS` (`String.fromCharCode(92)`)
+ * so no string-literal escape layer can shift them from what unbash sees. Every table asserts its length, and every
+ * SENSITIVE_READ_PATTERNS / DETONATION_TARGETS entry is reachable by a row: a dead pattern otherwise stays green.
  */
 import { describe, expect, it } from "vitest";
 
@@ -52,18 +37,12 @@ function arg(text: string, value: string = text): PathWordArg {
 }
 
 // ---------------------------------------------------------------------------
-// Task 1 — canonicalisePathArg
+// canonicalisePathArg
 // ---------------------------------------------------------------------------
 
 const AWS_CREDENTIALS_CANONICAL = "C:/Users/Admin/.aws/credentials";
 
-/**
- * Every row canonicalises to {@link AWS_CREDENTIALS_CANONICAL}. This is the
- * table the plan's own warning names: "the warning sign Pitfall 3 names is a
- * rule that fires for the quoted form and silently passes the unquoted one."
- * Each row's `text`/`value` pair was verified by executing unbash 4.0.10
- * directly against the shown shell fragment during this plan.
- */
+/** Every row canonicalises to {@link AWS_CREDENTIALS_CANONICAL}: a rule must not fire for the quoted form only. */
 const EQUIVALENT_TO_AWS_CREDENTIALS: ReadonlyArray<{ label: string; word: PathWordArg; ctxOverrides?: Partial<{ cwd: string; home: string }> }> = [
 	{
 		label: "unquoted Windows path (value is MANGLED by unbash's escape handling; text is not)",
@@ -149,9 +128,7 @@ describe("SAFE-06/SAFE-08 -- canonicalisePathArg: every path form for one file c
 	}
 
 	it("the unquoted form specifically does not fall back to word.value (the Pitfall 3 regression)", () => {
-		// word.value for the unquoted fixture is the MANGLED "C:UsersAdmin.awscredentials" --
-		// if canonicalisePathArg ever read .value instead of .text, this row alone would
-		// silently diverge from every other row in the table above.
+		// word.value of the unquoted form is mangled, so reading .value instead of .text diverges here.
 		const mangled = EQUIVALENT_TO_AWS_CREDENTIALS[0]!.word;
 		expect(mangled.value, "fixture sanity: value really is mangled, or this test proves nothing").not.toBe(
 			winPath("C:/Users/Admin/.aws/credentials"),
@@ -209,7 +186,7 @@ describe("SAFE-08 -- canonicalisePathArg: drive-letter case is normalised WITHOU
 });
 
 // ---------------------------------------------------------------------------
-// Task 2 — classifyPathRead / classifyPathWrite
+// classifyPathRead / classifyPathWrite
 // ---------------------------------------------------------------------------
 
 const KUBECONFIG_ENV_CANONICAL = "C:/Users/Admin/custom/kubeconfig.yaml";
@@ -444,42 +421,20 @@ describe("SAFE-08/SAFE-13 -- every DETONATION_TARGETS entry is matched by at lea
 });
 
 // ---------------------------------------------------------------------------
-// WR-10 -- the detonation-rule REASON, not merely the block kind, on a
-// genuinely native-Windows-shaped (backslash-rooted) home/project root.
+// The detonation-rule reason on a backslash-rooted home and project root
 // ---------------------------------------------------------------------------
 
 /**
- * WR-10: `tests/integration/path-canonicalisation.test.ts`'s own docstring
- * claimed CR-02's fail-open half "is proven at the paths.ts/policy.ts unit
- * level instead" -- untrue of this file, whose `HOME`/`PROJECT_ROOT` above
- * are forward-slash literals (`"C:/Users/Admin"`), never built via the
- * `BS` helper this file already defines for exactly this purpose. A
- * forward-slash-only fixture cannot distinguish "the bashrc rule matched"
- * from "the containment rule accidentally matched too" -- `classifyPathWrite`
- * would block `~/.bashrc` via containment alone even if the bashrc
- * DETONATION_TARGETS entry were deleted outright, as long as `HOME` sits
- * outside `PROJECT_ROOT` (as `bashrc`'s own fixture does), because CR-02's
- * bug was specifically about un-canonicalised (backslash-native) facts
- * reaching this module, and only a backslash-native fixture exercises that
- * shape.
- *
- * `index.ts#toCanonicalRoot` is reproduced here verbatim (not imported --
- * that function is private to `index.ts`, and re-deriving it from the SAME
- * `canonicalisePathArg` primitive this file already imports is the more
- * faithful proof: it shows `paths.ts` itself, given a genuinely
- * backslash-rooted home run through the real canonicalisation pipeline,
- * produces the SAME detonation-rule-vs-containment-rule distinction
- * `index.ts#buildFacts` relies on).
+ * A forward-slash fixture cannot tell the bashrc rule from containment, which would block `~/.bashrc` even with the
+ * rule deleted; only backslash-native roots run through the real canonicalisation show the distinction. The private
+ * `index.ts#toCanonicalRoot` is re-derived here from the same `canonicalisePathArg` primitive.
  */
 function toCanonicalRoot(absolutePath: string): string {
 	return canonicalisePathArg({ text: absolutePath, value: absolutePath }, { cwd: absolutePath, home: absolutePath });
 }
 
 describe("WR-10 -- classifyPathWrite's detonation reason distinguishes the specific rule from generic containment, on a native-Windows-shaped home", () => {
-	// A genuinely backslash-rooted home and project root -- exactly the shape
-	// `os.homedir()`/`ctx.cwd` actually produce on this project's target
-	// platform, built with the file's own BS helper rather than a
-	// forward-slash literal that happens to look similar.
+	// The shape os.homedir() and ctx.cwd produce on Windows, built with BS.
 	const RAW_HOME = winPath("C:/Users/tester");
 	const RAW_PROJECT_ROOT = winPath("C:/Users/tester/project");
 	const CANONICAL_HOME = toCanonicalRoot(RAW_HOME);

@@ -1,38 +1,8 @@
 /**
- * ROUTE-01/04/06/07/08/09 — `.pi/extensions/routing/modes.ts`, the PURE half
- * (everything up to and including the mechanism decision), proven with no
- * session and no registry involved.
- *
- * ---------------------------------------------------------------------------
- * ONE FAKE REGISTRY, SCRIPTED PER CASE, SAME CANDIDATE LIST BOTH DIRECTIONS
- * ---------------------------------------------------------------------------
- * `pickConfiguredCandidate`'s registry parameter is the structural
- * `{find, hasConfiguredAuth}` interface `modes.ts` declares -- never
- * `ExtensionContext` -- so a plain object built from a small per-case script
- * satisfies it exactly. The "first resolves, no auth -> second" case and the
- * "first resolves, has auth -> first" case below share the SAME two
- * candidate refs; only the auth script differs. A one-directional test
- * (auth always true) would pass against an implementation that ignores
- * `hasConfiguredAuth` entirely and returns the first candidate that merely
- * resolves -- proving the skip is genuinely on auth, not on resolution,
- * needs both directions on one list.
- *
- * ---------------------------------------------------------------------------
- * THE GUARD-PRECEDENCE CASE COMPARES AGAINST `guardRoute`'S OWN REASON
- * ---------------------------------------------------------------------------
- * Asserting only `ok === false` would pass against an implementation that
- * refused for the WRONG reason (e.g. treating "no configured auth" as a
- * capability block) -- "refused with a reason" is the requirement, not
- * merely "refused". The vision/text-only case below calls `guardRoute`
- * directly with the identical model/role/need and asserts the two reason
- * STRINGS are equal.
- *
- * ---------------------------------------------------------------------------
- * VACUOUS-PASS GUARD (this project's house rule)
- * ---------------------------------------------------------------------------
- * Mode-state cases run a dedicated test
- * that mutates state and then proves the reset helper actually restores the
- * default, rather than trusting a `beforeEach` that might itself be a no-op.
+ * The pure half of `routing/modes.ts`, with no session or registry. The fake registry runs the same candidate list
+ * both ways (auth present, absent), or an implementation that ignores auth would pass. The guard-precedence case
+ * compares against `guardRoute`'s own reason string, since refusing for the wrong reason must fail. A dedicated case
+ * proves the mode-state reset helper actually resets.
  */
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -232,10 +202,7 @@ describe("planRoleCall", () => {
 		const executorRoute = ROLE_MAP.cheap.executor;
 		expect(executorRoute.candidates.length, "vacuity guard").toBeGreaterThan(0);
 		const ref = executorRoute.candidates[0]!;
-		// The model's OWN id is the deny-listed one, regardless of which ref was
-		// requested -- pickConfiguredCandidate never checks that find() honoured
-		// the id it was asked for, and this fake registry is free to answer with
-		// whatever fixture the case needs.
+		// The model's own id is the deny-listed one: pickConfiguredCandidate never checks find() honoured the requested id.
 		const deniedModel = makeModel({ provider: ref.provider, id: "deepseek.r1-v1:0" });
 		const registry = makeRegistry([{ ref, model: deniedModel, authed: true }]);
 
@@ -280,9 +247,7 @@ describe("usesToolLoop", () => {
 });
 
 // -----------------------------------------------------------------------------
-// buildNestedApiOptions -- 08-01: the per-model.api nested options bag, proven
-// per api id, plus the undefined-effort short circuit and the CHAIN-hop
-// homogeneity case (T-08-07).
+// buildNestedApiOptions: the nested options bag per api id, the undefined-effort short circuit and chain-hop homogeneity
 // -----------------------------------------------------------------------------
 
 describe("buildNestedApiOptions", () => {
@@ -318,11 +283,7 @@ describe("buildNestedApiOptions", () => {
 	});
 
 	it("an api id outside the known three falls back to the openai-completions shape (the historical default, preserved deliberately)", () => {
-		// See buildNestedApiOptions's own docstring's DEVIATION section: a faux
-		// test fixture that omits `api` gets a RANDOM id from pi-ai
-		// (`faux:<timestamp>:<random>`), and single-shot-roles.test.ts relies on
-		// this function still treating that the way the pre-08-01 code treated
-		// every api -- as the openai-completions shape.
+		// A faux fixture without `api` gets a random id from pi-ai, which must still get the openai-completions shape.
 		const model = makeModel({ api: "faux:1234:abcdef" });
 		expect(buildNestedApiOptions(model, "max")).toEqual({ reasoningEffort: "max" });
 	});
@@ -406,14 +367,8 @@ describe("mode/escalation state", () => {
 	});
 
 	it("WR-03: a stale/corrupted globalThis slot with an out-of-range mode falls back to DEFAULT_MODE, and resolveRoute never throws on it", () => {
-		// Simulate "a stale shape from a version this module no longer writes"
-		// -- modes.ts's own getModeState docstring anticipates exactly this.
-		// Reaching directly into the process-wide slot by its documented key
-		// name is the ONLY way to construct this state: no public setter
-		// (setMode/setEscalated) accepts an out-of-range mode, by construction
-		// of ModeName -- the bug this case guards is specifically about a value
-		// that bypassed that type-level guarantee (a hand-edited session, or an
-		// older version of this module that wrote a different mode vocabulary).
+		// A stale shape no public setter can produce (ModeName forbids it), as from a hand-edited session or an older
+		// version; only writing the slot by its key builds it.
 		(globalThis as Record<string, unknown>)["__kypiRoutingModeState"] = {
 			mode: "turbo",
 			escalated: false,

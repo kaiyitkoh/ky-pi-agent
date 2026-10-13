@@ -1,47 +1,8 @@
 /**
- * ROUTE-03 — `/escalate` and `/escalate off` in a real Pi session: the
- * elevated state is sticky across turns, visible through `/mode`,
- * executor-scoped only, and never claimed on a refused switch.
- *
- * ---------------------------------------------------------------------------
- * WHY STICKINESS IS ASSERTED AFTER A REAL TURN, NOT ONLY AFTER THE COMMAND
- * ---------------------------------------------------------------------------
- * ARCHITECTURE:55 rejected auto-restore deliberately (05-CONTEXT.md's
- * `<specifics>` bullet on the same decision): an escalation that reverted on
- * its own would make "why was this turn expensive?" unanswerable after the
- * fact. An assertion taken only immediately after `escalate`'s command
- * handler returns would pass against a one-shot implementation that quietly
- * un-escalates on the very next turn -- exactly the design the plan rejects.
- * Every stickiness assertion below therefore runs `session.prompt(...)`
- * AFTER the switch and re-reads `ctx.model` afterwards, mirroring
- * `tests/integration/single-shot-roles.test.ts`'s own live-context proof
- * (`ctx.model` is a live getter reflecting the session's real state, not a
- * snapshot -- see that file's header, itself citing `mode-switch.test.ts`).
- *
- * ---------------------------------------------------------------------------
- * WHY THE MODULE-LEVEL MODE/ESCALATION STATE IS RESET BEFORE EVERY CASE
- * ---------------------------------------------------------------------------
- * `routing/modes.ts` keeps mode/escalation state on a `globalThis` slot,
- * shared across every jiti module instance in this process (that file's own
- * STATE-SLOT HAZARD section). `setMode`/`setEscalated`/`getModeState` are
- * imported directly here -- never through a loaded extension -- exactly the
- * pattern `tests/integration/single-shot-roles.test.ts#runFixture` already
- * established, so each `it` below starts from a deterministic `cheap`,
- * non-escalated state regardless of what an earlier case in this file (or a
- * sibling file in the same worker) left behind.
- *
- * ---------------------------------------------------------------------------
- * WHY `deepseek` CARRIES BOTH `deepseek-flash` AND `deepseek-v4-pro`
- * ---------------------------------------------------------------------------
- * `ROLE_MAP.cheap.executor` resolves to the flash tier (`FLASH_CANDIDATES`);
- * `ROLE_MAP.max.executor` (the `ESCALATION_MODE`) resolves to the pro tier
- * (`PRO_CANDIDATES`). Both tiers' first candidate is `provider:"deepseek"`,
- * so a single `setRuntimeApiKey("deepseek", ...)` grant (measured, polled --
- * see `mode-switch.test.ts`'s own header for the cached-snapshot gap this
- * closes) configures auth for both models at once, and a real escalate
- * therefore changes the executor from `deepseek/deepseek-flash` to
- * `deepseek/deepseek-v4-pro` -- a genuine model change, not a same-model
- * no-op.
+ * `/escalate` and `/escalate off` in a real session: sticky across turns, visible through `/mode`, executor-scoped,
+ * never claimed on a refused switch. Stickiness is asserted after a real further turn, or a one-shot implementation
+ * would pass. Mode state lives on a globalThis slot, so each case resets it. `deepseek` carries both the flash and pro
+ * ids, so one auth grant makes escalation a genuine model change.
  */
 import { join } from "node:path";
 
@@ -82,13 +43,7 @@ function findLatestModeEntry(branch: readonly unknown[]): CustomEntry<KyModeData
 	return entries.at(-1);
 }
 
-/**
- * Build a fresh faux session with the real routing extension loaded at user
- * scope, `deepseek` registered under BOTH the flash and pro ids, and the
- * module-level mode/escalation slot reset to `cheap`/not-escalated before
- * the session is even created. Three responses queued -- generous headroom
- * for every case below, at most two of which ever call `session.prompt`.
- */
+/** A fresh session with routing at user scope, deepseek under both ids, and the mode slot reset before creation. */
 async function withEscalateSession<T>(fn: (handle: FauxSessionHandle) => Promise<T>): Promise<T> {
 	setMode("cheap");
 	setEscalated(false);
@@ -153,9 +108,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			expect(getModeState().escalatedFrom, "escalatedFrom does not name the mode escalation was invoked from").toBe(
 				"cheap",
 			);
-			// The MODE itself is untouched by escalation -- only the executor and
-			// the escalation flag change (05-CONTEXT.md decision 1's "not a second
-			// whole-mode switch").
+			// Escalation changes only the executor and the flag, never the mode.
 			expect(getModeState().mode).toBe("cheap");
 
 			const branch = session.sessionManager.getBranch();
@@ -164,10 +117,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			expect(modeEntry?.data?.escalated).toBe(true);
 			expect(modeEntry?.data?.escalatedFrom).toBe("cheap");
 
-			// ---- stickiness: a FURTHER turn, not merely a re-read immediately
-			// after the command -- see this file's own header for why an
-			// immediately-after assertion would pass against a design
-			// ARCHITECTURE:55 already rejected.
+			// ---- stickiness: a further turn, not a re-read right after the command
 			await session.prompt("a further turn after escalation");
 
 			const afterTurn = ctx.model;
@@ -238,9 +188,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			expect(getModeState().escalatedFrom, "escalatedFrom was not cleared by escalate off").toBeUndefined();
 			expect(getModeState().mode, "the mode itself changed, which off must never do").toBe("cheap");
 
-			// ---- a further turn still reflects the restored (non-escalated)
-			// model -- the mirror of case 1's stickiness proof, in the other
-			// direction.
+			// ---- a further turn still shows the restored model
 			await session.prompt("a further turn after clearing escalation");
 
 			expect(ctx.model?.provider).toBe("deepseek");
@@ -285,9 +233,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 				).toBe(beforeLine);
 			}
 
-			// The executor line and the mode/escalation line are EXPECTED to
-			// differ -- this is the paired positive that proves the comparison
-			// above is not vacuously comparing two identical blobs.
+			// Paired positive: these two lines are expected to differ, so the comparison above is not vacuous.
 			const beforeExecutorLine = before.find((line) => line.startsWith("executor:"));
 			const afterExecutorLine = after.find((line) => line.startsWith("executor:"));
 			expect(
@@ -307,11 +253,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			responses: [fauxAssistantMessage("unused", { stopReason: "stop" })],
 		});
 		try {
-			// Deliberately register ONLY the flash model under "deepseek" -- the
-			// escalation target (max's executor, the PRO tier) has no candidate
-			// that resolves at all, so pi.setModel is never reached and the
-			// refusal happens at candidate selection, exactly like
-			// mode-switch.test.ts's case 3.
+			// Only flash is registered, so the escalation target resolves nothing and the refusal is at candidate selection.
 			const deepseekFaux = fauxProvider({
 				provider: "deepseek",
 				models: [{ id: "deepseek-flash", reasoning: true, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } }],
@@ -408,13 +350,8 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 			await escalateCommand.handler("", ctx);
 			expect(getModeState().escalated, "setup for this case did not actually escalate first").toBe(true);
 
-			// -- the mode switch that SILENTLY clears escalation (applyMode's own
-			// step 5 always resolves with escalated:false -- see index.ts's module
-			// docstring's "MODE SWITCH CLEARS ESCALATION" section). Switching back
-			// to the SAME mode ("cheap") is deliberate: it isolates the escalation
-			// CHANGE from a mode change, so this case cannot be satisfied by a
-			// buggy implementation that only writes a record when the mode name
-			// also changes.
+			// A mode switch clears escalation. Switching to the same mode isolates the escalation change, so an implementation
+			// that records only on a mode-name change fails.
 			await cheapCommand.handler("", ctx);
 			expect(notifications.at(-1)?.level, "the /cheap switch was refused").toBe("info");
 			expect(getModeState().escalated, "the mode switch did not actually clear escalation").toBe(false);
@@ -435,9 +372,7 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 					"off-record this case exists to prove) never reached disk",
 			).toBeGreaterThan(0);
 
-			// THE PAIRED POSITIVE: the ON record from the earlier `escalate`
-			// command must exist too, or "ends showing escalated:false" would be
-			// trivially true of a log that never recorded the ON half either.
+			// Paired positive: the ON record must exist, or ending on escalated:false is trivially true.
 			const onRecords = records.filter(
 				(record): record is { escalated: boolean } =>
 					typeof record === "object" && record !== null && (record as { escalated?: unknown }).escalated === true,
@@ -448,12 +383,8 @@ describe("ROUTE-03 -- /escalate and /escalate off in a real Pi session", () => {
 					"so the OFF assertion below would prove nothing about a real on-then-off sequence",
 			).toBeGreaterThan(0);
 
-			// THE ASSERTION WR-05 EXISTS FOR: the LAST record -- written by the
-			// /cheap switch, not by the earlier /escalate command -- names
-			// escalated:false. Before the fix, applyMode's setEscalated(false)
-			// wrote no durable record at all, so the log would end on the ON
-			// record from step 1 and silently misrepresent the sequence
-			// "/escalate -> (expensive turns) -> /cheap" as still escalated.
+			// The last record, written by the /cheap switch, must say escalated:false, or the log misreports the sequence as
+			// still escalated.
 			const last = records.at(-1) as { escalated?: unknown; mode?: unknown; previousModel?: unknown; newModel?: unknown } | undefined;
 			expect(
 				last?.escalated,

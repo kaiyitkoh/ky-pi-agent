@@ -1,40 +1,8 @@
 /**
- * EXT-03/EXT-04 -- binds `docs/EXTENSIONS.md`'s "Subagent capability
- * evidence" table to the exact `pi-subagents` version pinned in
- * `.pi/settings.json`, and separately asserts this repository's own
- * composition (the tracked agent file, the pinned package entry).
- *
- * WHAT THIS FILE DOES NOT PROVE. Nothing here executes `pi-subagents`, spawns
- * a real model turn, or observes a real background run or a real steer being
- * delivered into one. Every citation in the table is a file:line read from
- * the pinned package's own source at the moment the table was written; this
- * file only proves the citation table has not silently drifted from the pin
- * and has not silently shrunk. Third-party runtime behaviour is `RB-07-01`
- * material (written by plan 07-13), OUTSTANDING, and this file makes no claim
- * about it in either direction.
- *
- * A CORRECTION FROM THE PLAN THIS FILE WAS WRITTEN AGAINST. 07-12-PLAN.md's
- * own Task 2 text specifies Binding 4 as "`.pi/settings.json` sets
- * `agentScope` to a value that loads project agents". That is false for the
- * pinned `pi-subagents@0.76.1`: `agentScope` is not a `.pi/settings.json` key
- * at all -- it is a per-tool-call parameter on the `subagent` tool's own
- * schema, resolved to `"both"` whenever a caller omits it (07-09-SUMMARY.md's
- * Task 1 finding 3, re-confirmed while writing `docs/EXTENSIONS.md`'s
- * evidence table for this plan). Binding 4 below therefore asserts the true
- * shape -- `.pi/settings.json` carries NO `agentScope` key, because none is
- * needed -- rather than the plan's drafted, falsified assertion.
- * `tests/unit/extension-pins.test.ts` already carries an equivalent
- * assertion from plan 07-09; it is repeated here, independently, because this
- * file is EXT-03/EXT-04's own composition half and must not depend on
- * another test file to be true.
- *
- * THE MALFORMED-ROW RULE. `extractEvidenceRows` throws on any table row that
- * does not split into exactly 7 cells, rather than silently dropping it. A
- * parser that drops rows it cannot read is how a table with zero rows
- * parsed passes every binding below -- the exact failure mode Phase 6 and
- * this phase's own `07-VALIDATION.md` name repeatedly. Proven against an
- * inline fixture (a 6-cell row) in the "parser itself" describe block, before
- * any binding runs against the real file.
+ * Binds docs/EXTENSIONS.md's subagent capability evidence table to the `pi-subagents` version pinned in
+ * `.pi/settings.json`, and asserts this repo's own composition. Nothing here executes `pi-subagents`; its runtime
+ * behaviour is RB-07-01, OUTSTANDING. `agentScope` is a per-call tool parameter, not a settings key, so the settings
+ * must carry none. The parser throws on a malformed row rather than dropping it, so an empty parse cannot pass.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -59,14 +27,7 @@ interface EvidenceRow {
 	doesNotProve: string;
 }
 
-/**
- * Slice `## Subagent capability evidence` out of `docs/EXTENSIONS.md`, up to
- * the next `## ` heading or end of file. Mirrors
- * `tests/unit/routing-map.test.ts`'s `roleModelTableSection` extraction
- * discipline -- scoped to the section so nothing outside it (the "Installed
- * packages" table above, for instance) can accidentally satisfy or break a
- * binding below.
- */
+/** The `## Subagent capability evidence` section, so nothing elsewhere in the doc can satisfy or break a binding. */
 function evidenceSection(doc: string): string {
 	const heading = "\n## Subagent capability evidence";
 	const start = doc.indexOf(heading);
@@ -81,16 +42,8 @@ function evidenceSection(doc: string): string {
 }
 
 /**
- * Parse every `| ... |` data row of the evidence table within `section`.
- *
- * Skips the header row (`| Requirement | Mechanism | ... |`) and the
- * separator row (`|---|---|...|`) by content, not by position, so reordering
- * neither breaks parsing nor silently swallows a real row. Any row-shaped
- * line (starts with `|`, is not the header or separator) that does not split
- * into exactly 7 cells THROWS -- it does not skip the row and does not
- * return a partial result. This is the load-bearing rule this file's header
- * docstring names: a parser that drops malformed rows is how a table with
- * zero rows parsed passes every assertion below having checked nothing.
+ * Every data row of the evidence table, skipping header and separator by content. A row that does not split into
+ * exactly 7 cells throws, so a table that parses to zero rows cannot pass every binding.
  */
 function extractEvidenceRows(section: string): EvidenceRow[] {
 	const rows: EvidenceRow[] = [];
@@ -238,11 +191,7 @@ describe("subagent-capabilities Binding 3 -- the converse: no requirement's row 
 });
 
 describe("subagent-capabilities Binding 4 -- this repo's own composition, asserted separately from the third-party mechanism", () => {
-	// This half is enforced (this repo controls it): the agent file exists and
-	// is tracked, and .pi/settings.json's packages[] names pi-subagents at a
-	// pinned version. The OTHER half -- what pi-subagents@0.76.1 itself does
-	// with that agent file -- is recorded above in the evidence table, never
-	// asserted here, per this file's own separation-of-concerns rule.
+	// The half this repo controls; what pi-subagents does with the agent file stays in the evidence table.
 
 	it(".pi/agents/planner.md is tracked", () => {
 		expect(trackedFiles(AGENT_FILE_PATH)).toEqual([AGENT_FILE_PATH]);
@@ -252,12 +201,7 @@ describe("subagent-capabilities Binding 4 -- this repo's own composition, assert
 		expect(pinnedVersion("pi-subagents"), "no npm:pi-subagents@<version> entry in .pi/settings.json packages[]").toBeDefined();
 	});
 
-	// CORRECTED per this file's header docstring: the plan this file was
-	// written against drafted this binding as ".pi/settings.json sets
-	// agentScope to a value that loads project agents", which is false for
-	// pi-subagents@0.76.1 -- agentScope is not a settings key at any scope
-	// (07-09-SUMMARY.md Task 1 finding 3). The true, machine-checkable fact is
-	// its absence: writing one would be dead configuration nothing reads.
+	// agentScope is not a settings key at any scope, so writing one would be dead configuration.
 	it(".pi/settings.json deliberately carries no agentScope key -- pi-subagents@0.76.1 reads none from there", () => {
 		const settings = JSON.parse(readFileSync(SETTINGS_PATH, "utf-8")) as Record<string, unknown>;
 		expect(

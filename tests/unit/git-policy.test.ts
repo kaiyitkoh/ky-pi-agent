@@ -1,25 +1,7 @@
 /**
- * SAFE-04 / SAFE-05 — `.pi/extensions/safety/git.ts`, table-driven.
- *
- * A `{ command, currentBranch, expected, why }` table over `classifyGitInvocation`
- * and `classifyGlabInvocation`. Every ALLOW row named in the plan's `<behavior>`
- * is present EXPLICITLY (04-RESEARCH.md Pitfall 5: "this must be a named
- * allow-case, not merely absent from the deny-list") — `git worktree add -b feat
- * main`, `git fetch origin main`, `git diff main`, `git log origin/main` and
- * `git rebase feature` all appear as their own rows with `currentBranch: "main"`,
- * paired with BLOCK rows for `push`, `commit --amend`, `reset --hard`, `merge
- * other` on the same branch, and a paired-flip row proving `git push` is ALLOWED
- * once `currentBranch` is a feature branch — the whole point of Pitfall 5 is
- * that "mentions main" and "writes to the CURRENT branch, which happens to be
- * main" are different questions, so both directions of the flip must be visible
- * in one table rather than trusted from either row alone.
- *
- * VACUOUS-PASS GUARD (this repo's house rule — `tests/unit/path-policy.test.ts`,
- * `tests/unit/shell-deny-list.test.ts`): the row table asserts its own length
- * before use, and every `subcommand` key present in `GIT_WRITE_SUBCOMMANDS` /
- * `GIT_READ_SUBCOMMANDS` is asserted reachable by at least one row below — a
- * dead table entry and an absent one would otherwise produce identical green
- * runs.
+ * safety/git.ts classifyGitInvocation and classifyGlabInvocation, table-driven. Reads that merely mention main are
+ * named ALLOW rows on main, paired with BLOCK rows for writes to it and a flip row allowing the same push from a
+ * feature branch. The table asserts its own length, and every read/write subcommand must be reached by a row.
  */
 import { describe, expect, it } from "vitest";
 
@@ -78,7 +60,7 @@ const ROWS: readonly Row[] = [
 	{ command: "git bisect start", rest: "bisect start", kind: "git", currentBranch: "main", expected: "block", why: "unclassified subcommand -- fail closed per SAFE-03's posture" },
 
 	// -------------------------------------------------------------------------
-	// ALLOW on main -- named allow rows (Pitfall 5: must be explicit, not absence)
+	// ALLOW on main -- named allow rows, not mere absence from the deny list
 	// -------------------------------------------------------------------------
 	{ command: "git fetch", rest: "fetch", kind: "git", currentBranch: "main", expected: "allow", why: "reads from a remote, never mutates the checked-out branch" },
 	{ command: "git fetch origin main", rest: "fetch origin main", kind: "git", currentBranch: "main", expected: "allow", why: "still a fetch -- mentioning \"main\" in argv is not the question" },
@@ -154,7 +136,7 @@ const ROWS: readonly Row[] = [
 	{ command: "git reset --hard", rest: "reset --hard", kind: "git", currentBranch: "feature/x", expected: "allow", why: "same write, non-protected branch" },
 
 	// -------------------------------------------------------------------------
-	// CR-05 -- push targets a protected branch BY REFSPEC, independent of HEAD
+	// A push to a protected branch by refspec, independent of HEAD
 	// -------------------------------------------------------------------------
 	{
 		command: "git push --force origin main",
@@ -232,8 +214,7 @@ const ROWS: readonly Row[] = [
 	{ command: "glab repo clone", rest: "repo clone", kind: "glab", currentBranch: "main", expected: "block", why: "unclassified subcommand -- fail closed" },
 
 	// -------------------------------------------------------------------------
-	// PLAN 09-04 (FLOW-08) -- glab mr create, a conditional allow on the
-	// invocation's own DESTINATION target, independent of currentBranch
+	// glab mr create: a conditional allow on its own destination, independent of currentBranch
 	// -------------------------------------------------------------------------
 	{ command: "glab mr create --target-branch staging", rest: "mr create --target-branch staging", kind: "glab", currentBranch: "main", expected: "allow", why: "an explicit, present, non-protected target -- the separated form" },
 	{ command: "glab mr create --target-branch=staging", rest: "mr create --target-branch=staging", kind: "glab", currentBranch: "main", expected: "allow", why: "the = form of the same flag" },

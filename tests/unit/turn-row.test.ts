@@ -1,34 +1,8 @@
 /**
- * DIAG-04 — the per-turn row, proven field by field against inline fixtures.
- *
- * WHAT THIS FILE IS FOR. ROADMAP success criterion 3 reads: *"every turn appends
- * a JSONL row carrying model, provider, tokens, cost, latency, cache-read ratio
- * and outcome — and no reasoning-token column for Bedrock, which reports none"*.
- * Two halves of that sentence break silently rather than loudly:
- *
- *   1. A zero under the `reasoning` key on a Bedrock row is a FABRICATED
- *      measurement — Bedrock's `handleMetadata` never assigns the field
- *      [VERIFIED: pi-ai src/api/bedrock-converse-stream.ts:589-602] — and
- *      `expect(row.reasoning).toBeUndefined()` passes just as happily on a row
- *      that carries the key with an `undefined` in it. So the assertions below
- *      go through `Object.keys`, which can tell those two objects apart.
- *   2. A cost assertion written naively is `0 === 0` offline, because
- *      `fauxProvider` hardcodes `usage.cost` to all zeros in `withUsageEstimate`
- *      [VERIFIED: pi-ai src/providers/faux.ts:256-266]. The fixtures below
- *      deliberately carry faux's all-zero `cost` object, so the only way
- *      `row.cost.total` can be positive is the defensive `calculateCost` inside
- *      the composer.
- *
- * INLINE FIXTURES, NO FIXTURE FILE. `.gitignore` blanket-ignores `*.jsonl`
- * (blocker B5), so a committed dump fixture would be untracked, absent from a
- * fresh clone, and this whole file would be skipped or vacuous in CI while
- * passing locally. The analog is `tests/unit/docs-policy.test.ts:273-328`:
- * inline strings for a pure parser, plus a companion case that proves the guard
- * is live rather than assumed.
- *
- * PURE — no session, no network, no filesystem. `composeTurnRow` is a function
- * of its input. The in-session half (do the hooks fire, is the row on disk) is
- * plan 02-08.
+ * The per-turn row, field by field, against inline fixtures (*.jsonl is gitignored, so a fixture file would vanish in a
+ * clone). A Bedrock row must omit the `reasoning` key, checked via Object.keys because an undefined value passes
+ * toBeUndefined; faux hardcodes a zero cost (pi-ai src/providers/faux.ts:256-266), so a positive total proves the
+ * composer's own calculateCost. Pure: no session, network or filesystem.
  */
 import type { Api, Model, Usage } from "@earendil-works/pi-ai";
 
@@ -58,40 +32,19 @@ import { SECRET_FIXTURE_TOKEN } from "../helpers/faux.ts";
 // Fixtures — small, explicit, and arithmetic rather than approximate
 // ---------------------------------------------------------------------------
 
-/**
- * Cost rates in dollars per million tokens.
- *
- * The same four numbers `tests/helpers/session.ts` gives its faux model, so the
- * unit and integration halves of DIAG-04 price a turn identically. They are
- * chosen to make every product exact in binary-friendly decimals and to make
- * each component distinguishable — equal rates would let a composer that read
- * `output` where it meant `input` pass.
- */
+/** $/M-token rates matching the faux session model; distinct per component so a swapped field cannot pass. */
 const RATES = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } as const;
 
 /** Token counts used by every case that is not specifically about tokens. */
 const TOKENS = { input: 1000, output: 500, cacheRead: 300, cacheWrite: 200, totalTokens: 2000 };
 
 /**
- * Expected cost for {@link TOKENS} at {@link RATES}, stated as arithmetic.
- *
- * input      1    / 1e6 * 1000 = 0.001
- * output     2    / 1e6 *  500 = 0.001
- * cacheRead  0.1  / 1e6 *  300 = 0.00003
- * cacheWrite 1.5  / 1e6 *  200 = 0.0003     (no `cacheWrite1h`, so no 1h split)
- * total                        = 0.00233
- *
- * Written as literals rather than re-derived from `RATES`, so a change to
- * `calculateCost`'s formula fails here instead of being mirrored by the test.
+ * Expected cost for TOKENS at RATES: 0.001 + 0.001 + 0.00003 + 0.0003 = 0.00233. Literals, not re-derived, so a
+ * change to calculateCost's formula fails here instead of being mirrored.
  */
 const EXPECTED_COST = { input: 0.001, output: 0.001, cacheRead: 0.00003, cacheWrite: 0.0003, total: 0.00233 };
 
-/**
- * The `cost` object exactly as `fauxProvider` delivers it: all zeros.
- *
- * A fresh object per message, because `calculateCost` mutates whatever it is
- * handed and a shared literal would let one case's recompute leak into the next.
- */
+/** Faux's all-zero cost, fresh per message: calculateCost mutates what it is handed. */
 function fauxZeroCost(): Usage["cost"] {
 	return { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 0 };
 }
@@ -192,11 +145,8 @@ describe("DIAG-04 — the `reasoning` key is absent, not zero, when the provider
 	});
 
 	it("records `cacheWrite1h`, and its 2x-input price is then derivable from the row", () => {
-		// `calculateCost` prices the 1h portion at 2x the INPUT rate, not at the
-		// cacheWrite rate [VERIFIED: pi-ai 0.84.1 dist/models.js:538-543]:
-		//   longWrite  = cacheWrite1h                       = 50
-		//   shortWrite = cacheWrite - cacheWrite1h    = 200 - 50 = 150
-		//   cost       = (1.5 * 150 + 1 * 2 * 50) / 1e6 = (225 + 100) / 1e6
+		// The 1h portion is priced at 2x the input rate (pi-ai dist/models.js calculateCost):
+		//   (1.5 * (200 - 50) + 1 * 2 * 50) / 1e6 = (225 + 100) / 1e6
 		const cacheWrite1h = 50;
 		const shortWrite = TOKENS.cacheWrite - cacheWrite1h;
 		const expected = (RATES.cacheWrite * shortWrite + RATES.input * 2 * cacheWrite1h) / 1_000_000;
@@ -238,9 +188,7 @@ describe("DIAG-04 — the `reasoning` key is absent, not zero, when the provider
 });
 
 // ---------------------------------------------------------------------------
-// 1b. QUAL-09 — the quality-cost ledger: omission on the row, accumulation on
-//     the accumulator, and the "measured zero is not the same as omitted"
-//     distinction the reasoning-key tests above already established.
+// 1b. The quality-cost ledger: omitted on the row when unmeasured, a measured zero kept
 // ---------------------------------------------------------------------------
 
 describe("QUAL-09 — the `qualityMs`/`qualityTokens` keys follow the same omission rule as `reasoning`", () => {
@@ -259,12 +207,7 @@ describe("QUAL-09 — the `qualityMs`/`qualityTokens` keys follow the same omiss
 	});
 
 	it("keeps `qualityMs: 0` when the caller explicitly supplies a measured zero", () => {
-		// THE DISTINCTION THIS TEST NAME STATES: the omission rule forbids
-		// FABRICATING a zero (the case above), not RECORDING one a caller actually
-		// measured. A quality layer that ran for genuinely 0ms — a deterministic
-		// gate stage that short-circuited instantly — has a real number to report,
-		// and dropping it would be the opposite failure: hiding a real measurement
-		// behind the same absence a turn with no quality work also produces.
+		// The rule forbids fabricating a zero, not recording a measured one: dropping a real 0ms would hide a measurement.
 		const row = makeRow({ qualityMs: 0, qualityTokens: 0 });
 
 		expect(
@@ -298,10 +241,7 @@ describe("QUAL-09 — the `qualityMs`/`qualityTokens` keys follow the same omiss
 });
 
 describe("QUAL-09 — the quality-cost accumulator sums contributions and drains exactly once", () => {
-	// Isolation: this repository's `globalThis`-keyed accumulator (the same
-	// STATE-SLOT pattern `routing/modes.ts` uses) is process-wide, so a value
-	// left over from one test would leak into the next. `takeQualityCost()`
-	// both reads and clears, so calling it once before each case is the drain.
+	// The accumulator is a process-wide globalThis slot; takeQualityCost() reads and clears it, draining leftovers.
 	beforeEach(() => {
 		takeQualityCost();
 	});
@@ -574,11 +514,8 @@ describe("DIAG-04 — cache-read ratio", () => {
 	});
 
 	it("omits the key on a non-finite denominator rather than serialising a null", () => {
-		// `Usage` types both counts as `number`, which FORBIDS NaN and forbids a
-		// negative — and forces no adapter to honour either. A `denominator !== 0`
-		// guard lets NaN through, `NaN !== undefined` so the composer assigns it, and
-		// `JSON.stringify` then writes `"cacheReadRatio":null` — which the omitted-key
-		// rule and docs/DIAGNOSTICS.md both promise can never happen.
+		// `Usage` types both counts as number but no adapter is forced to avoid NaN or negatives; a NaN ratio would
+		// serialise as null, which the omitted-key rule promises never happens.
 		for (const usage of [
 			makeUsage({ input: Number.NaN }),
 			makeUsage({ cacheRead: Number.NaN }),
@@ -699,13 +636,7 @@ describe("DIAG-04 — optional fields are absent rather than empty", () => {
 // 7. Required-field completeness
 // ---------------------------------------------------------------------------
 
-/**
- * The fields RESEARCH §5.5 marks as always present.
- *
- * Every one of them is named in ROADMAP success criterion 3 or is what makes a
- * row attributable: `corr` ties the row to its `wire-*` records, `sessionId` and
- * `role` say who spent the money, `kind` separates a nested call from a turn.
- */
+/** Always-present fields: the ones the row contract names, plus what makes a row attributable (corr, sessionId, role, kind). */
 const REQUIRED_FIELDS = [
 	"ts",
 	"kind",

@@ -1,41 +1,8 @@
 /**
- * DIAG-01 / DIAG-07 — a live in-memory session produces an ordered, redacted,
- * gitignored wire dump.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE IS, AND WHAT IT IS NOT
- * ---------------------------------------------------------------------------
- * This is the OFFLINE PROXY named by `RB-02-01` and `RB-02-02`. It proves the
- * capture pipeline and the redactor against FIXTURES: that all three hooks fire
- * in order on a real `createAgentSession`, that the record carries the request
- * that was actually built, that the plaintext of a planted credential never
- * reaches the bytes on disk, and that every produced path is gitignored.
- *
- * It says NOTHING about what a real DeepSeek, DashScope or Bedrock request
- * looks like on the wire. The faux payload is transcribed from
- * `openai-completions.ts:681-760`, which makes it realistic and does not make
- * it real; faux's headers are `{}` (`pi-ai src/providers/faux.ts:510`), so no
- * live `Authorization` value has ever passed through the redactor. Both live
- * halves stay **OUTSTANDING** in `docs/RUNBOOK.md`. Never report them as
- * passing on the strength of this file. (RESEARCH §12.)
- *
- * ---------------------------------------------------------------------------
- * PITFALL 1 — the vacuous pass this whole phase was reorganised around
- * ---------------------------------------------------------------------------
- * `fauxProvider` never calls `options.onPayload`
- * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:510 — `grep -n onPayload` in
- * that file returns nothing], and Pi wires `before_provider_request` to exactly
- * that callback (`src/core/sdk.ts:294-360`). So under a PLAIN faux session the
- * payload hook never fires, the wire log is never created, and a test written
- * as "prompt, then assert on the captured payload" passes having verified
- * nothing. `wrapFauxWithPayload` in `tests/helpers/faux.ts` is what makes the
- * hook fire at all, and case 1 below asserts a strictly positive record count
- * BEFORE it looks at any content.
- *
- * The extension under test loads at USER scope through `writeUserScopeShim`:
- * project-scoped `.pi/extensions` is gated behind project trust, which resolves
- * `false` headless with no UI to answer the prompt, and a silently absent
- * extension is another green run over nothing (RESEARCH §8.4).
+ * A live in-memory session produces an ordered, redacted, gitignored wire dump. This is the offline proxy for RB-02-01
+ * and RB-02-02, against fixtures: real wire shapes and live credentials stay OUTSTANDING in docs/RUNBOOK.md.
+ * Plain faux never calls `onPayload`, so the payload hook would never fire; `wrapFauxWithPayload` makes it fire, and
+ * case 1 asserts a positive record count before any content. The extension loads at user scope.
  */
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
@@ -90,14 +57,7 @@ interface Capture {
 	model: Model<string> | undefined;
 }
 
-/**
- * Run one prompt through a real session with the diagnostics extension loaded,
- * and hand back everything the assertions below need.
- *
- * One session, one prompt, five cases: re-running the session per case would
- * quintuple the wall clock for no extra coverage, and the cases are about
- * different properties of the SAME dump.
- */
+/** One prompt through a real session with diagnostics loaded; the five cases read different properties of one dump. */
 async function captureOnePrompt(): Promise<Capture> {
 	let seenContext: TranscriptContext | undefined;
 	let seenModel: Model<string> | undefined;
@@ -105,17 +65,12 @@ async function captureOnePrompt(): Promise<Capture> {
 	return await withFauxSession(
 		{
 			extensionPath: EXTENSION_ENTRY,
-			// The credential is planted INSIDE the payload, which is where the real
-			// hazard lives: no adapter puts the API key in the body (RESEARCH §1.3,
-			// 12 verified call sites), but everything the model read this session
-			// travels in `messages[]`.
+			// The credential is planted in the payload: everything the model read travels in `messages[]`.
 			buildPayload: (model, context, options) =>
 				withSecretHeader(buildOpenAiFixturePayload(model, context, options)),
 			responses: [
 				(context, _options, _state, model) => {
-					// A response FACTORY, not a canned message: this is the only way to
-					// see the `Context` the provider was actually handed, which is what
-					// turns "we logged something" into "we logged the request".
+					// A factory, so the test sees the Context the provider was actually handed.
 					seenContext = context;
 					seenModel = model;
 					return fauxAssistantMessage("ok", { stopReason: "stop" });
@@ -128,24 +83,14 @@ async function captureOnePrompt(): Promise<Capture> {
 			const file = logPath(cwd, WIRE_LOG_BASE);
 			const { records, unparseable } = readTornSafe(file);
 
-			// WHY NOT `producedPaths()`. The extension under test is loaded by PI,
-			// through jiti, which keeps its own module registry — so the `jsonl.ts`
-			// instance that did the writing is not the one this test file imported,
-			// and the in-process produced-path set is empty here no matter what the
-			// session wrote. Verified by running it: case 5 failed on an empty list
-			// while cases 1-4 passed over a fully populated log file. Reading the
-			// directory is the honest oracle at this boundary, and it is also the
-			// stronger one: it reports what a session actually left on disk rather
-			// than what a bookkeeping set believes it left. The `producedPaths()`
-			// route is covered in-process by tests/unit/logs-gitignored.test.ts.
+			// Read the directory, not producedPaths(): Pi loads the extension through jiti's own module registry, so this
+			// file's jsonl.ts instance never saw the writes. The in-process route is covered by logs-gitignored.test.ts.
 			const dir = logDir(cwd);
 			return {
 				rows: records as Row[],
 				unparseable,
 				text: readFileSync(file, "utf8"),
-				// Repo-relative in SHAPE: the temp cwd is not the repository, but the
-				// path under it is exactly what the ignore rules classify. `sep`, not
-				// a literal backslash — this must also be right on the macOS CI leg.
+				// Repo-relative in shape; `sep`, not a literal backslash, so it is right on macOS too.
 				relativePaths: logFilesIn(dir).map((name) =>
 					relative(cwd, join(dir, name)).split(sep).join("/"),
 				),
@@ -172,10 +117,7 @@ describe("DIAG-01 / DIAG-07 — the wire dump of one live turn", () => {
 				"project trust, which resolves false headless",
 		).toBeGreaterThan(0);
 
-		// PITFALL 1 lives on THIS assertion, not on the count above. Under a plain
-		// faux provider the headers and response hooks still fire, so a wire log
-		// with records in it exists and only the payload record is missing. A
-		// non-empty file is therefore not evidence that the payload hook ran.
+		// Headers and response hooks fire under plain faux too, so only the payload record proves the payload hook ran.
 		expect(
 			capture.rows.some((r) => r.kind === "main.request"),
 			"the wire log has records but NO main.request among them, which is Pitfall 1 exactly: " +
@@ -216,9 +158,7 @@ describe("DIAG-01 / DIAG-07 — the wire dump of one live turn", () => {
 	});
 
 	it("case 2 — the recorded payload IS the outgoing request", () => {
-		// This is the case that separates "we logged something" from "we logged
-		// the request". Without it, a handler that wrote a constant would satisfy
-		// case 1 completely.
+		// Separates logging the request from logging something: a handler writing a constant passes case 1.
 		const request = capture.rows.find((r) => r.kind === "main.request");
 		expect(request, "no main.request record was written").toBeDefined();
 
@@ -235,15 +175,8 @@ describe("DIAG-01 / DIAG-07 — the wire dump of one live turn", () => {
 				"decisions are made on exactly this field",
 		).toBe(capture.model?.id);
 
-		// `buildOpenAiFixturePayload` prepends a `system` message when the context
-		// carries a system prompt (openai-completions.ts:681-760 does the same), so
-		// the arithmetic is the assertion rather than a bare equality.
-		//
-		// pi-ai 1.1.0: the system prompt is now a `role: "system"` message INSIDE
-		// `context.messages`, so counting `messages.length` and adding 1 for the
-		// prompt would double count it. Count the non-system messages (what the
-		// builder iterates) plus one when the replayed prompt is non-empty (the
-		// single system message the builder emits).
+		// The system prompt is a `role: "system"` message inside `context.messages` (pi-ai 1.1.0), and the builder emits
+		// one system message when it is non-empty: count the non-system messages plus that one.
 		const view = capture.context ? transcriptView(capture.context) : undefined;
 		const expectedMessages = (view?.messages.length ?? 0) + (view?.systemPrompt ? 1 : 0);
 		expect(

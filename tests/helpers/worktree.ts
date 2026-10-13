@@ -1,35 +1,6 @@
 /**
- * Real `git worktree` fixture helper — the untracked-file half of EXT-02.
- *
- * WHAT THIS PROVES, AND WHAT IT DOES NOT. This module exercises real `git
- * worktree add`/`remove` behaviour against a real temp repository: it proves
- * that untracked files (`.env`, `node_modules`) genuinely do not travel to a
- * fresh worktree, using git itself as the only oracle (never a hand-rolled
- * simulation). It says NOTHING about `pi-subagents`' own runtime — whether
- * that package's `createWorktrees()` invokes a configured
- * `worktreeSetupHook`, or how it wires `WorktreeSetupHookInput` on stdin, is
- * outside this file's scope entirely. Callers that need to prove the repo's
- * own `.pi/scripts/worktree-setup-hook.mjs` fixes the gap this file
- * demonstrates should feed its exports into their own build proxy (see
- * `tests/integration/worktree-build.test.ts`, a later plan).
- *
- * Sibling of `tests/helpers/git.ts` — reuses `makeTempRepo` and `commitFile`
- * from it rather than re-declaring a second git wrapper with different error
- * semantics. The local `run()` below is copied from `git.ts:45-56` exactly:
- * same `spawnSync` options, same throw-on-launch-failure shape. Every
- * exported function here follows `git.ts`'s own discipline — throw naming
- * the full failing argv and exit code on non-zero status, never return a
- * half-initialised path silently.
- *
- * Every temp directory this module creates goes through `makeTempRepo`,
- * which already uses `mkdtempSync(join(tmpdir(), prefix))` — never
- * `<repoRoot>/tmp`, because these fixtures import nothing from this repo's
- * own `node_modules` and have no reason to sit inside it. Removal (with
- * `{ recursive: true, force: true, maxRetries: 3 }`, the Windows
- * lingering-file-handle convention used throughout `tests/helpers/
- * session.ts`) is the caller's responsibility, exactly as it already is for
- * every `makeTempRepo` caller in this repo — this module writes nothing
- * outside a path it was itself handed or created via `makeTempRepo`.
+ * Real `git worktree` fixtures: prove with git itself that untracked files (.env, node_modules) do not travel to a fresh
+ * worktree. Says nothing about pi-subagents' runtime. Callers remove what makeTempRepo creates.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -51,17 +22,7 @@ function run(args: string[], cwd?: string): { stdout: string; status: number | n
 	return { stdout: result.stdout ?? "", status: result.status };
 }
 
-/**
- * Throw if git's own index reports any of `paths` as tracked inside `repo`.
- *
- * This is the guard that keeps the fixture honest: a "untracked" `.env` or
- * `node_modules` that was actually `git add`-ed (a copy/paste mistake, an
- * accidental `git add -A` upstream) would make every downstream negative
- * proof (EXT-02's "untracked files do not travel to a worktree") vacuous --
- * of course a file travels if it is tracked. No `.gitignore` is written by
- * this fixture, so the ignored-vs-tracked distinction is checked the only
- * way that is still meaningful without one: ask `git ls-files` directly.
- */
+/** Throws if git tracks any of `paths`: a tracked "untracked" file would make every travel proof vacuous. */
 function assertUntracked(repo: string, paths: string[]): void {
 	const args = ["ls-files", "--", ...paths];
 	const { stdout, status } = run(args, repo);
@@ -82,24 +43,8 @@ function assertUntracked(repo: string, paths: string[]): void {
 }
 
 /**
- * Build a fresh temp git repo carrying a tracked `src/index.js` build proxy
- * plus genuinely UNTRACKED `node_modules/dep/index.js` and `.env`.
- *
- * `src/index.js` requires the bare specifier `"dep"` (resolved through
- * `node_modules/dep/index.js` -- there is no relative require here, Node's
- * own module resolution is the mechanism under test) and asserts
- * `fs.existsSync(".env")`, printing `WORKTREE_BUILD_OK` to stdout and
- * exiting non-zero if either dependency is missing. Run it with `node
- * src/index.js` (cwd = the repo or worktree root) to prove whether that
- * location can build: succeeds in the original repo (both untracked paths
- * are physically present there), fails inside a fresh `git worktree add`
- * checkout (untracked files never travel) -- exactly Pattern C's steps 4-7.
- *
- * `node_modules/dep` and `.env` are created directly with `writeFileSync`/
- * `mkdirSync`, WITHOUT ever being passed to `git add`. That omission is the
- * entire point of this fixture; {@link assertUntracked} enforces it before
- * returning, so a future edit that accidentally stages either path fails
- * loudly here rather than silently downstream.
+ * A temp repo with a tracked `src/index.js` build proxy that needs the untracked `node_modules/dep` and `.env`: it
+ * prints WORKTREE_BUILD_OK in the repo and fails in a fresh worktree. Both are never staged, checked before returning.
  */
 export function makeTempRepoWithNodeModulesAndEnv(prefix: string): string {
 	const repo = makeTempRepo(prefix);
@@ -135,19 +80,7 @@ export function makeTempRepoWithNodeModulesAndEnv(prefix: string): string {
 	return repo;
 }
 
-/**
- * `git worktree add <worktreePath> -b <branch> <baseCommit>`, run from `repo`,
- * where `<baseCommit>` is HEAD resolved to a commit id first.
- *
- * Mirrors `pi-subagents@0.76.1`'s own invocation
- * (`src/runs/shared/worktree.js:784`: `git -C <toplevel> worktree add <path>
- * -b <branch> <baseCommit>`, with `baseCommit` resolved by
- * `rev-parse --verify --end-of-options HEAD^{commit}` at :228). The 0.49.0
- * shape passed the literal `HEAD`; the argv SHAPE otherwise matches, and a
- * resolved sha is equivalent for HEAD. Throws naming the full argv and exit
- * code on non-zero status. Returns `worktreePath` on success, mirroring
- * `makeTempRepo`'s own return-the-path convention.
- */
+/** `git worktree add <path> -b <branch> <HEAD sha>`, pi-subagents' own invocation shape (src/runs/shared/worktree.js:784). */
 export function addWorktree(repo: string, worktreePath: string, branch: string): string {
 	const resolved = run(["rev-parse", "--verify", "--end-of-options", "HEAD^{commit}"], repo);
 	if (resolved.status !== 0) {
@@ -162,17 +95,8 @@ export function addWorktree(repo: string, worktreePath: string, branch: string):
 }
 
 /**
- * Tear down a worktree created by {@link addWorktree}: `git worktree remove
- * --force <path>`, then `git branch -D <branch>`, then `git worktree prune`
- * -- matching `pi-subagents`' own teardown sequence
- * (`pi-subagents@0.76.1 src/runs/shared/worktree.js:1100, :1108, :1317`).
- *
- * The `remove` and `prune` steps throw naming the full argv and exit code on
- * non-zero status. The `branch -D` step is tolerated non-zero ONLY when the
- * branch is already gone (verified with `git rev-parse --verify
- * refs/heads/<branch>`) -- a caller that already deleted it, or a worktree
- * whose branch never got created, should not make cleanup itself fail. Any
- * other non-zero `branch -D` status throws.
+ * Removes a worktree, deletes its branch and prunes, as pi-subagents tears down. `branch -D` may fail only when the
+ * branch is already gone.
  */
 export function removeWorktree(repo: string, worktreePath: string, branch: string): void {
 	const removeArgs = ["worktree", "remove", "--force", worktreePath];

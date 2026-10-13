@@ -1,75 +1,9 @@
 /**
- * SAFE-12 -- the blocked command stays blocked inside a spawned HEADLESS
- * SUBAGENT child process, and the child's own audit log is the evidence that
- * the guard was genuinely present rather than merely quiet.
- *
- * ---------------------------------------------------------------------------
- * Why this is not a repeat of SAFE-10 (`headless-deny.test.ts`, Plan 09)
- * ---------------------------------------------------------------------------
- * Plan 09 already proves a blocked command is denied inside a real spawned
- * `pi --mode json` process with no UI bound. This file proves the SPAWN
- * TOPOLOGY that PITFALLS Pitfall 15 names specifically: `pi-subagents@0.47.1`
- * spawns a real child `pi` process from `pi-spawn.ts:139-163` whose own
- * working directory is a PROJECT directory that MAY carry project-scoped
- * `.pi/extensions/`, gated behind project trust that never resolves headless
- * (`resolveProjectTrusted` returns `false` with no UI --
- * PITFALLS.md:537-561). `pi-subagents` is not installed until Phase 7
- * (CLAUDE.md "Deferred"), so this test builds the faithful PROXY
- * 04-RESEARCH.md's Open Question 2 designs: the same composition Plan 09
- * proved reliable (`writeUserScopeShim` + an in-process `fauxProvider` driver
- * extension + a real spawned `pi --mode json` child), with a working
- * directory that ALSO contains a project-scoped `.pi/extensions/` sentinel --
- * so ONE spawn proves both halves of decision 6 (CONTEXT.md): user scope
- * loads, project scope genuinely does not, in the same run.
- *
- * Reused wholesale from Plan 09 rather than re-derived (per this plan's
- * `read_first`): the in-process `fauxProvider` driver-extension mechanism,
- * `writeUserScopeShim`, `runPi`, and the block-versus-allow audit-row
- * assertions. See `headless-deny.test.ts`'s own docstring for why the
- * plan's originally-suggested loopback-HTTP composition was abandoned.
- *
- * ---------------------------------------------------------------------------
- * ONE spawned child, TWO scripted tool calls (cost control)
- * ---------------------------------------------------------------------------
- * This is the phase's single most expensive test. Rather than spawning twice
- * (once per command, as Plan 09 does across two `it()` cases), the driver
- * here scripts BOTH commands into ONE spawned process's turn sequence: the
- * blocked command first, then the benign command, then a closing text
- * message. Pi's real agent loop feeds each tool result back to the model and
- * asks for the next turn regardless of whether the previous tool call was
- * blocked, so the scripted response queue advances exactly the same way it
- * would in a real multi-tool-call exchange.
- *
- * ---------------------------------------------------------------------------
- * Three assertions, one spawn
- * ---------------------------------------------------------------------------
- * 1. BLOCK IN THE CHILD -- the first bash tool call (the blocked command)
- *    surfaces as an error result carrying the guard's own reason text.
- * 2. THE GUARD WAS PRESENT, NOT MERELY QUIET -- the child's own
- *    `.pi/logs/audit-*.jsonl` contains an ALLOW row for the benign command
- *    it also ran, alongside the BLOCK row. Without the allow row, an empty
- *    or block-only audit log is indistinguishable from "the subagent did
- *    nothing dangerous" and "the guard was never loaded" -- precisely
- *    Pitfall 15's warning sign (PITFALLS.md:561), turned into an assertion.
- * 3. PROJECT SCOPE GENUINELY DOES NOT LOAD -- a project-scoped sentinel
- *    extension is planted at `<cwd>/.pi/extensions/kypi-project-sentinel/
- *    index.ts` that writes a marker file to disk purely as an IMPORT-TIME
- *    side effect (i.e. it fires the instant jiti loads the module, before
- *    Pi ever calls the extension's default export). No `-a` flag is passed
- *    and the throwaway agent dir has no saved trust decision, so project
- *    trust resolves to the non-interactive default ("ask", ignored with no
- *    error -- `tests/integration/load-paths.test.ts` case 4 proves this
- *    exact mechanism against the real repo). Asserting the marker file is
- *    ABSENT after the run confirms the module was never even imported, on
- *    the same run that proves the user-scope stub loaded and enforced.
- *
- * ---------------------------------------------------------------------------
- * Never `it.skip`
- * ---------------------------------------------------------------------------
- * `requirePiOnPath()` throws with the exact remedy if `pi` is missing --
- * matching every other real-subprocess test in this repository. There is no
- * env-var gate and no `describe.skip` here, per this plan's own instruction
- * and `tests/helpers/pi.ts`'s stated no-skip contract.
+ * A blocked command stays blocked inside a spawned headless child `pi`, the topology pi-subagents uses: one real
+ * `pi --mode json` child with the user-scope safety stub and an in-process faux driver, whose cwd also holds a
+ * project-scoped sentinel. One spawn scripts the blocked and the benign command and proves three things: the block
+ * surfaces with the guard's reason, the child's audit log holds an ALLOW row too (so the guard was present, not quiet),
+ * and the project-scoped sentinel was never even imported, because project trust never resolves headless.
  */
 import { existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -88,7 +22,7 @@ const TIMEOUT_MS = 120_000;
 const PROVIDER_ID = "kypi-subagent-loopback";
 const MODEL_ID = "kypi-subagent-block-sentinel";
 
-/** SAFE-06's path table blocks this directly at the HOOK -- proven fixture, reused verbatim from Plan 09/08. */
+/** The safety path table blocks this directly at the hook. */
 const BLOCKED_COMMAND = "cat terraform.tfstate";
 
 /** Nothing this project's policy classifies -- plain `echo`, no git/infra/path invocation. */
@@ -107,16 +41,7 @@ function freshEnv(agentDir: string): Record<string, string> {
 	};
 }
 
-/**
- * Write the in-process faux-provider driver extension at user scope, scripted
- * with ONE tool call per entry in `commands`, followed by a closing text
- * message so the exchange settles instead of re-attempting the last call.
- *
- * See the module docstring's "ONE spawned child, TWO scripted tool calls"
- * section. Mechanism copied wholesale from `headless-deny.test.ts`
- * (Plan 09) -- see that file's docstring for why this replaces a
- * cross-process loopback HTTP server.
- */
+/** Writes the faux driver extension at user scope: one tool call per command, then a closing text message so the run settles. */
 function writeFauxDriverExtension(agentDir: string, commands: string[]): void {
 	const dir = join(agentDir, "extensions", "kypi-faux-driver");
 	mkdirSync(dir, { recursive: true });
@@ -157,13 +82,7 @@ function writeFauxDriverExtension(agentDir: string, commands: string[]): void {
 	writeFileSync(join(dir, "index.ts"), source, "utf-8");
 }
 
-/**
- * Plant a project-scoped extension that leaves an on-disk marker purely as an
- * IMPORT-TIME side effect -- so "the marker is absent" means "the module was
- * never imported", which is a stronger claim than "the module ran and did
- * nothing". This is the SAFE-11 mechanism (project trust never resolves
- * headless) exercised from inside the SAME spawn that proves SAFE-12.
- */
+/** Plants a project extension whose import alone writes a marker, so an absent marker means it was never imported. */
 function writeProjectScopedSentinel(cwd: string): void {
 	const dir = join(cwd, ".pi", "extensions", "kypi-project-sentinel");
 	mkdirSync(dir, { recursive: true });
@@ -229,7 +148,7 @@ interface AuditRow {
 	pid: number;
 }
 
-/** Read every `<cwd>/.pi/logs/audit-*.jsonl` row -- the SAFE-14 log this project's safety extension writes. */
+/** Every row of `<cwd>/.pi/logs/audit-*.jsonl`, the safety extension's audit log. */
 function readAuditRows(cwd: string): AuditRow[] {
 	const dir = join(cwd, ".pi", "logs");
 	const rows: AuditRow[] = [];
@@ -255,18 +174,12 @@ describe("SAFE-12 -- a blocked command stays blocked inside a spawned headless s
 		requirePiOnPath();
 
 		agentDir = tempDir("kypi-subagent-agentdir-");
-		// The PROJECT directory a real pi-subagents child would be spawned into --
-		// outside this repository, carrying its OWN .pi/extensions/ (the project
-		// sentinel below), exactly the topology PITFALLS Pitfall 15 describes.
+		// The project directory a real child would run in: outside this repo, with its own .pi/extensions/.
 		cwd = tempDir("kypi-subagent-cwd-");
 
-		// SAFE-11's mechanism: the ONLY possible source of the safety extension is
-		// the user-scope stub, never project scope.
+		// The only possible source of the safety extension is the user-scope stub, never project scope.
 		writeUserScopeShim(agentDir, "ky-safety", SAFETY_ENTRY_POINT);
 
-		// SAFE-12's differentiator versus Plan 09: a project-scoped resource sits
-		// in the child's own cwd, proving it is genuinely ignored headless rather
-		// than merely absent from the fixture.
 		writeProjectScopedSentinel(cwd);
 
 		writeFauxDriverExtension(agentDir, [BLOCKED_COMMAND, BENIGN_COMMAND]);
@@ -279,9 +192,7 @@ describe("SAFE-12 -- a blocked command stays blocked inside a spawned headless s
 		() => {
 			const startedAt = Date.now();
 
-			// No `-a`: project trust must resolve to its non-interactive default
-			// ("ask", ignored with no error) exactly as
-			// tests/integration/load-paths.test.ts case 4 proves against this repo.
+			// No `-a`: project trust must resolve to its non-interactive default.
 			const result = runPi(
 				[
 					"--mode",
@@ -299,9 +210,7 @@ describe("SAFE-12 -- a blocked command stays blocked inside a spawned headless s
 
 			durationMs = Date.now() - startedAt;
 
-			// The process completed within the timeout with a real exit code --
-			// `--mode json` never binds a UI, so nothing was ever waiting on input;
-			// a hung process would instead have been killed by spawnSync's timeout.
+			// --mode json binds no UI, so nothing waited on input; a hang would have hit the spawnSync timeout.
 			expect(result.status, `pi failed:\n${result.stderr}\nstdout:\n${result.stdout}`).toBe(0);
 
 			const lines = parseJsonLines(result.stdout);

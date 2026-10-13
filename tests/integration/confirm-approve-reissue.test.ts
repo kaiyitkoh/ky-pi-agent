@@ -1,48 +1,8 @@
 /**
- * CR-01 -- the confirm -> approve -> re-issue protocol can actually complete:
- * a command blocked with `confirm`, then approved, then re-issued, reaches
- * the wrapped tool's own `execute()` exactly once, and the SAME retry a
- * third time (with no NEW approval) is blocked again.
- *
- * ---------------------------------------------------------------------------
- * WHAT WAS BROKEN, AND WHY THIS FILE PROVES IT DIFFERENTLY FROM
- * `headless-deny.test.ts`
- * ---------------------------------------------------------------------------
- * `tests/integration/headless-deny.test.ts:70-79` claimed this path was
- * "unit-proven in `tests/unit/safety-entry.test.ts` and
- * `tests/integration/double-enforcement.test.ts`" -- neither file touches it.
- * The `tool_call` hook handled a `confirm` verdict by UNCONDITIONALLY calling
- * `createPending()` and blocking, every single time, even when a valid grant
- * already existed for the exact command -- `approve_ky_command` could never
- * unblock anything: the model would re-issue the identical command, the hook
- * would mint a FRESH pending request and block again, forever.
- *
- * ---------------------------------------------------------------------------
- * WHY APPROVAL IS SIMULATED BY CALLING `approve()` DIRECTLY, NOT THROUGH
- * `approve_ky_command`'s OWN `ctx.ui.select()`
- * ---------------------------------------------------------------------------
- * `createFauxSession` never binds a UI context (`tests/helpers/session.ts`),
- * so `ctx.hasUI` is `false` and `approve_ky_command` would always refuse --
- * that gating (`ctx.ui.select` only under a real UI, "approve ONLY on an
- * explicit affirmative") is a SEPARATE property, already covered by this
- * file's own read of `index.ts`'s docstring and by
- * `tests/unit/safety-entry.test.ts`'s greps for `ctx.ui.confirm(`/`ctx.ui.select(`.
- * CR-01 is specifically about what happens AFTER a grant exists: does the
- * hook/wrapper pair actually let the retry through exactly once? Calling
- * `approve()` directly -- the same store `approve_ky_command`'s own
- * `execute()` calls on a real "Approve" selection -- isolates that question
- * from the UI-gating question, which this file does not re-prove.
- *
- * ---------------------------------------------------------------------------
- * WHY THE COMMAND IS `terraform apply`
- * ---------------------------------------------------------------------------
- * `infra.ts#TERRAFORM_CONFIRM_SUBCOMMANDS` classifies it `confirm`
- * unconditionally, with no branch/HEAD fixture needed -- the same fixture
- * `tests/unit/policy-compose.test.ts` already uses for its own confirm rows.
- * Whether `terraform` is actually installed on the machine running this test
- * is irrelevant: every assertion below is about the GUARD's own audit trail
- * (`safety.tool_call_hook` / `safety.wrapped_execute` verdicts and reasons),
- * never about the real command's exit code.
+ * The confirm -> approve -> re-issue protocol completes: a confirm-blocked command, once approved, reaches the wrapped
+ * tool's execute() exactly once, and a third identical retry with no new approval is blocked again. Approval calls
+ * approve() directly, since a faux session has no UI for approve_ky_command. `terraform apply` is confirm-classified
+ * unconditionally; only the guard's audit trail is asserted, never the real command's exit.
  */
 
 import type { AssistantMessage, Context, FauxResponseStep } from "@earendil-works/pi-ai";
@@ -81,12 +41,8 @@ function extractQuotedField(text: string, field: string): string {
 }
 
 /**
- * Three scripted turns:
- *   1. issue the confirm-classified command.
- *   2. (a FauxResponseFactory) read the block reason the hook produced for
- *      turn 1, extract `request_id`/`command`/`reason`, `approve()` directly
- *      (see module docstring), then re-issue the IDENTICAL command.
- *   3. a plain closing reply, its outgoing context captured for inspection.
+ * Three turns: issue the command; read the block reason, approve() it and re-issue the identical command; a closing
+ * reply whose context is captured.
  */
 function scriptedApprovalFlow(command: string, outgoing: Context[]): FauxResponseStep[] {
 	const approvalRetry: FauxResponseStep = ((context: Context): AssistantMessage => {
@@ -144,10 +100,7 @@ describe("CR-01 -- confirm -> approve -> re-issue actually unblocks the retry, e
 					`no initial confirm-block hook row for "${CONFIRM_COMMAND}" was found. Rows:\n${JSON.stringify(rows, null, 2)}`,
 				).toBeDefined();
 
-				// (b) THE FIX ITSELF: after approve() granted the retry, the hook's
-				// SECOND look at the identical command must be an ALLOW that names
-				// the grant -- never a second block, and never a second freshly
-				// minted pending request.
+				// (b) after the grant, the hook's second look must allow and name it, never mint a second pending request.
 				const hookDeferRows = rows.filter(
 					(r) =>
 						r.event === "safety.tool_call_hook" &&
@@ -161,9 +114,7 @@ describe("CR-01 -- confirm -> approve -> re-issue actually unblocks the retry, e
 						`command -- got no such row. Rows:\n${JSON.stringify(rows, null, 2)}`,
 				).toBeGreaterThan(0);
 
-				// (c) THE SECOND ENFORCEMENT LAYER actually consumed the grant and
-				// let the call through -- this is what "approve_ky_command is not
-				// dead code" cashes out to: the wrapped tool's own execute() ran.
+				// (c) the second enforcement layer consumed the grant and let the wrapped execute() run.
 				const wrapperConsumeRows = rows.filter(
 					(r) =>
 						r.event === "safety.wrapped_execute" &&
@@ -177,10 +128,7 @@ describe("CR-01 -- confirm -> approve -> re-issue actually unblocks the retry, e
 						`got no such row. Rows:\n${JSON.stringify(rows, null, 2)}`,
 				).toBeGreaterThan(0);
 
-				// (d) The retry genuinely reached the REAL bash tool's execute() --
-				// the closing turn's captured context has a tool result for the
-				// SECOND bash call, and that result is never the wrapper's own
-				// (pre-fix) block reason text.
+				// (d) the retry reached the real bash tool: its result is never the wrapper's block reason.
 				expect(outgoing.length, "the closing reply must have been reached for its context to be captured").toBe(1);
 				const finalResult = lastToolResult(outgoing[0] as Context);
 				expect(finalResult, "no tool result was captured for the re-issued command").toBeDefined();

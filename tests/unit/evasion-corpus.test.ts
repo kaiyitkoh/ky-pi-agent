@@ -1,20 +1,7 @@
 /**
- * SAFE-15 / SAFE-17 — drive `tests/fixtures/evasion-corpus.ts` through the
- * real guard and cross-check it against `docs/SAFETY.md`.
- *
- * THREE GROUPS.
- *   A. Every `BLOCKED` row goes through the REAL `evaluate()` from
- *      `.pi/extensions/safety/policy.ts` — never a re-derived mini-parser —
- *      and its exact verdict kind is asserted with HEAD on a feature branch and on main.
- *   B. Every `OUT-OF-SCOPE` row is cross-checked against the published table
- *      in `docs/SAFETY.md`: the doc's row count and row identities are
- *      DERIVED from the corpus (never a hand-typed number, following
- *      `docs-policy.test.ts`'s `truncationCauseCount()` discipline), and the
- *      converse is asserted too — the doc holds no row id the corpus does
- *      not know about.
- *   C. Corpus liveness: >=30 rows, both buckets non-empty, every id unique,
- *      every one of the 14 PITFALLS.md classes represented. A corpus that
- *      silently lost half its rows would otherwise pass A and B trivially.
+ * Drives the evasion corpus through the real guard: every BLOCKED row through the real evaluate() with HEAD on a
+ * feature branch and on main, every OUT-OF-SCOPE row genuinely allowed and matched both ways against docs/SAFETY.md's
+ * table (derived, never hand-counted), and the corpus kept live (>=30 unique rows covering all 14 classes).
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -28,9 +15,7 @@ const ROOT = repoRoot();
 const SAFETY_DOC_PATH = join(ROOT, "docs", "SAFETY.md");
 
 // ---------------------------------------------------------------------------
-// Shared fixture facts — a fixed "main" current branch, a fixture project
-// root and a fixture home, exactly the shape `evaluate()`'s own
-// `policy-compose.test.ts` table uses.
+// Shared fixture facts: a fixed "main" branch, project root and home, as policy-compose.test.ts uses
 // ---------------------------------------------------------------------------
 
 const HEADS = ["feat", "main"] as const;
@@ -107,16 +92,8 @@ describe("Group A -- every BLOCKED row returns its exact verdict through the rea
 });
 
 // ---------------------------------------------------------------------------
-// Group A' — WR-03: every OUT-OF-SCOPE row genuinely returns `allow` through
-// the real evaluate(), not merely "we published this limit in a table". Group
-// B (below) only checks the DOC agrees with the corpus -- a documentation
-// consistency check, not a behavioural one. Without Group A', the disarm path
-// is mechanical: a BLOCKED row that regresses to `allow` can be silently
-// re-bucketed to OUT-OF-SCOPE plus one pasted markdown row, and the suite
-// stays green while the guard is strictly weaker. Group A' makes the bucket
-// falsifiable in BOTH directions: a row that is actually STILL blocked (the
-// limit no longer exists, e.g. a future fix closes it) must be caught here,
-// not silently left stale in the "OUT-OF-SCOPE" bucket forever.
+// Group A' — every OUT-OF-SCOPE row really returns allow, so a regressed BLOCKED row cannot be re-bucketed
+// silently, and a limit that a later fix closes is caught rather than left stale
 // ---------------------------------------------------------------------------
 
 describe("Group A' -- every OUT-OF-SCOPE row genuinely returns allow (WR-03)", () => {
@@ -145,11 +122,7 @@ describe("Group A' -- every OUT-OF-SCOPE row genuinely returns allow (WR-03)", (
 // Group B — the OUT-OF-SCOPE bucket, cross-checked against docs/SAFETY.md
 // ---------------------------------------------------------------------------
 
-/**
- * Slice the "Known bypasses this guard does not catch" section out of
- * `docs/SAFETY.md` by heading markers -- the same pattern
- * `docs-policy.test.ts`'s `redactionSection()` uses.
- */
+/** The "Known bypasses this guard does not catch" section of docs/SAFETY.md, sliced by heading. */
 function knownBypassesSection(): string {
 	const doc = readFileSync(SAFETY_DOC_PATH, "utf-8");
 	const marker = "\n## Known bypasses this guard does not catch";
@@ -164,13 +137,7 @@ function knownBypassesSection(): string {
 	return end === -1 ? rest : rest.slice(0, end);
 }
 
-/**
- * Every `EV-\d+` id that appears as a TABLE ROW'S OWN identifier -- i.e. as
- * the first cell of a `| EV-xx | ... |` line -- not merely mentioned in
- * prose inside another row's cell (EV-27's own explanation cross-references
- * EV-28 and EV-30 by id; that mention must not be mistaken for EV-28/EV-30
- * having their own row in this table).
- */
+/** Ids that are a table row's own first cell, not ids mentioned in another row's prose (EV-27 cites EV-28 and EV-30). */
 function tableRowIds(section: string): string[] {
 	const ids: string[] = [];
 	const rowStart = /^\|\s*(EV-\d+)\s*\|/gm;

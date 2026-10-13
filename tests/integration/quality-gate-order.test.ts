@@ -1,50 +1,8 @@
 /**
- * GATE-01 / QUAL-05 / QUAL-09 — session-level proof, over a REAL composed
- * session, of four claims plan 08-11 makes and no earlier plan could prove
- * alone:
- *
- *   "order"       — a finding already present in the harness source does not
- *                    stop /quick, and the paired positive proves a clean run
- *                    arms and reaches the provider.
- *   "unavailable" — the LSP leg's UNAVAILABLE state is visible in a real
- *                    gate report and never fails the change; and — the second
- *                    half of this group — RESEARCH Open Question 2
- *                    ("does `pi.getAllTools()` include a registered-but-
- *                    inactive tool?") is answered by OBSERVATION, not by
- *                    reading a type.
- *   "stop"        — a workaround-classified review's QUAL-05 stop signal is
- *                    demonstrable at session level, with the debt (proper
- *                    fix, deferral reason) visible in what the user is
- *                    shown; wiring this into a LIVE ceremonial workflow
- *                    command is explicitly Phase 9's job (QUAL-08) and this
- *                    file does not attempt it.
- *
- * ---------------------------------------------------------------------------
- * THE EXEC OVERRIDE — WHY EVERY GROUP SETS AND RESTORES IT
- * ---------------------------------------------------------------------------
- * The change gate's typecheck and lint legs run the repo-local `tsc` and `eslint` against `cwd`. A throwaway
- * fixture has neither, so every `it` below installs `quality/index.ts#setQuickGateExecOverrideForTests`
- * (a `globalThis`-backed seam) with a deterministic, instant runner and restores it in a `finally`, so a thrown
- * assertion never leaks the override into a later test file sharing this worker.
- *
- * ---------------------------------------------------------------------------
- * THE OFFENDING FIXTURE — WHAT TRIPS THE ERROR-TIER LEG
- * ---------------------------------------------------------------------------
- * The fixture plants a `.ts` file under `<cwd>/.pi/extensions/` that carries a shipped `TODO` marker, which
- * `rules.ts#ruleShippedTodo` flags at ERROR tier. It exists before the run and is not part of the run's change,
- * so it must not stop `/quick`.
- *
- * ---------------------------------------------------------------------------
- * WHY THE "stop" GROUP HAND-BUILDS A `ReviewArtifact`, NOT `validateReview`'s
- * OUTPUT
- * ---------------------------------------------------------------------------
- * `decideWorkflowStop` is PURE — its contract is "given this shape, decide",
- * regardless of whether the shape came from a real reviewer's validated tool
- * call or a hand-built fixture. `tests/integration/refute-or-promote.test.ts`
- * (plan 08-09) already established this precedent for the identical
- * function; this file follows it rather than re-deriving a second
- * `validateReview` round trip that would prove nothing new about
- * `decideWorkflowStop` itself.
+ * In a real composed session: a finding already in the harness source does not stop /quick (and a clean run reaches
+ * the provider); an unavailable LSP leg shows in the report without failing the change; getAllTools() still lists an
+ * inactive tool; and a workaround review's stop signal carries its debt. Every test installs and restores an instant
+ * exec override, since the throwaway cwd has no tsc or eslint. decideWorkflowStop is pure, so a hand-built review suffices.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -122,9 +80,7 @@ async function withConfiguredCandidate<T>(fn: (candidate: { provider: string; id
 }
 
 afterEach(() => {
-	// Belt-and-braces: every `it` below restores this itself in a `finally`,
-	// but a thrown assertion inside a `finally` (unlikely, but possible) must
-	// still never leak the override across test files sharing this worker.
+	// Each test restores this itself; this catches a thrown assertion leaking it across files in the worker.
 	setQuickGateExecOverrideForTests(undefined);
 });
 
@@ -198,9 +154,7 @@ describe("order", () => {
 						await waitForConfiguredAuth(modelRuntime, candidate.provider);
 
 						gitInit(cwd, "work");
-						// Deliberately no offending fixture -- this is the paired
-						// positive that proves the gate is not a gate that always
-						// blocks.
+						// No offending fixture: the paired positive proves the gate does not always block.
 
 						const ctx = session.extensionRunner.createCommandContext();
 						const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
@@ -218,12 +172,7 @@ describe("order", () => {
 						await waitFor(() => faux.state.callCount >= 1, 5000, "the provider to actually be called");
 						expect(faux.state.callCount, "the provider must genuinely be called on a clean gate").toBeGreaterThanOrEqual(1);
 
-						// Drain to completion before this test ends -- isRunArmed()'s
-						// backing slot is a globalThis-keyed, PROCESS-WIDE state (per
-						// evidence.ts's own STATE-SLOT HAZARD docstring), shared across
-						// every `it` in this file's worker. Leaving it armed would make
-						// a LATER, unrelated test's /quick call refuse with "already in
-						// flight" instead of exercising its own gate.
+						// isRunArmed() is process-wide, so a run left armed would make a later test's /quick refuse.
 						await waitFor(() => !isRunArmed(), 5000, "the armed run to disarm at agent_settled before this test ends");
 					} finally {
 						setQuickGateExecOverrideForTests(undefined);
@@ -257,19 +206,9 @@ describe("unavailable", () => {
 	});
 
 	it("RESEARCH Open Question 2, resolved by observation -- pi.getAllTools() includes a registered tool even after it is made INACTIVE", async () => {
-		// `tools` is BOTH the initial-active list AND the allowlist that bounds
-		// the ENTIRE tool universe `getAllTools()`/`getActiveTools()` can ever
-		// see [VERIFIED: pi-coding-agent 0.84.1 `dist/core/sdk.js:133,136` --
-		// `allowedToolNames = options.tools ?? ...`]. `consult_advisor` must be
-		// named here or it is invisible to BOTH accessors regardless of
-		// registration, which would make this whole proof vacuous.
+		// `tools` also bounds every tool the accessors can see (pi dist/core/sdk.js:133,136), so consult_advisor must be named.
 		await withFauxSession({ extensionSource: composite(), tools: ["bash", "consult_advisor"] }, async ({ session }) => {
-			// consult_advisor is registered by quality/index.ts's own factory,
-			// which -- per agent-session.js's own _refreshToolRegistry -- makes it
-			// ACTIVE by default (a newly-registered tool not in the previous
-			// registry is pushed into nextActiveToolNames). Confirmed before it is
-			// touched, so the "still present after deactivation" half below is
-			// meaningful rather than vacuous.
+			// A newly registered tool starts active, confirmed first so the after-deactivation half is meaningful.
 			const beforeActive = session.getActiveToolNames();
 			const beforeAll = session.getAllTools().map((t) => t.name);
 			expect(beforeActive.length, "the session must have at least one active tool before this proof begins").toBeGreaterThan(0);
@@ -278,11 +217,7 @@ describe("unavailable", () => {
 			expect(beforeAll.includes("consult_advisor"), "consult_advisor must already be visible in getAllTools() before deactivation").toBe(true);
 			expect(registeredToolNames().includes("consult_advisor"), "quality/index.ts's own accessor must already agree with getAllTools()").toBe(true);
 
-			// Deactivate it via AgentSession#setActiveToolsByName -- the exact
-			// method pi.setActiveTools() itself calls
-			// [agent-session.js:1882, `setActiveTools: (toolNames) =>
-			// this.setActiveToolsByName(toolNames)`]. Genuinely exercises Pi's own
-			// runtime, not a stand-in.
+			// setActiveToolsByName is what pi.setActiveTools() calls (agent-session.js:1882).
 			session.setActiveToolsByName(beforeActive.filter((name) => name !== "consult_advisor"));
 
 			const afterActive = session.getActiveToolNames();
@@ -325,11 +260,7 @@ describe("stop", () => {
 			const ctx = session.extensionRunner.createCommandContext();
 			const { notifications, restore } = captureNotify(ctx);
 			try {
-				// Demonstrated at SESSION LEVEL over a validated review, per this
-				// plan's own must_haves -- wiring this into a LIVE ceremonial
-				// workflow command is explicitly Phase 9's job (QUAL-08); this is
-				// the record the stop signal produces, shown the way a future
-				// workflow would show it.
+				// The record a workflow shows when the stop signal fires.
 				ctx.ui.notify(`${stopResult.reason} -- requires human approval before shipping.`, "error");
 
 				expect(notifications.length, "a stop must produce a visible notification").toBe(1);

@@ -1,55 +1,9 @@
 /**
- * GATE-09 — the advisor consult reaches a DIFFERENT, stronger model, leaves
- * the session alone, refuses for free, and is accounted for.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS PROVES, AND WHY IT DOUBLES AS A SECOND GATE-10 PROOF
- * ---------------------------------------------------------------------------
- * `executeConsultAdvisor` (`.pi/extensions/quality/advisor.ts`, plan 08-08)
- * calls `runSingleShotRole(ctx, {role:"advisor", ...})` and nothing else.
- * This file drives it directly — no tool registration exists yet (that is
- * plan 08-11) — against a real `createFauxSession()`, and captures what left
- * the harness on the OUTGOING request via the faux response FACTORY, exactly
- * the technique `tests/integration/gate10-nested-thinking.test.ts` uses for
- * the same reason: the claim under test is what the harness actually sent,
- * not what a helper's return value says it sent.
- *
- * `advisor` resolves to a different candidate per mode
- * (`.pi/extensions/routing/schema.ts`'s `ROLE_MAP`): `PRO_CANDIDATES`
- * (deepseek-direct, openai-completions api) in `cheap`, `VISION_CANDIDATES`
- * (Bedrock Claude, bedrock-converse-stream api) in `balanced`/`max`. Driving
- * ONE consult in each of `cheap` and `max` therefore proves plan 08-01's
- * per-`model.api` fix (case 4) a SECOND time, through this file's own
- * independent caller, and simultaneously proves the consult reaches a model
- * genuinely distinct from what the `executor` role resolves to in the same
- * mode (case 1) — `ROLE_MAP.cheap.executor` is the flash tier (a different
- * id, same provider) and `ROLE_MAP.max.executor` is the pro tier on
- * `deepseek` while `ROLE_MAP.max.advisor` is Bedrock Claude (a genuinely
- * different PROVIDER) — the 05-11 discipline: a nested row naming the right
- * model proves nothing if the advisor's model could never differ from the
- * session executor's.
- *
- * ---------------------------------------------------------------------------
- * WHY THE SESSION'S OWN MODEL IS THE DEFAULT FAUX, NOT A ROLE_MAP CANDIDATE
- * ---------------------------------------------------------------------------
- * `createFauxSession({})`'s default model (`faux-flash` under the default
- * faux provider id) is what `ctx.model` reports for the whole fixture. It is
- * deliberately UNRELATED to either candidate registered below: case 2's
- * "no session mutation" claim is strongest when the session's own model
- * could never be confused with either the executor's or the advisor's
- * `ROLE_MAP` candidate, which a session literally running on the executor's
- * resolved model would risk.
- *
- * ---------------------------------------------------------------------------
- * REGISTRATION ORDER — INTERLEAVED, NEVER BATCHED
- * ---------------------------------------------------------------------------
- * `08-01-SUMMARY.md` and `gate10-nested-thinking.test.ts` both measured (not
- * assumed) that `ModelRuntime#registerNativeProvider` fires a fire-and-forget
- * UNSCOPED `refresh()` that bumps every provider's availability sequence
- * number, including one already mid-flight — registering two faux providers
- * back-to-back before authing either raced the two unscoped refreshes and
- * left the first permanently unconfigured. Every registration below completes
- * its own register → grant → wait cycle before the next one starts.
+ * The advisor consult reaches a different, stronger model, leaves the session alone, refuses for free, and is
+ * accounted for. The outgoing request is captured by the faux response factory. Cheap and max modes resolve advisor
+ * through different APIs, so this also proves the per-model.api options shape. The session runs on an unrelated faux
+ * model, and each provider completes register, grant and wait before the next: registerNativeProvider's unscoped
+ * refresh races an in-flight one and can leave the first provider unconfigured.
  */
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 
@@ -138,9 +92,7 @@ async function runMainFixture(): Promise<MainRun> {
 				"candidates; this fixture cannot register a faux provider for either without one",
 		);
 	}
-	// The 05-11 discipline: a nested row naming the right model proves nothing
-	// if the advisor's candidate could never differ from the executor's in the
-	// SAME mode. `max` is the genuinely cross-provider case.
+	// A row naming the right model proves nothing unless the advisor could differ from the executor; `max` is cross-provider.
 	expect(
 		maxAdvisor.provider === maxExecutor.provider && maxAdvisor.id === maxExecutor.id,
 		`ROLE_MAP.max.advisor (${maxAdvisor.provider}/${maxAdvisor.id}) resolves to the SAME candidate as ` +
@@ -154,9 +106,7 @@ async function runMainFixture(): Promise<MainRun> {
 	const handle = await createFauxSession({});
 
 	try {
-		// One faux provider under `deepseek`, carrying BOTH the cheap-mode
-		// executor's id and the cheap-mode advisor's id — proves a call
-		// genuinely reaches the ADVISOR's id, not merely "some deepseek model".
+		// One provider carries both the executor's and the advisor's id, so the call must reach the advisor's specifically.
 		const deepseekFaux = fauxProvider({
 			provider: cheapAdvisor.provider,
 			api: "openai-completions",
@@ -201,8 +151,7 @@ async function runMainFixture(): Promise<MainRun> {
 
 		const ctx = handle.session.extensionRunner.createCommandContext();
 
-		// Identity guard (Phase 3's lesson) — the resolved candidates really are
-		// THIS run's faux registrations, not Pi's own real catalogue entries.
+		// The resolved candidates must be this run's faux registrations, not Pi's catalogue entries.
 		const resolvedCheapAdvisor = ctx.modelRegistry.find(cheapAdvisor.provider, cheapAdvisor.id);
 		const resolvedMaxAdvisor = ctx.modelRegistry.find(maxAdvisor.provider, maxAdvisor.id);
 		if (resolvedCheapAdvisor?.api !== "openai-completions" || resolvedMaxAdvisor?.api !== "bedrock-converse-stream") {
@@ -292,13 +241,8 @@ async function runRefusalFixture(): Promise<RefusalRun> {
 			},
 		]);
 
-		// Registered, but DELIBERATELY never granted a runtime API key — this
-		// candidate resolves and then fails `hasConfiguredAuth`, which is what
-		// "no configured candidate" actually looks like for
-		// `pickConfiguredCandidate`'s ordering rule. `dashscope` (the second
-		// candidate in PRO_CANDIDATES) is never registered at all here, so it
-		// fails the OTHER way ("did not resolve") — the refusal reason should
-		// name both.
+		// Registered but never granted a key, so it fails hasConfiguredAuth; dashscope is never registered and fails to
+		// resolve. The refusal should name both.
 		handle.modelRuntime.registerNativeProvider(deepseekFaux.provider);
 
 		const ctx = handle.session.extensionRunner.createCommandContext();
@@ -359,10 +303,7 @@ describe("GATE-09 — the advisor consult through executeConsultAdvisor", () => 
 				"reached the executor's candidate instead, which is exactly the failure this case exists to catch",
 		).toBe(maxAdvisorId);
 
-		// The session's own model (a faux default, unrelated to either candidate)
-		// stayed untouched — case 2 asserts this properly; here it is only used
-		// to confirm the advisor's resolved id is genuinely a DIFFERENT model
-		// than the session's own.
+		// The advisor's model must differ from the session's own.
 		expect(main.modelBefore.provider, "the session had no active model to compare against").toBeDefined();
 		expect(
 			main.cheapAdvisorCalls[0]?.modelId,
@@ -382,9 +323,7 @@ describe("GATE-09 — the advisor consult through executeConsultAdvisor", () => 
 		).toBe(main.modelBefore.provider);
 		expect(main.modelAfter.id).toBe(main.modelBefore.id);
 
-		// NOT asserted at zero absolute — session construction itself writes one
-		// model_change entry (measured in single-shot-roles.test.ts's case 3);
-		// the honest claim is a DELTA of zero across both calls.
+		// A delta, not zero: session construction itself writes one model_change entry.
 		expect(
 			main.modelChangeCountAfter - main.modelChangeCountBefore,
 			"a model_change session entry was written as a result of executeConsultAdvisor",

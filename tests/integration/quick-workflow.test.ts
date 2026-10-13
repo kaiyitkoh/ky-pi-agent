@@ -1,70 +1,8 @@
 /**
- * FLOW-01 / GATE-07 -- the walking-skeleton proof: does `/quick` really
- * compose Phase 4's git guard, Phase 5's routing guard and Phase 6's
- * evidence gate, or does it merely LOOK like it does?
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE PROVES, AND WHAT IT DOES NOT
- * ---------------------------------------------------------------------------
- * Five cases: (0) `/quick` is really registered, so the cases below fail for
- * the right reason if it is not; (1) breaking the Phase 5 seam (no configured
- * auth for the executor candidate) makes `/quick` refuse in Phase 5's OWN
- * words, at zero provider requests; (2) breaking the Phase 4 seam (HEAD is a
- * protected branch) makes `/quick` refuse in Phase 4's OWN words, at zero
- * provider requests; (3) a transcript that reads exactly like a passing
- * `npm test` run, with no real tool call behind it, is REJECTED by the
- * evidence gate, and the reject reason is shown to contain none of the
- * fabricated text -- proof the gate never read it; (4) a real commit made
- * through the guarded bash tool, at the branch's real HEAD, is ACCEPTED, with
- * the accepted SHA checked against a `git rev-parse HEAD` this file runs
- * itself, a Phase 4 audit row, and a Phase 2 turn row, all in the SAME
- * session.
- *
- * This file does NOT re-prove `classifyGitInvocation`'s table
- * (`tests/unit/git-policy.test.ts`), `planRoleCall`'s resolution order
- * (`tests/unit/routing-dispatch.test.ts`) or `gateCompletion`'s predicate
- * (`tests/unit/evidence-gate.test.ts`). It proves that `/quick` calls the
- * REAL versions of all three, in the right order, and that a real Pi session
- * really executes the guarded command.
- *
- * ---------------------------------------------------------------------------
- * WHY THE FIXTURE LOADS AT USER SCOPE
- * ---------------------------------------------------------------------------
- * `tests/helpers/session.ts`'s own docstring: project-scoped `.pi/extensions`
- * is gated behind project trust, which resolves `false` headless with no UI
- * to answer the prompt -- a silently absent extension is a green run that
- * proved nothing. Every case below loads through `extensionSource`, never a
- * project-scoped path, mirroring `tests/integration/double-enforcement.test.ts`
- * and `tests/integration/turns-log.test.ts`.
- *
- * ---------------------------------------------------------------------------
- * DECISION D-13 -- EVERY EXPECTED REFUSAL IS READ FROM THE REAL FUNCTION
- * ---------------------------------------------------------------------------
- * Cases 1 and 2 call `planRoleCall` / `classifyGitInvocation` themselves,
- * with the same inputs `/quick` uses, and compare the notification against
- * the RETURNED `reason` -- never a retyped literal. Phase 5's own review
- * found a wire-proof test that was structurally unable to distinguish a real
- * routing decision from a hardcoded chain head; a retyped literal here would
- * stay green against a `/quick` that hardcoded the identical string.
- *
- * ---------------------------------------------------------------------------
- * DECISION D-14 -- A REFUSAL MUST COST ZERO PROVIDER REQUESTS
- * ---------------------------------------------------------------------------
- * `faux.state.callCount === 0` after a refusal is what distinguishes
- * "refused before prompting" from "prompted, then reported something" --
- * the same assertion shape `tests/integration/single-shot-roles.test.ts`
- * established for a guard refusal.
- *
- * ---------------------------------------------------------------------------
- * DECISION D-16 -- A KNOWN AND ACCEPTED PROPERTY, STATED RATHER THAN HIDDEN
- * ---------------------------------------------------------------------------
- * Evidence is bound to the SHA at CAPTURE time and compared against HEAD at
- * CLAIM time. A verification command run BEFORE the commit is therefore
- * stale by construction the instant the commit lands -- this is GATE-07's
- * stated rule ("evidence collected against SHA A must not satisfy a claim
- * made at SHA B"), not a defect. Re-running verification after the commit,
- * or binding to a tree hash instead of a commit SHA, is Phase 8's job, not
- * this walking skeleton's.
+ * /quick really composes the git guard, the routing guard and the evidence gate in one real session: each broken seam
+ * refuses in that guard's own words (read from the real function, never retyped) at zero provider requests, a
+ * fabricated passing transcript is rejected, and a real guarded commit at the real HEAD is accepted. Evidence is
+ * bound to the SHA at capture time, so verification run before the commit is stale by design.
  */
 import { existsSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -88,17 +26,11 @@ import { gitInit, repoRoot, runGit } from "../helpers/git.ts";
 import { readAudit, readJsonl } from "../helpers/logs.ts";
 import { captureNotify, waitFor, waitForConfiguredAuth, withFauxSession, type Notification } from "../helpers/session.ts";
 
-/**
- * Every case that settles a commit runs the deterministic change gate at agent_settled, against a
- * `gitInit`-only temp `cwd` with no `node_modules`. Without this override a real `tsc` spawn would either
- * fail or try to reach the network; the override keeps the typecheck leg instant and offline.
- */
+/** Keeps the change gate's typecheck leg instant and offline in a temp `cwd` with no node_modules. */
 const INSTANT_PASS_EXEC: ExecRunner = () => ({ code: 0, stdout: "", stderr: "" });
 
 afterEach(() => {
-	// Belt-and-braces, matching quality-gate-order.test.ts's own discipline --
-	// every case below restores this itself, but a thrown assertion must still
-	// never leak the override across test files sharing this worker.
+	// Each case restores this itself; this catches a thrown assertion leaking it across files in the worker.
 	setQuickGateExecOverrideForTests(undefined);
 });
 
@@ -112,12 +44,7 @@ const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`.re
 /** A cost-rated fixture model, matching `tests/integration/mode-switch.test.ts`'s own shape. */
 const FIXTURE_COST = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } as const;
 
-/**
- * Build the inline user-scope extension source: the REAL safety extension,
- * then the REAL workflows extension (`/quick`), and -- for case 4 -- the
- * REAL diagnostics extension too (D-12). No re-implementation, no shim, no
- * stub: every default export is imported by absolute path and called.
- */
+/** The real safety and workflows extensions, plus the real diagnostics extension when asked, imported by path. */
 function composite(withDiagnostics: boolean): string {
 	const lines = [
 		"// Generated for tests/integration/quick-workflow.test.ts. Lives in a temp dir.",
@@ -145,10 +72,7 @@ function logOneline(cwd: string): string {
 	return runGit(["log", "--oneline"], cwd);
 }
 
-/**
- * This test's OWN, independent `git rev-parse HEAD` -- never the value taken
- * from an evidence row and compared to itself (case 4, assertion (b)).
- */
+/** An independent `git rev-parse HEAD`, never a value read back from the evidence row it is compared with. */
 function realHeadSha(cwd: string): string {
 	return runGit(["rev-parse", "HEAD"], cwd).trim();
 }
@@ -178,12 +102,12 @@ function readEvidence(cwd: string): EvidenceRowShape[] {
 	return readJsonl(file) as EvidenceRowShape[];
 }
 
-/** A row from the Phase 2 turns log, narrowed to the field this file reads. */
+/** A row from the diagnostics turns log, narrowed to the field this file reads. */
 interface TurnRowShape {
 	kind?: string;
 }
 
-/** Read the Phase 2 turns log for `cwd`, failing with the remedy rather than an `ENOENT` stack. */
+/** Read the diagnostics turns log for `cwd`, failing with the remedy rather than an `ENOENT` stack. */
 function readTurns(cwd: string): TurnRowShape[] {
 	const file = logPath(cwd, TURNS_LOG_BASE);
 	if (!existsSync(file)) {
@@ -223,10 +147,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		await withFauxSession(
 			{ extensionSource: composite(false), tools: ["bash"], responses: [] },
 			async ({ session, faux, cwd }) => {
-				// The branch is irrelevant to this case -- routing refuses before the
-				// git pre-flight is ever reached -- but a repository is initialised
-				// anyway so an accidental reordering does not crash the test with an
-				// unrelated git error instead of failing the assertion below.
+				// Routing refuses before the git pre-flight; the repo exists so a reordering fails the assertion, not on git.
 				gitInit(cwd, "work");
 
 				const ctx = session.extensionRunner.createCommandContext();
@@ -565,10 +486,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 
 	it("case 4 -- a real guarded commit is accepted, bound to a SHA this test reads from git itself", async () => {
 		const candidate = flashExecutorCandidate();
-		// GATE-01 (Phase 8, plan 08-12): a bare --allow-empty commit's tree is
-		// byte-identical to its parent's and now correctly REJECTS (branch (6)) --
-		// this case's own point is an ACCEPT, so the fixture must make a genuine
-		// tree change, same as any other test in this file asserting "accept".
+		// An --allow-empty commit leaves the tree unchanged and rejects, so an accept case needs a real tree change.
 		const COMMIT_COMMAND = 'echo "export const v = 1;" >> skeleton.ts && git add skeleton.ts && git commit -m "quick: skeleton commit"';
 
 		await withFauxSession(
@@ -632,8 +550,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 						row.headSha,
 						"the accepted row's headSha does not equal a real git rev-parse HEAD read by the test itself",
 					).toBe(sha);
-					// IN-03 / CR-01's negation: HEAD genuinely moved during this run -- the
-					// cheapest possible statement that this accept is NOT the CR-01 shape.
+					// HEAD genuinely moved during this run, so this accept is not a stale-SHA accept.
 					expect(row.baseSha, "an accepted run's baseSha must differ from its headSha -- HEAD must have moved").not.toBe(
 						row.headSha,
 					);
@@ -646,7 +563,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 						"git log --oneline does not show the skeleton commit's subject",
 					).toContain("quick: skeleton commit");
 
-					// (d) the Phase 4 audit log carries a row naming the git commit -- non-empty asserted FIRST.
+					// (d) the safety audit log carries a row naming the git commit -- non-empty asserted FIRST.
 					const auditRows = readAudit(cwd);
 					expect(auditRows.length, "the audit log exists but is empty").toBeGreaterThan(0);
 					const commitAuditRows = auditRows.filter((r) => (r.command ?? "").includes(COMMIT_COMMAND));
@@ -656,7 +573,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 							"may not have run",
 					).toBeGreaterThan(0);
 
-					// (e) the Phase 2 turn log carries at least one kind:"turn" row -- non-empty asserted FIRST.
+					// (e) the diagnostics turn log carries at least one kind:"turn" row -- non-empty asserted FIRST.
 					const turnRows = readTurns(cwd);
 					expect(turnRows.length, "the turns log exists but is empty").toBeGreaterThan(0);
 					const realTurnRows = turnRows.filter((r) => r.kind === "turn");
@@ -770,10 +687,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				responses: [
 					// (1) a real verification command that genuinely fails (exit 1).
 					fauxAssistantMessage([fauxToolCall("bash", { command: "exit 1" })], { stopReason: "toolUse" }),
-					// (2) the model, undeterred, makes the commit anyway -- a REAL content
-					// change (not --allow-empty), so branch (6) genuinely passes it through
-					// and this test still exercises branch (3)'s CR-01 anti-aging behaviour
-					// rather than accidentally passing via the tree-comparison branch instead.
+					// (2) the model commits anyway, with a real content change so the tree-comparison branch does not decide it.
 					fauxAssistantMessage(
 						[fauxToolCall("bash", { command: 'echo "export const v = 1;" >> probe-f.ts && git add probe-f.ts && git commit -m "quick: PROBE F"' })],
 						{ stopReason: "toolUse" },
@@ -843,14 +757,9 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				providerId: candidate.provider,
 				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
 				responses: [
-					// (1) BLOCKED before it ever executes -- CR-05's own pushTargetsProtected
-					// check fires on the refspec destination regardless of the checked-out
-					// branch, so this blocks even though gitInit below checks out "work".
+					// (1) blocked before it executes: the refspec destination is protected whatever branch is checked out.
 					fauxAssistantMessage([fauxToolCall("bash", { command: BLOCKED_PUSH })], { stopReason: "toolUse" }),
-					// (2) undeterred, the model commits anyway -- a REAL content change (not
-					// --allow-empty), so branch (6) does not pre-empt this case's own point:
-					// the earlier BLOCKED push must still surface in the rejection, not be
-					// silently superseded by the (here, irrelevant) tree-comparison branch.
+					// (2) the model commits anyway (a real change), and the earlier blocked push must still surface in the rejection.
 					fauxAssistantMessage(
 						[fauxToolCall("bash", { command: 'echo "export const v = 1;" >> probe-p4.ts && git add probe-p4.ts && git commit -m "quick: PROBE P4"' })],
 						{ stopReason: "toolUse" },
@@ -928,14 +837,9 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				providerId: candidate.provider,
 				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
 				responses: [
-					// (1) a REAL, successful command (mv exits 0) whose own EVIDENCE
-					// CAPTURE nonetheless throws: tool_execution_end's currentSha(cwd)
-					// call cannot find a `.git` to read while it is renamed away.
+					// (1) a successful command whose evidence capture throws: currentSha finds no .git while it is renamed away.
 					fauxAssistantMessage([fauxToolCall("bash", { command: "mv .git .gitx" })], { stopReason: "toolUse" }),
-					// (2) restore .git and make the real commit -- a REAL content change
-					// (not --allow-empty), so branch (6) does not pre-empt this case's own
-					// point, which is the dropped-capture record from step (1) -- this
-					// call's own capture succeeds normally.
+					// (2) restore .git and commit a real change; the point is the dropped-capture record from step (1).
 					fauxAssistantMessage(
 						[
 							fauxToolCall("bash", {
@@ -1005,9 +909,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				providerId: candidate.provider,
 				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
 				responses: [
-					// (1) a real, successful tool call that moves HEAD -- CREATES
-					// NO COMMIT, landing on a SHA that already existed before this
-					// run was even armed.
+					// (1) a successful call that moves HEAD to a SHA that existed before the run was armed, creating no commit.
 					fauxAssistantMessage([fauxToolCall("bash", { command: "git checkout --detach HEAD^" })], {
 						stopReason: "toolUse",
 					}),
@@ -1088,9 +990,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				providerId: candidate.provider,
 				models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
 				responses: [
-					// GATE-01: a REAL content change (not --allow-empty) -- this case's own
-					// point is that run 1 is still accepted, which now requires a genuinely
-					// changed tree.
+					// A real content change: run 1 must still be accepted, which needs a changed tree.
 					fauxAssistantMessage(
 						[fauxToolCall("bash", { command: 'echo "export const v = 1;" >> run-one.ts && git add run-one.ts && git commit -m "quick: run one"' })],
 						{ stopReason: "toolUse" },
@@ -1120,9 +1020,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC); // CR-03: both handler calls below reach runQuickGateStage
 				const { notifications, restore } = captureNotify(ctx);
 				try {
-					// Run 1's handler arms the run and fires the turn in the background
-					// (pi.sendUserMessage is fire-and-forget) -- the handler itself
-					// returns before agent_end. Run 2's handler call races run 1's turn.
+					// sendUserMessage is fire-and-forget, so run 1's handler returns before agent_end and run 2 races its turn.
 					await command.handler("first task", ctx);
 					await command.handler("second task", ctx);
 
@@ -1195,10 +1093,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 
 				const { notifications, restore } = captureNotify(ctx);
 				try {
-					// Fire an ORDINARY prompt (not through /quick at all) and do not await
-					// it -- this is the shape that WR-01's original fix (guarding only
-					// against a second /quick) could not see: no `/quick` run is armed by
-					// this turn, so `isRunArmed()` alone stays false throughout.
+					// An ordinary prompt, not awaited: no /quick run is armed, so isRunArmed() alone stays false throughout.
 					const ordinary = session.prompt("do some ordinary work");
 					await waitFor(() => !ctx.isIdle(), 2000, "the ordinary turn to actually start (ctx.isIdle() false)");
 
@@ -1269,10 +1164,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 				try {
 					await command.handler("destroy the repo after committing", ctx);
 
-					// Before WR-02's fix this timeout never resolved: agent_end's own
-					// currentSha() throw was swallowed whole, endRun() was never
-					// reached, no row was ever written, and isRunArmed() stayed true
-					// forever. waitFor's own timeout IS the RED signal for that shape.
+					// If agent_end swallowed a currentSha() throw before endRun(), the run stays armed and this times out.
 					const evidenceFile = logPath(cwd, EVIDENCE_LOG_BASE);
 					await waitFor(
 						() => existsSync(evidenceFile) && readJsonl(evidenceFile).length >= 1,
@@ -1299,10 +1191,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 						restore2();
 					}
 
-					// The .git destruction happened INSIDE the one bash call, so the
-					// tool_result handler's own currentSha() read also throws (swallowed,
-					// same rule) -- no structured record ever lands, so the reject reason
-					// is the empty-records branch, not a stale-SHA one.
+					// .git was destroyed inside the bash call, so no structured record lands: the empty-records branch rejects.
 					expect(notifications.length, "run 1's own outcome must still be reported").toBe(1);
 					expect(notifications[0]?.text, "notification text must equal the written row's own reason").toBe(
 						rows[0]?.reason,

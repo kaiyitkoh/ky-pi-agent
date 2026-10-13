@@ -1,24 +1,7 @@
 /**
- * GATE-07 — `.pi/extensions/workflows/evidence.ts`, table-driven.
- *
- * A `{name, records, expected, reasonMustContain, why}` table over
- * `gateCompletion`, following `git-policy.test.ts`'s shape. Every SHA in
- * this file comes from a REAL repository (`tests/helpers/git.ts`'s
- * `makeTempRepo`/`commitFile`/`headSha`) — no 40-character hex literal
- * appears anywhere below, because a gate whose SHA is a fixture constant
- * cannot distinguish "bound correctly" from "bound to nothing".
- *
- * Every rejection is asserted on its REASON string (`capability-guard.test
- * .ts`'s house convention: never merely on `ok === false`), and the table's
- * own non-emptiness is asserted first — this repo's standing vacuous-pass
- * guard (`git-policy.test.ts`, `extension-layout.test.ts`).
- *
- * MUTATION ARGUMENTS. Four falsifications of `gateCompletion` (deleting
- * branch 1, weakening branch 2's equality, deleting branch 3, and forcing an
- * always-reject return) plus one falsification of `currentSha` were each
- * executed by hand against this file's real `npx vitest run` output, then
- * reverted. The observed RED output for each is recorded in
- * `06-01-SUMMARY.md`, not merely asserted here.
+ * The evidence gate, table-driven. Every SHA comes from a real temp repository, never a hex literal, since a fixture
+ * constant cannot tell bound-correctly from bound-to-nothing. Every rejection is asserted on its reason string, and
+ * the table's non-emptiness first.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -60,9 +43,9 @@ function treeOfSha(cwd: string, sha: string): string {
 	return (result.stdout ?? "").trim();
 }
 
-/** GATE-01: shaA's tree -- genuinely different from shaB's tree below, since the second commit adds a new file rather than amending the first. */
+/** shaA's tree -- different from shaB's, since the second commit adds a file rather than amending the first. */
 const treeA = treeOfSha(repo, shaA);
-/** GATE-01: shaB's tree -- `repo`'s HEAD is still shaB at this point, so `currentTree` (the real production function) reads it directly. */
+/** shaB's tree -- `repo`'s HEAD is still shaB here, so the real `currentTree` reads it directly. */
 const treeB = currentTree(repo);
 
 /** Maps a fixture SHA to its already-computed tree -- the only two SHAs `ROWS`' `baseSha` ever names. */
@@ -82,7 +65,7 @@ function record(toolName: string, sha: string, isError: boolean): EvidenceRecord
 interface Row {
 	readonly name: string;
 	readonly records: readonly EvidenceRecord[];
-	/** Defaults to `shaA` when omitted -- distinct from `shaB` (HEAD), so the CR-01 branch never fires by accident. */
+	/** Defaults to `shaA` when omitted -- distinct from `shaB` (HEAD), so the moved-HEAD branch never fires by accident. */
 	readonly baseSha?: string;
 	readonly expected: "accept" | "reject";
 	readonly reasonMustContain: readonly string[];
@@ -313,15 +296,8 @@ describe("currentSha", () => {
 });
 
 /**
- * GATE-01 (Phase 8, plan 08-12) -- `gateCompletion`'s sixth ordered branch:
- * `headTree === baseTree` rejects. This is the exact residual `evidence.ts`'s
- * own docstring and `docs/WORKFLOWS.md` section 4 both named as Phase 8's
- * job: an empty commit (`git commit --allow-empty`) moves `HEAD` and its SHA
- * without moving its tree. A dedicated repo, separate from `repo` above, so
- * these commits cannot shift what `head`/`shaA`/`shaB` mean for any ROW in
- * the table above (`ROWS`' `it`s read `currentSha(repo)` fresh on every
- * run -- a later commit to the SAME repo would silently change what "HEAD"
- * means for every row that ran after it).
+ * An empty commit moves HEAD without moving the tree, and must reject. A separate repo, so these commits cannot shift
+ * what HEAD means for the table rows above, which read currentSha(repo) fresh.
  */
 describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the empty-commit gap", () => {
 	const gate01Repo = makeTempRepo("quick-evidence-gate01-");

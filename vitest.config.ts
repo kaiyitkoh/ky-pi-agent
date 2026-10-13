@@ -4,25 +4,15 @@ export default defineConfig({
 	test: {
 		environment: "node",
 		include: ["tests/**/*.test.ts"],
-		// Integration tests shell out to `pi --offline -a --list-models`, which
-		// pays a cold jiti compile on first run. The default 5s is not enough.
+		// Integration tests spawn `pi` and `sh`, and the first pays a cold jiti compile.
 		testTimeout: 120_000,
 		hookTimeout: 120_000,
-		// Cap worker processes (the full suite pegged the dev machine's CPU at 99%).
+		// The full suite at default parallelism pegged the dev machine's CPU.
 		maxWorkers: 2,
-		// A vacuously-empty suite must never report success.
 		passWithNoTests: false,
-		// Suite-wide tripwire: fails the run if any tracked file ends up
-		// modified that was clean before the run started. See
-		// tests/global-teardown.ts's own docstring for why this exists (the
-		// `.env.example`-corruption bug it was added to catch) and why it diffs
-		// against a setup-time snapshot rather than demanding an empty
-		// `git status --porcelain` outright.
+		// Fails the run if a tracked file that was clean at start is modified (tests/global-teardown.ts).
 		globalSetup: ["./tests/global-teardown.ts"],
-		// Structural guard against ANY test resolving getAgentDir() to
-		// this machine's real ~/.pi/agent. Runs once per test file, before
-		// every test in that file -- see tests/setup/agent-dir.ts's own
-		// docstring for the reproduced incident this closes.
+		// Points getAgentDir() away from the machine's real ~/.pi/agent before every file.
 		setupFiles: ["./tests/setup/agent-dir.ts"],
 	},
 });

@@ -1,45 +1,8 @@
 /**
- * SAFE-11 -- Assumption A1, closed: does a user-scope re-export stub really
- * load in a REAL spawned `pi` process on Windows?
- *
- * WHY THIS IS THE PHASE'S ONE GENUINE SPIKE. `writeUserScopeShim`
- * (tests/helpers/session.ts:177-192) is already proven against Pi's
- * IN-PROCESS `createAgentSession()` path, used by every faux-session test
- * since Phase 2. Pattern 6 of 04-RESEARCH.md makes a DIFFERENT claim: that the
- * exact same re-export-stub shape also resolves through jiti inside a
- * REAL, SEPARATELY-SPAWNED `pi` CLI process -- the shape `pi-subagents`
- * actually uses to run a subagent (`pi-spawn.ts:139-163`). That composition
- * has never been executed in this repo. 04-RESEARCH.md tags it `[ASSUMED]`
- * and names a fallback chain: re-export stub -> `file://` URL -> directory
- * copy. This file settles it.
- *
- * THREE CASES, EACH WITH ITS PAIRED CONTROL (this repo's house rule --
- * tests/integration/load-paths.test.ts case 4's own docstring: "a negative
- * assertion needs a fixture that COULD produce the opposite answer").
- *
- *   1. POSITIVE   -- the stub at user scope loads.
- *   2. NEGATIVE    -- the SAME sentinel at PROJECT scope, no trust granted,
- *      CONTROL        does NOT load (Pitfall 15's mechanism -- the entire
- *                      reason SAFE-11 exists), paired with a positive run on
- *                      the identical directory with `-a` added.
- *   3. FRESHNESS   -- editing the sentinel TARGET file and re-running `pi`
- *                      picks up the new content without rewriting the stub,
- *                      proving "one copy of the logic."
- *
- * SENTINEL DESIGN, copied from `.pi/extensions/harness/index.ts` and
- * `tests/integration/load-paths.test.ts`: a registered PROVIDER whose model
- * id is a unique string is the credential-free, TTY-free way to observe that
- * an extension loaded -- `pi --list-models` renders every loaded extension's
- * registered models with no network call and no trust prompt to answer
- * [CITED: pi 0.84.1 docs/extensions.md:1709, `registerProvider` calls made
- * during the factory are queued and flushed once the runner binds context].
- * The sentinel ALSO registers a command, never a tool, following BOOT-10's
- * boundary rule and `harness/index.ts`'s own precedent -- this fixture is not
- * under `.pi/extensions/` at all, but dogfooding the rule costs nothing and
- * keeps the fixture honest about what a real safety extension will do.
- *
- * NEVER `it.skip`. `requirePiOnPath()` throws with the exact remedy if `pi`
- * is missing -- see tests/helpers/pi.ts's own docstring.
+ * A user-scope re-export stub loads in a real spawned `pi` process on Windows, the shape `pi-subagents` uses for a
+ * subagent. Three cases, each with a paired control: the stub loads; the same sentinel at project scope without trust
+ * does not (and does with `-a`); editing the target is picked up without rewriting the stub. The sentinel registers a
+ * provider whose unique model id `pi --list-models` shows with no network or trust prompt.
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -53,14 +16,7 @@ import { requirePiOnPath, runPi } from "../helpers/pi.ts";
 const scratch = scratchDirs();
 const tempDir = scratch.make;
 
-/**
- * A Pi environment with a throwaway agent directory.
- *
- * `PI_CODING_AGENT_DIR` relocates everything Pi keeps under `~/.pi/agent`
- * [VERIFIED: pi 0.84.1 dist/config.js:397,412-418], including `trust.json`.
- * A fresh directory per case is what makes the negative control honest: no
- * saved trust decision from this machine's history can leak in.
- */
+/** A Pi environment with a fresh agent directory, so no saved trust decision can leak into the negative control. */
 function freshAgentEnv(agentDir: string): Record<string, string> {
 	return {
 		...(process.env as Record<string, string>),
@@ -73,11 +29,7 @@ function sentinelModelId(tag: string): string {
 	return `kypi-safety-spike-${tag}`;
 }
 
-/**
- * Build the sentinel extension source. Parameterised on `tag` so the
- * FRESHNESS case can produce a source whose observable output differs from
- * the one that preceded it at the same file path.
- */
+/** The sentinel extension source, parameterised on `tag` so the freshness case can change its output. */
 function sentinelSource(tag: string): string {
 	const modelId = sentinelModelId(tag);
 	return [
@@ -119,11 +71,7 @@ function writeSentinelTarget(path: string, tag: string): void {
 	writeFileSync(path, sentinelSource(tag), "utf-8");
 }
 
-/**
- * Write the identical sentinel source directly at PROJECT scope --
- * `<cwd>/.pi/extensions/<name>/index.ts`. Project scope needs no re-export
- * stub mechanism of its own; the file IS the extension entry point.
- */
+/** Writes the same sentinel directly at project scope, where the file itself is the entry point. */
 function writeProjectScopeSource(cwd: string, name: string, source: string): void {
 	const dir = join(cwd, ".pi", "extensions", name);
 	mkdirSync(dir, { recursive: true });
@@ -151,10 +99,7 @@ describe("SAFE-11 -- the user-scope re-export stub, proven against a real spawne
 		const agentDir = tempDir("kypi-agentdir-");
 		writeUserScopeShim(agentDir, "ky-safety-spike", sentinelPath);
 
-		// cwd is an EMPTY temp directory -- no project, no .pi/extensions, no
-		// package.json -- so the only possible source of the sentinel is the
-		// user-scope stub. No -a, no -e: user-scope extensions load regardless
-		// of project trust [CITED: docs/extensions.md:118, "Global (subdirectory)"].
+		// An empty cwd, so the user-scope stub is the only possible source; user scope ignores project trust.
 		const cwd = tempDir("kypi-cwd-");
 
 		const result = runPi(["--list-models"], { cwd, env: freshAgentEnv(agentDir) });
@@ -175,9 +120,7 @@ describe("SAFE-11 -- the user-scope re-export stub, proven against a real spawne
 		const projectCwd = tempDir("kypi-project-");
 		writeProjectScopeSource(projectCwd, "ky-safety-spike", source);
 
-		// One shared agent dir for both runs in this case: the only difference
-		// between them is the -a flag, so the difference in outcome can only be
-		// the trust gate -- same discipline as load-paths.test.ts case 4.
+		// One agent dir for both runs: only -a differs, so only the trust gate can explain a different outcome.
 		const agentDir = tempDir("kypi-agentdir-");
 		const env = freshAgentEnv(agentDir);
 
@@ -191,9 +134,7 @@ describe("SAFE-11 -- the user-scope re-export stub, proven against a real spawne
 				"subagent, and the absence looks identical to 'nothing dangerous happened'",
 		).not.toContain(sentinelModelId("project-scope"));
 
-		// Paired positive: same directory, same cwd, only -a added. Without
-		// this, the absence above could equally mean the fixture itself is
-		// broken, which would make the negative control a vacuous pass.
+		// Paired positive: without it the absence above could mean a broken fixture.
 		const approved = runPi(["-a", "--list-models"], { cwd: projectCwd, env });
 		assertNoParseError(approved);
 		expect(

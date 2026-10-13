@@ -1,50 +1,8 @@
 /**
- * ROUTE-01 — the role→model map is complete, resolvable, vision-capable and
- * classification-free.
- *
- * ---------------------------------------------------------------------------
- * WHY A COMPOSED REGISTRY, NOT THE TEMPLATE'S LITERAL JSON
- * ---------------------------------------------------------------------------
- * `.pi/extensions/routing/schema.ts` names model ids as plain strings. A test
- * that only checked those strings against `.pi/templates/models-template.json`
- * would prove the ids are spelled the same in two files, not that Pi can
- * actually resolve them into a real `Model<Api>`. `withModelsConfig` is the
- * honest oracle this repository already uses for exactly this reason
- * (`tests/unit/model-metadata.test.ts`, `tests/unit/r1-unclamp.test.ts`):
- * it builds a real, offline `ModelRuntime`/`ModelRegistry` pair over the
- * shipped template and returns the COMPOSED model — `contextWindow`, `input`
- * and `compat` as Pi built them, not as the JSON states them.
- *
- * ONE SURPRISE WORTH RECORDING: `withModelsConfig` over the shipped template
- * resolves BOTH the DashScope entries the template defines AND Pi's built-in
- * catalogue entries (DeepSeek-direct, every Bedrock model) through the same
- * `registry.find(provider, id)` call — verified live on this machine,
- * 2026-08-14, `node -e` against `ModelRuntime.create({..., refreshOnCreate:
- * false})`: `registry.find("amazon-bedrock",
- * "anthropic.claude-sonnet-4-5-20250929-v1:0")` returned a real model with
- * `input:["text","image"]`, and `rt.getModels().length` was 1220. So every
- * candidate in `ROLE_MAP` — DashScope, DeepSeek-direct and Bedrock alike —
- * resolves through the SAME oracle, with no second, hand-rolled reader of the
- * installed `pi-ai` catalogue JSON needed.
- *
- * ---------------------------------------------------------------------------
- * THE NO-AUTO-CLASSIFICATION ASSERTION IS A REAL GATE, NOT A SLOGAN
- * ---------------------------------------------------------------------------
- * "No auto-classification, explicit role→model mapping" is this project's
- * first Key Decision. `PINNED_EXPORTS` below is the machine check that keeps
- * it true: the module's exported names are compared against a pinned list,
- * and independently against a regex, so a future `classifyRole`/`detectRole`/
- * `inferRole` export fails on BOTH — one because it is not on the list, one
- * because it matches the shape a classifier's name always takes.
- *
- * ---------------------------------------------------------------------------
- * VACUOUS-PASS GUARDS (this repo's house rule)
- * ---------------------------------------------------------------------------
- * Every loop below iterates a non-empty set before it is trusted to say
- * anything: `ROLES`/`MODES` are asserted non-empty, the non-vacuity control
- * proves the map is not a single model copy-pasted six times, and the
- * candidate-resolution loop is asserted to have actually visited more than
- * one `{provider,id}` pair before its own negative assertion is trusted.
+ * The role-to-model map is complete, resolvable, vision-capable and classification-free. Candidates resolve through
+ * withModelsConfig, a real offline registry over the shipped template that also serves Pi's built-in catalogue, so the
+ * composed Model is checked, not two spellings of an id. Exports are pinned and matched against a classifier-name
+ * regex, so a classifyRole-style export fails twice. Every loop first proves its set is non-empty.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -68,7 +26,7 @@ import {
 import { repoRoot } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 
-/** The template plan 03-02 shipped. Composed through Pi for every assertion. */
+/** The shipped models template. Composed through Pi for every assertion. */
 const TEMPLATE = `${repoRoot()}/.pi/templates/models-template.json`;
 
 /** `docs/ROUTING.md` — the user-facing document the table below is checked against. */
@@ -80,15 +38,7 @@ const EXPECTED_ROLES = ["executor", "planner", "reviewer", "advisor", "vision", 
 /** `/cheap`, `/balanced`, `/max` — the three modes this phase switches between. */
 const EXPECTED_MODES = ["cheap", "balanced", "max"] as const;
 
-/**
- * Every value this module is permitted to export, sorted.
- *
- * A NEW EXPORT NOT ON THIS LIST FAILS HERE FIRST. `export type` declarations
- * (`Role`, `ModeName`, `Mechanism`, `ModelRef`, `RoleRoute`, `KyModeData`) are
- * erased at the type-only import boundary and never appear as runtime keys of
- * the imported namespace — `verbatimModuleSyntax` guarantees this, so the
- * list below only needs the VALUE exports.
- */
+/** Every value export permitted, sorted; type exports are erased under verbatimModuleSyntax and never appear. */
 const PINNED_EXPORTS = [
 	"AGENT_NAME_BY_ROLE",
 	"BEDROCK_PROFILE_PREFIX_DEFAULT",
@@ -103,12 +53,7 @@ const PINNED_EXPORTS = [
 	"ROUTING_EVENT",
 ].sort();
 
-/**
- * The shape a classifier's own name always takes. Independent of
- * {@link PINNED_EXPORTS}: a new export could in principle be added to the
- * pinned list by the same change that introduces it, so the regex is the
- * second, independent guard this project's first Key Decision gets.
- */
+/** A classifier's name shape: independent of PINNED_EXPORTS, which the same change could extend. */
 const CLASSIFIER_NAME_RE = /classif|detect|infer|guess/i;
 
 /** `${provider}/${id}`, the key used to dedupe candidates before resolving. */
@@ -154,10 +99,7 @@ describe("ROUTE-01 — every candidate resolves through the same composed regist
 			}
 		}
 
-		// Non-vacuity: a map with one shared candidate list per role would still
-		// exercise this loop, but an empty map (every route emptied) would not —
-		// the earlier "non-empty candidates" describe block already forbids that,
-		// this is the belt-and-braces guard for THIS test file specifically.
+		// Non-vacuity: an emptied map would skip this loop entirely.
 		expect(
 			seen.size,
 			"no distinct {provider,id} pairs were collected from ROLE_MAP — the resolution loop below " +
@@ -279,9 +221,7 @@ describe("ROUTE-01 — non-vacuity: the map is not one model copy-pasted six tim
 	});
 
 	it("executor's first candidate is the flash tier in cheap and the pro tier in max", () => {
-		// Named directly, not just asserted generically: this is the concrete case
-		// the plan itself states ("cheap ... executor ... on deepseek-v4-flash",
-		// "max: executor ... on deepseek-v4-pro").
+		// The concrete case: cheap runs the executor on deepseek-v4-flash, max on deepseek-v4-pro.
 		expect(ROLE_MAP.cheap.executor.candidates[0].id).toBe("deepseek-flash");
 		expect(ROLE_MAP.max.executor.candidates[0].id).toBe("deepseek-v4-pro");
 	});
@@ -310,9 +250,7 @@ describe("ROUTE-01 — no auto-classification path exists", () => {
 	});
 
 	it("the regex fires against a classifier-shaped name (guards against a dead pattern)", () => {
-		// Proven live, the same way tests/unit/chokepoint-lint.test.ts proves its
-		// own FORBIDDEN patterns are live: a regex checked only against a clean
-		// export list is a regex that could be silently broken and never noticed.
+		// A regex checked only against a clean export list could be broken unnoticed, so prove it fires.
 		for (const offending of ["classifyRole", "detectRole", "inferRole", "guessRole"]) {
 			expect(CLASSIFIER_NAME_RE.test(offending), `${offending} did not match CLASSIFIER_NAME_RE`).toBe(true);
 		}
@@ -347,23 +285,10 @@ describe("ROUTE-01 — mode/escalation vocabulary the rest of the phase depends 
 });
 
 // ---------------------------------------------------------------------------
-// ROUTE-01/05-12 — docs/ROUTING.md's published table cannot drift from
-// ROLE_MAP, in EITHER direction. Following docs/SAFETY.md's own
-// corpus-derived-limits discipline (the "Known bypasses" table is asserted
-// against tests/fixtures/evasion-corpus.ts in both directions, never
-// hand-typed): the CONVERSE direction is the one that matters. Without it,
-// docs/ROUTING.md could grow a row ROLE_MAP does not have, which is exactly
-// how a doc becomes a second source of truth.
+// docs/ROUTING.md's table agrees with ROLE_MAP in both directions, so the doc never becomes a second source of truth
 // ---------------------------------------------------------------------------
 
-/**
- * Matches a `provider/id`-shaped token using only the three provider
- * namespaces this project's schema.ts actually names (`deepseek`,
- * `dashscope`, `amazon-bedrock`). Deliberately narrow rather than a bare
- * `\S+\/\S+`: the deny-listed Bedrock R1 ids in §4 of the document are
- * written WITHOUT a provider prefix precisely so they do not collide with
- * this extraction — see docs/ROUTING.md §4's own wording.
- */
+/** A `provider/id` token in the three namespaces schema.ts names; the deny-listed R1 ids in §4 carry no prefix. */
 const PROVIDER_MODEL_RE = /\b(?:deepseek|dashscope|amazon-bedrock)\/[A-Za-z0-9._:-]+/g;
 
 /** `${provider}/${id}` for a {@link ModelRef}, matching {@link PROVIDER_MODEL_RE}'s own shape. */
@@ -384,13 +309,7 @@ function everyRoleMapCandidateKey(): Set<string> {
 	return keys;
 }
 
-/**
- * Slice out `docs/ROUTING.md`'s "## 2. The role→model table" section, the
- * same extraction discipline `tests/unit/docs-policy.test.ts`'s Group D uses
- * for `docs/DIAGNOSTICS.md`'s Redaction section — scoped to the table so a
- * refusal-section mention of a Bedrock id (§4) cannot accidentally satisfy or
- * break this check.
- */
+/** The "## 2. The role→model table" section, so a §4 mention of a Bedrock id cannot satisfy or break the check. */
 function roleModelTableSection(doc: string): string {
 	const start = doc.indexOf("\n## 2. The role→model table");
 	expect(

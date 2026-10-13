@@ -1,21 +1,7 @@
 /**
- * SAFE-07 — `.pi/extensions/safety/infra.ts`, table-driven.
- *
- * A `{ command, expected, why }` table over `classifyInfraInvocation`,
- * covering the three infra families (`aws`, `terraform`, `kubectl`) plus a
- * `not-applicable` row for a non-infra executable. The orientation calls
- * (`aws sts get-caller-identity`, `aws s3 ls`, `terraform plan`, `kubectl
- * get pods`) are present as NAMED ALLOW rows citing `04-RESEARCH.md`
- * Pitfall 4, so a later change that gates them fails loudly rather than
- * silently degrading the harness into approval fatigue.
- *
- * VACUOUS-PASS GUARD (this repo's house rule -- `tests/unit/git-policy.test.ts`,
- * `tests/unit/path-policy.test.ts`, `tests/unit/shell-deny-list.test.ts`):
- * the row table asserts its own length before use, and every entry in
- * `TERRAFORM_CONFIRM_SUBCOMMANDS`, `TERRAFORM_ALLOW_SUBCOMMANDS`,
- * `KUBECTL_CONFIRM_VERBS` and `KUBECTL_ALLOW_VERBS` is asserted reachable by
- * at least one row -- a dead table entry and an absent one would otherwise
- * produce identical green runs.
+ * safety/infra.ts classifyInfraInvocation, table-driven over aws, terraform, kubectl and openspec. Orientation calls are
+ * named ALLOW rows, so gating them fails loudly instead of breeding approval fatigue. The table asserts its own length,
+ * and every confirm/allow table entry must be reached by a row: a dead entry and an absent one pass alike otherwise.
  */
 import { describe, expect, it } from "vitest";
 
@@ -47,7 +33,7 @@ interface Row {
 
 const ROWS: readonly Row[] = [
 	// -------------------------------------------------------------------------
-	// aws -- the orientation calls, named ALLOW (Pitfall 4)
+	// aws -- the orientation calls, named ALLOW
 	// -------------------------------------------------------------------------
 	{
 		command: "aws sts get-caller-identity",
@@ -124,7 +110,7 @@ const ROWS: readonly Row[] = [
 	{ command: "terraform workspace delete x", expected: "confirm", why: "two-word subcommand: destroys a workspace" },
 
 	// -------------------------------------------------------------------------
-	// terraform -- orientation / preview, named ALLOW (Pitfall 4's terraform sibling)
+	// terraform -- orientation / preview, named ALLOW
 	// -------------------------------------------------------------------------
 	{ command: "terraform plan", expected: "allow", why: "Pitfall 4 sibling: a local plan must not gate" },
 	{ command: "terraform fmt", expected: "allow", why: "formatting only" },

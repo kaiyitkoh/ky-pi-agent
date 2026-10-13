@@ -1,52 +1,8 @@
 /**
- * SAFE-16 -- `scripts/check-gh-unauthenticated.sh` classifies both states.
- *
- * ---------------------------------------------------------------------------
- * READ THIS BEFORE BELIEVING A GREEN RUN
- * ---------------------------------------------------------------------------
- * This test proves the CLASSIFIER, not the MACHINE. It says nothing whatsoever
- * about whether `/share` is actually neutered anywhere. The live control --
- * logging `gh` out on the work laptop, then confirming `gh auth status` exits
- * non-zero and that `/share` really does abort in a live Pi session -- is
- * **OUTSTANDING**. It is recorded in `docs/RUNBOOK.md` and must never be
- * reported as passed on the strength of this file. Four green checks here plus
- * an authenticated work laptop is still a full session transcript one keystroke
- * away from a GitHub gist.
- *
- * ---------------------------------------------------------------------------
- * Why every case is stubbed
- * ---------------------------------------------------------------------------
- * `gh` IS authenticated on this dev machine, with `gist` scope, account
- * kaiyitkoh [VERIFIED: RESEARCH.md 6.3 + Runtime State Inventory, executed
- * 2026-08-13]. That is not an oversight: the git remote is HTTPS and no SSH key
- * exists, so the `gh` credential in the OS keyring is how this repo is pushed.
- *
- * Two consequences, both load-bearing:
- *
- *   1. No case here may mutate `gh` auth state. Logging the developer out to
- *      make an assertion true would break their git access -- and it is
- *      irreversible without an interactive browser flow. [threat T-01-07]
- *   2. No case here may assert on real machine state either. "gh is logged out"
- *      would be red on this machine and green on a CI runner that never had
- *      `gh` -- a result that tracks the runner, not the code.
- *
- * So every case runs the script as a subprocess against a `gh` supplied by
- * `withStubBin`, and each one additionally asserts, from the stub's own call
- * log, that the STUB was the binary consulted. That log is the proof the real
- * `gh` was never reached; without it, a PATH-ordering mistake would silently
- * turn this suite into an assertion about the developer's keyring.
- *
- * ---------------------------------------------------------------------------
- * Why cases 1 and 2 must both exist
- * ---------------------------------------------------------------------------
- * They are the same script under inverted stub states, asserting inverted exit
- * codes. Either one alone is satisfied by a script that always exits 0 -- i.e.
- * by a control that never fires. [threat T-01-23]
- *
- * The closed doors the script's header records (no extension hook is upstream
- * of the literal `/share` match at interactive-mode.ts:2902; `--remove-scopes`
- * cannot drop `gist`) are not re-tested here -- they are properties of Pi and
- * of the GitHub CLI, not of this repo. [threats T-01-21, T-01-22]
+ * check-gh-unauthenticated.sh classifies both gh states. This proves the classifier, not the machine: logging gh out
+ * on the work laptop is an outstanding runbook check. Every case stubs gh (the dev machine's gh is authenticated and
+ * pushes this repo, so its state must never be changed or asserted) and checks from the stub's log that the stub
+ * answered. Cases 1 and 2 invert the stub and the verdict, so a script hardcoded to one exit code fails one of them.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -63,17 +19,7 @@ const SCRIPT = join(repoRoot(), "scripts", "check-gh-unauthenticated.sh").replac
 
 const TIMEOUT_MS = 60_000;
 
-/**
- * Absolute path to `sh`, resolved once from the REAL environment.
- *
- * Case 4 hands the child a PATH containing nothing but an empty stub directory,
- * so `sh` itself has to be located before that PATH is narrowed. Resolving it
- * up front and spawning the absolute path keeps the child's PATH purely an
- * input to the code under test rather than something the spawn also depends on.
- *
- * Throws rather than skips, per the house rule from Plan 02: a skipped
- * supply-chain check is a green run that verified nothing.
- */
+/** Absolute `sh`, resolved before case 4 narrows PATH to an empty stub directory. Throws rather than skips. */
 function resolveSh(): string {
 	const finder = process.platform === "win32" ? "where" : "which";
 	const found = spawnSync(finder, ["sh"], { encoding: "utf-8", windowsHide: true });
@@ -108,14 +54,7 @@ interface CheckRun {
 	ghCalls: string[];
 }
 
-/**
- * Run the script exactly the way the runbook and CI do: as a subprocess through
- * `sh`, with no in-process reimplementation of the branch under test.
- *
- * `ghExitCode: null` means "no `gh` stub, and a PATH narrowed to the stub
- * directory alone" -- the only honest way to simulate a machine without the
- * GitHub CLI while the real one sits on this machine's PATH.
- */
+/** Runs the script through `sh` as CI does; `ghExitCode: null` means no stub and a PATH holding only the stub dir. */
 function runCheck(opts: {
 	ghExitCode: number | null;
 	args?: string[];
@@ -141,9 +80,7 @@ function runCheck(opts: {
 			if (opts.envToken !== undefined) env.GH_TOKEN = opts.envToken;
 			const key = pathKeyOf(env);
 			if (opts.ghExitCode === null) {
-				// withStubBin prepends its temp dir to the inherited PATH. Keep only
-				// that first entry, so the real `gh` (and everything else) is out of
-				// reach and `command -v gh` genuinely finds nothing.
+				// Keep only withStubBin's own PATH entry, so `command -v gh` genuinely finds nothing.
 				const stubDir = (env[key] ?? "").split(delimiter)[0];
 				env[key] = stubDir;
 			}
@@ -182,14 +119,10 @@ describe("SAFE-16 -- the /share control classifier", () => {
 	it("case 1: authenticated + bare invocation fails and names the remedy", () => {
 		const run = runCheck({ ghExitCode: 0 });
 
-		// The gate. `gh auth status` exiting 0 means Pi's guard at
-		// interactive-mode.ts:5856-5866 lets /share through to the export at
-		// :5869, so the check must refuse.
+		// gh auth status exiting 0 lets /share through Pi's guard (interactive-mode.ts:5856-5866), so the check must refuse.
 		expect(run.status, `stdout: ${run.stdout}\nstderr: ${run.stderr}`).toBe(1);
 
-		// It has to be actionable, and there is exactly one action. Matched with
-		// \s+ so this file never contains the literal command; nothing in the test
-		// suite may look like an invocation of it.
+		// Matched with \s+ so this file never contains the literal command.
 		expect(run.stderr).toMatch(/gh\s+auth\s+logout/);
 		expect(run.stderr).toMatch(/gist/i);
 
@@ -200,9 +133,7 @@ describe("SAFE-16 -- the /share control classifier", () => {
 	it("case 2: unauthenticated passes and says /share aborts", () => {
 		const run = runCheck({ ghExitCode: 1 });
 
-		// Inverted stub, inverted verdict. Paired with case 1 this is the whole
-		// proof: a script hardcoded to exit 0 passes case 2 and fails case 1, and
-		// one hardcoded to exit 1 does the reverse. [threat T-01-23]
+		// Inverted stub, inverted verdict: with case 1 this rules out a hardcoded exit code.
 		expect(run.status, `stdout: ${run.stdout}\nstderr: ${run.stderr}`).toBe(0);
 		expect(run.stdout).toMatch(/unauthenticated/);
 		expect(run.stdout).toMatch(/cannot upload/);
@@ -236,24 +167,12 @@ describe("SAFE-16 -- the /share control classifier", () => {
 		// /share takes its error branch. Nothing to warn about.
 		expect(run.status, `stdout: ${run.stdout}\nstderr: ${run.stderr}`).toBe(0);
 
-		// THIS pair is the real control, and it is discriminating: `gh` is
-		// genuinely authenticated on this development machine, so if the narrowed
-		// PATH had leaked the script would have taken the authenticated branch and
-		// exited 1 with "gh IS authenticated" on stderr. Asserting the
-		// not-installed message specifically -- rather than the substring
-		// "cannot upload", which the authenticated branch also contains -- is what
-		// distinguishes "gh was absent" from "gh answered".
+		// Discriminating because the real gh is authenticated: a leaked PATH would take the authenticated branch, so the
+		// not-installed message is asserted rather than the shared "cannot upload" substring.
 		expect(run.stdout).toMatch(/OK: gh is not installed; \/share cannot upload\./);
 		expect(run.stderr).not.toMatch(/gh IS authenticated/);
 
-		// NOT asserted: `expect(run.ghCalls).toEqual([])`. It cannot fail. With
-		// `ghExitCode: null` no stub is written and no `logTo` is wired, so the
-		// log file cannot exist and `ghCalls` is `[]` by construction whether or
-		// not the real `gh` ran. Nor can it be repaired by always writing a
-		// logging stub: the leak this is meant to catch is the REAL `gh`, and the
-		// real `gh` writes to no log either, so an empty log would still be
-		// consistent with the leak. Stated rather than deleted silently, so the
-		// next reader does not re-add it thinking it is missing coverage.
+		// No ghCalls assertion: with no stub the log cannot exist, and the real gh writes no log either.
 	}, TIMEOUT_MS);
 
 	it("case 5: a stored Radius credential fails even when gh is unauthenticated", () => {

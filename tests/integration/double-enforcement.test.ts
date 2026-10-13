@@ -1,66 +1,9 @@
 /**
- * SAFE-09 — the post-approval / post-allow mutation hazard is a failing-then-
- * passing test in this repo, not merely a claim in a docstring.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS PROVES, AND WHAT IT DOES NOT
- * ---------------------------------------------------------------------------
- * Pi's own extension types document the hazard verbatim: "`event.input` is
- * mutable... Later `tool_call` handlers see earlier mutations. No
- * re-validation is performed after mutation."
- * [VERIFIED: `dist/core/extensions/types.d.ts:687-688`, quoted in
- * `.planning/research/PITFALLS.md:442-449`]. A `tool_call`-hook-only guard is
- * therefore defeated by ANY later-loaded extension that rewrites the command
- * after the hook allowed it. This file proves the safety extension's SECOND
- * enforcement layer — the wrapped tool's own `execute()`, which re-evaluates
- * policy against the params that actually reach execution — closes that gap.
- * It does not re-prove SAFE-03/SAFE-04/SAFE-06 (those are `tests/unit/*-policy*`
- * and `tests/unit/policy-compose.test.ts`); it proves the TWO-LAYER
- * COMPOSITION specifically.
- *
- * ---------------------------------------------------------------------------
- * WHY THE SAFETY EXTENSION LOADS AT USER SCOPE
- * ---------------------------------------------------------------------------
- * `tests/helpers/session.ts`'s own docstring, note 3: project-scoped
- * `.pi/extensions` is gated behind project trust, which resolves `false`
- * headless with no UI to answer the prompt (RESEARCH §8.4). A silently
- * absent extension is a green run that proved nothing, so every case here
- * loads through `extensionPath`/`extensionSource` (the mandatory shim route),
- * never a project-scoped path.
- *
- * ---------------------------------------------------------------------------
- * WHY THE MUTATION IS WITHIN-EXTENSION, NOT ACROSS-EXTENSION
- * ---------------------------------------------------------------------------
- * `createFauxSession` accepts exactly ONE user-scope entry point
- * (`extensionPath` XOR `extensionSource` — `tests/helpers/session.ts:236-247`
- * throws if both are given). Cases 2 and 3 therefore load an INLINE
- * extension that (a) imports and calls the REAL safety extension's default
- * export first, then (b) registers a SECOND `pi.on("tool_call", ...)`
- * handler that mutates `event.input.command`. Per the plan's own explicit
- * fallback instruction, this is recorded here rather than silently assumed:
- * the load-order fidelity this file exercises is WITHIN one extension's own
- * handler list, not across two separately-loaded extensions. The mechanism
- * under test — last-handler-wins mutation with no re-validation
- * [VERIFIED: `dist/core/extensions/runner.js:701-719`, `emitToolCall`'s
- * `for (const handler of handlers)` loop, which accumulates mutations to the
- * SAME `event.input` object across every handler in registration order and
- * short-circuits only on an explicit `block`] — is IDENTICAL either way: Pi's
- * own `emitToolCall` treats every extension's handler list, and every
- * extension's own handler list, through the same accumulating loop. There is
- * no code path in `runner.js` that behaves differently for two handlers in
- * one extension versus one handler in each of two extensions.
- *
- * ---------------------------------------------------------------------------
- * WHY THE FIXTURES ARE PATH-BASED, NOT GIT-BRANCH-BASED
- * ---------------------------------------------------------------------------
- * `withFauxSession`'s `cwd` is a fresh temp directory, never a git
- * repository (`tests/helpers/session.ts:227`). A blocked-command fixture
- * that depended on `HEAD == main` would need this file to `git init` and
- * commit inside that temp dir before every case — extra setup this file does
- * not need, because `policy.ts`'s path classifier (SAFE-06) blocks
- * `cat terraform.tfstate` with NO git fixture at all, exactly as the plan's
- * own Case 1 alternative names. Every command below is `cat`/`echo` over a
- * path or a literal string; none of them touch git.
+ * The post-allow mutation hazard: `event.input` is mutable and never re-validated (pi dist/core/extensions/types.d.ts),
+ * so a later `tool_call` handler can rewrite an allowed command. The wrapped tool's `execute()` re-evaluates policy on
+ * the params that actually run, closing that gap. The mutating handler is registered after `safety(pi)` inside one
+ * inline extension; `emitToolCall` accumulates mutations through one loop either way. Fixtures are path-based, so no
+ * git repository is needed.
  */
 
 import type { FauxResponseStep, TranscriptContext } from "@earendil-works/pi-ai";
@@ -86,14 +29,8 @@ const BENIGN_A = "echo benign-a";
 const BENIGN_B = "echo benign-b";
 
 /**
- * An inline user-scope extension: the REAL safety extension, plus a SECOND
- * `tool_call` handler that rewrites `event.input.command` from `mutateFrom`
- * to `mutateTo` -- but only for a `bash` call carrying exactly `mutateFrom`,
- * so an unrelated command in the same session (there is none in this file,
- * but the guard costs nothing) is left untouched.
- *
- * Registered AFTER `safety(pi)` in the same synchronous function body, which
- * is the within-extension load-order fidelity the module docstring explains.
+ * The real safety extension plus a second `tool_call` handler, registered after it, that rewrites a bash command
+ * exactly equal to `mutateFrom` into `mutateTo`.
  */
 function mutatorExtensionSource(mutateFrom: string, mutateTo: string): string {
 	return [
@@ -121,10 +58,7 @@ function scriptedTurn(command: string, outgoing: TranscriptContext[]): FauxRespo
 
 describe("SAFE-09 -- a blocked command stays blocked even after a later handler mutates it", () => {
 	it("case 1: the hook catches an outright-blocked command directly, with no mutation involved", async () => {
-		// CR-06: the safety extension's default export has no process-wide
-		// idempotency guard any more -- this file loads it in-process, in more
-		// than one it() below, and each load fully re-registers with no reset
-		// call needed.
+		// The safety default export has no process-wide idempotency guard, so each in-process load re-registers fully.
 		const outgoing: TranscriptContext[] = [];
 
 		await withFauxSession(
@@ -176,10 +110,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 				const rows = readAudit(cwd);
 				assertAuditNonEmpty(rows);
 
-				// (a) the hook genuinely allowed the ORIGINAL, unmutated input --
-				// the hook evaluates event.input BEFORE the second handler in this
-				// file's own registration order runs, so its own audit row names
-				// the benign command, never the blocked one.
+				// (a) The hook saw the original command, before the second handler ran.
 				const hookAllow = rows.filter(
 					(row) => row.event === "safety.tool_call_hook" && row.verdict === "allow" && row.command === BENIGN_A,
 				);
@@ -202,11 +133,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 				).toBe(true);
 				expect(result?.text, "the tool result must carry the wrapper's own block reason").toContain("tfstate");
 
-				// (c) the audit log contains BOTH an allow row (the hook's view of
-				// the original command) AND a block row (the wrapper's view of the
-				// mutated command) -- the observable signature of enforcement
-				// happening TWICE. This is what makes the case about SAFE-09 rather
-				// than SAFE-04/06.
+				// (c) An allow row for the original and a block row for the mutation: enforcement happened twice.
 				const wrapperBlock = rows.filter(
 					(row) => row.event === "safety.wrapped_execute" && row.verdict === "block" && row.command === BLOCKED_COMMAND,
 				);
@@ -239,10 +166,7 @@ describe("SAFE-09 -- a blocked command stays blocked even after a later handler 
 				const rows = readAudit(cwd);
 				assertAuditNonEmpty(rows);
 
-				// Without this case, case 2 is consistent with "the wrapper blocks
-				// EVERYTHING it re-evaluates", not specifically "the wrapper blocks
-				// a command that classifies as blocked". The SAME mutation
-				// mechanism, targeting a benign command, must execute cleanly.
+				// The same mutation onto a benign command must run, or case 2 fits a wrapper that blocks everything.
 				expect(outgoing.length, "the closing reply must have been reached for its context to be captured").toBe(
 					1,
 				);

@@ -1,94 +1,10 @@
 /**
- * SAFE-10 -- a blocked command is denied inside a REAL, separately-spawned
- * `pi --mode json` process, where `noOpUIContext` is genuinely bound rather
- * than merely asserted about.
- *
- * ---------------------------------------------------------------------------
- * Why a faux session cannot prove this (04-RESEARCH.md Pattern 4)
- * ---------------------------------------------------------------------------
- * `hasUI()` is an object-identity check against the `noOpUIContext` singleton
- * [`dist/core/extensions/runner.js:153,274-276`], not a mode-string branch.
- * `createFauxSession` (Plan 08's `double-enforcement.test.ts`) drives a REAL
- * in-process agent loop and is the right tool for proving policy logic and
- * double enforcement, but it runs inside THIS test process, which never binds
- * a UI context either way -- so it cannot distinguish "no UI was ever bound"
- * from "a UI could have been bound but the test harness happens not to use
- * one". Only an actual `--mode json` subprocess, spawned via `runPi()`, can
- * make that distinction, because Pi's own CLI entry point is what decides
- * whether `setUIContext` is ever called.
- *
- * ---------------------------------------------------------------------------
- * The composition, and the dead end it replaces (RESEARCH Open Question 2)
- * ---------------------------------------------------------------------------
- * The plan's own design named `tests/helpers/loopback.ts` (a cross-process
- * HTTP capture server in THIS test process) as the way to script the spawned
- * `pi`'s model turn. THAT COMPOSITION WAS TRIED, AND MEASURED TO BE
- * UNRELIABLE: driving the identical argv through `spawnSync` from inside a
- * vitest test process (`--pool=threads` and `--pool=forks` both) reproduced a
- * deterministic hang -- the spawned `pi` process never even opened a
- * connection to the loopback server -- in every one of five separate runs,
- * while the SAME argv against the SAME server run from a bare `node script.mjs`
- * outside vitest succeeded in four of five runs, and reliably once warmed.
- * Stripping every `npm_config_*`/`NPM_CONFIG_*`/`VITEST*` variable vitest
- * injects into the child's environment (bootstrap.sh's own documented
- * pollution hazard) made no difference. The proximate cause was never fully
- * isolated -- plausibly a security-software interception of loopback traffic
- * specifically between a vitest-spawned process and a freshly-launched child,
- * plausibly something else -- and RESEARCH's own Open Question 2 explicitly
- * pre-authorizes exactly this situation: fall back to whatever route
- * reliably reaches the wrapped tool, and record precisely what does and does
- * not change.
- *
- * THE FIX: no network at all. `fauxProvider()` [pi-ai 0.84.1
- * `dist/providers/faux.js`] resolves every scripted response through
- * `queueMicrotask` with no `fetch` anywhere in its implementation. Instead of
- * a `models.json` pointing at an external loopback URL, this file writes a
- * small DRIVER EXTENSION straight into the throwaway agent directory
- * (`kypi-faux-driver`) that imports `fauxProvider`/`fauxToolCall`/
- * `fauxAssistantMessage` from `@earendil-works/pi-ai` and calls
- * `pi.registerProvider(faux.provider)` -- run INSIDE the spawned `pi`
- * process itself, exactly the same `registerProvider`-during-the-factory
- * pattern the sentinel provider in Plan 01's `user-scope-load.test.ts`
- * already proved loads and resolves with no trust prompt. Verified by direct
- * repeated execution (both standalone and inside vitest) to complete in well
- * under a second with no flakiness across multiple consecutive runs.
- *
- * The driver's scripted response queue is exactly two entries: turn 1 always
- * emits a single `bash` tool call for the given command, turn 2 always
- * settles with plain text -- so the exchange terminates instead of
- * re-attempting the same command once its tool result comes back.
- *
- * ---------------------------------------------------------------------------
- * What this file proves, and what it explicitly does not (scope, stated
- * honestly per the plan's own fallback clause)
- * ---------------------------------------------------------------------------
- * PROVEN: a command classified `block` by `policy.ts` is refused with no UI
- * bound at all, in a real subprocess, with an audit trail; the identical
- * harness executes a benign command normally, so the deny is not merely "the
- * subprocess could not execute anything".
- *
- * NOT exercised here: the `confirm`-verdict / `approve_ky_command` path,
- * where `ctx.ui.select()` itself returns `undefined` headless. That specific
- * mechanism is unit-proven in `tests/unit/safety-entry.test.ts`'s WR-11
- * describe block ("approve_ky_command.execute() denies by default on every
- * non-affirmative branch"), which drives the REGISTERED tool's own
- * `execute()` directly for all three deny-by-default branches T-04-03 names
- * (`hasUI: false`, an explicit "Deny" selection, and `ctx.ui.select()`
- * returning `undefined`), asserting both that it throws and that no grant is
- * left behind. (This docstring previously named
- * `tests/integration/double-enforcement.test.ts` too -- that file proves
- * SAFE-09's mutation-after-allow property, not this one; it never invokes
- * `approve_ky_command` at all. Corrected as WR-11.) Scripting a SECOND tool
- * call (`approve_ky_command`) on top of the two-turn exchange above was
- * judged unnecessary for this plan and would not add anything the unit-level
- * proof does not already cover -- both paths go through the identical
- * `noOpUIContext` singleton this file's DENY case already proves is bound.
- *
- * ---------------------------------------------------------------------------
- * Never `it.skip`
- * ---------------------------------------------------------------------------
- * `requirePiOnPath()` throws with the exact remedy if `pi` is missing --
- * matching every other real-subprocess test in this repository.
+ * A blocked command is denied inside a real `pi --mode json` subprocess, where `noOpUIContext` is genuinely bound:
+ * `hasUI()` is an identity check against that singleton, which an in-process faux session cannot distinguish.
+ * The model is a faux provider registered by a driver extension inside the spawned `pi`, not a loopback server: a
+ * vitest-spawned `pi` deterministically never connected to one. Turn 1 emits one bash call, turn 2 settles. A benign
+ * command runs normally as the control. The headless `approve_ky_command` deny path is unit-proven in
+ * safety-entry.test.ts.
  */
 import { existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -123,13 +39,8 @@ function freshEnv(agentDir: string): Record<string, string> {
 }
 
 /**
- * Write (or overwrite) the in-process faux-provider driver extension at user
- * scope. See the module docstring's "THE FIX" section for why this replaces
- * a loopback HTTP server. Overwriting the SAME file between the two `it()`
- * cases below and relying on a fresh `pi` process to re-resolve it is the
- * identical mechanism `user-scope-load.test.ts`'s FRESHNESS case already
- * proved: jiti has no cross-process cache, so each spawn sees exactly the
- * content on disk at the moment it starts.
+ * Writes the faux-provider driver extension at user scope. Overwriting it between cases is safe: each fresh `pi`
+ * process re-resolves it, since jiti has no cross-process cache.
  */
 function writeFauxDriverExtension(agentDir: string, command: string): void {
 	const dir = join(agentDir, "extensions", "kypi-faux-driver");
@@ -247,14 +158,10 @@ describe("SAFE-10 / SAFE-11 -- a blocked command is denied inside a real headles
 		requirePiOnPath();
 
 		agentDir = tempDir("kypi-agentdir-");
-		// A throwaway cwd OUTSIDE this repository: from inside the repo, Pi would
-		// walk up collecting this project's own 49 KB CLAUDE.md into every
-		// request (tests/helpers/session.ts's own documented hazard).
+		// A cwd outside the repo, or Pi collects this project's large CLAUDE.md into every request.
 		cwd = tempDir("kypi-cwd-");
 
-		// SAFE-11's mechanism, not project-scoped resources: this cwd has no
-		// .pi/extensions at all, so the ONLY possible source of the safety
-		// extension is the user-scope stub.
+		// This cwd has no .pi/extensions, so the user-scope stub is the only possible source of the safety extension.
 		writeUserScopeShim(agentDir, "ky-safety", SAFETY_ENTRY_POINT);
 	});
 
@@ -280,10 +187,7 @@ describe("SAFE-10 / SAFE-11 -- a blocked command is denied inside a real headles
 				{ cwd, env: freshEnv(agentDir) },
 			);
 
-			// The process completed within the timeout with a real exit code --
-			// this IS the "no hang" proof: `--mode json` never binds a UI, so
-			// nothing was ever waiting on input; a hung process would instead
-			// have been killed by spawnSync's timeout and reported status null.
+			// A real exit code within the timeout is the no-hang proof: a hung process would report status null.
 			expect(result.status, `pi failed:\n${result.stderr}\nstdout:\n${result.stdout}`).toBe(0);
 
 			const lines = parseJsonLines(result.stdout);

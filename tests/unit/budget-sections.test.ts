@@ -1,39 +1,7 @@
 /**
- * DIAG-06 — the `/budget` decomposition, proven against inline fixtures.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE IS, AND WHAT IT IS NOT
- * ---------------------------------------------------------------------------
- * This is the pure half. No session, no filesystem, no Pi: every fixture below
- * is a string written in this file, so the parser's behaviour is provable in
- * milliseconds and every edge is reachable. It proves the SLICER.
- *
- * It cannot prove the MARKERS. A decomposition that sums perfectly against a
- * fixture this file constructed says nothing about whether Pi 0.84.1 still
- * emits `<project_context>` — and Pi ships every 2-3 days. That claim belongs
- * to `tests/integration/budget.test.ts`, which slices the real system prompt of
- * the installed version. Neither file is sufficient alone, and the split is the
- * same one `turns-log.test.ts` and `turn-row.test.ts` already use.
- *
- * ---------------------------------------------------------------------------
- * NO SIZE THRESHOLD IS ASSERTED ANYWHERE (RESEARCH Pitfall 9)
- * ---------------------------------------------------------------------------
- * "The system prompt must be under N characters" is an assertion about the
- * machine the test runs on, not about the code. Pi walks up from `cwd`
- * collecting context files, so the number depends on the repository layout
- * above it. What is asserted here is that the decomposition ACCOUNTS for every
- * character, whatever the number turns out to be.
- *
- * ---------------------------------------------------------------------------
- * THE SUM ASSERTION IS NOT AN IDENTITY
- * ---------------------------------------------------------------------------
- * `base + contextFiles + skills === total` would hold trivially if `base` were
- * computed as `total - contextFiles - skills`. It is not: `sliceSystemPrompt`
- * builds `base` by physically removing the located regions from the prompt and
- * measuring what is left, so the sum fails when the regions overlap, run past
- * the end, or are located twice. That is what makes the assertion worth making
- * — a decomposition that does not sum is a decomposition quietly attributing
- * characters to nothing.
+ * The /budget decomposition against inline fixtures: this proves the slicer, and tests/integration/budget.test.ts
+ * proves Pi still emits the markers. No size threshold is asserted, since prompt size depends on the machine. The sum
+ * is not an identity: `base` is what remains after physically removing the located regions, so overlaps fail it.
  */
 import { describe, expect, it } from "vitest";
 
@@ -56,13 +24,7 @@ import {
 	type BudgetInput,
 } from "../../.pi/extensions/diagnostics/budget.ts";
 
-/**
- * The base prompt, standing in for Pi's 1,400-odd characters of preamble.
- *
- * Deliberately contains the words "project" and "skills" in prose: a slicer
- * that matched on a loose substring rather than the full literal delimiters
- * would find them here, and the sum would break.
- */
+/** A stand-in for Pi's preamble that says "project" and "skills" in prose, so a loose-substring slicer breaks the sum. */
 const PREAMBLE =
 	"You are an expert coding assistant.\n\nAvailable tools:\n- read\n\n" +
 	"Guidelines:\n- Be concise\n- Mention the project and any skills you use\n";
@@ -188,9 +150,7 @@ describe("sliceSystemPrompt — every character is accounted for", () => {
 				"not make characters disappear",
 		).toBe(prompt.length);
 
-		// The WARNING is a property of computeBudget, not the slicer: it fires only
-		// when a block was EXPECTED. Pi told us there is a context file and the
-		// prompt does not carry the block -- that is the divergence.
+		// The warning belongs to computeBudget: it fires only when Pi reported a context file the prompt does not carry.
 		const report = computeBudget(input({ systemPrompt: prompt }));
 
 		expect(
@@ -238,9 +198,7 @@ describe("sliceSystemPrompt — every character is accounted for", () => {
 				"report must state rather than absorb",
 		).toBeGreaterThanOrEqual(1);
 
-		// A session with genuinely NO skills is the benign case, and it must be
-		// silent. Without this half the warnings array would fire on every ordinary
-		// session and nobody would read it when it mattered.
+		// A session with no skills must stay silent, or the warnings array is noise.
 		const quiet = computeBudget(
 			input({ systemPrompt: prompt, skills: [], skillsBlock: "" }),
 		);
@@ -255,18 +213,8 @@ describe("sliceSystemPrompt — every character is accounted for", () => {
 
 describe("computeBudget — the decomposition invariant is checked at RUNTIME, not only here", () => {
 	/**
-	 * A context file whose CONTENT quotes Pi's skills markers.
-	 *
-	 * THE OFFENDING FIXTURE, in the same style as `chokepoint-lint.test.ts:212-233`.
-	 * `findRegion` uses `prompt.indexOf(open)` — first occurrence ANYWHERE — and
-	 * context-file content is interpolated verbatim into the prompt, so a file that
-	 * merely documents Pi's prompt format produces a skills region nested inside
-	 * the context region. `sliceSystemPrompt`'s removal loop then skips the
-	 * overlapping region on purpose and the pieces stop adding up.
-	 *
-	 * This is not hypothetical for this project: this repository's own planning
-	 * documents quote those markers, and `.planning/` sits above the working tree
-	 * Pi walks up from.
+	 * A context file whose content quotes Pi's skills markers: findRegion takes the first occurrence, so the skills region
+	 * lands inside the context region. Real here: this repo's planning docs quote the markers.
 	 */
 	const QUOTING_BODY =
 		"Notes on Pi's prompt format, for a future reader:\n" +
@@ -320,9 +268,7 @@ describe("computeBudget — the decomposition invariant is checked at RUNTIME, n
 	});
 
 	it("case 3c: the paired positive — a healthy prompt raises no sum warning", () => {
-		// Without this half, a check that pushed the warning unconditionally would
-		// satisfy every assertion above while making the warnings array noise nobody
-		// reads on the session that mattered.
+		// Without this, an unconditional warning would pass every assertion above.
 		expect(
 			computeBudget(input()).warnings.join("\n"),
 			"the ordinary fixture's regions do not overlap and its sum holds exactly (case 1), so " +
@@ -446,9 +392,7 @@ describe("computeBudget — divergence, tool accounting and the rows-written pas
 				"worse than one number",
 		).toBe(expectedTotal);
 
-		// The per-file context breakdown carries Pi's real per-file wrapper, so a
-		// reader comparing it to the block total sees a small residual (the block
-		// delimiters and header) rather than a mystery.
+		// The per-file breakdown carries Pi's wrapper, so the residual against the block total is the delimiters.
 		expect(
 			report.contextFilesByPath[0]?.chars,
 			"each context file costs its path, its content and the " +
@@ -498,11 +442,7 @@ describe("formatBudgetReport — estimates are marked, ground truth is separate"
 			"the report names the command that produced it, so a pasted excerpt is attributable",
 		).toContain(`/${BUDGET_COMMAND_NAME}`);
 
-		// Every table row is `label  chars  ~tokens`. Rows are selected by their
-		// CHARACTER column -- a plain digit run -- and never by the marker, so a
-		// formatter that dropped the marker still yields the row here and fails the
-		// assertion below instead of quietly selecting nothing. Warning bullets are
-		// excluded because they are prose that may happen to carry a number.
+		// Rows are selected by their character column, never by the marker, so a dropped marker fails rather than selecting nothing.
 		const tableLines = lines.filter(
 			(line) => /^ {2,}\S/.test(line) && /\d/.test(line) && !line.startsWith("  - "),
 		);

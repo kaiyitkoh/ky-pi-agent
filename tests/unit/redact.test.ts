@@ -1,32 +1,7 @@
 /**
- * DIAG-07 — the redactor, asserted in both directions.
- *
- * WHY BOTH DIRECTIONS. A redactor is trivially easy to test wrong. Assert only
- * that secrets disappear and `redactString = () => "[redacted]"` passes every
- * case while destroying the instrument the phase exists to build. Assert only
- * that clean text survives and a redactor that does nothing passes. So this
- * file carries a positive table (`SECRET_SAMPLES`, one entry per pattern) and a
- * negative control (`CLEAN_SAMPLES`, byte-identical round trips), and neither
- * half is optional.
- *
- * THE VACUOUS-PASS GUARD. `SECRET_SAMPLES.length` is asserted equal to
- * `SECRET_VALUE_PATTERNS.length`, and each sample is asserted against the
- * pattern at its own index. Without that, a pattern could be added to the
- * module with no sample proving it ever fires, and the loop below would report
- * green having never exercised it — the failure shape this project has already
- * tripped over three times.
- *
- * SAMPLES ARE ASSEMBLED AT RUNTIME. Every credential-shaped string below is
- * built by joining short parts. This repository is public; a committed
- * 20-plus-character run over a token alphabet is indistinguishable from a
- * pasted credential to a scanner, to a reader, and to a future grep of
- * `.pi/logs/`. Same rule as `tests/helpers/faux.ts:113`.
- *
- * SCOPE, STATED RATHER THAN IMPLIED. This file proves the matcher is correct
- * about what it matches. It says nothing about coverage: every fixture here was
- * written by the same person who wrote the pattern list. The real check is
- * `RB-02-02` — grepping actual dumps from actual credentialed requests on the
- * work laptop — and it is OUTSTANDING.
+ * The redactor in both directions: one secret sample per pattern, asserted at its own index so an unproven pattern
+ * fails, plus byte-identical clean round trips, since either half alone passes a broken redactor. Samples are
+ * assembled at runtime so this public repo holds no credential-shaped literal. Coverage of real dumps is a runbook check.
  */
 import { describe, expect, it } from "vitest";
 import {
@@ -47,14 +22,7 @@ interface Sample {
 	readonly value: string;
 }
 
-/**
- * One credential-shaped sample per entry in `SECRET_VALUE_PATTERNS`, in the
- * same order.
- *
- * Order is load-bearing: the loop below asserts sample `i` against pattern `i`,
- * so deleting or reordering a pattern without touching this table fails loudly
- * instead of quietly shrinking what the redactor covers.
- */
+/** One sample per SECRET_VALUE_PATTERNS entry, in the same order: sample i is asserted against pattern i. */
 const SECRET_SAMPLES: readonly Sample[] = [
 	{ label: "OpenAI-style sk- key", value: ["sk", "abcdefghij0123456789"].join("-") },
 	{ label: "AWS long-term access key id", value: ["AK", "IA"].join("") + "IOSFODNN7EXAMPLE" },
@@ -76,14 +44,7 @@ const SECRET_SAMPLES: readonly Sample[] = [
 	{ label: "generic password assignment", value: "DATABASE_PASSWORD=" + ["Pr0d", "!pass"].join("") },
 ];
 
-/**
- * Realistic strings that are NOT credentials and must survive untouched.
- *
- * The last two are the deliberate near-misses. `sk-` and `pt-` are three
- * low-entropy characters that occur inside ordinary English and ordinary
- * paths; they are the reason those two patterns — and only those two — require
- * a preceding word boundary.
- */
+/** Non-credentials that must survive; the last two are the near-misses that make `sk-` and `pt-` need a word boundary. */
 const CLEAN_SAMPLES: readonly Sample[] = [
 	{ label: "a repo-relative log path", value: ".pi/logs/wire-2026-08-13.jsonl" },
 	{ label: "a POSIX absolute path", value: "/home/runner/work/ky-pi-agent/tests/unit/redact.test.ts" },
@@ -263,13 +224,7 @@ describe("DIAG-07 — redactDeep walks a payload without mutating it", () => {
 });
 
 describe("DIAG-07 — the two holes redactDeep used to have", () => {
-	/**
-	 * SHORT AND UNREMARKABLE ON PURPOSE.
-	 *
-	 * On its own it matches NONE of the `SECRET_VALUE_PATTERNS` — that is the whole
-	 * point. Shape matching cannot save a credential this plain; only the KEY that
-	 * names it can, and the key rule used to fire on a string value only.
-	 */
+	/** Matches no value pattern on purpose: only the key that names it can redact it. */
 	const SHORT_SECRET = "s3cr3t42";
 
 	it("the secret really is invisible to shape matching, so the key rule is what is under test", () => {
@@ -342,10 +297,7 @@ describe("DIAG-07 — the two holes redactDeep used to have", () => {
 	});
 
 	it("does not throw on a CIRCULAR non-plain object", () => {
-		// The same hole, in its other failure mode: a circular non-plain object used
-		// to survive the walk by reference and then make `JSON.stringify` throw inside
-		// `appendJsonl` -- which, on the nested path, killed the request being
-		// measured (CR-01's trigger list).
+		// A circular non-plain object surviving by reference would make JSON.stringify throw inside appendJsonl.
 		class Looped {
 			public self: unknown = undefined;
 			public secret = SHORT_SECRET;
@@ -368,10 +320,7 @@ describe("DIAG-07 — the two holes redactDeep used to have", () => {
 	});
 
 	it("keeps a Date as the string JSON.stringify would have produced", () => {
-		// THE NEGATIVE CONTROL FOR THE CHANGE ABOVE. Over-redaction is a failure too,
-		// just a quieter one: truncating everything object-like without exception
-		// would turn every timestamp in a payload into a sentinel. An ISO timestamp
-		// matches no credential shape and is what `JSON.stringify` emits anyway.
+		// The negative control: over-redaction would turn every timestamp into a sentinel.
 		const when = new Date(Date.UTC(2026, 7, 13, 3, 57, 24, 428));
 		const out = redactDeep({ createdAt: when, model: "deepseek-chat" }) as {
 			createdAt: unknown;
@@ -392,9 +341,7 @@ describe("DIAG-07 — the two holes redactDeep used to have", () => {
 	});
 
 	it("leaves null and undefined under a credential-named key alone", () => {
-		// `null` means "delete this header" (pi-ai src/types.ts:110). Rewriting it to
-		// a placeholder would misreport a deletion as a credential, which is the same
-		// reason `redactHeaders` keeps it.
+		// `null` means "delete this header" (pi-ai src/types.ts:110), so it is not a credential.
 		const out = redactDeep({ authorization: null, "x-api-key": undefined }) as Record<
 			string,
 			unknown
@@ -456,12 +403,8 @@ describe("DIAG-07 — redactHeaders on resolved provider auth headers", () => {
 	});
 
 	it("normalises a non-string, non-null value instead of throwing", () => {
-		// [IN-04] The declared type is `Record<string, string | null>`, so this cannot
-		// happen -- and a provider or another extension deleting a key by assigning
-		// `undefined` rather than `null` makes it happen anyway. Both branches read
-		// `value.length`, so it used to throw, and `safeHandler` would then discard
-		// the WHOLE wire record for that hook: one loose value and the request
-		// disappears from the dump entirely.
+		// The type forbids undefined, but a key deleted by assigning undefined happens anyway; throwing on it would
+		// make safeHandler drop the whole wire record.
 		const loose = { authorization: undefined, "x-count": 7 } as unknown as Record<
 			string,
 			string | null
@@ -493,11 +436,7 @@ describe("DIAG-07 — redactHeaders on resolved provider auth headers", () => {
 });
 
 describe("DIAG-07 — the pattern set is bounded against a hostile input", () => {
-	/**
-	 * A repeating unit built from the character classes every pattern uses,
-	 * arranged so that not one of them completes. That is the expensive path:
-	 * a matcher only backtracks on inputs that nearly match.
-	 */
+	/** A repeat of every pattern's character classes that never completes one: the backtracking worst case. */
 	const UNIT = "-----BEGIN AAAA Bearer, sk-AKIA ghp_ glpat- xoxb- AIza pt- ABSK ://a: aws_secret_access_key password ";
 
 	it("redacts a 1 MB adversarial string in under two seconds", () => {

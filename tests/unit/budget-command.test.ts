@@ -1,42 +1,7 @@
 /**
- * DIAG-06 — the `/budget` COMMAND HANDLER, driven end to end offline.
- *
- * ---------------------------------------------------------------------------
- * THE GAP THIS FILE CLOSES
- * ---------------------------------------------------------------------------
- * `registerBudgetCommand`'s handler body — roughly fifty lines including
- * `ctx.getSystemPrompt()`, `ctx.getSystemPromptOptions()`,
- * `formatSkillsForPrompt(skills)`, the `getActiveTools`/`getAllTools`
- * intersection, `getLastAssistantUsage(...)`, `ctx.ui.notify` and the entire
- * catch path that writes a `diagnostics.error` row carrying
- * `BUDGET_COMMAND_WHERE` — had ZERO coverage. `diagnostics-entry.test.ts`
- * asserts only that the command NAME was registered; its stub `registerCommand`
- * discards the handler. `budget.test.ts` calls `computeBudget` and
- * `formatBudgetReport` directly and states the gap in its own header.
- *
- * `ExtensionCommandContext` is a plain interface and every pure function in
- * `budget.ts` already takes its inputs as data, so the handler is drivable with
- * no session at all — which is the only reason the gap was ever tolerable and
- * therefore the reason it is not.
- *
- * ---------------------------------------------------------------------------
- * THE TRIPWIRE, AGAINST PI'S OWN FORMATTER FOR THE FIRST TIME
- * ---------------------------------------------------------------------------
- * `report.skillsBlockMatchesSlice` is described in `budget.test.ts` as
- * "RESEARCH §7.3's tripwire for Pi changing its format". It was not one. Every
- * `computeBudget` call in that file passes `skillsBlock: ""` hand-written by the
- * test, and in those sessions `slices.skills` is also `0` — so the assertion
- * compared a constant the test supplied against a default that happens to match.
- * `budget-sections.test.ts` case 5 exercises the COMPARISON against a synthetic
- * block, which is a different claim.
- *
- * Here the system prompt the stub returns CONTAINS the output of the real
- * `formatSkillsForPrompt`, and the handler recomputes the block with that same
- * exported function. So the sliced region and the recomputed block are compared
- * against each other for a NON-EMPTY block, through Pi's own formatter, at the
- * version installed in `node_modules`. If a future release moves
- * `SKILLS_OPEN_MARKER` or `SKILLS_CLOSE_MARKER` relative to what the formatter
- * emits, this is the file that goes red. [threat T-02-10-02]
+ * The /budget command handler, driven offline through a stub ExtensionCommandContext. The stub's system prompt
+ * contains the real formatSkillsForPrompt output, so the sliced skills region is compared with Pi's own formatter
+ * for a non-empty block: a moved skills marker in a future Pi fails here.
  */
 import { existsSync } from "node:fs";
 
@@ -95,14 +60,7 @@ const CONTEXT_BLOCK =
 	`<project_instructions path="${CONTEXT_PATH}">\n${CONTEXT_BODY}\n</project_instructions>\n\n` +
 	CONTEXT_FILES_CLOSE_MARKER;
 
-/**
- * The system prompt the stub context returns.
- *
- * Assembled in Pi's own order — preamble, context block, skills index, trailer —
- * with the SKILLS HALF produced by the real exported formatter rather than
- * transcribed. That is what makes the recomputed-versus-sliced cross-check a
- * check against Pi and not against this file.
- */
+/** The stub's system prompt in Pi's order, its skills half produced by the real formatter. */
 const FULL_PROMPT =
 	"You are an expert coding assistant.\n\nGuidelines:\n- Be concise\n" +
 	CONTEXT_BLOCK +
@@ -125,13 +83,7 @@ interface InvokeOptions {
 	branch?: unknown[];
 }
 
-/**
- * Register the REAL command against a recording stub, then invoke its handler.
- *
- * The handler is pulled off the stub rather than reimplemented: a test that
- * called `computeBudget` itself would prove the same thing `budget.test.ts`
- * already proves and would leave the fifty lines around it unexecuted.
- */
+/** Registers the real command against a recording stub and invokes its handler, rather than reimplementing it. */
 async function invoke(opts: InvokeOptions = {}): Promise<Invocation & { cwd: string }> {
 	return await withTempLogCwd(async (cwd) => {
 		let handler: CommandHandler | undefined;
@@ -302,10 +254,7 @@ describe("DIAG-06 — the /budget handler runs, and the skills tripwire is real"
 		const { notified } = await invoke();
 		const text = notified[0]?.text ?? "";
 
-		// The precondition, asserted rather than assumed. Both prior tripwire
-		// assertions in this repository compared an empty recomputed block against an
-		// empty sliced region — `"".length === 0` — so they held no matter what Pi
-		// emitted. This is what makes the check below non-vacuous.
+		// A non-empty block, so the comparison below cannot hold vacuously as "" === "".
 		expect(
 			REAL_SKILLS_BLOCK.length,
 			"`formatSkillsForPrompt` returned an EMPTY block for a skill with " +

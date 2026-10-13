@@ -1,28 +1,7 @@
 /**
- * BOOT-09 -- credential and runtime-state paths are not committable, and
- * harness paths still are.
- *
- * The oracle is `git check-ignore -q --no-index` (see ../helpers/git.ts for why
- * both flags are load-bearing). Two properties of that command shape this file:
- *
- *   - it evaluates rules against a STRING, so none of the paths below need to
- *     exist on disk. This table is deliberately full of files that do not and
- *     should never exist -- `.pi/auth.json`, `id_rsa`, `terraform.tfstate`.
- *   - it reports the ignore POLICY. `git add -f` bypasses ignore rules
- *     entirely, so a green run here means "the declared rules classify every
- *     path correctly", not "nothing can ever be committed". Forcing a
- *     credential into the index is a different control's problem.
- *
- * Both directions are asserted with equal weight, and that is the point.
- * A one-directional test would go green on a `.gitignore` that swallowed
- * `.pi/extensions/` -- which would silently break the `pi install` path
- * (BOOT-02) while leaving the dogfood path (BOOT-05) working, the worst
- * possible failure shape. [threats T-01-05, T-01-06]
- *
- * Path inventory read at source: pi 0.84.1 src/config.ts:516-566 (agent dir,
- * auth.json, sessions, debug log), src/core/package-manager.ts:2004,2084
- * (project-scope npm/ and git/ install roots), docs/settings.md:216
- * (`sessionDir: ".pi/sessions"` is the documented example value).
+ * Credential and runtime-state paths are ignored, and harness paths stay committable; both directions, since a
+ * .gitignore swallowing .pi/extensions/ would silently break `pi install`. The oracle is `git check-ignore -q
+ * --no-index`, which evaluates the policy against strings (paths need not exist); `git add -f` is out of scope.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -31,10 +10,7 @@ import { describe, expect, it } from "vitest";
 
 import { isIgnored, repoRoot, trackedFiles } from "../helpers/git.ts";
 
-/**
- * Must never reach a public remote. Credentials, transcripts, runtime state,
- * and infrastructure secrets the developer's other tooling leaves lying around.
- */
+/** Must never reach a public remote: credentials, transcripts, runtime state and stray infrastructure secrets. */
 const MUST_BE_IGNORED = [
 	// --- Pi project-scope runtime state -----------------------------------
 	".pi/sessions/s.jsonl",
@@ -49,7 +25,7 @@ const MUST_BE_IGNORED = [
 	".pi/npm/package.json",
 	".pi/npm/node_modules/x",
 	".pi/git/github.com/o/r/package.json",
-	// --- Ceremonial-workflow scratch artifacts (plan 09-03, FLOW-10) --------
+	// --- Ceremonial-workflow scratch artifacts ------------------------------
 	".pi/work/demo-slug/SPEC.md",
 	".pi/work/demo-slug/PROGRESS.md",
 	// --- Generic credential shapes ------------------------------------------
@@ -80,13 +56,9 @@ const MUST_BE_IGNORED = [
 	"node_modules/x",
 ] as const;
 
-/**
- * Must stay committable. These ARE the harness: if `.gitignore` swallows one,
- * `pi install https://github.com/kaiyitkoh/ky-pi-agent` gets a clone that is
- * missing the thing it was installing, with no error message anywhere.
- */
+/** Must stay committable: these are the harness, and a clone missing one fails with no error. */
 const MUST_BE_COMMITTABLE = [
-	// --- The two supply-chain controls (BOOT-01) ----------------------------
+	// --- The two supply-chain controls -------------------------------------
 	".npmrc",
 	".pi/npm/.npmrc",
 	// --- Pi project resources, all five discovery directories ----------------
@@ -120,9 +92,7 @@ const MUST_BE_COMMITTABLE = [
 	"scripts/openspec-setup.sh",
 ] as const;
 
-/** Registry auth patterns. `_auth\b` deliberately excludes `_authToken`, which
- * its own alternative covers -- keeping them separate makes a failure message
- * say which shape leaked. */
+/** Registry auth patterns; `_auth\b` excludes `_authToken` so a failure names which shape leaked. */
 const REGISTRY_AUTH = /_authToken|_auth\b|_password/i;
 
 const COMMITTED_NPMRC = [".npmrc", ".pi/npm/.npmrc"] as const;
@@ -191,11 +161,8 @@ describe("openspec/ is never tracked", () => {
 });
 
 describe("no .gitignore may exist under .pi/extensions/", () => {
-	// Pi's two discovery paths DISAGREE about ignore files, silently:
-	// the package path honours .gitignore (package-manager.ts:571) while
-	// project-local discovery is a plain readdirSync that does not
-	// (loader.ts:652-684, 710-712). One file here makes BOOT-05 pass and
-	// BOOT-02 fail with no error emitted by either.
+	// The package path honours .gitignore (package-manager.ts:571) but project-local discovery does not
+	// (loader.ts:652-684), so an ignored file breaks one path silently.
 	it("has none on disk", () => {
 		const dir = join(repoRoot(), ".pi", "extensions");
 		if (!existsSync(dir)) {
@@ -214,23 +181,8 @@ describe("no .gitignore may exist under .pi/extensions/", () => {
 });
 
 /**
- * WR-10. `.env.example` is TRACKED and also GENERATED by every full
- * `bin/bootstrap.sh` run, which is why two integration tests have to snapshot
- * its bytes and restore them in a `finally` for the suite to be worktree-safe.
- * That restore dance is a tell.
- *
- * Keeping it tracked is deliberate -- it is the file a reader of the repo looks
- * for, `.gitignore` has an explicit `!.env.example` negation for it, and
- * untracking it would mean a fresh clone has no env template until bootstrap
- * runs. The hazard is not the tracking; it is DIVERGENCE. `write_env_template`
- * is already a no-op when the output would be byte-identical
- * (`bin/bootstrap.sh`, the `fs.readFileSync(dst) === out` guard), so while the
- * managed region of the template and the tracked file agree, a consumer's
- * `sh bin/bootstrap.sh` writes nothing and leaves their checkout clean. The
- * moment they diverge, it dirties a file the user never edited.
- *
- * So assert agreement here, cheaply and offline, rather than discovering it
- * from a dirty worktree.
+ * `.env.example` is tracked and regenerated by every full bootstrap run, which writes nothing when the output is
+ * byte-identical. So the template's managed region must agree with the tracked file, or bootstrap dirties a checkout.
  */
 describe("WR-10 -- the tracked .env.example cannot drift from its template", () => {
 	const START = "# ky-pi-agent managed:start";

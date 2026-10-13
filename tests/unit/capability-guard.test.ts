@@ -1,49 +1,8 @@
 /**
- * ROUTE-06/07/08 — `.pi/extensions/routing/guard.ts`, table-driven with a
- * paired negative control for every block.
- *
- * ---------------------------------------------------------------------------
- * TWO ORACLES, AND WHY BOTH ARE THE SAME MECHANISM
- * ---------------------------------------------------------------------------
- * The text-only DashScope case and every Bedrock case below come from the
- * SAME `withModelsConfig({ models: TEMPLATE })` composition, in one
- * `beforeAll`. `05-01-SUMMARY.md` already established (and this file relies
- * on, rather than re-verifying) that `withModelsConfig` composes Pi's FULL
- * built-in catalogue — including every Bedrock entry — alongside the shipped
- * DashScope template, all resolvable through the identical
- * `handle.requireModel(provider, id)` call. There is therefore one honest
- * oracle for every provider this file needs, not a hand-built `Model<Api>`
- * literal for Bedrock and a composed one for DashScope: `requireModel`
- * THROWS naming both ids when a lookup fails (`tests/helpers/models.ts`'s own
- * docstring — "Throw, never opt out"), which is exactly the "assert the read
- * succeeded before using it" the plan requires. A silently-`undefined` R1
- * entry cannot reach any case below; the whole `beforeAll` would fail loudly
- * first.
- *
- * ---------------------------------------------------------------------------
- * FIXTURES, CATALOGUE-VERIFIED (2026-08-14, this machine's installed pi-ai)
- * ---------------------------------------------------------------------------
- *   dashscope/deepseek-v4-flash             input:["text"]           contextWindow:393216
- *   amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0
- *                                            input:["text","image"]  reasoning:true  contextWindow:200000
- *   [Pi 1.1.0: R1 ids removed from catalogue; built locally in beforeAll]
- *   amazon-bedrock/deepseek.r1-v1:0         input:["text"]  reasoning:true  contextWindow:128000
- *   amazon-bedrock/us.deepseek.r1-v1:0      same shape, region-qualified id
- *   amazon-bedrock/deepseek.v3-v1:0         input:["text"]  reasoning:true  contextWindow:163840
- *     — Bedrock, non-Claude, reasoning:true, and NOT on the R1 deny rule.
- *     This is the ROUTE-07 positive AND the "deny-list is not a blanket
- *     Bedrock block" negative control for ROUTE-08 — the same model proves
- *     both, because both blocks need a non-Claude reasoning Bedrock model
- *     that is not R1.
- *
- * ---------------------------------------------------------------------------
- * VACUOUS-PASS GUARD (this project's house rule)
- * ---------------------------------------------------------------------------
- * The row table asserts its own non-emptiness before use, and every
- * `ok:false` case asserts on the reason STRING (contains `${provider}/${id}`
- * plus a block-specific fragment), never merely on `ok === false` — a guard
- * that always names a hardcoded string but never inspects the input would
- * satisfy a bare boolean check.
+ * The capability guard, table-driven with a paired negative control for every block. Every model comes from one
+ * withModelsConfig composition (template plus Pi's catalogue), whose requireModel throws on a failed lookup. Bedrock
+ * deepseek.v3 is both a thinking-block positive and the proof the R1 deny-list is not a blanket Bedrock block. Each
+ * refusal asserts on the reason string naming the model, never only on `ok === false`.
  */
 import { join } from "node:path";
 
@@ -78,11 +37,8 @@ beforeAll(async () => {
 		dashscopeFlash = handle.requireModel("dashscope", "deepseek-v4-flash");
 		bedrockClaude = handle.requireModel("amazon-bedrock", "anthropic.claude-sonnet-4-5-20250929-v1:0");
 		bedrockNonClaudeReasoning = handle.requireModel("amazon-bedrock", "deepseek.v3-v1:0");
-		// Pi 1.1.0 dropped deepseek.r1-v1:0 / us.deepseek.r1-v1:0 from the Bedrock
-		// catalogue (verified: only deepseek.v3-v1:0 and deepseek.v3.2 remain). The
-		// deny-list in guard.ts is id-based and still protects anyone who supplies
-		// those ids (custom models.json entry, older Pi), so the fixtures are built
-		// locally: same shape as the former catalogue entries (text-only, reasoning).
+		// Pi 1.1.0 dropped the R1 ids from the Bedrock catalogue; the id-based deny-list still protects a custom entry,
+		// so the fixtures are built locally in the former shape (text-only, reasoning).
 		const r1Shape = { ...bedrockNonClaudeReasoning, input: ["text"], reasoning: true, contextWindow: 128000 };
 		bedrockR1 = { ...r1Shape, id: "deepseek.r1-v1:0", name: "DeepSeek-R1" } as Model<Api>;
 		bedrockR1Global = { ...r1Shape, id: "global.deepseek.r1-v1:0", name: "DeepSeek-R1 (Global)" } as Model<Api>;
@@ -108,7 +64,7 @@ interface Row {
 
 const ROWS: readonly Row[] = [
 	// ---------------------------------------------------------------------
-	// ROUTE-06, block 1 — image needed against a text-only model
+	// Block 1 — image needed against a text-only model
 	// ---------------------------------------------------------------------
 	{
 		name: 'image needed against dashscope/deepseek-v4-flash (real input:["text"]) -- block',
@@ -127,7 +83,7 @@ const ROWS: readonly Row[] = [
 	},
 
 	// ---------------------------------------------------------------------
-	// ROUTE-07, block 3 — Bedrock non-Claude + thinking, three-way control
+	// Block 3 — Bedrock non-Claude + thinking, three-way control
 	// ---------------------------------------------------------------------
 	{
 		name: "Bedrock non-Claude, reasoning:true, thinkingRequested:true -- block, the configuration is silently dropped",
@@ -153,7 +109,7 @@ const ROWS: readonly Row[] = [
 	},
 
 	// ---------------------------------------------------------------------
-	// ROUTE-08, block 4 — the R1 deny-list, both ids, both usesToolLoop directions
+	// Block 4 — the R1 deny-list, both ids, both usesToolLoop directions
 	// ---------------------------------------------------------------------
 	{
 		name: "deepseek.r1-v1:0 with usesToolLoop:true -- block",

@@ -1,25 +1,8 @@
 /**
- * SAFE-11 -- `bin/bootstrap.sh install_safety_extension`, driven as a real
- * subprocess against a throwaway `PI_CODING_AGENT_DIR`.
- *
- * ---------------------------------------------------------------------------
- * What this proves, and what it deliberately does not
- * ---------------------------------------------------------------------------
- * This file proves the SHELL SCRIPT writes the right bytes in the right place,
- * idempotently, and that `--check-only` reports without mutating. It does NOT
- * prove the written stub actually loads in a real `pi` process -- that is
- * `tests/integration/user-scope-load.test.ts` (the mechanism spike, Plan 01)
- * and `tests/integration/headless-deny.test.ts` (Plan 09 Task 2, which uses
- * `writeUserScopeShim` directly rather than going through the shell script).
- * Two different oracles for two different claims, following this suite's own
- * house rule (`tests/integration/bootstrap-check-only.test.ts`'s docstring).
- *
- * Never asserts on real machine state: every case redirects
- * `PI_CODING_AGENT_DIR` at a fresh `os.tmpdir()` directory, exactly like
- * `bootstrap-check-only.test.ts`. `withStubBin`'s `npm` stub plus
- * `KYPI_SKIP_INSTALL=1` are BOTH present on every full run for the same
- * reason that file gives: two independent guards against ever touching the
- * developer's real global npm prefix.
+ * `bin/bootstrap.sh install_safety_extension` as a real subprocess against a throwaway PI_CODING_AGENT_DIR: the
+ * script writes the right stub bytes idempotently, `--check-only` reports without mutating, and the generated stub
+ * registers and fails closed when loaded. Every full run carries both the npm stub and KYPI_SKIP_INSTALL=1, two
+ * independent guards against touching the real global npm prefix.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
@@ -38,15 +21,7 @@ const TIMEOUT_MS = 120_000;
 const scratch = scratchDirs();
 const tempDir = scratch.make;
 
-/**
- * A throwaway `REPO_ROOT` for one full bootstrap run, registered for cleanup
- * the same way every other scratch directory in this suite is. See
- * `tests/helpers/bootstrap-repo.ts` for why this exists (a full run's
- * `write_env_template` would otherwise write the real, tracked
- * `.env.example`) and why it is nested under this repo's own `tmp/` rather
- * than `os.tmpdir()` (so the CR-06 cases' dynamic import of the real safety
- * extension can still resolve `node_modules`).
- */
+/** A throwaway REPO_ROOT under this repo's tmp/, so a full run cannot write the tracked .env.example and the stub's import still resolves node_modules. */
 function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
 	scratch.track(copy.root);
@@ -57,16 +32,7 @@ function stubPath(agentDir: string): string {
 	return join(agentDir, "extensions", "ky-safety", "index.ts");
 }
 
-/**
- * Pull the dynamically-imported specifier out of a stub's content, or throw
- * with the content shown. CR-06/CR-09: the stub is no longer a plain
- * `export { default } from "...";` re-export -- it is a function that
- * unconditionally dynamically imports and calls the real safety extension's
- * default export, with no existence check or dedup of any kind (CR-09
- * removed the existsSync guard an earlier fix added -- see this file's own
- * describe block below, and bin/bootstrap.sh's own CR-09 docstring section,
- * for why that guard was itself a fail-open bug).
- */
+/** The dynamically imported specifier in a stub's content; the stub imports and calls the real extension unconditionally. */
 function extractSpecifier(content: string): string {
 	const m = /await import\("([^"]+)"\)/.exec(content);
 	if (m === null) {
@@ -170,8 +136,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 		const agentDir = tempDir("kypi-agentdir-");
 		const dir = join(agentDir, "extensions", "ky-safety");
 		mkdirSync(dir, { recursive: true });
-		// CR-09 shape: a dynamic import, unconditional, no existsSync guard --
-		// matches what install_safety_extension() actually writes now.
+		// The shape install_safety_extension() writes: an unconditional dynamic import, no existsSync guard.
 		writeFileSync(
 			join(dir, "index.ts"),
 			[
@@ -195,63 +160,15 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 });
 
 /**
- * CR-09 (supersedes the CR-06 version of this block) -- the generated stub's
- * OWN runtime behaviour: does it register EVERY TIME it runs, regardless of
- * whether a project-scoped copy also exists at the session's own cwd?
- * `bootstrap-safety-stub.test.ts`'s cases above only prove the shell script
- * writes the right BYTES; this describe block runs the real generated stub
- * in a REAL, SEPARATE `node` subprocess, with a REAL `cwd` set at
- * process-spawn time, so it is the direct regression test for the exact
- * mechanism CR-09's fix and CR-09's own bug both live in (as opposed to
- * `tests/unit/safety-entry.test.ts`'s CR-06 case, which proves the
- * UNDERLYING extension itself has no globalThis guard any more -- a
- * different claim about a different file).
- *
- * An earlier shape of this stub returned early when a project-scoped copy
- * existed ON DISK at `process.cwd()`, reasoning that Pi would also load that
- * copy. Case 7 below is the executed proof that reasoning was wrong: Pi only
- * auto-discovers a project-scoped copy when the project is TRUSTED, and this
- * describe block's own driver never binds any UI or trust decision at all --
- * so a project-scoped copy merely existing on disk at cwd, with no trust
- * behind it, must NOT suppress the stub. Case 7 is renamed from its CR-06
- * wording ("returns without registering") to its CR-09 contract ("registers
- * regardless") -- this is not a new test file, it is the fix for the exact
- * assertion the review found locking the fail-open bug in.
- *
- * A SUBPROCESS, not `process.chdir()` inside this vitest worker: `process.
- * chdir()` inside a vitest/Vite SSR-executed test was measured, by direct
- * execution while authoring this test, to NOT reliably propagate into a
- * nested dynamic `import()`'s own execution context (the imported module's
- * `process.cwd()` observed the vitest WORKER's own root cwd, not the chdir
- * target), which would make a chdir-based version of this test either
- * silently pass vacuously or fail for a reason unrelated to the fix under
- * test. A real child process has no such ambiguity: `cwd` is an OS-level
- * property of the process itself.
- *
- * THROUGH JITI, NOT PLAIN NODE ESM: the stub is loaded with a RAW,
- * scheme-less absolute path specifier (`await import("C:/Users/.../index.ts")`),
- * which is exactly what Pi's own `loadExtensionModule` does
- * [`dist/core/extensions/loader.js:358-369`] -- that only works because Pi
- * resolves every extension through **jiti**, not plain Node ESM (`node
- * --experimental-strip-types`'s own loader rejects a bare Windows path with
- * `ERR_UNSUPPORTED_ESM_URL_SCHEME`, confirmed by direct execution while
- * authoring this test). The driver below resolves jiti from
- * `@earendil-works/pi-coding-agent`'s own `node_modules` (the exact copy Pi
- * itself uses) and drives the stub through `jiti.import(path, { default:
- * true })`, mirroring `loadExtensionModule` exactly, so this test exercises
- * the REAL production loading mechanism rather than a Node ESM shape Pi
- * never actually uses for this file.
+ * The generated stub's own runtime behaviour, in a separate node process with a real cwd: it must register every time,
+ * even with a project-scoped copy on disk, because Pi loads that copy only for a trusted project. A subprocess, because
+ * process.chdir() in a vitest worker does not reach a nested dynamic import. Loaded through Pi's own jiti, since Pi
+ * imports a bare absolute path (dist/core/extensions/loader.js loadExtensionModule) that plain Node ESM rejects.
  */
 describe("CR-09 -- the generated stub registers unconditionally, regardless of a project-scoped copy at cwd", () => {
 	afterEach(scratch.cleanup);
 
-	/**
-	 * The exact jiti entry point Pi itself resolves and uses --
-	 * `node_modules/@earendil-works/pi-coding-agent`'s own copy, as a
-	 * `file://` URL: this ONE import is plain Node ESM (jiti is not loaded
-	 * yet at this point to resolve it any other way), and plain Node ESM
-	 * rejects a bare Windows drive-letter path as an unsupported URL scheme.
-	 */
+	/** Pi's own jiti as a file:// URL: this one import is plain Node ESM, which rejects a bare drive-letter path. */
 	const JITI_ENTRY = (() => {
 		const requireFromRepo = createRequire(join(repoRoot(), "package.json"));
 		const jitiCjs = requireFromRepo.resolve("jiti", {
@@ -260,14 +177,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 		return pathToFileURL(join(jitiCjs, "..", "jiti.mjs")).href;
 	})();
 
-	/**
-	 * A driver script, spawned with `cwd` set to the case under test. Loads
-	 * the real generated stub through jiti (see this describe block's own
-	 * docstring for why plain Node ESM cannot be used here), drives it with a
-	 * recording fake `pi`, and prints the registered tool names as one JSON
-	 * array on stdout -- the ONLY output this driver produces, so the test
-	 * can parse it directly.
-	 */
+	/** A driver spawned with `cwd` set to the case: loads the stub through jiti with a recording fake `pi` and prints only the registered tool names as JSON. */
 	function driverSource(stubSpecifier: string): string {
 		return [
 			`import { createJiti } from ${JSON.stringify(JITI_ENTRY)};`,
@@ -328,28 +238,14 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 	it(
 		"case 7 (CR-09) -- project-scoped copy PRESENT ON DISK at cwd, but NOT loaded (no trust decision behind it): the stub still registers the real safety extension",
 		() => {
-			// This is the EXACT executed proof CR-09 demanded: a directory that
-			// DOES contain .pi/extensions/safety/index.ts at cwd -- mirroring
-			// this repository itself -- but where nothing in this test grants
-			// project trust, so Pi itself would never have auto-discovered or
-			// loaded that copy (dist/core/package-manager.js:1980's
-			// `if (projectTrusted)` gate; dist/core/project-trust.js's
-			// `resolveProjectTrusted` returning `false` with no UI). Before the
-			// CR-09 fix, the stub used a bare existsSync(...) check as a proxy for
-			// "the project copy will also load" -- wrong, because existence on
-			// disk says nothing about trust. That earlier stub found this exact
-			// file present and returned WITHOUT ever calling the real safety
-			// extension, so NEITHER copy registered anything: the driver's own
-			// tool list came back `[]` on this fixture, confirmed by direct
-			// execution before this fix landed.
+			// A cwd holding .pi/extensions/safety/index.ts with no project trust: Pi would never load that copy
+			// (dist/core/package-manager.js `if (projectTrusted)`), so the stub must still register.
 			const agentDir = tempDir("kypi-agentdir-");
 			const logDir = tempDir("kypi-log-");
 			const log = join(logDir, "npm.log").replace(/\\/g, "/");
 			const cwdWithCopy = tempDir("kypi-cwd-with-copy-");
 			mkdirSync(join(cwdWithCopy, ".pi", "extensions", "safety"), { recursive: true });
-			// Content is irrelevant -- the fixed stub never even looks at this
-			// path, let alone imports it; it exists only to model "a
-			// project-scoped copy sits on disk at this cwd".
+			// Content is irrelevant: the stub never reads this path.
 			writeFileSync(join(cwdWithCopy, ".pi", "extensions", "safety", "index.ts"), "export default function () {}\n", "utf-8");
 			const repoCopy = bootstrapRepoCopy();
 
@@ -374,13 +270,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 		TIMEOUT_MS,
 	);
 
-	/**
-	 * Extract a `field="<json-quoted string>"` value from the hook's
-	 * block-reason text, unescaping it via `JSON.parse`. Mirrors
-	 * `tests/unit/safety-entry.test.ts`'s own `extractQuotedField` helper --
-	 * duplicated inline here because this driver runs as its own spawned
-	 * `node` subprocess, with no access to this test file's own imports.
-	 */
+	/** Extracts a `field="<json string>"` value from a block reason; duplicated because the driver runs in its own process. */
 	const EXTRACT_QUOTED_FIELD_SOURCE = [
 		"function extractQuotedField(text, field) {",
 		'  const marker = field + "=";',
@@ -398,26 +288,9 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 	].join("\n");
 
 	/**
-	 * CR-11 -- a driver that loads the real generated stub TWICE, into two
-	 * fresh `pi` objects, IN ONE PROCESS (unlike `runDriverAt`'s tool-name
-	 * proof above, which spawns a SEPARATE process per call and therefore
-	 * cannot observe any property that depends on shared process state).
-	 * Drives both recorded `tool_call` hooks through block -> approve ->
-	 * re-issue -> (simulated wrapper) consume -> re-issue, exactly the way
-	 * Pi's own `emitToolCall` drives every loaded extension's hook for one
-	 * tool call, and prints the outcome of each round as JSON.
-	 *
-	 * `approve()`/`consume()`/`APPROVALS_STORE_KEY` are pulled directly from
-	 * the real `approvals.ts` sibling module (derived from the stub's own
-	 * embedded specifier) rather than routed through `approve_ky_command`'s
-	 * UI-gated `execute()` -- this isolates the CR-11 property (does the
-	 * DEFERRAL MARKER survive a double load) from `approve_ky_command`'s own,
-	 * separately-tested UI-gating property (T-04-03,
-	 * `tests/unit/safety-entry.test.ts`'s WR-11 cases). Reading
-	 * `globalThis[APPROVALS_STORE_KEY].granted` directly (the same pattern
-	 * the review's own CR-11 investigation and this project's `approvals.ts`
-	 * module docstring both use) is what proves the grant is genuinely
-	 * shared, not merely that both loads happen to behave the same way.
+	 * Loads the stub twice into two `pi` objects in ONE process and drives both tool_call hooks through block, approve,
+	 * re-issue, consume and re-issue, the way Pi's emitToolCall does. approve()/consume() come from the real approvals.ts,
+	 * and reading the globalThis store directly proves the grant is shared, not merely that both loads behave alike.
 	 */
 	function cr11DriverSource(stubSpecifier: string, approvalsSpecifier: string): string {
 		return [
@@ -516,19 +389,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 	it(
 		"case 8 (CR-11, supersedes the CR-09 version of this case) -- project-scoped copy PRESENT at cwd AND this call site's own real safety extension both load: block -> approve -> re-issue lets the command through EXACTLY ONCE, never permanently",
 		() => {
-			// WR-18: the PRIOR shape of this case called `runDriverAt` TWICE --
-			// two SEPARATE node subprocesses, sharing no globalThis, no
-			// approvals store and no hook list. "The same full tool set comes
-			// back twice" was true by construction and would have stayed true
-			// no matter how badly the IN-PROCESS double load actually behaved --
-			// structurally incapable of observing the CR-11 property it claimed
-			// to pin. This case drives BOTH independent loads' hooks in ONE
-			// process instead, through the full block -> approve -> re-issue ->
-			// consume -> re-issue cycle, which is the only oracle that can tell
-			// "duplicate block" (harmless) apart from "permanently blocked" (the
-			// real CR-11 bug, reproduced by direct execution while diagnosing
-			// this finding: reverting only CR-11's `event.toolCallId` keying
-			// makes round2 below come back BLOCKED, forever, for every re-issue).
+			// Only one process can observe the shared approvals store, which separates a duplicate block (harmless) from a permanent one.
 			const agentDir = tempDir("kypi-agentdir-");
 			const logDir = tempDir("kypi-log-");
 			const log = join(logDir, "npm.log").replace(/\\/g, "/");
@@ -544,9 +405,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 
 			const stubFile = stubPath(agentDir);
 			const stub = stubFile.replace(/\\/g, "/");
-			// The stub's OWN embedded specifier points at the real index.ts;
-			// approvals.ts is its sibling module -- same directory, same
-			// globalThis-keyed store (see approvals.ts's own module docstring).
+			// approvals.ts sits beside the stub's embedded index.ts and shares its globalThis-keyed store.
 			const indexSpecifier = extractSpecifier(readFileSync(stubFile, "utf-8"));
 			const approvalsSpecifier = indexSpecifier.replace(/index\.ts$/, "approvals.ts");
 

@@ -1,28 +1,7 @@
 /**
- * DIAG-05 — the prose-tool-call classifier, asserted in both directions.
- *
- * WHAT THIS FILE IS, AND IS NOT. This is the offline proxy named by `RB-02-03`.
- * It proves the *classifier*: given a finalized assistant message and a list of
- * active tool names, does the predicate say the right thing? It says nothing
- * whatsoever about whether the detector has ever fired on real DeepSeek V4
- * Flash traffic, at what rate, or whether the retry recovers the turn. Those
- * are the live half, they need credentials this machine does not have, and
- * `RB-02-03` is **OUTSTANDING**. Do not upgrade a green run here into a claim
- * about the 11% baseline.
- *
- * WHY BOTH DIRECTIONS, AND WHY THE NEGATIVES OUTNUMBER THE POSITIVES. A false
- * positive here is worse than a miss. A miss costs one un-nudged turn. A false
- * positive costs an extra model call *and* fabricates the prose rate Phase 10
- * will use to discriminate between root causes — a measurement that is wrong in
- * the flattering direction is worse than no measurement. So `NOT_PROSE` carries
- * seven mandatory cases against `PROSE`'s five, and the two that matter most —
- * a message carrying a real `toolCall`, and a message that merely mentions a
- * tool name — are both in it.
- *
- * WHY IT NEEDS NO SESSION. `prose.ts` is a pure predicate and the retry effect
- * lives in `index.ts` (plan 02-09). Everything below is a plain function call
- * over fixtures built with `fauxAssistantMessage`. No provider, no agent, no
- * network, no disk.
+ * The prose-tool-call classifier in both directions, as a pure predicate over faux messages. A false positive costs an
+ * extra call and inflates the measured prose rate, so negatives outnumber positives and include a real toolCall and a
+ * mere mention of a tool name. Says nothing about live traffic, which is an outstanding runbook check.
  */
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
 import type { AssistantMessage } from "@earendil-works/pi-ai";
@@ -34,12 +13,7 @@ import {
 	proseToolCallName,
 } from "../../.pi/extensions/diagnostics/prose.ts";
 
-/**
- * The tools a session might plausibly have active.
- *
- * `edit_file` is here on purpose: `_` is a word character, so it exercises both
- * the escaping and the leading `\b` at once.
- */
+/** Plausible active tools; `edit_file` exercises both the escaping and the leading `\b`. */
 const ACTIVE = ["read", "write", "bash", "edit_file"] as const;
 
 /** A finalized assistant message carrying only the given text. */
@@ -215,9 +189,7 @@ describe("DIAG-05 — the tables are actually populated and actually discriminat
 	});
 
 	it("keeps the real-toolCall and mention-only negatives in the table", () => {
-		// Named explicitly rather than counted: these two are the mandatory pair
-		// in RESEARCH §6.6 and §12's DIAG-05 split, and a future tidy-up that
-		// deleted either would still satisfy the length floor above.
+		// Named, not counted: deleting either mandatory case would still satisfy the length floor.
 		expect(NOT_PROSE.map((c) => c.label)).toContain("a real tool call, narrated as well");
 		expect(NOT_PROSE.map((c) => c.label)).toContain("a bare mention of a tool name");
 	});
@@ -269,11 +241,7 @@ describe("DIAG-05 — the matcher is anchored and bounded by construction", () =
 // ---------------------------------------------------------------------------
 
 describe("DIAG-05 — the detector is bounded against a hostile message", () => {
-	/**
-	 * A repeating near-miss: the tool name, whitespace, and a character that is
-	 * not an opening paren. That is the expensive path — a matcher only
-	 * backtracks on input that nearly matches.
-	 */
+	/** A repeated near-miss (name, whitespace, no paren): the backtracking worst case. */
 	const UNIT = "read x write y bash z edit_file w ";
 
 	it("classifies a 1 MB assistant message in under two seconds", () => {

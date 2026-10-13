@@ -1,53 +1,8 @@
 /**
- * DIAG-03 — bypassing the chokepoint is a build failure, not a code review note.
- *
- * THE RULE. DIAG-02 says every model invocation in this harness routes through
- * `callModel()` in `.pi/extensions/diagnostics/call-model.ts`. A rule written in
- * markdown and asserted nowhere is a rule the next phase breaks: Phase 5's
- * router and Phase 8's quality gates both want to call a model, and the cheapest
- * way to do that is the direct one. This file is what makes the cheap way fail.
- *
- * WHY A GREP AND NOT A LINTER. `no-restricted-syntax` under ESLint has the
- * correct AST semantics and the wrong price. `tests/unit/pinning.test.ts:253`
- * asserts `Object.keys(devDependencies)` equals exactly six audited pins, so
- * adding `eslint` + `typescript-eslint` + a config package fails that test and
- * requires a Package Legitimacy Audit of each — in a repo whose Phase 1 thesis
- * is supply-chain minimalism. A tsc-level trick cannot express "this symbol may
- * only be referenced from this directory" at all. So: zero dependencies, the
- * same shape as `tests/unit/contributing-boundary.test.ts` (BOOT-10), which has
- * held this exact kind of line since Phase 1. (02-RESEARCH.md §9.2.)
- *
- * SCOPE, STATED RATHER THAN IMPLIED. This gate applies to tracked `.ts` under
- * `.pi/extensions/` and to nothing else. `docs/`, `CONTRIBUTING.md` and
- * everything under `tests/` may discuss and even perform these calls freely —
- * the negative control in `tests/integration/call-model.test.ts` has to make a
- * bare completion, or it would not be a control. A later phase that genuinely
- * needs a direct call does not delete this file: it adds the path to
- * {@link CHOKEPOINT_BYPASS_ALLOWLIST} below, in the same commit, with the
- * written justification beside it. Making the exception visible and argued is
- * the whole point.
- *
- * NAMING DISCIPLINE. The patterns are matched against RAW SOURCE, comments
- * included, exactly as BOOT-10's `registerTool` substring is. That is
- * deliberate — a substring is the only form that survives `ctx["modelRegistry"]`,
- * a destructured alias or a `const m = "complete"` indirection — and the price
- * is real: no extension file outside `diagnostics/` may spell these calls even
- * in prose. Describe them instead, the way `.pi/extensions/harness/index.ts`
- * says "the tool-registration call". Inside `diagnostics/` the discipline does
- * not apply, because the exemption is by DIRECTORY: `wire.ts` already names
- * `modelRegistry.complete` and the model runtime class in its docstring, and
- * narrowing the exemption to `call-model.ts` alone would have made that a build
- * failure for describing the very trap it warns about (02-PATTERNS blocker B4).
- *
- * THE VACUOUS-PASS GUARD. Phase 1 tripped this class twice — a `check-ignore`
- * without `--no-index`, and an npm probe that read its launcher's environment.
- * A grep over an empty file set is a green run that verified nothing, and a
- * regex set that matches nothing is the same failure one level down. So there
- * are three guards, not one: the scanned set is asserted non-empty, the set
- * REMAINING AFTER the `diagnostics/` exemption is asserted non-empty (otherwise
- * moving every extension into `diagnostics/` would turn the gate green while
- * proving nothing), and every pattern is run against an inline offending fixture
- * and asserted to fire.
+ * Bypassing the callModel() chokepoint in .pi/extensions/ is a build failure. A grep, not ESLint, because adding a
+ * linter means new audited devDependencies. Patterns match raw source, comments included, since only a substring
+ * survives aliases and indirection; diagnostics/ is exempt by directory so its files can describe the trap. Three
+ * vacuity guards: the scanned set and the post-exemption set are non-empty, and every pattern fires on a fixture.
  */
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -59,13 +14,7 @@ import { repoRoot, trackedFiles } from "../helpers/git.ts";
 /** The scanned tree. Everything outside it is out of scope by design. */
 const EXT_DIR = ".pi/extensions";
 
-/**
- * The exempt directory — note the trailing slash, so it is a prefix and not a
- * substring of some future `.pi/extensions/diagnostics-experiments/`.
- *
- * Exempting the DIRECTORY rather than `call-model.ts` alone is what lets the
- * chokepoint's siblings document the trap. See NAMING DISCIPLINE above.
- */
+/** The exempt directory, with a trailing slash so it is a prefix, not a substring of a future sibling. */
 const CHOKEPOINT_DIR = ".pi/extensions/diagnostics/";
 
 /** The file the whole rule points at. Asserted to exist and to be exempt. */
@@ -75,33 +24,14 @@ const CHOKEPOINT_FILE = ".pi/extensions/diagnostics/call-model.ts";
 const SANCTIONED_CALL = "modelRegistry.complete";
 
 /**
- * Extension files permitted to bypass `callModel()`.
- *
- * EMPTY BY DESIGN. The chokepoint's own directory is exempt structurally, so no
- * diagnostics file will ever need an entry here — which means an entry appearing
- * in this array is always a real architectural decision.
- *
- * To add one you must, in the same commit, write beside it: (a) which model call
- * this is, (b) why `callModel()` cannot carry it, and (c) how the call will be
- * measured instead, given that it will produce no `turns-*` row. Without (c) the
- * cost accounting in Phase 8 silently under-reports and nothing anywhere says so.
+ * Extension files permitted to bypass callModel(): empty by design. An entry needs, beside it, which call it is, why
+ * callModel() cannot carry it, and how it is measured instead, since it produces no turns-* row.
  */
 const CHOKEPOINT_BYPASS_ALLOWLIST: readonly string[] = [];
 
 /**
- * The bypass routes, each with the reason it is banned.
- *
- * Exactly the 02-RESEARCH.md §9.3 set. Every `modelRegistry` pattern tolerates
- * optional chaining and arbitrary whitespace around the dot, because
- * `modelRegistry ?. complete` is the same call and a gate defeated by a
- * formatter is not a gate.
- *
- * DELIBERATELY NOT BANNED: `modelRegistry.find`, `.getAvailable`, `.getAll`,
- * `.hasConfiguredAuth`, `.getProviderAuthStatus` and `.registerProvider`. Phase
- * 5's capability guard needs all six, and banning the whole `modelRegistry`
- * substring would force that phase to gut the allowlist — an allowlist everyone
- * edits is not a control. The line drawn here is "reaches a model", not
- * "mentions the registry".
+ * The bypass routes, each tolerant of optional chaining and whitespace so a formatter cannot defeat the gate.
+ * modelRegistry's non-calling members (find, getAvailable, ...) stay allowed: the line is 'reaches a model'.
  */
 const FORBIDDEN: readonly { readonly pattern: RegExp; readonly why: string }[] = [
 	{
@@ -134,15 +64,7 @@ const FORBIDDEN: readonly { readonly pattern: RegExp; readonly why: string }[] =
 	},
 ];
 
-/**
- * A synthetic source carrying one offending form per pattern.
- *
- * INLINE, and asserted below never to be read from disk. A fixture file under
- * `.pi/extensions/` would be enumerated by the scan itself and fail the gate it
- * exists to prove; a fixture anywhere else would be one more thing to keep in
- * sync. It also exercises the whitespace and optional-chaining tolerance the
- * patterns claim, rather than only the tidy spelling.
- */
+/** One offending form per pattern, inline: a fixture file under .pi/extensions/ would fail the gate it proves. */
 const OFFENDING_FIXTURE = [
 	'import { streamOpenAiCompletions } from "@earendil-works/pi-ai/api/openai-completions.ts";',
 	"const a = await ctx.modelRegistry.complete(model, context);",
@@ -210,10 +132,7 @@ describe("DIAG-03 — no extension bypasses the callModel() chokepoint", () => {
 	});
 
 	it("proves every forbidden pattern is live against an inline offending fixture", () => {
-		// A regex set proven only against a clean tree is a set that could be
-		// uniformly broken — a stray `^` anchor, an escaping slip during a rename —
-		// and never noticed, because a dead pattern and a clean repository produce
-		// byte-identical output. Each pattern must fire against something.
+		// A dead pattern and a clean tree produce identical output, so each pattern must fire on something.
 		const dead = FORBIDDEN.filter(({ pattern }) => !pattern.test(OFFENDING_FIXTURE)).map(
 			({ pattern, why }) => `${String(pattern)} — ${why}`,
 		);
@@ -233,10 +152,6 @@ describe("DIAG-03 — no extension bypasses the callModel() chokepoint", () => {
 	});
 
 	it("keeps the offending fixture inline rather than reading it from disk", () => {
-		// A fixture file under `.pi/extensions/` would be enumerated by the scan
-		// above and fail the very gate it exists to prove; one outside would be a
-		// second copy of the rule to keep in sync. Asserting the shape rather than
-		// the mechanism, since the fixture is a `const` two screens up.
 		expect(
 			OFFENDING_FIXTURE.includes(SANCTIONED_CALL),
 			"the inline fixture no longer contains the sanctioned call it is meant to exercise",
@@ -251,9 +166,7 @@ describe("DIAG-03 — no extension bypasses the callModel() chokepoint", () => {
 	});
 
 	it("has a chokepoint that is tracked, exempt, and actually makes the call", () => {
-		// Without this, renaming the directory turns the gate green — everything
-		// becomes non-matching prose — and nothing anywhere goes red. Here the
-		// rename makes THIS case fail instead, which is the loud half of the pair.
+		// Without this, renaming the directory would turn the gate green.
 		const chokepoint = sources.find((s) => s.path === CHOKEPOINT_FILE);
 
 		expect(

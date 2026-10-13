@@ -1,63 +1,8 @@
 /**
- * GATE-10 (nested half) — the per-`model.api` outgoing-request proof for
- * `runSingleShotRole`, run and recorded RED against the pre-fix code before
- * any production change landed (see 08-01-SUMMARY.md's RED OUTPUT section).
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS PROVES
- * ---------------------------------------------------------------------------
- * `.pi/extensions/routing/modes.ts:409` built the outgoing `api` options bag
- * as `{ reasoningEffort: plan.reasoningEffort }` UNCONDITIONALLY — the
- * openai-completions shape — for every nested single-shot call, regardless of
- * which `model.api` the resolved candidate actually carries. `BedrockOptions`
- * (`node_modules/@earendil-works/pi-ai/dist/api/bedrock-converse-stream.d.ts:6-
- * 11`) has NO `reasoningEffort` field: a request built this way silently drops
- * the reviewer/advisor's declared `reasoningEffort: "high"` on the floor for
- * every Bedrock-routed candidate (reviewer/advisor in `balanced` and `max`;
- * vision in every mode).
- *
- * This file proves the defect DIRECTLY on the wire, per `model.api`, by
- * registering two faux providers under the two real api ids `ROLE_MAP`
- * actually resolves for `reviewer` (`cheap` -> openai-completions,
- * `max` -> bedrock-converse-stream) and capturing the OUTGOING options object
- * each provider's response factory was handed.
- *
- * ---------------------------------------------------------------------------
- * WHY EVERY CANDIDATE IS READ OUT OF `ROLE_MAP`, NEVER HARDCODED
- * ---------------------------------------------------------------------------
- * A literal provider/model id copied into a test silently stops tracking
- * `schema.ts` the moment the map changes, and the test keeps passing against a
- * candidate the router no longer resolves. Both candidates below come from
- * `ROLE_MAP.cheap.reviewer.candidates[0]` and `ROLE_MAP.max.reviewer.candidates[0]`.
- *
- * ---------------------------------------------------------------------------
- * WHY NO WIRE LOG OR DIAGNOSTICS EXTENSION
- * ---------------------------------------------------------------------------
- * The claim under test is "what left the harness as the outgoing `options`
- * bag", and a faux response FACTORY sees exactly that object as its second
- * argument — the same technique `tests/integration/single-shot-roles.test.ts`
- * uses for its own `seenEffortReviewer` oracle. No diagnostics extension, no
- * warm-up prompt and no turns/wire log read are needed to see it; this file
- * deliberately carries none of the three. `createCommandContext()` is
- * available immediately after `createAgentSession` returns — extension
- * loading happens at session construction, not at the first prompt
- * [VERIFIED: `tests/integration/mode-switch.test.ts`'s own header, citing
- * `dist/core/agent-session.d.ts:642` and `dist/core/extensions/runner.d.ts:132,144`].
- *
- * ---------------------------------------------------------------------------
- * WHY `reviewer` IN BOTH `cheap` AND `max`, NOT TWO DIFFERENT ROLES
- * ---------------------------------------------------------------------------
- * `ROLE_MAP.cheap.reviewer`'s first candidate is byte-identical to `CHAIN[0]`
- * in `.pi/extensions/providers/schema.ts` (`deepseek/deepseek-flash`), so
- * this run's openai-completions call is dispatched through the fallback-chain
- * wrapper rather than a direct chokepoint call — see `runSingleShotRole`'s own
- * `resolvedIsChainHead` check. That is deliberately exercised here rather than
- * avoided: the fallback wrapper forwards the caller's `api` bag UNCHANGED
- * (`providers/fallback.ts`'s own `callWithFallback` calls `callModel(ctx,
- * {...opts, model})`), so both dispatch paths this router can take are proven
- * by this one role, not just the simpler one. `ROLE_MAP.max.reviewer`'s
- * candidate (Bedrock Claude) has no hop in `CHAIN`, so that call takes the
- * direct chokepoint path.
+ * runSingleShotRole sends the options shape each model.api understands: Bedrock options have no reasoningEffort
+ * (pi-ai dist/api/bedrock-converse-stream.d.ts), so a flat bag silently drops the reviewer's "high". The outgoing
+ * options are captured by each faux provider's response factory. Candidates come from ROLE_MAP, never hardcoded;
+ * cheap's reviewer is the fallback-chain head and max's is not, so both dispatch paths are exercised.
  */
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 
@@ -137,22 +82,8 @@ async function runFixture(): Promise<Capture[]> {
 			},
 		]);
 
-		// registerNativeProvider replaces a built-in of the same provider id — the
-		// mechanism `tests/helpers/session.ts`'s own docstring names and
-		// `single-shot-roles.test.ts` relies on. Registered bare: this fixture
-		// captures via the response FACTORY, not via `onPayload`, so
-		// `wrapFauxWithPayload` buys nothing here.
-		//
-		// MEASURED, NOT ASSUMED: `registerNativeProvider` fires a fire-and-forget
-		// UNSCOPED `refresh()` [pi model-runtime.js:546-553], which bumps EVERY
-		// provider's internal availability sequence number, including one already
-		// mid-flight. Registering BOTH providers back-to-back and only THEN
-		// awaiting `setRuntimeApiKey` for each raced the two unscoped refreshes
-		// against the targeted ones and left `deepseek` permanently unconfigured
-		// (reproduced: still `false` after 4s of polling). Each provider's
-		// register -> grant -> wait cycle is completed BEFORE the next provider is
-		// registered, so no unscoped refresh from a LATER registration can
-		// invalidate an EARLIER provider's already-settled auth state.
+		// Each provider completes register, grant and wait before the next is registered: registerNativeProvider's unscoped
+		// refresh (pi model-runtime.js) otherwise races and leaves the first provider unconfigured.
 		handle.modelRuntime.registerNativeProvider(openAiFaux.provider);
 		await handle.modelRuntime.setRuntimeApiKey(openAiCandidate.provider, "kypi-fixture-not-a-real-key");
 		await waitForConfiguredAuth(handle.modelRuntime, openAiCandidate.provider);
@@ -161,10 +92,7 @@ async function runFixture(): Promise<Capture[]> {
 		await handle.modelRuntime.setRuntimeApiKey(bedrockCandidate.provider, "kypi-fixture-not-a-real-key");
 		await waitForConfiguredAuth(handle.modelRuntime, bedrockCandidate.provider);
 
-		// The interleaved ordering above protects EACH provider from the OTHER's
-		// registration, but not from itself: confirm deepseek is STILL configured
-		// after bedrock's own register/grant/wait cycle completed, so a caller
-		// reading this fixture can trust neither auth state degrades once won.
+		// deepseek must still be configured after bedrock's own registration cycle.
 		expect(
 			handle.modelRuntime.hasConfiguredAuth(openAiCandidate.provider),
 			`${openAiCandidate.provider} lost its configured auth after ${bedrockCandidate.provider} was ` +
@@ -173,9 +101,7 @@ async function runFixture(): Promise<Capture[]> {
 
 		const ctx = handle.session.extensionRunner.createCommandContext();
 
-		// Identity guard (Phase 3's lesson, applied every time a faux provider
-		// replaces a real provider id) -- the resolved candidate really is THIS
-		// run's faux registration, not Pi's own real catalogue entry.
+		// The resolved candidate must be this run's faux registration, not Pi's catalogue entry.
 		const resolvedOpenAi = ctx.modelRegistry.find(openAiCandidate.provider, openAiCandidate.id);
 		const resolvedBedrock = ctx.modelRegistry.find(bedrockCandidate.provider, bedrockCandidate.id);
 		if (resolvedOpenAi?.api !== "openai-completions" || resolvedBedrock?.api !== "bedrock-converse-stream") {

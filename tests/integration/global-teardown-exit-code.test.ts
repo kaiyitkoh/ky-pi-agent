@@ -1,66 +1,7 @@
 /**
- * WR-13 -- prove `tests/global-teardown.ts`'s tracked-file tripwire actually
- * fails the process EXIT CODE, not only a stderr log line.
- *
- * ---------------------------------------------------------------------------
- * Why this file exists
- * ---------------------------------------------------------------------------
- * The BUG-01 fix (see `04-REVIEW-FIX.md`'s ad-hoc entry) proved the tripwire's
- * LOGIC was non-vacuous by hand: dirty a tracked file, run the suite, observe
- * an `error during close` line naming the file, restore. That proof stopped
- * one step short -- it never checked the process's own exit code. Confirmed
- * by direct execution, twice, on separate runs: vitest reports a `globalSetup`
- * teardown throw as `error during close` on stderr and does NOT translate it
- * into a non-zero exit status, so the tripwire fired and `npx vitest run`
- * still exited 0. In CI, and in any `npm test && ...` chain, that is a check
- * that cannot fail the build -- decorative, not a gate. This file drives a
- * REAL, SEPARATE `npx vitest run` subprocess and asserts on its actual exit
- * code in both directions, which is the only way to prove the fix (setting
- * `process.exitCode` inside the teardown) actually closes the gap.
- *
- * ---------------------------------------------------------------------------
- * Why a dedicated probe fixture, not `CLAUDE.md` (the BUG-01 precedent)
- * ---------------------------------------------------------------------------
- * `CLAUDE.md` and `docs/RUNBOOK.md` are both read and asserted on by other
- * test files (`tests/unit/pinning.test.ts`, `tests/unit/helpers.test.ts`,
- * `tests/integration/budget.test.ts`, `tests/unit/docs-policy.test.ts`,
- * among others) that may run CONCURRENTLY with this file in the same overall
- * `vitest run` invocation. Appending to either mid-suite risks a real
- * assertion elsewhere reading half-mutated content through a race this file
- * has no way to prevent. `tests/fixtures/global-teardown-probe.txt` exists
- * for exactly one purpose (see its own docstring): nothing else in this repo
- * reads its content, so this file can safely mutate and restore it with zero
- * interference, regardless of what else vitest schedules in parallel.
- *
- * ---------------------------------------------------------------------------
- * Why the dirtying test file is written INTO the child run, not done by
- * this (parent) file directly
- * ---------------------------------------------------------------------------
- * `tests/global-teardown.ts#setup()` snapshots "modified tracked files" once,
- * before any test file in that `vitest run` invocation executes. Dirtying the
- * probe fixture from THIS (parent) process, then spawning a child `vitest
- * run`, would have the CHILD's own `setup()` see the probe already dirty at
- * its own baseline -- not "newly dirtied" during the child's run, so its
- * teardown would never fire at all. [Confirmed by direct execution while
- * authoring this test: exactly that shape produced a false negative -- exit
- * 0 with no tripwire message, for the wrong reason.] The dirtying must happen
- * AFTER the child's own `setup()` baseline is taken, i.e. from inside a test
- * file the child itself runs. `writeDirtyingProbeTest()` below writes a
- * throwaway test file under `tests/unit/` (matching this project's
- * `include: ["tests/**\/*.test.ts"]` glob so the child discovers it), the
- * child run targets ONLY that one file, and the file is deleted again in this
- * (parent) test's own `finally` -- it is untracked for its entire existence,
- * so its own creation/deletion never trips any tripwire (`??` entries are
- * excluded on both sides of the diff, per that file's own docstring).
- *
- * ---------------------------------------------------------------------------
- * Timeout budget
- * ---------------------------------------------------------------------------
- * Each case spawns one cold `npx vitest run` targeting a single small file --
- * a fresh Vite/jiti transform pipeline, not warm-cached from this (parent)
- * process. Matches this suite's own convention for real-subprocess spawns
- * (`bootstrap-safety-stub.test.ts`, `bootstrap-check-only.test.ts`) rather
- * than the default 120s-shared budget.
+ * The tracked-file tripwire fails the process exit code, not only a stderr line: vitest logs a globalSetup teardown
+ * throw yet exits 0. A real child `npx vitest run` is checked in both directions. The child dirties a probe fixture
+ * nothing else reads, from inside a test file it runs, because its own setup() snapshots the baseline first.
  */
 import { spawnSync } from "node:child_process";
 import { existsSync, rmSync, writeFileSync } from "node:fs";
@@ -82,13 +23,7 @@ const TIMEOUT_MS = 120_000;
 /** Absolute path of the throwaway dirtying test file, cleaned up in `afterEach`. */
 const DIRTYING_TEST_PATH = join(ROOT, "tests", "unit", "zzz-wr13-dirtying-probe.test.ts");
 
-/**
- * Write a throwaway vitest test file that appends a line to the tracked
- * probe fixture from INSIDE whatever `vitest run` invocation discovers it.
- * See this module's own docstring for why the dirtying must happen from a
- * test the CHILD process runs, not from this (parent) process before
- * spawning the child.
- */
+/** A throwaway test that dirties the probe fixture from inside the child run, after the child's baseline snapshot. */
 function writeDirtyingProbeTest(): void {
 	const source = [
 		'import { appendFileSync } from "node:fs";',
@@ -114,13 +49,8 @@ interface ChildRun {
 }
 
 /**
- * Spawn a real, separate `npx vitest run <relativeTarget>` with `cwd` at the
- * repo root. `npx` ships as `npx.cmd` on Windows, and since the CVE-2024-27980
- * fix Node refuses to execute a `.cmd` without a shell -- `tests/helpers/pi.ts`
- * and `tests/helpers/stub-bin.ts` document and hit the exact same hazard.
- * `commandFor` (shared with those two files via `win-quote.ts`) folds argv
- * into one quoted command string on Windows and passes it through unchanged
- * on POSIX, which is the only shape `shell: true` is safe in.
+ * A real `npx vitest run <relativeTarget>` from the repo root. `npx.cmd` needs a shell on Windows since the
+ * CVE-2024-27980 fix, so `commandFor` folds argv into one quoted command there.
  */
 function runChildSuite(relativeTarget: string): ChildRun {
 	const [file, argv] = commandFor("npx", ["vitest", "run", relativeTarget], IS_WINDOWS);

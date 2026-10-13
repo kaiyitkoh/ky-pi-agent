@@ -1,64 +1,8 @@
 /**
- * DIAG-06 — `/budget`'s decomposition, against the real system prompt of the
- * installed Pi version, and `cacheRead` versus `input` across two real turns.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE PROVES THAT THE UNIT TEST CANNOT
- * ---------------------------------------------------------------------------
- * `tests/unit/budget-sections.test.ts` proves the PARSER: given a string shaped
- * like a system prompt, the slicer accounts for every character of it. Every
- * fixture there is a string that file wrote itself, so a green run says nothing
- * about whether Pi still emits `<project_context>` — and Pi ships every 2-3
- * days.
- *
- * This file proves the MARKERS. It drives a live in-memory session, plants its
- * own small `AGENTS.md` so Pi's context-file discovery genuinely loads one, and
- * slices the string `ctx.getSystemPrompt()` really returned from the Pi version
- * installed in `node_modules`. If a future release renames a delimiter, this is
- * the file that goes red — instead of `/budget` silently attributing the whole
- * block to "base prompt" and reporting it with a straight face.
- * [threat T-02-10-02]
- *
- * ---------------------------------------------------------------------------
- * WHY A PROBE EXTENSION AND NOT A COMMAND
- * ---------------------------------------------------------------------------
- * `getSystemPromptOptions()` — the exact context-file and skill lists — exists
- * only on `ExtensionCommandContext`, not on the `ExtensionContext` a hook
- * receives [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:256 versus
- * :219-249; RESEARCH §7.1 cites the same as `types.ts:1352-1356`]. A headless
- * session has no way to invoke a slash command, so this file asserts the
- * SLICING against the real prompt and supplies the context-file list itself.
- * The command-context wiring — `getSystemPromptOptions()`,
- * `formatSkillsForPrompt`, `getLastAssistantUsage` — is covered by
- * `tests/unit/diagnostics-entry.test.ts` (the command is registered, exactly
- * once) and by manual use. That gap is stated rather than papered over.
- *
- * The probe captures `ctx.getSystemPrompt()` by writing it to a file in `cwd`.
- * Pi loads the extension through jiti, which keeps its own module registry, so
- * an in-process variable this file could read would never move (02-05's
- * finding, re-confirmed in 02-07, 02-08 and 02-09).
- *
- * ---------------------------------------------------------------------------
- * NO ABSOLUTE SIZE THRESHOLD IS ASSERTED ANYWHERE (RESEARCH Pitfall 9)
- * ---------------------------------------------------------------------------
- * "The system prompt must be under N characters" is an assertion about the
- * machine the suite runs on, not about the code: Pi walks up from `cwd`
- * collecting context files, so the number depends on the directory tree above
- * the temp dir. RESEARCH measured 50,881 characters from inside this repository
- * and 2,023 from a temp dir — both correct, neither a threshold. What is
- * asserted here is that the decomposition ACCOUNTS for whatever the number
- * turns out to be. There is deliberately no `toBeLessThan` in this file.
- *
- * ---------------------------------------------------------------------------
- * THE CACHE NUMBERS ARE FAUX NUMBERS
- * ---------------------------------------------------------------------------
- * `fauxProvider` runs a real prefix-cache SIMULATION keyed on
- * `options.sessionId` whenever `cacheRetention !== "none"`
- * [VERIFIED: pi-ai 0.84.1 src/providers/faux.ts:229-267, RESEARCH §8.5], which
- * is what makes `cacheRead` versus `input` exercisable with no credentials.
- * It is a simulation, not a provider measurement. What a real DeepSeek or
- * Bedrock turn reports is `RB-02-01`, which stays **OUTSTANDING**. Never read a
- * green run here as a live measurement.
+ * /budget's decomposition against the real system prompt of the installed Pi, which the unit test's hand-written
+ * fixtures cannot prove: a renamed delimiter fails here. A probe writes ctx.getSystemPrompt() to a file (jiti isolates
+ * module state, and getSystemPromptOptions exists only on command contexts). No size threshold is asserted: the
+ * number depends on the directory tree above cwd. Cache numbers come from faux's simulation, not a provider.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -91,10 +35,7 @@ const EXTENSION_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`;
 /** The context file this test plants. Small, known, and its own. */
 const CONTEXT_FILE_NAME = "AGENTS.md";
 
-/**
- * Its content. Short on purpose: the assertion is that the located block is at
- * least this long, never that it is under some ceiling.
- */
+/** Short on purpose: the located block must be at least this long, never under a ceiling. */
 const CONTEXT_FILE_BODY = "# Project notes\n\nAlways run the tests before committing.\n";
 
 /** Where the probe writes the system prompt it saw. Relative to `cwd`. */
@@ -128,13 +69,8 @@ interface Capture {
 }
 
 /**
- * An extension that IS the real diagnostics extension, plus a prompt dump.
- *
- * Written inline rather than composed from two extension paths because
- * `createFauxSession` accepts one user-scope entry point and refuses both
- * options at once. `turn_start` is the hook because it fires on every turn and
- * its `ExtensionContext` carries `getSystemPrompt()`; the file is overwritten
- * each turn, so the last write is the prompt of the last turn.
+ * The real diagnostics extension plus a prompt dump at turn_start, inline because createFauxSession takes one entry
+ * point. The file is overwritten each turn, so it holds the last turn's prompt.
  */
 function probeSource(): string {
 	return [
@@ -161,13 +97,8 @@ describe("DIAG-06 — /budget against a real system prompt and a real cache", ()
 			{
 				extensionSource: probeSource(),
 				tools: [TOOL],
-				// Pi discovers context files by walking up from `cwd` with candidates
-				// ["AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md",
-				// "CLAUDE.MD"] [VERIFIED: pi src/core/resource-loader.ts:71, 125-155].
-				// `cwd` is a temp dir outside this repository, so this planted file is
-				// the context file — from inside the repo Pi would load a 49 KB
-				// CLAUDE.md instead and the test would be measuring the harness
-				// (RESEARCH §8.4, threat T-02-01-02).
+				// Pi walks up from cwd for AGENTS.md/CLAUDE.md (pi src/core/resource-loader.ts:71); cwd is outside the repo,
+				// so this planted file is the context file rather than the repo's large CLAUDE.md.
 				cwdFiles: { [CONTEXT_FILE_NAME]: CONTEXT_FILE_BODY },
 				responses: [
 					(context) => {
@@ -229,9 +160,7 @@ describe("DIAG-06 — /budget against a real system prompt and a real cache", ()
 				"prompt was built",
 		).toBeGreaterThan(0);
 
-		// A cross-check the plan does not require, and worth having: the string
-		// `/budget` reads must be the string the provider is sent. If they ever
-		// diverge, the report would be decomposing a prompt nobody was charged for.
+		// The string /budget reads must be the string the provider is sent.
 		expect(
 			live.providerPrompt,
 			"`ctx.getSystemPrompt()` and the `getCurrentSystemPrompt(context.messages)` the provider adapter received " +
@@ -288,17 +217,12 @@ describe("DIAG-06 — /budget against a real system prompt and a real cache", ()
 				"false would mean the two are computed independently and can disagree",
 		).toBe(0);
 
-		// The warnings array must be SILENT for the situation this fixture set up:
-		// context files present and located, no skills configured and none rendered.
-		// A warnings array that fires on every healthy session is one nobody reads
-		// on the session that mattered.
+		// Warnings must stay silent for a healthy session, or nobody reads them on the one that matters.
 		const report = computeBudget({
 			systemPrompt: live.prompt,
 			contextFiles: [{ path: live.contextPath, content: CONTEXT_FILE_BODY }],
 			skills: [],
-			// `formatSkillsForPrompt([])` returns "" [VERIFIED: pi src/core/skills.ts:338-340].
-			// Spelled as the empty string here because this file cannot call the
-			// command-context path that would produce it -- see the module docstring.
+			// formatSkillsForPrompt([]) returns "" (pi src/core/skills.ts:338-340); the command path is not callable here.
 			skillsBlock: "",
 			tools: live.tools,
 			lastUsage: undefined,
@@ -464,19 +388,10 @@ describe("DIAG-06 — /budget against a real system prompt and a real cache", ()
 	});
 
 	it("case 5: this suite deliberately asserts no upper bound on prompt size", () => {
-		// RESEARCH Pitfall 9, stated as an executable reminder rather than a
-		// comment nobody greps. `sliceSystemPrompt` is a decomposition, and the
-		// honest assertion about a decomposition is that it accounts for the whole,
-		// never that the whole is small. A `toBeLessThan(5000)` here would fail on
-		// any machine whose repository layout differs -- RESEARCH measured 50,881
-		// characters from inside this repository and 2,023 from a temp dir, and both
-		// numbers are right.
+		// A decomposition must account for the whole, never assert the whole is small: the size depends on the machine.
 		const source = readFileSync(new URL(import.meta.url), "utf-8");
 
-		// The pattern is BUILT rather than spelled, the same dodge `jsonl.ts` uses
-		// for its own grep gate: a literal here would appear in the file it scans
-		// and the check would match itself. The `\.` prefix is what keeps this
-		// regex, and the prose above it, out of its own result set.
+		// Built rather than spelled, so the pattern does not match its own source.
 		const upperBound = new RegExp(`\\.toBeLessThan${"(?:OrEqual)?"}\\(\\s*([\\d_]+)`, "g");
 		const bounds = [...source.matchAll(upperBound)].map((match) => match[1]);
 

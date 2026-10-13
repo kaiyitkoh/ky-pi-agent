@@ -1,49 +1,8 @@
 /**
- * DIAG-08 — four concurrent processes append to one file and nothing tears.
- *
- * WHY THIS IS AN INTEGRATION TEST AND NOT A UNIT ONE. The claim is about the
- * operating system, not about our code: whether `appendFileSync` from four
- * separate OS processes onto one path produces interleaved-but-whole records or
- * shredded ones. Nothing in-process can answer that. Subagents are separate
- * `pi` child processes [RESEARCH §10.2], so this is the real deployment shape.
- *
- * It reproduces the shape of RESEARCH §10.3's executed finding — 4 processes ×
- * 1500 records of ~950 B → 6000 lines, 0 unparseable — at 4 × 400, which keeps
- * the suite inside its feedback budget while still crossing the boundary the
- * finding is about.
- *
- * ---------------------------------------------------------------------------
- * THE BARRIER, AND WHY THE CHILDREN ARE NOT SPAWNED WITH `spawnSync`
- * ---------------------------------------------------------------------------
- * `spawnSync` blocks until the child exits. Four `spawnSync` calls in a loop
- * run four processes strictly one after another, and a serialised run cannot
- * produce a single interleaved write — the test would go green having proven
- * nothing about concurrency at all. That is this repo's recurring vacuous-pass
- * shape, so the children are spawned asynchronously and awaited together.
- *
- * Overlap is then made deterministic rather than hoped for: the parent computes
- * one wall-clock start instant and passes it to every child, each child sleeps
- * until that instant before its first write, and the test asserts that the
- * latest start precedes the earliest finish — i.e. there was a moment when all
- * four were writing. Without that assertion, four processes that happened to
- * run back to back would still produce 1600 clean lines and still pass.
- *
- * ---------------------------------------------------------------------------
- * Caveats, recorded rather than hidden (RESEARCH §10.3)
- * ---------------------------------------------------------------------------
- * (a) The original measurement, and every run of this test so far, is Windows
- *     only. The macOS leg belongs to CI's `macos-latest` job, which is itself
- *     BOOT-07 and still OUTSTANDING — it has never run. A green result here is
- *     evidence about win32 and about nothing else.
- * (b) POSIX `O_APPEND` atomicity for very large single writes is not formally
- *     guaranteed. The records here are ~950 B, far below any pipe-buffer-sized
- *     threshold, but the guarantee being empirical rather than specified is the
- *     reason the writer stays open-write-close per record and the reason this
- *     test measures rather than assumes.
- *
- * The generated child is written as `.mjs`, never `.js`: `.JS` is in PATHEXT on
- * Windows and Windows Script Host cannot run ESM
- * [VERIFIED: tests/helpers/stub-bin.ts:20-35].
+ * Four concurrent processes append ~950 B records to one file and nothing tears: an operating-system property, so
+ * real processes. They are spawned asynchronously (spawnSync would serialise them) and start at one shared instant,
+ * and the test asserts the latest start precedes the earliest finish. Measured on win32; POSIX O_APPEND atomicity is
+ * empirical, which is why the writer stays open-write-close. The child is `.mjs`: `.JS` is in Windows PATHEXT.
  */
 import { spawn } from "node:child_process";
 import { mkdirSync, writeFileSync } from "node:fs";
@@ -75,14 +34,7 @@ interface ChildReport {
 	finishedAt: number;
 }
 
-/**
- * Source of the child process.
- *
- * Built as a joined array of source lines, the house pattern from
- * `tests/helpers/stub-bin.ts:133-163`. `writeSync(1, …)` rather than
- * `console.log` plus `process.exit`, because `process.exit` can truncate a
- * piped stdout mid-flush and would make the report flaky.
- */
+/** The child's source. writeSync(1, ...) rather than console.log plus process.exit, which can truncate piped stdout. */
 function childSource(): string {
 	return [
 		"// Generated child -- see tests/integration/jsonl-concurrency.test.ts.",
@@ -214,9 +166,7 @@ describe("DIAG-08 — concurrent appends from separate processes", () => {
 					"'1600 lines arrived' from '1600 lines arrived and one child's 400 overwrote another's'",
 			).toEqual(Object.fromEntries(LABELS.map((label) => [label, RECORDS_PER_CHILD])));
 
-			// The record size the RESEARCH measurement used. Asserted rather than
-			// commented, so a future edit to PAD_LENGTH cannot quietly shrink the
-			// records until the test stops exercising the interesting size.
+			// Asserted, so shrinking PAD_LENGTH cannot quietly stop exercising the measured record size.
 			const sample = JSON.stringify(records[0]);
 			expect(
 				Buffer.byteLength(sample, "utf8"),

@@ -1,49 +1,8 @@
 /**
- * DIAG-04 — the two branches of `turn_end` whose failure is INVISIBLE.
- *
- * ---------------------------------------------------------------------------
- * WHY THESE TWO, AND WHY THEY HAD NO TEST
- * ---------------------------------------------------------------------------
- * `TURN_NO_MESSAGE_WHERE` and `MODEL_UNAVAILABLE_EVENT` are both exported under
- * this repository's house rule — "exported so a test imports it rather than
- * re-typing the literal" — and no test imported either. Nothing constructed a
- * turn with no assistant message, and nothing constructed a session whose
- * `ctx.model` is `undefined`, so both paths and the `degradedModel` shape shipped
- * unexecuted.
- *
- * They are exactly the branches whose failure produces no error anywhere:
- *
- *   - [threat T-02-08-02] a turn that leaves NO ROW is indistinguishable from a
- *     quiet session. The handler writes a `diagnostics.error` row instead of
- *     skipping the append precisely so the hole is visible, and nothing checked
- *     that it does.
- *   - [threat T-02-08-05] `ctx.model` is `Model<any> | undefined`
- *     [VERIFIED: pi 0.84.1 dist/core/extensions/types.d.ts:223]. With no
- *     catalogue entry there are no rates, so the row's cost is all zeros — and a
- *     zero cost that looks exactly like a computed one is a FABRICATED
- *     measurement. `MODEL_UNAVAILABLE_EVENT` is what lets Phase 8 exclude the row
- *     from a spend total rather than quietly under-count it, and nothing checked
- *     that the marker is actually stamped.
- *
- * ---------------------------------------------------------------------------
- * NO SESSION IS NEEDED, AND THAT IS THE POINT
- * ---------------------------------------------------------------------------
- * Same recording stub `wire-nonmutating.test.ts` uses: `ExtensionAPI` and
- * `ExtensionContext` are plain interfaces, so `diagnostics(pi)` registers the REAL
- * handlers and this file invokes them directly. A live session cannot reach either
- * branch — Pi always has a model and always produces a message — which is why the
- * unit route is the only one available and why "untested defensive code is a
- * comment" applies here more than anywhere else in the subsystem.
- *
- * ---------------------------------------------------------------------------
- * THE REQUIRED-FIELD LIST IS DERIVED, NOT TRANSCRIBED
- * ---------------------------------------------------------------------------
- * "Honestly degraded" means the degraded row is still a complete row. Rather than
- * copy `turns-log.test.ts`'s `REQUIRED_TURN_FIELDS` — a duplicated literal list
- * is how an assertion silently stops matching the thing it checks — this file
- * drives a HEALTHY turn through the same handlers in the same session and requires
- * the degraded row to carry every key the healthy one carries. The list maintains
- * itself.
+ * The two turn_end branches whose failure is invisible: a turn with no assistant message must still leave a
+ * diagnostics.error row, and a session with no ctx.model must stamp MODEL_UNAVAILABLE_EVENT so its all-zero cost is
+ * not read as computed. A live session reaches neither, so the real handlers are driven with a recording stub. The
+ * degraded row must carry every key a healthy row from the same handlers carries.
  */
 import { existsSync } from "node:fs";
 
@@ -114,12 +73,7 @@ function makeModel(): Model<Api> {
 	};
 }
 
-/**
- * A context carrying only what the turn handlers read.
- *
- * `model` is passed explicitly, `undefined` included, because that absence is the
- * whole subject of the second case.
- */
+/** A context carrying only what the turn handlers read; `model` may be undefined on purpose. */
 function fakeCtx(cwd: string, model: Model<Api> | undefined): ExtensionContext {
 	return {
 		cwd,
@@ -160,10 +114,7 @@ describe("DIAG-04 — turn_end's two invisible branches", () => {
 				registerCommand() {
 					/* /budget is registered and never invoked here. */
 				},
-				// EMPTY ON PURPOSE. `isProseToolCall` refuses an empty active-tool list
-				// by design (gate 3), so `message_end` records the message and takes
-				// none of the prose branch — which belongs to prose-retry.test.ts and
-				// would otherwise put extra rows in this file's log.
+				// Empty on purpose: isProseToolCall refuses an empty tool list, keeping the prose branch out of this log.
 				getActiveTools: () => [],
 				getAllTools: () => [],
 				sendUserMessage() {
@@ -182,10 +133,7 @@ describe("DIAG-04 — turn_end's two invisible branches", () => {
 					"about a handler that was never called",
 			).toBe(true);
 
-			// The accumulator is module state and the agent loop is serial, so the three
-			// sequences run in order inside ONE log and are told apart by position.
-			// `turn_end` takes and clears the accumulator first, so sequence 3's
-			// `turn_start` genuinely starts from nothing.
+			// The accumulator is module state and the loop is serial, so the three sequences share one log, told apart by position.
 
 			// 1 — HEALTHY: a real catalogue entry. The control.
 			await turnStart?.({ type: "turn_start", timestamp: Date.now() }, fakeCtx(cwd, makeModel()));
@@ -269,9 +217,6 @@ describe("DIAG-04 — turn_end's two invisible branches", () => {
 	});
 
 	it("keeps every field the healthy row has, so 'honestly degraded' is a tested claim", () => {
-		// Derived from the healthy row rather than transcribed from
-		// `turns-log.test.ts`'s REQUIRED_TURN_FIELDS: a duplicated literal list is how
-		// an assertion silently stops matching the thing it checks.
 		const expected = Object.keys(healthy ?? {}).sort();
 
 		expect(

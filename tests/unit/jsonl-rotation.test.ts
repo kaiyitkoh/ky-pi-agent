@@ -1,26 +1,7 @@
 /**
- * DIAG-08 — rotation, retention and path confinement, against a real filesystem.
- *
- * No mocks and no in-memory fs. The whole claim is about what `renameSync` and
- * `unlinkSync` do to real files, so faking either would leave the requirement
- * asserted nowhere. Every case runs inside `withTempLogCwd`, which only ever
- * removes a directory it created itself under a `kypi-logs-` prefix.
- *
- * THE ROTATION ASSERTION IS RECORD-FOR-RECORD, NOT FILE-EXISTENCE. "a rotated
- * file appeared" is satisfied by a writer that renames and then drops the next
- * fifty records on the floor. What matters is that the union of live plus
- * rotated files, read oldest-first, is exactly the sequence that was appended —
- * nothing lost across the rename, nothing duplicated. That is the property
- * RESEARCH §10.3 measured and the one a later reader of `turns-*.jsonl` relies
- * on when they count turns.
- *
- * DETERMINISM. Record size is computed, not guessed: `makeRecord` pads every
- * record to exactly {@link RECORD_BYTES} serialised bytes including its
- * newline, so with a cap of `RECORD_BYTES * 8` the rotation boundaries are
- * arithmetic rather than an approximation that drifts when a field is renamed.
- * Retention injects `now` rather than back-dating mtimes, because mtime
- * manipulation behaves differently on Windows and macOS and the requirement is
- * about the date stamp in the file name anyway.
+ * Rotation, retention and path confinement against a real filesystem. Rotation is checked record-for-record across
+ * live and rotated files, since 'a rotated file appeared' passes a writer that drops records. Records are padded to an
+ * exact size so the boundaries are arithmetic, and retention injects `now` rather than back-dating mtimes.
  */
 import { existsSync, mkdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
@@ -51,14 +32,7 @@ const ROTATE_BYTES = RECORD_BYTES * PER_FILE;
 /** The value planted in record 1, so "the oldest content" is identifiable by string. */
 const OLDEST_MARKER = "OLDEST-RECORD-MARKER";
 
-/**
- * A record whose serialised line is exactly {@link RECORD_BYTES} bytes.
- *
- * The padding is computed from the real serialisation rather than eyeballed;
- * a hand-tuned constant would silently stop being exact the first time a field
- * name changes, and every boundary assertion below would then be off by one
- * with no explanation.
- */
+/** A record whose serialised line is exactly RECORD_BYTES bytes, computed from the real serialisation. */
 function makeRecord(i: number, marker = ""): { i: number; marker: string; pad: string } {
 	const overhead = Buffer.byteLength(JSON.stringify({ i, marker, pad: "" }), "utf8") + 1;
 	return { i, marker, pad: "p".repeat(RECORD_BYTES - overhead) };
@@ -101,9 +75,7 @@ describe("DIAG-08 — size-based rotation loses no record across the rename", ()
 			const now = new Date(2026, 7, 13, 9, 0, 0);
 			const live = logPath(cwd, TURNS_LOG_BASE, now);
 
-			// 20 records at 8 per file: records 1-8 and 9-16 rotate away, 17-20
-			// stay live. Two crossings of the cap, which is what the requirement
-			// is about — one rotation could be luck.
+			// Two crossings of the cap: one rotation could be luck.
 			const written = appendRun(cwd, 20, { rotateBytes: ROTATE_BYTES, now });
 
 			expect(
@@ -112,9 +84,7 @@ describe("DIAG-08 — size-based rotation loses no record across the rename", ()
 					"count means rotation fired the wrong number of times",
 			).toBe(3);
 
-			// Oldest first: .2 was rotated before .1, which was rotated before the
-			// live file was reopened. Reading them in this order must reproduce the
-			// append order exactly.
+			// Oldest first: reading .2, .1, then live must reproduce the append order.
 			const inRotationOrder = [
 				...readIntact(rotatedPath(live, 2), "the oldest rotated file"),
 				...readIntact(rotatedPath(live, 1), "the newest rotated file"),
@@ -151,33 +121,13 @@ describe("DIAG-08 — size-based rotation loses no record across the rename", ()
 
 describe("DIAG-08 — a record larger than the cap is written whole, not dropped", () => {
 	/**
-	 * THE HONEST HALF OF THE CAP CLAIM.
-	 *
-	 * `appendJsonl`'s guard is `size > 0 && size + bytes > cap`, so two branches
-	 * write unconditionally: an empty or absent file, and the post-rotation path
-	 * where `size` was just reset to 0. The docstring used to promise "the live file
-	 * is never larger than the cap", full stop, and that is not true for a single
-	 * oversized record.
-	 *
-	 * The behaviour is the RIGHT one — dropping a record loses the turn it describes,
-	 * which is the one thing this writer may never do — so this case pins it rather
-	 * than treating it as a bug. It also pins the consequence, which is the part a
-	 * reader would otherwise be surprised by: the live file is over the cap, so the
-	 * NEXT append rotates immediately.
-	 *
-	 * Untested in both directions before this: every rotation case uses 500-byte
-	 * records against a 4000-byte cap, so the branch was never entered.
+	 * A single record larger than the cap is still written (dropping it would lose a turn), so the live file exceeds
+	 * the cap and the next append rotates at once.
 	 */
 	it("writes it whole, then rotates on the very next append", async () => {
 		await withTempLogCwd(async (cwd) => {
 			const now = new Date(2026, 7, 13, 9, 0, 0);
-			// `now` PASSED, as every other case here passes it. Omitting it names
-			// the file after TODAY while the appends below write the file named
-			// after the fixture's date, so the two agreed only for as long as the
-			// two dates happened to be the same day — this case passed until
-			// 2026-08-13 turned into 2026-08-14 mid-run and then failed with an
-			// ENOENT that had nothing to do with rotation. A fixture that depends
-			// on the wall clock is a test that reports the calendar.
+			// `now` is passed, or the file is named after today and the case fails across midnight.
 			const live = logPath(cwd, TURNS_LOG_BASE, now);
 			// A cap far below one record, so the first append cannot possibly fit.
 			const tinyCap = 100;
@@ -205,9 +155,6 @@ describe("DIAG-08 — a record larger than the cap is written whole, not dropped
 					"the record was truncated to fit, which is the same loss wearing a different name",
 			).toBeGreaterThan(tinyCap);
 
-			// The consequence, pinned so it is documented behaviour rather than a
-			// surprise: the live file is already over the cap with `size > 0`, so the
-			// guard fires immediately.
 			const second = makeRecord(2);
 			appendJsonl(cwd, TURNS_LOG_BASE, second, { rotateBytes: tinyCap, now });
 
@@ -231,9 +178,7 @@ describe("DIAG-08 — the rotated-file cap bounds disk use, oldest first", () =>
 			const now = new Date(2026, 7, 13, 9, 0, 0);
 			const maxRotated = 3;
 
-			// 50 records at 8 per file crosses the cap six times, which is past
-			// four rotations and therefore past the point where the earliest file
-			// must have been unlinked rather than merely shifted.
+			// Six crossings: past the point where the earliest file must be unlinked, not merely shifted.
 			appendRun(cwd, 50, { rotateBytes: ROTATE_BYTES, maxRotated, now });
 
 			const files = logFilesIn(logDir(cwd));
@@ -248,9 +193,7 @@ describe("DIAG-08 — the rotated-file cap bounds disk use, oldest first", () =>
 					"the run did not actually rotate enough times to exercise the unlink path",
 			).toBe(maxRotated + 1);
 
-			// The marker went into record 1, i.e. into the first file written. It
-			// must be the content that disappeared — deleting the NEWEST file would
-			// also satisfy a file-count assertion, and would be catastrophic.
+			// The marker is in the first file written; deleting the newest instead would pass a count check.
 			const survivingText = files
 				.map((name) => readIntact(join(logDir(cwd), name), name))
 				.flat()
@@ -400,17 +343,7 @@ describe("DIAG-08 / T-02-03-07 — a base name cannot escape the log directory",
 		});
 	});
 
-	/**
-	 * `rotate` is the OTHER exported writer, and it takes a raw path.
-	 *
-	 * `logPath` validates its `base` and confines the result, and `appendJsonl` goes
-	 * through `logPath` — but `rotate` performs `readdirSync`, `renameSync` and
-	 * `unlinkSync` relative to whatever directory it derives from the string it is
-	 * handed. Until it took `cwd` there was no confinement on it at all, so the
-	 * module docstring's second control ("the resolved file is asserted to sit inside
-	 * `logDir(cwd)` before anything is written") was untrue for one of the two.
-	 * Today's only caller is internal, which is why nothing was broken.
-	 */
+	/** `rotate` takes a raw path, so it must confine itself to logDir(cwd) like appendJsonl does. */
 	const ROTATE_ESCAPES = [
 		"evil.jsonl",
 		"../evil.jsonl",

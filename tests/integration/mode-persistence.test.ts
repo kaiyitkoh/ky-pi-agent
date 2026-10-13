@@ -1,48 +1,8 @@
 /**
- * ROUTE-09 — the restart half and the zero-context-tokens half, both proven
- * rather than asserted.
- *
- * ---------------------------------------------------------------------------
- * WHAT THIS FILE DOES NOT PROVE, STATED PLAINLY
- * ---------------------------------------------------------------------------
- * `session_start` does NOT fire in a headless `createAgentSession`
- * [MEASURED: `tests/integration/call-model.test.ts`'s own header — a
- * five-event probe logged nothing before the first prompt; Pi emits
- * `session_start` from `AgentSession`'s extension-binding step,
- * `agent-session.ts:1761`, which the headless factory this repository's test
- * helpers use does not reach]. Every case below therefore simulates the
- * restart by calling `restoreModeFromBranch` directly against a branch read
- * from a real, live session — never by waiting for `session_start` to fire.
- * This proves the RESTORE FUNCTION is correct against real branch data; it
- * does NOT prove Pi's own event dispatch actually calls the `session_start`
- * hook in an interactive session — that half is Pi's own documented contract
- * (`routing/index.ts`'s module docstring cites the exact source lines for the
- * model-restoration half of the same claim) and is not re-verified here.
- *
- * ---------------------------------------------------------------------------
- * WHY THE ABSENCE ASSERTION NEEDS A CONTROL, NOT JUST A CAPTURE
- * ---------------------------------------------------------------------------
- * `05-RESEARCH.md` and this plan both name the same trap Phase 3 already hit
- * once for the compat-block proof: an absence on a wire body is only evidence
- * when a control body proves the SAME instrument would have found the marker
- * if it were there. Case 4 below plants `MODE_ENTRY_TYPE` ("ky:mode" — the
- * `customType` string every persisted mode entry legitimately carries) as the
- * distinctive marker, asserts it is absent from every captured outgoing
- * payload after a mode switch and a real turn, and then sends the identical
- * string inside a user message as the positive control — proving the capture
- * instrument is live, not merely silent.
- *
- * ---------------------------------------------------------------------------
- * WHY `deepseek` CARRIES BOTH `deepseek-flash` AND `deepseek-v4-pro`,
- * WRAPPED FOR PAYLOAD CAPTURE
- * ---------------------------------------------------------------------------
- * `createFauxSession`'s own `buildPayload` option only wraps the DEFAULT faux
- * provider the session starts on (`faux/faux-flash`) — the payload-capturing
- * instrument this file needs lives on the `deepseek` provider the executor
- * switches TO, exactly like `mode-switch.test.ts`/`escalate.test.ts` register
- * it. So `deepseek`'s faux provider is wrapped with `wrapFauxWithPayload`
- * directly, here, rather than through `createFauxSession`'s option — the same
- * wrapper, applied at the second registration site instead of the first.
+ * Mode restore after restart, and zero context tokens for the persisted mode entry. `session_start` does not fire
+ * headless, so the restart is simulated by calling `restoreModeFromBranch` on a real session's branch; Pi's own
+ * dispatch of that hook is not re-verified here. The absence of the `ky:mode` marker on the wire is paired with a
+ * positive control sending the same string as user content. `deepseek` is wrapped for payload capture directly.
  */
 import type { CustomEntry, ModelChangeEntry, SessionEntry } from "@earendil-works/pi-coding-agent";
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
@@ -81,13 +41,7 @@ function findModelChangeEntries(branch: readonly SessionEntry[]): ModelChangeEnt
 	return branch.filter((entry): entry is ModelChangeEntry => entry.type === "model_change");
 }
 
-/**
- * Build a fresh faux session with the real routing extension loaded at user
- * scope, `deepseek` registered under both the flash and pro ids AND wrapped
- * for payload capture, and the module-level mode/escalation slot reset to
- * `cheap`/not-escalated before the session is even created -- mirroring
- * `escalate.test.ts`'s own `withEscalateSession` setup.
- */
+/** A fresh session with routing at user scope, deepseek under both ids wrapped for capture, and the mode slot reset. */
 async function withPersistenceSession<T>(
 	fn: (handle: FauxSessionHandle, captured: unknown[]) => Promise<T>,
 ): Promise<T> {
@@ -153,10 +107,7 @@ describe("ROUTE-09 -- mode persistence: branch restore and the zero-context-toke
 			expect(modeEntry?.data?.mode).toBe("max");
 			expect(modeEntry?.data?.escalated).toBe(false);
 
-			// -- the model_change half: VERIFY Pi's own persistence exists, never
-			// re-build it. If a future Pi version stopped writing this entry, this
-			// assertion is what tells us before a user discovers their model
-			// silently reset on resume.
+			// Verify Pi's own model_change persistence exists rather than rebuilding it, so a Pi change shows up here.
 			const modelChangeEntry = findModelChangeEntries(branch).at(-1);
 			expect(
 				modelChangeEntry,
@@ -166,9 +117,7 @@ describe("ROUTE-09 -- mode persistence: branch restore and the zero-context-toke
 			expect(modelChangeEntry?.provider).toBe("deepseek");
 			expect(modelChangeEntry?.modelId).toBe("deepseek-v4-pro");
 
-			// -- the restart simulation: perturb the module state to something
-			// OTHER than what the branch holds, so the restore below is observable
-			// rather than a no-op that would pass by coincidence.
+			// Perturb the module state away from the branch's, so the restore is observable.
 			setMode("cheap");
 			setEscalated(false);
 			expect(getModeState().mode, "perturbation before restore did not take").toBe("cheap");
@@ -237,9 +186,7 @@ describe("ROUTE-09 -- mode persistence: branch restore and the zero-context-toke
 			} as unknown as SessionEntry,
 		];
 
-		// Perturb to a DIFFERENT valid mode first, so a successful fallback to
-		// DEFAULT_MODE is observable rather than a no-op that would pass by
-		// coincidence if DEFAULT_MODE happened to already be in force.
+		// Perturb first, so a fallback to DEFAULT_MODE is observable.
 		setMode("balanced");
 		setEscalated(false);
 		expect(getModeState().mode, "perturbation before restore did not take").toBe("balanced");
@@ -257,22 +204,9 @@ describe("ROUTE-09 -- mode persistence: branch restore and the zero-context-toke
 	});
 
 	it("case 3b -- WR-04: a branch whose latest ky:mode payload carries data: null never throws, and leaves whatever state was already in force untouched", () => {
-		// `latest?.data === undefined` (the pre-fix check) does NOT catch
-		// `data: null` -- `null === undefined` is `false` in JavaScript.
-		// Execution used to reach `isModeName(data.mode)` and dereference
-		// `null`, throwing a TypeError straight past this function's own
-		// "NEVER THROWS" doc comment. Case 3 above only exercises a malformed
-		// MODE STRING inside an otherwise-well-formed payload object; this case
-		// exercises a malformed PAYLOAD itself. The fix treats `data: null` as
-		// "nothing to restore" (an early return, the same branch an absent
-		// `data` field already takes) -- it does NOT force DEFAULT_MODE the way
-		// case 3's malformed-mode-STRING path does, because that path only
-		// runs once `data` is confirmed to be an object worth reading `mode`
-		// off of. Perturbing to "balanced" (a mode DEFAULT_MODE is not) and
-		// asserting it STAYS "balanced" is the stronger, non-vacuous proof:
-		// asserting a fall-back TO DEFAULT_MODE here would pass just as well
-		// for a buggy implementation that unconditionally reset state on any
-		// malformed payload, which is not what "leave it untouched" means.
+		// `data: null` must leave state untouched (`null === undefined` is false, so a naive check dereferences it).
+		// Staying "balanced" is the non-vacuous proof: a fall-back to DEFAULT_MODE would also pass an implementation that
+		// reset on any malformed payload.
 		const fabricatedBranch: SessionEntry[] = [
 			{
 				type: "custom",
@@ -317,11 +251,7 @@ describe("ROUTE-09 -- mode persistence: branch restore and the zero-context-toke
 			await command.handler("", ctx);
 			expect(notifications.at(-1)?.level, "the balanced switch was refused").toBe("info");
 
-			// The ky:mode entry now exists on the branch, carrying MODE_ENTRY_TYPE
-			// as its own customType -- the distinctive marker this case searches
-			// for. Confirm the entry actually exists before claiming anything about
-			// its absence from the wire: an absence claim about an entry that was
-			// never written proves nothing.
+			// The entry must exist on the branch before its absence from the wire means anything.
 			const branch = session.sessionManager.getBranch();
 			expect(
 				findModeEntries(branch).length,
@@ -343,10 +273,7 @@ describe("ROUTE-09 -- mode persistence: branch restore and the zero-context-toke
 					"mode-persistence entry is not supposed to participate in LLM context at all",
 			).toBe(false);
 
-			// -- the positive control: the SAME marker, sent as ordinary user
-			// content, must be found by the SAME instrument. Without this, an
-			// instrument that captured nothing (or captured but never serialised
-			// content) would have passed the assertion above vacuously.
+			// Positive control: the same marker as user content must be found by the same instrument.
 			await session.prompt(`marker present in this message: ${MODE_ENTRY_TYPE}`);
 
 			expect(

@@ -1,21 +1,7 @@
 /**
- * GATE-02 — proving the reviewer's fixed context contract actually reaches
- * the wire, on the CAPTURED OUTGOING REQUEST, never on `buildReviewerContext`'s
- * return value alone (which would only prove the builder built it, not that
- * `runReview` delivered it).
- *
- * ---------------------------------------------------------------------------
- * THE FIXTURE
- * ---------------------------------------------------------------------------
- * A REAL `makeTempRepo()` clone: `src/b.ts` committed first, then `src/a.ts`
- * committed importing it, then a THIRD commit changing `src/a.ts` only (one
- * line, `git diff --unified=0` so the hunk carries no surrounding context).
- * `src/a.ts` also carries a `KEEP_MARKER` line and a secret-shaped token far
- * from the changed line — both present in the file's FULL CONTENTS, neither
- * present in the zero-context diff. The point of a real repo, per the plan:
- * a bug of omission (`src/b.ts` needed changing too) is genuinely
- * representable, and "full contents contains a line the diff does not" is a
- * real git fact, not a fabricated string.
+ * The reviewer's fixed context contract reaches the wire, asserted on the captured outgoing request rather than on
+ * `buildReviewerContext`'s return value. The fixture is a real repo where `src/a.ts` imports `src/b.ts` and a
+ * zero-context diff touches only `a.ts`, whose full contents carry a marker and a secret-shaped token the diff lacks.
  */
 import { spawnSync } from "node:child_process";
 import { mkdirSync, readFileSync } from "node:fs";
@@ -73,16 +59,10 @@ interface RepoFixture {
 	farFromChangeLine: string;
 }
 
-/**
- * Builds the real temp-repo fixture. `src/a.ts` imports `src/b.ts`
- * (`import { B } from "./b.ts";`), so {@link buildImportGraph} over the
- * touched files produces the edge `src/a.ts -> ./b.ts`.
- */
+/** The temp-repo fixture; `src/a.ts` imports `./b.ts`, so the import graph has the edge `src/a.ts -> ./b.ts`. */
 function buildRepoFixture(): RepoFixture {
 	const repo = makeTempRepo("kypi-reviewer-contract-");
-	// commitFile requires the parent directory to exist first -- every prior
-	// git.ts caller only ever wrote flat filenames (05-STATE.md's own note on
-	// this exact helper).
+	// commitFile needs the parent directory to exist.
 	mkdirSync(join(repo, "src"), { recursive: true });
 
 	commitFile(repo, "src/b.ts", "export const B = 1;\n", "add b");
@@ -123,9 +103,7 @@ function buildRepoFixture(): RepoFixture {
 	const diff = gitDiff(repo, shaBefore, "HEAD", "src/a.ts");
 	const fullContentsA = readFileSync(join(repo, "src/a.ts"), "utf-8");
 
-	// Fixture sanity: the marker/secret/control lines must genuinely be absent
-	// from the zero-context diff, or the "full contents proves more than the
-	// diff" assertion later would be vacuous.
+	// The marker, secret and control lines must be absent from the diff, or the full-contents assertion is vacuous.
 	if (diff.includes(farFromChangeLine) || diff.includes(SECRET_FIXTURE_TOKEN) || diff.includes(NON_SECRET_CONTROL)) {
 		throw new Error(
 			"buildRepoFixture: the marker/secret/control lines leaked into the zero-context diff -- the " +
@@ -157,7 +135,7 @@ function buildContract(repoFixture: RepoFixture): { contract: ReviewerContractIn
 }
 
 // -----------------------------------------------------------------------------
-// Session/faux plumbing -- mirrors tests/integration/single-shot-roles.test.ts
+// Session/faux plumbing
 // -----------------------------------------------------------------------------
 
 interface CapturedRequest {
@@ -165,12 +143,7 @@ interface CapturedRequest {
 	options: SimpleStreamOptions | undefined;
 }
 
-/**
- * The raw text of every message's content in a captured request, joined --
- * NOT `JSON.stringify`, which escapes the double quotes `KEEP_MARKER`'s own
- * line carries and would make a literal-string `toContain` assertion fail
- * against text that is genuinely present.
- */
+/** Every message's raw content text, joined; JSON.stringify would escape the quotes KEEP_MARKER's line carries. */
 function capturedText(capture: CapturedRequest | undefined): string {
 	if (capture === undefined) {
 		return "";
@@ -238,9 +211,7 @@ async function runFixture(): Promise<Run> {
 		});
 
 		deepseekFaux.setResponses([
-			// 1 -- the successful review call. A FACTORY: capture the OUTGOING
-			// context (messages + system prompt) and options -- never assert on
-			// buildReviewerContext's return value alone.
+			// The review call: a factory capturing the outgoing context and options.
 			(context, options) => {
 				captures.push({ context, options });
 				return fauxAssistantMessage(fauxToolCall("submit_review", VALID_SUBMIT_REVIEW_ARGS), {
@@ -329,10 +300,7 @@ describe("GATE-02 -- the reviewer's fixed context contract reaches the wire", ()
 			run.repoFixture.changedLine.trim(),
 		);
 
-		// (2) FULL CONTENTS of file A -- specifically a line NOT present in the
-		// diff (the "far from the change" KEEP_MARKER line, proven absent from
-		// the diff by buildRepoFixture's own sanity check). This is the
-		// assertion that distinguishes "full contents" from "the diff".
+		// (2) A line of file A's full contents that the diff lacks: what distinguishes full contents from the diff.
 		expect(
 			messagesText,
 			"the touched file's full contents (specifically a line the diff does not carry) is not present " +
@@ -429,7 +397,7 @@ describe("GATE-02 -- the reviewer's fixed context contract reaches the wire", ()
 });
 
 // -----------------------------------------------------------------------------
-// buildReviewerContext -- the six missing-element cases, direct unit proof
+// buildReviewerContext: the six missing-element cases
 // -----------------------------------------------------------------------------
 
 describe("buildReviewerContext -- throws naming which of the six elements is absent", () => {

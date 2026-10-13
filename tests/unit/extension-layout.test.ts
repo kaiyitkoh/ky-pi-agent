@@ -1,49 +1,8 @@
 /**
- * BOOT-05 (`/reload`) — structural precondition for hot-reload.
- *
- * OFFLINE PROXY, NOT THE THING ITSELF. `/reload` is a slash command with no
- * non-interactive equivalent, so exercising it needs an interactive TTY that CI
- * does not have. The live behavioural check — `cd ky-pi-agent && pi`, edit the
- * sentinel string, `/reload`, confirm the new value in `--list-models` — is
- * recorded in `docs/RUNBOOK.md` and its status is **OUTSTANDING**. It must
- * never be reported as passed on the strength of this file.
- *
- * What is asserted here is the documented *precondition*: hot-reload works only
- * for auto-discovered locations, and `pi -e ./path.ts` is for quick tests only
- * [CITED: pi 0.84.1 docs/extensions.md:7]. If a shipped extension sits anywhere
- * else, `/reload` cannot possibly pick it up — and that much is checkable
- * offline, today, with no TTY.
- *
- * The four auto-discovered extension shapes
- * [CITED: docs/extensions.md:115-120]
- * [VERIFIED: src/core/extensions/loader.ts:652-684, 710-712]:
- *
- *   ~/.pi/agent/extensions/<name>.ts       global, flat
- *   ~/.pi/agent/extensions/<dir>/index.ts  global, nested index
- *   .pi/extensions/<name>.ts               project-local, flat
- *   .pi/extensions/<dir>/index.ts          project-local, nested index
- *
- * Only the two project-local shapes can appear in this repo, so those are what
- * every tracked `.ts` under `.pi/extensions/` must match. A helper module that
- * is itself an entry point, or an extension wired only through `pi -e`, is not
- * auto-discovered and therefore cannot hot-reload.
- *
- * ENTRY POINTS vs IMPORTED MODULES — added in Phase 2, and a gap closed rather
- * than a requirement relaxed. The original shape assertion required *every*
- * tracked `.ts` to match one of the two shapes, while its own failure message
- * already sanctioned "a non-entry-point imported by one". The regex never
- * implemented that half; only `index.ts` was ever tested. So the first sibling
- * module under `.pi/extensions/diagnostics/` — a directory that ships a
- * redactor, a JSONL writer and a chokepoint alongside its `index.ts` — would
- * have turned Phase 1's suite red over a file Pi never even tries to load.
- *
- * `isEntryPoint` below is the discriminator. A file carrying a default export
- * is something Pi would attempt to load, so it must sit at an auto-discovered
- * path. A file with none cannot be an extension wherever it sits, and is only
- * reachable through an import — but it still may not sit at the FLAT shape,
- * because that is the path Pi *would* try to load. Deliberately NOT done:
- * widening the regex to `[^/]+\/.*\.ts`. That deletes the requirement instead
- * of expressing it.
+ * The precondition for `/reload`: hot-reload works only for auto-discovered locations, so every entry point under
+ * `.pi/extensions/` must be `<name>.ts` or `<dir>/index.ts`. The live `/reload` check needs a TTY and is OUTSTANDING
+ * in docs/RUNBOOK.md. A file with a default export is an entry point; one without is an imported module, which may
+ * live in a subdirectory but never at the flat shape Pi would try to load.
  */
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
@@ -57,53 +16,21 @@ const FLAT = /^\.pi\/extensions\/[^/]+\.ts$/;
 /** `.pi/extensions/<dir>/index.ts` — nested-index form. */
 const NESTED_INDEX = /^\.pi\/extensions\/[^/]+\/index\.ts$/;
 
-/**
- * `.pi/extensions/<dir>/…/<name>.ts` — where a non-entry-point module may live.
- *
- * Not an auto-discovered shape and not meant to be: Pi never loads these, an
- * `index.ts` imports them. The only thing this rules out is a module at the
- * flat top level, which would collide with the FLAT entry-point shape.
- */
+/** Where a non-entry-point module may live: any subdirectory, never the flat top level. */
 const NESTED_MODULE = /^\.pi\/extensions\/[^/]+\/.+\.ts$/;
 
 /**
- * A default export at statement position — Pi's own criterion for a loadable
- * extension.
- *
- * Every documented extension shape is `export default function (pi) { … }`
- * [CITED: docs/extensions.md:115-120], and the loader reads `mod.default` and
- * calls it [VERIFIED: src/core/extensions/loader.ts:710-712]. A file without
- * one cannot be an entry point no matter where it sits: there is nothing for
- * Pi to call.
- *
- * Anchored per-line with `m` so prose that merely mentions the phrase — a `//`
- * comment, a jsdoc ` * ` line — is not counted. KNOWN LIMIT, stated rather than
- * hidden: an `export default` alone on its own line inside a block comment
- * still matches. That is the deliberate price of a regex over a parser, and a
- * file written that way is asking to be treated as an entry point.
+ * A default export at statement position: Pi's loader calls `mod.default`. Anchored per line so a comment mentioning
+ * it does not count; a bare `export default` line inside a block comment still matches, a known limit.
  */
 const DEFAULT_EXPORT = /^[ \t]*export[ \t]+default[ \t]*(async[ \t]+function|function|class|\(|[A-Za-z_$])/m;
 
-/**
- * Is this source an extension entry point rather than an imported module?
- *
- * Exported so the fixtures at the bottom of this file can prove it live. A
- * discriminator that silently answered `false` for everything would classify
- * the whole tree as modules and re-open exactly the hole this function closes,
- * and the shape assertion above it would then assert nothing.
- */
+/** True for an extension entry point; exported so inline fixtures prove it answers both ways. */
 export function isEntryPoint(source: string): boolean {
 	return DEFAULT_EXPORT.test(source);
 }
 
-/**
- * Glob metacharacters, forbidden in the manifest entry.
- *
- * Non-glob manifest entries go through `resolve(root, entry)` and then
- * directory collection; glob entries go through `globSync(entry, {cwd: root,
- * dot: false})`, and `dot: false` makes behaviour around the dot-prefixed `.pi`
- * segment fragile [VERIFIED: src/core/package-manager.ts:2290-2305].
- */
+/** Glob metacharacters, forbidden in the manifest: glob entries run `globSync` with `dot: false`, fragile around `.pi`. */
 const GLOB_CHARS = ["*", "?", "[", "!"];
 
 interface PiManifest {
@@ -138,9 +65,7 @@ describe("BOOT-05 — every shipped extension sits at a hot-reloadable path", ()
 		.filter((p) => p.endsWith(".ts"))
 		.sort();
 
-	// Partition by what the file IS, not by where it sits. Read from disk
-	// because git's index has no opinion about default exports; the path set
-	// still comes from the index.
+	// Partition by content read from disk; the path set comes from the index.
 	const entryPoints = sources.filter((p) => isEntryPoint(readFileSync(join(repoRoot(), p), "utf-8")));
 	const modules = sources.filter((p) => !entryPoints.includes(p));
 
@@ -183,10 +108,7 @@ describe("BOOT-05 — every shipped extension sits at a hot-reloadable path", ()
 	});
 
 	it("has no ignore file at any level under .pi/extensions/", () => {
-		// The two discovery paths disagree: the package path honours `.gitignore`
-		// in the directory it scans (package-manager.ts:249,571) while the
-		// project-local path does not (loader.ts:652-684). One such file makes
-		// BOOT-05 green and BOOT-02 red with no error message anywhere.
+		// The package path honours .gitignore and the project-local path does not, so one such file breaks BOOT-02 silently.
 		const onDisk = walkOnDisk(EXT_DIR).filter((p) => p.endsWith("/.gitignore"));
 		expect(onDisk, "delete it — see the comment above").toEqual([]);
 
@@ -214,17 +136,8 @@ describe("BOOT-05 — every shipped extension sits at a hot-reloadable path", ()
 });
 
 /**
- * The discriminator, proven live against inline fixtures.
- *
- * The partition above is only as honest as this predicate. If `isEntryPoint`
- * returned `false` for everything, every file would land in `modules`, the
- * auto-discovered-path assertion would iterate an empty list and pass, and the
- * BOOT-05 precondition would be enforced nowhere — the exact vacuous-pass shape
- * this phase keeps tripping over. Four cases, both directions, so neither a
- * dead regex nor an over-eager one can hide here.
- *
- * Fixtures are inline strings rather than files: a fixture on disk under
- * `.pi/extensions/` would itself be enumerated by the suite above.
+ * The discriminator against inline fixtures, both directions: a predicate answering false for everything would empty
+ * the entry-point list and make the shape check vacuous. Inline, because a fixture under .pi/extensions/ would be scanned.
  */
 describe("isEntryPoint — the entry-point discriminator is live", () => {
 	it("treats a default-exported function as an entry point", () => {
