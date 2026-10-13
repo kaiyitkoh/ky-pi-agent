@@ -47,6 +47,7 @@ async function askUser(ctx: ExtensionContext, title: string, message: string): P
 }
 
 function sessionIdOf(ctx: ExtensionContext): string | undefined {
+	// NEVER THROWS: no session id means no child guard to register, not a failed session start.
 	try {
 		return ctx.sessionManager.getSessionId();
 	} catch {
@@ -487,8 +488,8 @@ export default function (pi: ExtensionAPI): void {
 
 	registerToolCallHook(pi);
 
-	// Best-effort retention; a failure must not affect session start.
 	pi.on("session_start", async (_event, ctx) => {
+		// NEVER THROWS: pruning is retention only, so a failure must not affect session start.
 		try {
 			pruneAuditLogs(ctx.cwd);
 		} catch {

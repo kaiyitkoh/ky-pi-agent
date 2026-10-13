@@ -335,8 +335,23 @@ describe("QUAL-01 Group C — dead-rule guard", () => {
  * `swallowed-exception` x3. They are third-party code kept byte-faithful to
  * upstream, so they are recorded here rather than remediated. The 22
  * pre-existing findings are unchanged (swallowed-exception 17, magic-number 5).
+ *
+ * 12.1 RE-MEASURE (2026-10-13): 67 -> 72 -> 65. Phase 12.1 added five error
+ * findings, all real: deliberate best-effort catches with no documented
+ * contract (routing/index.ts model_select, input and session_shutdown;
+ * safety/index.ts sessionIdOf; safety/subagents.ts disposeChildGuard). The
+ * review fixes then repeated a `/ 4` token estimate in routing/guard.ts (two more).
+ * Each catch now carries the NEVER THROWS contract that says why swallowing is
+ * correct there, and guard.ts names CHARS_PER_TOKEN. The older routing/index.ts
+ * session_start catch got the same contract. Remaining: 45 vendored background-tasks
+ * findings plus 20 authored ones (swallowed-exception 15: checkpoint/git.ts x3,
+ * checkpoint/index.ts x1, diagnostics/budget.ts x2, diagnostics/call-model.ts
+ * x1, diagnostics/index.ts x1, loop-police/loop-police.ts x1,
+ * providers/index.ts x1, qoder/client.ts x1, qoder/index.ts x1,
+ * routing/agent-overrides.ts x1, workflows/index.ts x1, workflows/settle.ts x1;
+ * magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
  */
-const ERROR_BUDGET_ON_OWN_SOURCE = 67;
+const ERROR_BUDGET_ON_OWN_SOURCE = 65;
 
 function realExtensionSources(): QualitySource[] {
 	return trackedFiles(".pi/extensions")

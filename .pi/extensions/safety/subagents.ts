@@ -118,9 +118,10 @@ export function isChildGuardRegistered(sessionId: string): boolean {
 export function disposeChildGuard(sessionId: string): void {
 	const handle = guards().get(sessionId);
 	guards().delete(sessionId);
+	// NEVER THROWS: disposal runs at shutdown, when there is nothing left to protect.
 	try {
 		handle?.dispose();
 	} catch {
-		// Disposal runs at shutdown; there is nothing left to protect if it fails.
+		// Best-effort.
 	}
 }

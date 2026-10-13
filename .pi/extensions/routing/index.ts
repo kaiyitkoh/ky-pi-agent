@@ -400,6 +400,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	// The pin lives in the user-level settings file shared by every repo, so it ends with the session.
 	pi.on("session_shutdown", (event) => {
 		if (event.reason === "reload" || isSubagentChild()) return;
+		// NEVER THROWS: a settings file that cannot be restored must not stop the session from ending.
 		try {
 			restorePlannerPin();
 		} catch {

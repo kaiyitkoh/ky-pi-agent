@@ -49,6 +49,9 @@ export function isAnthropicClaudeModel(model: Model<Api>): boolean {
 	);
 }
 
+/** Pi's own token estimate is characters divided by four (`diagnostics/budget.ts` uses the same formula). */
+const CHARS_PER_TOKEN = 4;
+
 /** The slice of `ExtensionContext` that {@link deriveNeed} reads. */
 export interface NeedContext {
 	getContextUsage(): { tokens: number | null } | undefined;
@@ -68,7 +71,7 @@ export function deriveNeed(
 	const level = ctx.thinkingLevel;
 	return {
 		image: extra.image === true,
-		estimatedInputTokens: used + Math.ceil((extra.promptChars ?? 0) / 4) + (extra.extraTokens ?? 0),
+		estimatedInputTokens: used + Math.ceil((extra.promptChars ?? 0) / CHARS_PER_TOKEN) + (extra.extraTokens ?? 0),
 		thinkingRequested: level !== undefined && level !== "off",
 		usesToolLoop: extra.usesToolLoop,
 	};
@@ -82,7 +85,7 @@ export function nestedNeed(
 	const chars = (request.systemPrompt?.length ?? 0) + JSON.stringify(request.messages).length + JSON.stringify(request.tools ?? []).length;
 	return {
 		image: request.messages.some((m) => Array.isArray(m.content) && m.content.some((block) => block.type === "image")),
-		estimatedInputTokens: Math.ceil(chars / 4),
+		estimatedInputTokens: Math.ceil(chars / CHARS_PER_TOKEN),
 		thinkingRequested: effort !== undefined,
 	};
 }
