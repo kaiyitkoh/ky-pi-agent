@@ -4,6 +4,7 @@
  * Ungated on purpose: registration is the observation. The id stays `ky-harness-selftest`; every load-path assertion greps it.
  * Registers commands and a provider, never a tool: tools[] is serialised into every request
  * (pi-ai src/api/openai-completions.ts), commands cost zero per-turn tokens.
+ * Sets the OpenSpec opt-out env for child processes.
  * No build step and no .gitignore under .pi/extensions/: package-manager.ts honours one, extensions/loader.ts does not.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -19,6 +20,13 @@ export const SELFTEST_PROVIDER_ID = "ky-harness";
 const DEAD_ENDPOINT = "http://127.0.0.1:1/v1";
 
 export default function (pi: ExtensionAPI): void {
+	// Forced, not defaulted: bash children inherit process.env, and an inherited OPENSPEC_TELEMETRY=1 would re-enable reporting.
+	// NO_UPDATE_CHECK also suppresses the unpinned self-upgrade offer.
+	process.env.OPENSPEC_TELEMETRY = "0";
+	process.env.DO_NOT_TRACK = "1";
+	process.env.OPENSPEC_NO_UPDATE_CHECK = "1";
+	process.env.OPENSPEC_NO_AUTO_CONFIG = "1";
+
 	// A context file with its own "## Code comments" section replaces these rules, so they appear once.
 	pi.on("before_agent_start", (event) => {
 		const o = event.systemPromptOptions;
