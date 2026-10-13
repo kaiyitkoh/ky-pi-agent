@@ -2,14 +2,14 @@
  * /review: builds the reviewer's six-part contract from artifacts on disk, runs the existing review mechanisms,
  * writes REVIEW.md and opens the MR through the glab classifier. Registers one command, zero tools.
  */
-import { spawnSync } from "node:child_process";
-import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
-import { workDir } from "../../lib/work-artifacts.ts";
-import { acceptedEntries, allowanceOf, latestRepin, pinMismatch, pinnedAllowance, pinnedPlan, readLedger, restoreAdvice, specDigest, tasksOf } from "../execute/ledger.ts";
-import { ensureHarnessIgnored, uncommittedPaths } from "../execute/progress.ts";
+import { workDir, workSlugs } from "../../lib/work-artifacts.ts";
+import { acceptedEntries, allowanceOf, latestRepin, pinRefusal, readLedger, tasksOf } from "../execute/ledger.ts";
+import { git } from "../execute/git-run.ts";
+import { commitRefusal, ensureHarnessIgnored, uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
@@ -19,26 +19,15 @@ import { runChangeGateStage, typecheckBaseline } from "../quality/index.ts";
 import { buildImportGraph, runReview, type ReviewerContractInput } from "../quality/reviewer.ts";
 import { renderReviewMarkdown, type ReviewArtifact } from "../quality/review-schema.ts";
 import { decideWorkflowStop, runRefuteOrPromote } from "../quality/verdict.ts";
-import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
+import { currentBranch } from "../safety/git.ts";
 import { getModeState } from "../routing/modes.ts";
-import { protectedBranchesFor } from "../safety/index.ts";
 import { MR_TARGET_BRANCH, buildMrBody, historyMismatch, openMr, sanitizeTitle, spawnExec, upstreamMismatch } from "./mr.ts";
 import { changedFilesSince, compareScope, readTouchedFiles, resolveBaseRef } from "./scope-drift.ts";
 
-function slugsWithProgress(cwd: string): string[] {
-	const root = resolve(join(cwd, ".pi", "work"));
-	if (!existsSync(root)) return [];
-	return readdirSync(root, { withFileTypes: true })
-		.filter((e) => e.isDirectory() && existsSync(join(root, e.name, "PROGRESS.md")))
-		.sort((a, b) => statSync(join(root, b.name)).mtimeMs - statSync(join(root, a.name)).mtimeMs)
-		.map((e) => e.name);
-}
-
-const GIT_MAX_BUFFER_BYTES = 67_108_864;
-function git(cwd: string, args: string[]): string {
-	const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true, maxBuffer: GIT_MAX_BUFFER_BYTES });
-	if (r.status !== 0) throw new Error(`review: git ${args.join(" ")} failed (exit ${r.status}): ${r.stderr ?? ""}`);
-	return r.stdout ?? "";
+function gitOrThrow(cwd: string, args: string[]): string {
+	const r = git(cwd, args);
+	if (r.status !== 0) throw new Error(`review: git ${args.join(" ")} failed (exit ${r.status}): ${r.stderr}`);
+	return r.out;
 }
 
 export default function (pi: ExtensionAPI): void {
@@ -48,7 +37,7 @@ export default function (pi: ExtensionAPI): void {
 			const fail = (msg: string) => void ctx.ui.notify(msg, "error");
 			try {
 				const arg = args.trim();
-				const candidates = slugsWithProgress(ctx.cwd);
+				const candidates = workSlugs(ctx.cwd, "PROGRESS.md");
 				if (arg === "" && candidates.length !== 1) {
 					return fail(candidates.length === 0 ? "review: no .pi/work/<slug>/PROGRESS.md found -- run /execute first" : `review: several runs exist (${candidates.join(", ")}) -- pass one: /review <slug>`);
 				}
@@ -56,8 +45,8 @@ export default function (pi: ExtensionAPI): void {
 				claimWorkflow("review");
 				const dir = workDir(ctx.cwd, slug);
 
-				const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) });
-				if (verdict.kind === "block") return fail(verdict.reason);
+				const refusal = commitRefusal(ctx.cwd);
+				if (refusal !== undefined) return fail(refusal);
 
 				for (const f of ["SPEC.md", "PLAN.md", "PROGRESS.md"]) {
 					if (!existsSync(join(dir, f))) return fail(`review: .pi/work/${slug}/${f} does not exist`);
@@ -70,12 +59,9 @@ export default function (pi: ExtensionAPI): void {
 				if (!plan.ok) return fail(plan.reason);
 				// PROGRESS.md is model-editable; the signed ledger is the record the MR and the history check read.
 				const rows = readLedger(ctx.cwd, slug);
-				const pinned = pinnedAllowance(rows);
-				if (pinned !== undefined && pinned.join("\n") !== allowanceOf(spec.spec.scopePin.expectedFiles, plan.plan.filesTouched).join("\n")) {
-					return fail(`review: the SPEC/PLAN write allowance changed since /execute pinned it (pinned: ${pinned.join(", ")}) -- restore it, or accept it with /execute ${slug} --repin, which shows what changed`);
-				}
-				const moved = pinMismatch(pinnedPlan(rows), { tasks: tasksOf(plan.plan.tasks), specHash: specDigest(specText) });
-				if (moved !== undefined) return fail(`review: ${moved} changed since /execute pinned them -- ${restoreAdvice(ctx.cwd, slug, moved, rows)}`);
+				const now = { allowance: allowanceOf(spec.spec.scopePin.expectedFiles, plan.plan.filesTouched), tasks: tasksOf(plan.plan.tasks), specText };
+				const pinDrift = pinRefusal(ctx.cwd, slug, rows, now, "/execute pinned them");
+				if (pinDrift !== undefined) return fail(`review: ${pinDrift}`);
 				const repin = latestRepin(rows);
 				const accepted = acceptedEntries(rows);
 				const lastStale = accepted.map((e) => repin?.before.has(e.sha) === true).lastIndexOf(true);
@@ -94,7 +80,7 @@ export default function (pi: ExtensionAPI): void {
 
 				const baseRef = resolveBaseRef(ctx.cwd, MR_TARGET_BRANCH);
 				if (!baseRef.ok) return fail(`review: ${baseRef.reason}`);
-				const base = git(ctx.cwd, ["merge-base", "HEAD", baseRef.ref]).trim();
+				const base = gitOrThrow(ctx.cwd, ["merge-base", "HEAD", baseRef.ref]).trim();
 				const changed = changedFilesSince(ctx.cwd, base);
 				let gateReport = "The deterministic stage is outside this workflow's gate depth and did not run.";
 				const gateDoubts: string[] = [];
@@ -108,13 +94,12 @@ export default function (pi: ExtensionAPI): void {
 					gateReport = gate.report;
 				}
 				const touched = readTouchedFiles(ctx.cwd, changed);
-				const filesTouchedUnion = [...new Set([...spec.spec.scopePin.expectedFiles, ...plan.plan.filesTouched])];
 				const contract: ReviewerContractInput = {
-					diff: git(ctx.cwd, ["-c", "core.quotePath=false", "diff", `${base}..HEAD`]),
+					diff: gitOrThrow(ctx.cwd, ["-c", "core.quotePath=false", "diff", `${base}..HEAD`]),
 					touchedFiles: touched,
 					gateReport,
 					requirements: ids.map((id) => ({ id, text: (spec.spec.requirementsBody.split("\n").find((l) => new RegExp(`\\b${id}\\b`).test(l)) ?? id).trim() })),
-					filesTouchedUnion,
+					filesTouchedUnion: now.allowance,
 					// A deleted, binary or omitted file carries a note, not source, so it must not read as "no declared imports".
 					importGraph: buildImportGraph(touched.filter((t) => /\.[cm]?[tj]sx?$/.test(t.path) && !/^\((?:deleted|content omitted)\b/.test(t.contents)).map((t) => ({ path: t.path, text: t.contents }))),
 				};

@@ -65,19 +65,15 @@ export function buildHandoffPacket(input: { readonly spec: SpecArtifact; readonl
 	const { spec, task } = input;
 	const entriesById = new Map(parseRequirementEntries(spec.requirementsBody).map((entry) => [entry.id, entry] as const));
 
-	const requirementExcerpts: string[] = [];
-	for (const id of task.requirementIds) {
+	const requirementExcerpts = task.requirementIds.map((id) => {
 		const entry = entriesById.get(id);
-		if (entry === undefined) {
-			throw new Error(
-				`buildHandoffPacket: task ${task.id} cites requirement ${id}, but the SPEC's Requirements section ` +
-					`(§3) carries no entry opening with ${id} -- a packet built on a missing requirement is a silently ` +
-					"under-specified child",
-			);
-		}
-		requirementExcerpts.push(entry.text);
-	}
-
+		if (entry !== undefined) return entry.text;
+		throw new Error(
+			`buildHandoffPacket: task ${task.id} cites requirement ${id}, but the SPEC's Requirements section ` +
+				`(§3) carries no entry opening with ${id} -- a packet built on a missing requirement is a silently ` +
+				"under-specified child",
+		);
+	});
 	if (task.path === undefined) {
 		throw new Error(`buildHandoffPacket: task ${task.id} carries no explicit file path -- a validated PLAN.md cannot reach this`);
 	}
@@ -96,36 +92,13 @@ export function buildHandoffPacket(input: { readonly spec: SpecArtifact; readonl
 
 /** Render a packet as the text a child would receive; this is what measurePacketDelta measures. */
 export function renderHandoffPacket(packet: HandoffPacket): string {
-	const lines: string[] = [];
-
-	lines.push(`# Handoff Packet: ${packet.taskId}`);
-	lines.push("");
-
-	lines.push("## Requirement Excerpts");
-	lines.push("");
-	lines.push(packet.requirementExcerpts.join("\n\n"));
-	lines.push("");
-
-	lines.push("## Verified Facts");
-	lines.push("");
-	for (const fact of packet.verifiedFacts) {
-		lines.push(`- ${fact.claim} (evidence: ${fact.evidence}; how verified: ${fact.howVerified})`);
-	}
-	lines.push("");
-
-	lines.push("## File Paths");
-	lines.push("");
-	for (const path of packet.filePaths) {
-		lines.push(`- ${path}`);
-	}
-	lines.push("");
-
-	lines.push("## Verification Command");
-	lines.push("");
-	lines.push(packet.verificationCommand);
-	lines.push("");
-
-	return lines.join("\n");
+	return [
+		`# Handoff Packet: ${packet.taskId}`, "",
+		"## Requirement Excerpts", "", packet.requirementExcerpts.join("\n\n"), "",
+		"## Verified Facts", "", ...packet.verifiedFacts.map((f) => `- ${f.claim} (evidence: ${f.evidence}; how verified: ${f.howVerified})`), "",
+		"## File Paths", "", ...packet.filePaths.map((p) => `- ${p}`), "",
+		"## Verification Command", "", packet.verificationCommand, "",
+	].join("\n");
 }
 
 /** {@link measurePacketDelta}'s return shape. */

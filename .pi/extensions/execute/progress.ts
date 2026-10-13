@@ -4,12 +4,19 @@
  * ensureHarnessIgnored and the run state.
  */
 import { appendFileSync, mkdirSync } from "node:fs";
-import { spawnSync } from "node:child_process";
 import { dirname, join, resolve } from "node:path";
-
 import { redactString } from "../diagnostics/redact.ts";
 import { EXPECTED_FILE_PATTERN } from "../grill/spec-schema.ts";
+import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
+import { protectedBranchesFor } from "../safety/index.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
+import { git } from "./git-run.ts";
+
+/** Why a workflow may not commit on the checked-out branch, or undefined: the git guard's own `git commit` verdict. */
+export function commitRefusal(cwd: string): string | undefined {
+	const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(cwd), protectedBranches: protectedBranchesFor(cwd) });
+	return verdict.kind === "block" ? verdict.reason : undefined;
+}
 
 /** One task's completion record. `output` is the captured text, never a summary. */
 export interface ProgressEntry {
@@ -25,22 +32,12 @@ export interface ProgressEntry {
 
 /** Render one entry: a header naming task and SHA, then the command and output in a fenced block. */
 export function renderProgressAppend(entry: ProgressEntry): string {
-	const lines: string[] = [];
-	lines.push(`## ${entry.taskId} @ ${entry.commitSha}`);
-	lines.push("");
-	lines.push(`- Verification command: \`${entry.verificationCommand}\``);
-	lines.push(`- Exit code: ${entry.exitCode}`);
-	if (entry.gate !== undefined) lines.push(`- Deterministic gate: ${entry.gate}`);
-	lines.push(`- Recorded: ${new Date(entry.recordedAt).toISOString()}`);
-	lines.push("");
 	// Longer than any backtick run in the output, so the output can never close the fence early.
 	const longestRun = Math.max(0, ...[...entry.output.matchAll(/`+/g)].map((m) => m[0].length));
 	const fence = "`".repeat(Math.max(MIN_FENCE, longestRun + 1));
-	lines.push(fence);
-	lines.push(entry.output);
-	lines.push(fence);
-	lines.push("");
-	return lines.join("\n");
+	const gate = entry.gate === undefined ? [] : [`- Deterministic gate: ${entry.gate}`];
+	const recorded = `- Recorded: ${new Date(entry.recordedAt).toISOString()}`;
+	return [`## ${entry.taskId} @ ${entry.commitSha}`, "", `- Verification command: \`${entry.verificationCommand}\``, `- Exit code: ${entry.exitCode}`, ...gate, recorded, "", fence, entry.output, fence, ""].join("\n");
 }
 
 const MIN_FENCE = 3;
@@ -108,37 +105,15 @@ export function normalisePathForDrift(path: string): string {
  */
 export function driftAbort(input: DriftAbortInput): DriftVerdict {
 	const union = new Set<string>([...input.specExpectedFiles, ...input.planFilesTouched]);
-
+	const refuse = (reason: string): DriftVerdict => ({ ok: false, reason });
 	// Must come first: an empty allowance means nothing was declared, and permitting everything would fail open.
-	if (union.size === 0) {
-		return {
-			ok: false,
-			reason: "the write allowance (SPEC expected files union PLAN files-touched) is empty; refusing rather than permitting any write",
-		};
-	}
-
-	if (input.attemptedPaths.length === 0) {
-		return { ok: false, reason: "driftAbort was called with zero attempted paths; the caller is malformed" };
-	}
-
+	if (union.size === 0) return refuse("the write allowance (SPEC expected files union PLAN files-touched) is empty; refusing rather than permitting any write");
+	if (input.attemptedPaths.length === 0) return refuse("driftAbort was called with zero attempted paths; the caller is malformed");
 	const normalised = input.attemptedPaths.map(normalisePathForDrift);
-
 	const malformed = normalised.filter((p) => !EXPECTED_FILE_PATTERN.test(p));
-	if (malformed.length > 0) {
-		return {
-			ok: false,
-			reason: `attempted path(s) are not valid repo-relative paths (no leading "/", no ".." segment, no glob): ${malformed.join(", ")}`,
-		};
-	}
-
+	if (malformed.length > 0) return refuse(`attempted path(s) are not valid repo-relative paths (no leading "/", no ".." segment, no glob): ${malformed.join(", ")}`);
 	const outside = normalised.filter((p) => !union.has(p));
-	if (outside.length > 0) {
-		return {
-			ok: false,
-			reason: `attempted path(s) fall outside the declared write allowance: ${outside.join(", ")}; allowance is {${Array.from(union).sort().join(", ")}}`,
-		};
-	}
-
+	if (outside.length > 0) return refuse(`attempted path(s) fall outside the declared write allowance: ${outside.join(", ")}; allowance is {${Array.from(union).sort().join(", ")}}`);
 	return { ok: true };
 }
 
@@ -149,24 +124,13 @@ export function stallDetected(previousErrorCount: number, currentErrorCount: num
 	return currentErrorCount >= previousErrorCount;
 }
 
-interface TextBlock {
-	readonly type?: string;
-	readonly text?: string;
-}
-
 const MAX_FALLBACK_CHARS = 4000;
 /** The text of a tool's `result`: joined text blocks when present, else a bounded JSON rendering. */
 export function renderToolResultText(result: unknown): string {
-	if (result !== null && typeof result === "object" && Array.isArray((result as { content?: unknown }).content)) {
-		const blocks = (result as { content: TextBlock[] }).content;
-		const text = blocks
-			.filter((b) => b.type === "text" && typeof b.text === "string")
-			.map((b) => b.text)
-			.join("");
-		if (text.length > 0) {
-			return text;
-		}
-	}
+	const content = (result as { content?: unknown } | null)?.content;
+	const blocks = Array.isArray(content) ? (content as { type?: unknown; text?: unknown }[]) : [];
+	const text = blocks.flatMap((b) => (b?.type === "text" && typeof b.text === "string" ? [b.text] : [])).join("");
+	if (text.length > 0) return text;
 	try {
 		return JSON.stringify(result).slice(0, MAX_FALLBACK_CHARS);
 	} catch {
@@ -185,6 +149,11 @@ export interface ExecuteRunContext {
 	readonly taskId: string;
 	readonly verificationCommand: string;
 	readonly mode: "delegated" | "degraded (ordinary prompt loop)";
+	/** The drift base the settle diffs against. */
+	readonly baseSha: string;
+	readonly allowance: { readonly spec: readonly string[]; readonly plan: readonly string[] };
+	/** A typecheck that already fails on the base cannot blame the change, so the settle gate skips that leg. */
+	readonly baseTypecheckFailed: boolean;
 }
 
 /** One observed bash run of the task's verification command: its own output and exit status, and the tree it ran on. */
@@ -219,10 +188,7 @@ export function armExecuteRun(context: ExecuteRunContext): void {
 
 /** The armed context, or undefined when /execute did not arm the current run. */
 export function executeRunContext(): ExecuteRunContext | undefined {
-	const state = runState();
-	return state === undefined
-		? undefined
-		: { cwd: state.cwd, slug: state.slug, taskId: state.taskId, verificationCommand: state.verificationCommand, mode: state.mode };
+	return runState();
 }
 
 /** Remember a bash call's command by id; `tool_execution_end` carries no arguments, so this is the only place to see it. */
@@ -250,9 +216,9 @@ const MAX_DIRTY_LISTED = 10;
  * A file left out of the commit would otherwise let a check pass that the commit cannot.
  */
 export function uncommittedPaths(cwd: string): string {
-	const r = spawnSync("git", ["status", "--porcelain", "--untracked-files=all"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	const r = git(cwd, ["status", "--porcelain", "--untracked-files=all"]);
 	if (r.status !== 0) return `(git status failed in ${cwd})`;
-	const paths = (r.stdout ?? "").split("\n").filter((l) => l.trim() !== "").map((l) => l.slice(3));
+	const paths = r.out.split("\n").filter((l) => l.trim() !== "").map((l) => l.slice(3));
 	return paths.length <= MAX_DIRTY_LISTED ? paths.join(", ") : `${paths.slice(0, MAX_DIRTY_LISTED).join(", ")} and ${paths.length - MAX_DIRTY_LISTED} more`;
 }
 
@@ -272,17 +238,16 @@ const HARNESS_DIRS = [".pi/work/", ".pi/logs/", ".pi/state/"] as const;
  * nothing ignores yet to the repo-local exclude file, which is never committed itself. Returns a notice when it did so.
  */
 export function ensureHarnessIgnored(cwd: string): string | undefined {
-	const git = (args: string[]) => spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
 	const missing: string[] = [];
 	for (const dir of HARNESS_DIRS) {
-		const probe = git(["check-ignore", "-q", "--", `${dir}probe`]);
+		const probe = git(cwd, ["check-ignore", "-q", "--", `${dir}probe`]);
 		if (probe.status === 1) missing.push(dir);
 		else if (probe.status !== 0) throw new Error(`could not tell whether ${dir} is git-ignored here -- refusing rather than risk committing it`);
 	}
 	if (missing.length === 0) return undefined;
-	const exclude = git(["rev-parse", "--git-path", "info/exclude"]);
+	const exclude = git(cwd, ["rev-parse", "--git-path", "info/exclude"]);
 	if (exclude.status !== 0) throw new Error("could not locate the repo's info/exclude file -- refusing rather than risk committing harness state");
-	const file = resolve(cwd, (exclude.stdout ?? "").trim());
+	const file = resolve(cwd, exclude.out.trim());
 	mkdirSync(dirname(file), { recursive: true });
 	// `**/` because the checkpoint store sits at the repo root while the logs and work artifacts sit at the cwd.
 	appendFileSync(file, `\n${missing.map((d) => `**/${d}`).join("\n")}\n`, "utf-8");
@@ -291,8 +256,8 @@ export function ensureHarnessIgnored(cwd: string): string | undefined {
 
 /** HEAD (or `rev`) at `cwd`, or "" when git cannot say; "" never equals a recorded commit, so an unknown HEAD fails the check. */
 export function headShaOrEmpty(cwd: string, rev = "HEAD"): string {
-	const r = spawnSync("git", ["rev-parse", "--verify", "--quiet", rev], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	return r.status === 0 ? (r.stdout ?? "").trim() : "";
+	const r = git(cwd, ["rev-parse", "--verify", "--quiet", rev]);
+	return r.status === 0 ? r.out.trim() : "";
 }
 
 /** The verification run observed in this armed run, if any. */
@@ -323,17 +288,7 @@ export function disarmExecuteRun(): void {
  * destination. `-z` keeps non-ASCII paths unquoted (`é.ts`, not `"\303\251.ts"`).
  */
 export function changedFiles(cwd: string, baseSha: string, headSha: string): readonly string[] {
-	const result = spawnSync("git", ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", `${baseSha}..${headSha}`], {
-		cwd,
-		encoding: "utf-8",
-		shell: false,
-		windowsHide: true,
-	});
-	if (result.status !== 0) {
-		throw new Error(`execute: git diff --name-only ${baseSha}..${headSha} failed (exit ${result.status}) in ${cwd}: ${result.stderr ?? ""}`);
-	}
-	return (result.stdout ?? "")
-		.split("\0")
-		.map((line) => line.replace(/\\/g, "/"))
-		.filter((line) => line.length > 0);
+	const r = git(cwd, ["-c", "core.quotePath=false", "diff", "--name-only", "--no-renames", "-z", `${baseSha}..${headSha}`]);
+	if (r.status !== 0) throw new Error(`execute: git diff --name-only ${baseSha}..${headSha} failed (exit ${r.status}) in ${cwd}: ${r.stderr}`);
+	return r.out.split("\0").map((line) => line.replace(/\\/g, "/")).filter((line) => line.length > 0);
 }

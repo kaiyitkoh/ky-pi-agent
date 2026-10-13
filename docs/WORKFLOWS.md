@@ -390,8 +390,8 @@ refusal is handed to the next turn. When the hard question budget runs out
 without a passing SPEC, `/grill` stops with an error. A dimension still below
 its floor is not overridable: SPEC.md stays refused, and `/grill --resume`
 starts a fresh budget as the user's explicit choice to keep asking. `/plan`
-re-gates PLAN.md the same way. Both share one turn rule
-(`turnBudgetSpent` in `grill/scorecard.ts`): `HARD_QUESTION_BUDGET` working
+re-gates PLAN.md the same way. Both run one shared turn loop
+(`registerGatedTurns` and `TURN_BUDGET` in `grill/turns.ts`): `HARD_QUESTION_BUDGET` working
 turns plus one final turn to write the file, then the run disarms with an
 error; `/plan` tells the model on that last turn to write PLAN.md now, and an
 Esc-aborted turn is never counted. Each workflow command claims the session when it arms

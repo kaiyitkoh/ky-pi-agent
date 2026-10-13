@@ -8,13 +8,7 @@ export const REQUIREMENT_ID_PATTERN = /\bR\d{1,4}\b/g;
 
 /** Distinct requirement ids, sorted ascending. `matchAll` on this /g constant is safe: it works on a clone. */
 export function extractSpecRequirementIds(requirementsBody: string): readonly string[] {
-	const ids = new Set<string>();
-	for (const match of requirementsBody.matchAll(REQUIREMENT_ID_PATTERN)) {
-		const token = match[0];
-		if (token !== undefined) {
-			ids.add(token);
-		}
-	}
+	const ids = new Set(Array.from(requirementsBody.matchAll(REQUIREMENT_ID_PATTERN), (m) => m[0]));
 	return Array.from(ids).sort((a, b) => Number(a.slice(1)) - Number(b.slice(1)));
 }
 

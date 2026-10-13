@@ -6,11 +6,10 @@ import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { runTypecheckAt } from "../quality/index.ts";
 import { deriveNeed } from "../routing/guard.ts";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
-import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
-import { protectedBranchesFor } from "../safety/index.ts";
+import { currentSha, currentTree } from "../safety/git.ts";
 import { IN_FLIGHT, armQuickSettle, clearQuickSettle, notePrompt, settleQuickRun } from "./settle.ts";
 import { armedCwd, disarmRun, endRun, isRunArmed, isRunPending, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun, writeRunEvidence } from "./evidence.ts";
-import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext, uncommittedPaths } from "../execute/progress.ts";
+import { commitRefusal, disarmExecuteRun, ensureHarnessIgnored, executeRunContext, uncommittedPaths } from "../execute/progress.ts";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 
 export default function (pi: ExtensionAPI): void {
@@ -19,23 +18,14 @@ export default function (pi: ExtensionAPI): void {
 		handler: async (args, ctx) => {
 			// Order is the whole claim: route -> guard -> arm -> hand off.
 			const task = args.trim();
-			if (task === "") {
-				ctx.ui.notify('quick: usage is "/quick <task>"', "error");
-				return;
-			}
+			if (task === "") return void ctx.ui.notify('quick: usage is "/quick <task>"', "error");
 			const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: { ...deriveNeed(ctx, { promptChars: task.length }), estimatedInputTokens: undefined } });
-			if (!plan.ok) {
-				ctx.ui.notify(plan.reason, "error");
-				return;
-			}
+			if (!plan.ok) return void ctx.ui.notify(plan.reason, "error");
 			if (ctx.model?.id !== plan.model.id || ctx.model?.provider !== plan.model.provider)
 				return void ctx.ui.notify(`quick: session model is not the routed executor (${plan.model.provider}/${plan.model.id})`, "error");
 			try {
-				const verdict = classifyGitInvocation(
-					{ subcommand: "commit", args: [] },
-					{ currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) },
-				);
-				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
+				const refusal = commitRefusal(ctx.cwd);
+				if (refusal !== undefined) return void ctx.ui.notify(refusal, "error");
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify(`quick: ${IN_FLIGHT}`, "error");
 				disarmExecuteRun(); // with no shared run armed, an /execute slot is a leak that would otherwise settle this run
 

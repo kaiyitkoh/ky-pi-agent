@@ -2,13 +2,12 @@
  * The harness-owned, HMAC-signed record of each /execute slug, kept outside the work tree because the model can edit
  * PROGRESS.md; the safety path guard keeps the key from tool reads. Unverifiable rows throw.
  */
-import { spawnSync } from "node:child_process";
 import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { appendFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
-
 import { workDir } from "../../lib/work-artifacts.ts";
 import { HARNESS_LEDGER_SEGMENT } from "../safety/paths.ts";
+import { git } from "./git-run.ts";
 import { stallDetected } from "./progress.ts";
 
 /** Directory under the git common dir; the safety path guard refuses any tool path through a segment of this name. */
@@ -43,17 +42,17 @@ const KEY_FILE = "key";
 const KEY_BYTES = 32;
 
 function ledgerRoot(cwd: string): string {
-	const r = spawnSync("git", ["rev-parse", "--git-common-dir"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	const r = git(cwd, ["rev-parse", "--git-common-dir"]);
 	if (r.status !== 0) throw new Error(`execute: cannot locate the git directory in ${cwd} for the harness ledger`);
-	return join(resolve(cwd, (r.stdout ?? "").trim()), LEDGER_DIR);
+	return join(resolve(cwd, r.out.trim()), LEDGER_DIR);
 }
 
 /** The ledger file for `slug` in this worktree; the common dir is shared, so the name carries the worktree's top level. */
 export function ledgerFile(cwd: string, slug: string): string {
 	workDir(cwd, slug);
-	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	const top = git(cwd, ["rev-parse", "--show-toplevel"]);
 	if (top.status !== 0) throw new Error(`execute: cannot locate the worktree root in ${cwd} for the harness ledger`);
-	const worktree = createHash("sha256").update(resolve((top.stdout ?? "").trim())).digest("hex").slice(0, 12);
+	const worktree = createHash("sha256").update(resolve(top.out.trim())).digest("hex").slice(0, 12);
 	return join(ledgerRoot(cwd), `${slug}.${worktree}.jsonl`);
 }
 
@@ -110,16 +109,6 @@ export function ledgerBase(rows: readonly LedgerRow[]): string | undefined {
 /** The SPEC and PLAN content pinned by the latest `base` or `pin` row; undefined before the first /execute. */
 export function pinnedPlan(rows: readonly LedgerRow[]): PlanPin | undefined {
 	return rows.filter((r) => r.kind === "base" || r.kind === "pin").at(-1) as PlanPin | undefined;
-}
-
-/** The pinned write allowance, so a widened SPEC/PLAN cannot absorb drift unnoticed. */
-export function pinnedAllowance(rows: readonly LedgerRow[]): readonly string[] | undefined {
-	return pinnedPlan(rows)?.allowance;
-}
-
-/** The task list pinned with the latest `base` or `pin`; undefined when none, or a row written before tasks were pinned. */
-export function pinnedTasks(rows: readonly LedgerRow[]): readonly PinnedTask[] | undefined {
-	return pinnedPlan(rows)?.tasks;
 }
 
 // Ticking a task done is not a change to what was pinned.
@@ -208,6 +197,19 @@ export function restoreAdvice(cwd: string, slug: string, moved: string, rows: re
 	const copy = moved === "SPEC.md" && readPinnedSpec(cwd, slug, pinnedPlan(rows)) !== undefined ? pinnedSpecFile(cwd, slug) : undefined;
 	const restore = copy === undefined ? "restore it" : `restore it with !cp "${copy}" ".pi/work/${slug}/SPEC.md"`;
 	return `${restore}, or accept it with /execute ${slug} --repin, which shows what changed`;
+}
+
+/**
+ * Why the live SPEC and PLAN no longer match the signed pin, or undefined. A widened allowance would absorb drift
+ * unnoticed, and the executor can edit both files mid-run. `since` names the pin in the message.
+ */
+export function pinRefusal(cwd: string, slug: string, rows: readonly LedgerRow[], now: { readonly allowance: readonly string[]; readonly tasks: readonly PinnedTask[]; readonly specText: string }, since: string): string | undefined {
+	const pin = pinnedPlan(rows);
+	if (pin !== undefined && pin.allowance.join("\n") !== now.allowance.join("\n")) {
+		return `the SPEC/PLAN write allowance changed since ${since} (pinned: ${pin.allowance.join(", ")}) -- restore it, or accept it with /execute ${slug} --repin, which shows what changed`;
+	}
+	const moved = pinMismatch(pin, { tasks: now.tasks, specHash: specDigest(now.specText) });
+	return moved === undefined ? undefined : `${moved} changed since ${since} -- ${restoreAdvice(cwd, slug, moved, rows)}`;
 }
 
 export function acceptedEntries(rows: readonly LedgerRow[]): readonly { readonly taskId: string; readonly sha: string; readonly entry: string }[] {

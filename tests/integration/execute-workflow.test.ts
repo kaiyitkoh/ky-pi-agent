@@ -560,6 +560,18 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(bytes(progressFile(h))).toBe(before);
 	});
 
+	it("a refused /execute during a run cannot widen the allowance that run settles against", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), `${PLAN}- [ ] T009 [R1] Create the b module in src/b.ts | verify: npm test\n`);
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text).toContain("already in flight");
+		commitIn(h.repo, "src/b.ts", "export const b = 1;\n");
+		verify(h);
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.notes.at(-1)?.text).toContain("HALT");
+	});
+
 	it("drift is sticky: the next /execute still HALTs on the earlier undeclared commit instead of re-basing past it", async () => {
 		const h = harness();
 		await h.command(SLUG);

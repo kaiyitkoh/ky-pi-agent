@@ -2,10 +2,9 @@
  * Scope drift for /review: changed paths come from git, never from a model. Pure except the git and file readers,
  * which read the committed diff only, so callers must first refuse a working tree that is not HEAD.
  */
-import { spawnSync } from "node:child_process";
 import { closeSync, existsSync, openSync, readSync, statSync } from "node:fs";
 import { basename, join } from "node:path";
-
+import { git } from "../execute/git-run.ts";
 import { changedFiles, normalisePathForDrift } from "../execute/progress.ts";
 import type { TouchedFile } from "../quality/reviewer.ts";
 
@@ -52,9 +51,9 @@ export function compareScope(input: ScopeDriftInput): ScopeDriftReport {
 
 export type BaseRef = { readonly ok: true; readonly ref: string } | { readonly ok: false; readonly reason: string };
 
-function gitOut(cwd: string, args: string[]): { status: number | null; out: string } {
-	const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	return { status: r.status, out: (r.stdout ?? "").trim() };
+export function gitOut(cwd: string, args: string[]): { status: number | null; out: string } {
+	const r = git(cwd, args);
+	return { status: r.status, out: r.out.trim() };
 }
 
 /**

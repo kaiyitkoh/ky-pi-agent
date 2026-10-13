@@ -87,6 +87,12 @@ describe("validateGatedSpec -- the gate every reader applies", () => {
 		expect(validateGatedSpec(renderSpecMarkdown(SPEC)).ok).toBe(true);
 	});
 
+	it("re-rendering a gated SPEC reproduces it byte for byte, so a re-gate never moves its pinned hash", () => {
+		const once = renderSpecMarkdown(SPEC);
+		const gated = validateGatedSpec(once);
+		expect(gated.ok && renderSpecMarkdown(gated.spec)).toBe(once);
+	});
+
 	it("refuses a SPEC with no dimension scores, even with a self-reported low overall", () => {
 		const v = validateGatedSpec(UNGATED_SPEC);
 		expect(v.ok).toBe(false);

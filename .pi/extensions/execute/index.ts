@@ -2,44 +2,30 @@
  * /execute: runs the next unfinished PLAN task and appends PROGRESS.md only after the evidence gate accepts.
  * Registers one command, zero tools. Rationale lives in docs/WORKFLOWS.md.
  */
-import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
-import { join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
-import { workDir } from "../../lib/work-artifacts.ts";
+import { workDir, workSlugs } from "../../lib/work-artifacts.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
-import { validatePlan, type ParsedTask } from "../plan-ceremony/plan-schema.ts";
+import { validatePlan } from "../plan-ceremony/plan-schema.ts";
 import { gateDepthFor } from "../quality/gates.ts";
 import { registeredToolNames, runChangeGateStage, runTypecheckAt } from "../quality/index.ts";
-import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
-import { protectedBranchesFor } from "../safety/index.ts";
+import { currentSha, currentTree } from "../safety/git.ts";
 import { deriveNeed, guardRoute } from "../routing/guard.ts";
 import { acceptedReason, disarmRun, endRun, isRunArmed, isRunPending, startRun, writeRunEvidence } from "../workflows/evidence.ts";
 import { IN_FLIGHT, notePrompt } from "../workflows/settle.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
-import { acceptedEntries, allowanceOf, appendLedger, appendPin, attemptState, ledgerBase, pinMismatch, pinnedAllowance, pinnedPlan, pinnedTasks, readLedger, renderPinChanges, restoreAdvice, specDigest, tasksOf } from "./ledger.ts";
+import { acceptedEntries, allowanceOf, appendLedger, appendPin, attemptState, ledgerBase, pinRefusal, pinnedPlan, readLedger, renderPinChanges, specDigest, tasksOf } from "./ledger.ts";
 import {
-	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, disarmExecuteRun, driftAbort, ensureHarnessIgnored, normalisePathForDrift,
+	REVISION_CAP, appendProgress, armExecuteRun, changedFiles, checkVerification, commitRefusal, disarmExecuteRun, driftAbort, ensureHarnessIgnored, normalisePathForDrift,
 	executeRunContext, headShaOrEmpty, noteToolEnd, noteToolStart, renderProgressAppend, uncommittedPaths, verificationRecord,
 } from "./progress.ts";
 
-/** Slugs holding a PLAN.md. A plan is only trusted after revalidation, so existence is all that is checked here. */
-function slugsWithPlan(cwd: string): string[] {
-	const root = resolve(join(cwd, ".pi", "work"));
-	if (!existsSync(root)) return [];
-	return readdirSync(root, { withFileTypes: true })
-		.filter((e) => e.isDirectory() && existsSync(join(root, e.name, "PLAN.md")))
-		.sort((a, b) => statSync(join(root, b.name)).mtimeMs - statSync(join(root, a.name)).mtimeMs)
-		.map((e) => e.name);
-}
+const runsDeterministicGate = (): boolean => gateDepthFor("execute").mechanisms.includes("deterministic");
 
 export default function (pi: ExtensionAPI): void {
-	// Reset at each arm; the settle handler reads them after the run ends.
-	let baseSha = "";
-	let allowance: { spec: readonly string[]; plan: readonly string[] } = { spec: [], plan: [] };
-	let baseTypecheckFailed = false;
-
 	pi.registerCommand("execute", {
 		description: "Run the next unfinished PLAN.md task, evidence-gated, and append PROGRESS.md on acceptance",
 		handler: async (args, ctx) => {
@@ -48,15 +34,16 @@ export default function (pi: ExtensionAPI): void {
 				const tokens = args.trim().split(/\s+/).filter((t) => t !== "");
 				const reset = tokens.includes("--reset");
 				const arg = tokens.find((t) => !t.startsWith("--")) ?? "";
-				const candidates = slugsWithPlan(ctx.cwd);
+				// A plan is only trusted after revalidation, so existence is all that is checked here.
+				const candidates = workSlugs(ctx.cwd, "PLAN.md");
 				if (arg === "" && candidates.length !== 1) {
 					return fail(candidates.length === 0 ? "execute: no .pi/work/<slug>/PLAN.md found -- run /plan first" : `execute: several plans exist (${candidates.join(", ")}) -- pass one: /execute <slug>`);
 				}
 				const slug = arg !== "" ? arg : (candidates[0] as string);
 				const dir = workDir(ctx.cwd, slug);
 
-				const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) });
-				if (verdict.kind === "block") return fail(verdict.reason);
+				const refusal = commitRefusal(ctx.cwd);
+				if (refusal !== undefined) return fail(refusal);
 
 				if (!existsSync(join(dir, "PLAN.md"))) return fail(`execute: .pi/work/${slug}/PLAN.md does not exist -- run /plan first`);
 				const specText = readFileSync(join(dir, "SPEC.md"), "utf-8");
@@ -65,24 +52,21 @@ export default function (pi: ExtensionAPI): void {
 				const plan = validatePlan(readFileSync(join(dir, "PLAN.md"), "utf-8"), extractSpecRequirementIds(spec.spec.requirementsBody));
 				if (!plan.ok) return fail(plan.reason);
 
-				allowance = { spec: spec.spec.scopePin.expectedFiles, plan: plan.plan.filesTouched };
-				if (allowance.spec.length + allowance.plan.length === 0) {
-					return fail("execute: the write allowance (SPEC expected files and PLAN files-touched) is empty -- nothing may be written");
-				}
+				const allowance = { spec: spec.spec.scopePin.expectedFiles, plan: plan.plan.filesTouched };
+				const union = allowanceOf(allowance.spec, allowance.plan);
+				if (union.length === 0) return fail("execute: the write allowance (SPEC expected files and PLAN files-touched) is empty -- nothing may be written");
 
 				const rows = readLedger(ctx.cwd, slug);
-				const union = allowanceOf(allowance.spec, allowance.plan);
-				const pinnedUnion = pinnedAllowance(rows);
 				const from = ledgerBase(rows);
 				const tasks = tasksOf(plan.plan.tasks);
 				const specHash = specDigest(specText);
-				const pinShown = renderPinChanges(ctx.cwd, slug, rows, { allowance: union, tasks, specText });
+				const pinShown = () => renderPinChanges(ctx.cwd, slug, rows, { allowance: union, tasks, specText });
 				// Pi runs commands mid-stream, so a re-pin must not accept an edit the running executor is still making.
 				if (isRunArmed() || !ctx.isIdle()) return fail(`execute: ${IN_FLIGHT}`);
 				if (tokens.includes("--repin")) {
 					// A PLAN or SPEC edit the user accepts: the drift base stays, so every recorded commit's ancestry is still checked.
 					if (from === undefined) return fail(`execute: ${slug} has nothing pinned yet -- run /execute ${slug} first`);
-					if (!(await ctx.ui.confirm("Re-pin the SPEC and PLAN?", `Re-pin ${slug}'s SPEC and PLAN content; the drift base stays ${from}.\n${pinShown}`))) return void ctx.ui.notify("execute: nothing re-pinned -- declined", "warning");
+					if (!(await ctx.ui.confirm("Re-pin the SPEC and PLAN?", `Re-pin ${slug}'s SPEC and PLAN content; the drift base stays ${from}.\n${pinShown()}`))) return void ctx.ui.notify("execute: nothing re-pinned -- declined", "warning");
 					appendPin(ctx.cwd, slug, { kind: "pin", allowance: union, tasks, specHash, reason: "re-pinned by the user with --repin" }, specText);
 					return void ctx.ui.notify(`execute: ${slug}'s SPEC and PLAN are re-pinned; run /execute ${slug} to continue`, "info");
 				}
@@ -91,21 +75,19 @@ export default function (pi: ExtensionAPI): void {
 					if (from === undefined) return fail(`execute: ${slug} has no pinned base to move -- run /execute ${slug} first`);
 					const head = currentSha(ctx.cwd);
 					const undeclared = changedFiles(ctx.cwd, from, head).filter((p) => !union.includes(normalisePathForDrift(p)));
-					const shown = `Move ${slug}'s drift base from ${from} to HEAD ${head}.\nChanged since the base and not declared: ${undeclared.join(", ") || "none"}\n${pinShown}`;
+					const shown = `Move ${slug}'s drift base from ${from} to HEAD ${head}.\nChanged since the base and not declared: ${undeclared.join(", ") || "none"}\n${pinShown()}`;
 					if (!(await ctx.ui.confirm("Re-pin the drift base?", shown))) return void ctx.ui.notify("execute: drift base not moved -- re-pin declined", "warning");
 					appendPin(ctx.cwd, slug, { kind: "base", sha: head, allowance: union, tasks, specHash, reason: "re-pinned by the user with --rebase-base" }, specText);
 					return void ctx.ui.notify(`execute: ${slug}'s drift base is now ${head}; run /execute ${slug} to continue`, "info");
 				}
-				if (pinnedUnion !== undefined && pinnedUnion.join("\n") !== union.join("\n")) {
-					return fail(`execute: the SPEC/PLAN write allowance changed since ${slug} was pinned (pinned: ${pinnedUnion.join(", ")}) -- restore it, or accept it with /execute ${slug} --repin, which shows what changed`);
-				}
 				// The executor can edit SPEC.md and PLAN.md mid-run, so the next brief is built only from content that matches the signed pin.
-				const moved = pinMismatch(pinnedPlan(rows), { tasks, specHash });
-				if (moved !== undefined) return fail(`execute: ${moved} changed since ${slug} was pinned -- ${restoreAdvice(ctx.cwd, slug, moved, rows)}`);
+				const drifted = pinRefusal(ctx.cwd, slug, rows, { allowance: union, tasks, specText }, `${slug} was pinned`);
+				if (drifted !== undefined) return fail(`execute: ${drifted}`);
 				const recorded = new Set(acceptedEntries(rows).map((e) => e.taskId));
-				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !recorded.has(t.id));
-				const verificationCommand = (pinnedTasks(rows) ?? tasks).find((t) => t.id === task?.id)?.verificationCommand ?? undefined;
-				if (task === undefined || verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
+				const task = plan.plan.tasks.find((t) => !recorded.has(t.id));
+				if (task === undefined) return fail("execute: every PLAN task already has a PROGRESS entry");
+				const verificationCommand = (pinnedPlan(rows)?.tasks ?? tasks).find((t) => t.id === task.id)?.verificationCommand ?? undefined;
+				if (verificationCommand === undefined) return fail(`execute: ${task.id} has no verification command`);
 
 				// Guarded before arming, so a refusal arms nothing; the input backstop re-checks the prompt.
 				const guard = ctx.model === undefined ? { ok: true as const } : guardRoute(ctx.model, "executor", { ...deriveNeed(ctx, { usesToolLoop: true }), estimatedInputTokens: undefined });
@@ -116,23 +98,17 @@ export default function (pi: ExtensionAPI): void {
 					return fail(`execute: ${task.id} is escalated (${prior.attempts} rejected attempts${prior.stalled ? ", gate findings not dropping" : ""}) -- inspect it, then run /execute ${slug} --reset to allow another attempt`);
 				}
 
-				// A typecheck that already fails on the base tree cannot blame the change, so the settle gate skips that leg.
-				const deterministic = gateDepthFor("execute").mechanisms.includes("deterministic");
-				baseTypecheckFailed = deterministic && runTypecheckAt(ctx.cwd, ctx.isProjectTrusted()).status === "fail";
+				const deterministic = runsDeterministicGate();
+				const baseTypecheckFailed = deterministic && runTypecheckAt(ctx.cwd, ctx.isProjectTrusted()).status === "fail";
 				if (deterministic) ctx.ui.notify(`execute: ${task.id} runs the deterministic gate on the changed files at settle`, "info");
 
 				const probe = probeSubagentAvailability(registeredToolNames());
-				let brief: string;
-				let mode: "delegated" | "degraded (ordinary prompt loop)";
-				if (probe.status === "pass") {
-					mode = "delegated";
-					// A child's tool results never reach this session's evidence, so the parent re-runs the verification itself.
-					brief = `Dispatch this packet to the subagent tool with agent: "${HANDOFF_AGENT}" and wait with bg_wait. Its report is not evidence:\n\n${renderHandoffPacket(buildHandoffPacket({ spec: spec.spec, task }))}`;
-				} else {
-					mode = "degraded (ordinary prompt loop)";
-					ctx.ui.notify(`execute: subagent layer unavailable (${probe.status === "unavailable" ? probe.reason : "not usable"}) -- running ${task.id} in this session, not delegated`, "warning");
-					brief = `Do this task yourself: ${task.rawLine}`;
-				}
+				const mode = probe.status === "pass" ? "delegated" : "degraded (ordinary prompt loop)";
+				if (probe.status !== "pass") ctx.ui.notify(`execute: subagent layer unavailable (${probe.status === "unavailable" ? probe.reason : "not usable"}) -- running ${task.id} in this session, not delegated`, "warning");
+				// A child's tool results never reach this session's evidence, so the parent re-runs the verification itself.
+				const brief = probe.status === "pass"
+					? `Dispatch this packet to the subagent tool with agent: "${HANDOFF_AGENT}" and wait with bg_wait. Its report is not evidence:\n\n${renderHandoffPacket(buildHandoffPacket({ spec: spec.spec, task }))}`
+					: `Do this task yourself: ${task.rawLine}`;
 
 				// Base SHA and tree are read in the same try, so a throw refuses and never arms a run.
 				const ignoredNow = ensureHarnessIgnored(ctx.cwd);
@@ -140,11 +116,10 @@ export default function (pi: ExtensionAPI): void {
 				const headSha = currentSha(ctx.cwd);
 				if (from === undefined) appendPin(ctx.cwd, slug, { kind: "base", sha: headSha, allowance: union, tasks, specHash, reason: "first /execute" }, specText);
 				if (reset) appendLedger(ctx.cwd, slug, { kind: "reset", taskId: task.id });
-				baseSha = from ?? headSha;
 				const message = `${brief}\n\nMake exactly one atomic commit with the bash tool, staging only the files you changed (git add <path>...), THEN run the verification command yourself with the bash tool, exactly as written, on the committed HEAD: ${verificationCommand}\nFailed intermediate tool calls are logged, not fatal: the attempt passes when the one atomic commit lands and the verification command, run exactly as written on the committed HEAD, exits 0. Touch only: ${[...allowance.spec, ...allowance.plan].join(", ")}`;
 				startRun(ctx.cwd, headSha, currentTree(ctx.cwd), message);
 				claimWorkflow("execute");
-				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand, mode });
+				armExecuteRun({ cwd: ctx.cwd, slug, taskId: task.id, verificationCommand, mode, baseSha: from ?? headSha, allowance, baseTypecheckFailed });
 				pi.sendUserMessage(message);
 			} catch (err) {
 				fail(err instanceof Error ? err.message : String(err));
@@ -175,7 +150,7 @@ export default function (pi: ExtensionAPI): void {
 		if (event.aborted) return void (disarmExecuteRun(), disarmRun()); // an aborted run records no verdict and consumes no attempt
 		const verification = verificationRecord();
 		disarmExecuteRun();
-		const cwd = run.cwd;
+		const { cwd, baseSha, allowance } = run;
 		// Non-throwing reads: an unknown HEAD rejects, and the run is still ended rather than left armed.
 		const ended = endRun(headShaOrEmpty(cwd), headShaOrEmpty(cwd, "HEAD^{tree}"));
 		let written = false;
@@ -184,6 +159,7 @@ export default function (pi: ExtensionAPI): void {
 			if (ended !== undefined && !written) writeRunEvidence(ended.run, verdict, reason);
 			written = true;
 		};
+		const notRecorded = (reason: string) => (evidence("reject", reason), ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${reason}`, "error"));
 		try {
 			const checked = ended?.ok === true ? checkVerification(verification, run.verificationCommand, ended.sha) : undefined;
 			const verdict = ended?.ok === true && checked?.ok === false ? { ok: false as const, reason: checked.reason } : ended;
@@ -204,14 +180,13 @@ export default function (pi: ExtensionAPI): void {
 			const drift = driftAbort({ attemptedPaths: changed, specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
 			if (!drift.ok) return void (evidence("reject", `HALT -- ${drift.reason}`), ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error"));
 			let gateLine = "outside this workflow's gate depth";
-			if (gateDepthFor("execute").mechanisms.includes("deterministic")) {
-				const gate = runChangeGateStage({ cwd, projectTrusted: ctx.isProjectTrusted(), baseSha, changed, baseTypecheckFailed });
+			if (runsDeterministicGate()) {
+				const gate = runChangeGateStage({ cwd, projectTrusted: ctx.isProjectTrusted(), baseSha, changed, baseTypecheckFailed: run.baseTypecheckFailed });
 				const failed = [gate.typecheck, gate.lint, gate.antiPattern].flatMap((leg) => (leg.status === "fail" ? [Math.max(1, leg.findings.length)] : []));
 				if (failed.length > 0) return reject(`the deterministic gate fails on the committed change:\n${gate.report}`, failed.reduce((a, b) => a + b, 0));
 				// Awaited only when nothing ran, so an ordinary settle stays synchronous.
 				if (!gate.ranAny && !(await ctx.ui.confirm("Record with no deterministic check?", `No deterministic check applies to ${run.taskId}:\n${gate.report}`))) {
-					evidence("reject", "no deterministic check ran and recording without one was not approved");
-					return void ctx.ui.notify(`execute: ${run.taskId} not recorded -- no deterministic check ran and recording without one was not approved`, "error");
+					return notRecorded("no deterministic check ran and recording without one was not approved");
 				}
 				gateLine = `${gate.report.replace(/\n/g, "; ")}${gate.ranAny ? "" : " -- no check ran; recorded with the user's approval"}`;
 			}
@@ -222,8 +197,9 @@ export default function (pi: ExtensionAPI): void {
 			appendProgress(cwd, run.slug, rendered);
 			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode}); ${verdict.failedToolCalls} failed tool call(s) logged`, "info");
 		} catch (err) {
-			evidence("reject", `not recorded -- ${err instanceof Error ? err.message : String(err)}`);
-			ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${err instanceof Error ? err.message : String(err)}`, "error");
+			const reason = err instanceof Error ? err.message : String(err);
+			evidence("reject", `not recorded -- ${reason}`);
+			ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${reason}`, "error");
 		}
 	});
 }

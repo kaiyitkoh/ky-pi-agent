@@ -12,6 +12,7 @@ import type { ReviewArtifact } from "../quality/review-schema.ts";
 import { writeAuditRow } from "../safety/audit.ts";
 import { classifyGlabInvocation } from "../safety/git.ts";
 import { protectedBranchesFor } from "../safety/index.ts";
+import { gitOut } from "./scope-drift.ts";
 
 export const MR_TARGET_BRANCH = "staging";
 export const MR_TARGET_BRANCH_FLAG = "--target-branch";
@@ -68,11 +69,6 @@ export function buildMrBody(input: MrBodyInput): string {
 	return redactForModel(lines.join("\n"));
 }
 
-function gitRead(cwd: string, args: string[]): { status: number | null; out: string } {
-	const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	return { status: r.status, out: (r.stdout ?? "").trim() };
-}
-
 /**
  * Why the recorded history does not match HEAD, or undefined: every task recorded, each record on HEAD's history,
  * none after the last. After a user re-pin, records made before it are exempt from the ancestry check and the
@@ -83,9 +79,9 @@ export function historyMismatch(cwd: string, taskIds: readonly string[], progres
 	const missing = taskIds.filter((id) => !entries.some((e) => e.taskId === id));
 	if (missing.length > 0) return `PLAN task(s) with no PROGRESS entry: ${missing.join(", ")} -- run /execute first`;
 	const checked = entries.filter((e) => repin?.before.has(e.sha) !== true);
-	const offHistory = checked.filter((e) => gitRead(cwd, ["merge-base", "--is-ancestor", e.sha, "HEAD"]).status !== 0);
+	const offHistory = checked.filter((e) => gitOut(cwd, ["merge-base", "--is-ancestor", e.sha, "HEAD"]).status !== 0);
 	if (offHistory.length > 0) return `recorded commit(s) not on HEAD's history: ${offHistory.map((e) => `${e.taskId} @ ${e.sha}`).join(", ")} -- after a rebase, run /execute <slug> --rebase-base`;
-	const head = gitRead(cwd, ["rev-parse", "HEAD"]).out;
+	const head = gitOut(cwd, ["rev-parse", "HEAD"]).out;
 	const last = checked.at(-1)?.sha ?? repin?.sha;
 	if (last !== head) return `HEAD (${head}) carries commits after the last recorded entry (${last ?? "none"}) that no verification covers`;
 	return undefined;
@@ -97,11 +93,11 @@ export function historyMismatch(cwd: string, taskIds: readonly string[], progres
  * This reads the local remote-tracking ref, which is only as fresh as the last push or fetch.
  */
 export function upstreamMismatch(cwd: string): string | undefined {
-	const head = gitRead(cwd, ["rev-parse", "HEAD"]).out;
-	const branch = gitRead(cwd, ["symbolic-ref", "--short", "HEAD"]);
+	const head = gitOut(cwd, ["rev-parse", "HEAD"]).out;
+	const branch = gitOut(cwd, ["symbolic-ref", "--short", "HEAD"]);
 	if (branch.status !== 0) return "HEAD is detached -- check out the branch the MR should come from";
-	const remote = gitRead(cwd, ["config", "--get", `branch.${branch.out}.remote`]).out || "origin";
-	const pushed = gitRead(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branch.out}`]);
+	const remote = gitOut(cwd, ["config", "--get", `branch.${branch.out}.remote`]).out || "origin";
+	const pushed = gitOut(cwd, ["rev-parse", "--verify", "--quiet", `refs/remotes/${remote}/${branch.out}`]);
 	if (pushed.status !== 0) return `${remote}/${branch.out} does not exist -- push the branch under its own name first: git push ${remote} ${branch.out}:${branch.out}`;
 	return pushed.out === head ? undefined : `${remote}/${branch.out} is at ${pushed.out}, not HEAD (${head}) -- push first`;
 }
@@ -196,6 +192,3 @@ function attemptMr(input: MrInput, deps: OpenMrDeps): MrOutcome {
 	const r = deps.exec("glab", [...argv]);
 	return r.status === 0 ? { kind: "opened", stdout: r.stdout } : { kind: "failed", code: r.status, stderr: r.stderr };
 }
-
-// This proves classification and the argv that would be sent. It cannot show that GitLab accepts the request,
-// that the target exists, or that server-side branch protection is configured.
