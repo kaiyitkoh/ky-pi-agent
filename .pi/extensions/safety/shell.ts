@@ -56,6 +56,7 @@ export const SHELL_REFUSAL_CAUSES = [
 	"non-literal-command-name",
 	"shell-runner",
 	"generated-script",
+	"command-string-program",
 	"unresolved-wrapper",
 	"parse-error",
 ] as const;
@@ -348,6 +349,8 @@ const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
 		`"${c}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`,
 	"generated-script": (c) =>
 		`"${c}" gives a code runner its input through a pipe or a stdin alias, or runs a file the same command writes, so the guard never sees the code; pass input as a file argument or through jq, and write a script in one command and run it in another`,
+	"command-string-program": (c) =>
+		`"${c}" runs a program that takes a command string from its own arguments (awk system() or a pipe, sed e or w /dev/, tar --to-command or -I, rsync -e, bat --pager, make --eval or -f -, sort --compress-program) or an interactive pager or editor`,
 	"unresolved-wrapper": (c) =>
 		`"${c}" puts a guarded verb, a code runner or piped input behind a wrapper word this guard cannot resolve, or runs a wrapper under xargs, find -exec or parallel, whose command then comes from the input`,
 	"parse-error": (c) => `"${c}" did not parse cleanly; this catch-all denies rather than falls through to allow`,
@@ -794,6 +797,71 @@ const firstWrappedRefusal = (invocations: readonly CanonicalInvocation[]): Shell
 	return undefined;
 };
 
+// GNU getopt accepts any unambiguous prefix of a long option, so a prefix of a listed name counts.
+const longOptionIn = (arg: string, names: readonly string[]): boolean => {
+	const name = arg.split("=")[0];
+	return name.length >= 4 && name.startsWith("--") && names.some((n) => n.startsWith(name));
+};
+
+const shortFlagIn = (arg: string, letters: RegExp): boolean => /^-[^-]/.test(arg) && letters.test(arg.slice(1));
+
+const AWK_RUNS_COMMAND = /\bsystem\s*\(|\|\s*getline|\|&|@load|\b(print|printf)\b[^;}]*?[^|]\|(?!\|)/;
+const SED_E_COMMAND = /(^|[;{}\n])\s*(\d+|\$|\/[^/]*\/)?(\s*,\s*(\d+|\$|\/[^/]*\/))?\s*!?\s*e(\s|;|$)/;
+const SED_SUBSTITUTE = /s([^\\\n])(?:\\.|(?!\1)[^\\])*\1(?:\\.|(?!\1)[^\\])*\1([a-zA-Z0-9]*)/g;
+const SED_WRITE_DEVICE = /(^|[;{}\s\d$/])[wW]\s*\/dev\//;
+
+/** Interactive programs that run commands from a prompt or an option; a non-interactive agent has no use for them. */
+const INTERACTIVE_COMMAND_RUNNERS = wordSet("less more most man vi vim nvim view ex vimdiff emacs nano pico gdb");
+
+/** The sed scripts in `args`: every -e/--expression value, else the first positional. */
+function sedScripts(args: readonly string[]): string[] {
+	const flagged = args.flatMap((a, i) => (a === "-e" || a === "--expression" ? [args[i + 1] ?? ""] : a.startsWith("--expression=") ? [a.slice(13)] : []));
+	return flagged.length > 0 ? flagged : args.filter((a) => !a.startsWith("-")).slice(0, 1);
+}
+
+const sedRunsCommand = (script: string): boolean =>
+	SED_E_COMMAND.test(script) || SED_WRITE_DEVICE.test(script) || [...script.matchAll(SED_SUBSTITUTE)].some((m) => /^[^w]*e/.test(m[2]));
+
+/** Why a program runs a command string taken from its own arguments, or undefined; plain awk and sed stay allowed. */
+function commandStringProgram(inv: Pick<CanonicalInvocation, "executable" | "args" | "assignmentWords">): string | undefined {
+	const executable = normaliseExecutable(inv.executable);
+	const args = inv.args;
+	if (INTERACTIVE_COMMAND_RUNNERS.has(executable)) return "is interactive and runs commands from its prompt or options";
+	switch (executable) {
+		case "awk":
+		case "gawk":
+		case "mawk":
+		case "nawk":
+			return args.some((a) => AWK_RUNS_COMMAND.test(a)) ? "runs an awk program that starts a command" : undefined;
+		case "sed":
+			return sedScripts(args).some(sedRunsCommand) ? "runs a sed script with the e command or flag, or one that writes to a device" : undefined;
+		case "tar": {
+			const names = ["--to-command", "--use-compress-program", "--checkpoint-action", "--info-script", "--new-volume-script", "--rsh-command"];
+			const oldStyle = args[0] !== undefined && /^[a-zA-Z]*[IF][a-zA-Z]*$/.test(args[0]);
+			return oldStyle || args.some((a) => longOptionIn(a, names) || shortFlagIn(a, /[IF]/)) ? "names a program for tar to run" : undefined;
+		}
+		case "rsync":
+			return args.some((a) => longOptionIn(a, ["--rsh", "--rsync-path"]) || shortFlagIn(a, /e/)) ? "names a shell or program for rsync to run" : undefined;
+		case "bat": {
+			const pagerVariable = (inv.assignmentWords ?? []).some((w) => /^(BAT_)?PAGER=/.test(w));
+			return pagerVariable || args.some((a) => a === "--pager" || a.startsWith("--pager=")) ? "names a pager for bat to run" : undefined;
+		}
+		case "make": {
+			const stdinFile = args.some((a, i) => (a === "-f" || longOptionIn(a, ["--file", "--makefile"])) && STDIN_ALIAS.test(a.includes("=") ? a.split("=")[1] : (args[i + 1] ?? "")));
+			return stdinFile || args.some((a) => longOptionIn(a, ["--eval"]) || /^-E/.test(a)) ? "takes a rule from its arguments or stdin" : undefined;
+		}
+		case "sort":
+			return args.some((a) => longOptionIn(a, ["--compress-program"])) ? "names a compressor for sort to run" : undefined;
+		default:
+			return undefined;
+	}
+}
+
+const firstCommandString = (invocations: readonly CanonicalInvocation[]): string | undefined => {
+	const commands = invocations.flatMap((inv) => [inv, ...(wrappedCommands(inv) ?? [])]);
+	return commands.map(commandStringProgram).find((why) => why !== undefined);
+};
+
 /** Parse and fail closed on {@link SHELL_REFUSAL_CAUSES}; otherwise one canonical invocation per `Command` node. */
 export function canonicalise(command: string): ShellVerdict {
 	let script: ParsedScript;
@@ -813,6 +881,7 @@ export function canonicalise(command: string): ShellVerdict {
 	if (findShellRunnerDenial(invocations) !== undefined || carriesVerbAcrossSegments(invocations)) return refused("shell-runner", command);
 	const wrappedCause = firstWrappedRefusal(invocations);
 	if (wrappedCause !== undefined) return refused(wrappedCause, command);
+	if (firstCommandString(invocations) !== undefined) return refused("command-string-program", command);
 	if (runsGeneratedScript(extracted, scan)) return refused("generated-script", command);
 	// An unresolved wrapper is refused when a guarded verb or a code runner could be behind it, or it reads a pipe; `env -x ls` stays ok.
 	const hidesRunner = (e: ExtractedInvocation): boolean =>

@@ -61,6 +61,21 @@ docstring for the structural argument). Concretely, it catches:
   argument, redirect it from a file (`python solve.py < input.txt`), or use
   `jq`. A script written by an earlier, separate tool call stays opaque
   (EV-166).
+- **Programs that take a command string** (cause `command-string-program`)
+  — refused whatever the string holds: an `awk`/`gawk`/`mawk`/`nawk`
+  program with `system(`, `| getline`, `|&`, `@load` or a print into a
+  pipe; a `sed` script with the `e` command, the `s///e` flag, or `w` to a
+  `/dev/` path; `tar --to-command`, `--use-compress-program`, `-I`, `-F`,
+  `--checkpoint-action`, `--info-script`, `--new-volume-script` and
+  `--rsh-command` (any unambiguous prefix, as GNU accepts); `rsync -e`,
+  `--rsh` and `--rsync-path`; `bat --pager` or a `PAGER`/`BAT_PAGER`
+  prefix; `make --eval`, `-E` and `-f -`; `sort --compress-program`; and the
+  interactive pagers, editors and debuggers (`less`, `more`, `man`, `vi`,
+  `vim`, `nvim`, `emacs`, `nano`, `gdb`, ...), which run commands from a
+  prompt or an option. The same check runs on the command `xargs` or
+  `find -exec` runs. Plain `awk` and `sed` stay allowed. git's own program
+  settings (`-c core.pager`, `core.editor`, `diff.external`) are covered by
+  the git `-c` rule below.
 - **Commands run over input** — `xargs`, `find -exec`/`-execdir`/`-ok`,
   `fd -x` and `parallel` are unwrapped and the command they run is
   classified. That command is refused (cause `unresolved-wrapper`) when it
