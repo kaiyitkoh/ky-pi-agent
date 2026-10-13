@@ -170,6 +170,7 @@ const PHASE_EIGHT_IDS = ["RB-08-01", "RB-08-02", "RB-08-03"] as const;
 const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
 const PHASE_NINE_IDS = ["RB-09-01", "RB-09-02", "RB-09-03"] as const;
 const PHASE_TEN_IDS = ["RB-10-01", "RB-10-02", "RB-10-03"] as const;
+const PHASE_ELEVEN_IDS = ["RB-11-01", "RB-11-02", "RB-11-03"] as const;
 const PHASE_TWELVE_IDS = ["RB-12-01", "RB-12-02", "RB-12-03", "RB-12-04"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
@@ -184,6 +185,7 @@ const ALL_IDS = [
 	...PHASE_EIGHT_TWO_IDS,
 	...PHASE_NINE_IDS,
 	...PHASE_TEN_IDS,
+	...PHASE_ELEVEN_IDS,
 	...PHASE_TWELVE_IDS,
 ] as const;
 
@@ -547,6 +549,18 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	],
 	"RB-10-03": [
 		'echo "RB-10-03 <package> delta per profile: <recon>/<review>/<implement>/<full>, $(date -u +%FT%TZ)" >> RB-10-03-RESULT.md',
+	],
+
+	"RB-11-01": [
+		"pi --use-theme ky",
+		'echo "RB-11-01 theme ky listed=<yes|no>, header=<yes|no>, ky-statusline segments=<text>, $(date -u +%FT%TZ)" >> RB-11-01-RESULT.md',
+	],
+	"RB-11-02": [
+		'echo "RB-11-02 pi-subagents widget seen=<yes|no>, statusline agents peak=<n> back to none=<yes|no>, $(date -u +%FT%TZ)" >> RB-11-02-RESULT.md',
+	],
+	"RB-11-03": [
+		'sh scripts/ui-wire-check.sh --probe "$(git branch --show-current)"',
+		'echo "RB-11-03 ui-wire-check <PASS|FAIL|INSUFFICIENT>, turn-2 cacheRead ratio: <ratio>, $(date -u +%FT%TZ)" >> RB-11-03-RESULT.md',
 	],
 
 	"RB-12-01": [
