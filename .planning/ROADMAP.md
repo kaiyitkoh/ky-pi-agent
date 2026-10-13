@@ -702,6 +702,16 @@ Plans:
 
 - [x] 12-04-PLAN.md — Pre-authorised real install + user-level setup on this machine, docs/OPENSPEC.md (upgrade, uninstall, openspec-pi rejection), RUNBOOK Phase 12 + RB-12-01..04
 
+### Phase 12.1: v1.0 Gap Closure: audit + deep review fixes (INSERTED)
+
+**Goal:** [Urgent work - to be planned]
+**Requirements**: TBD
+**Depends on:** Phase 12
+**Plans:** 0 plans
+
+Plans:
+- [ ] TBD (run /gsd-plan-phase 12.1 to break down)
+
 ### Phase 13: Orca Desktop Front-end
 
 **Goal:** The user's whole Pi harness runs inside Orca (stablyai/orca) on the work laptop — terminal mode first, chat mode when mature — with privacy hardened and no new path around the safety guard. Phone access (Orca mobile or an authored Lark bot) is a later, separate decision.
