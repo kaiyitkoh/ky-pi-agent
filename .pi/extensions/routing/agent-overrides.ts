@@ -11,6 +11,7 @@ import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "nod
 import { join } from "node:path";
 
 import { guardRoute } from "./guard.ts";
+import { resolveBedrockRef } from "./modes.ts";
 import { AGENT_NAME_BY_ROLE, type KyModeData, type ModelRef, ROLE_MAP, ROLE_MECHANISM, type Role } from "./schema.ts";
 
 /** Structural fixture for `guardRoute`, no registry lookup. Sound because only `usesToolLoop` is set, so only the tool-loop deny-list block can fire; inert fields keep any new block failing safe. */
@@ -48,6 +49,8 @@ export interface AgentOverridesForOptions {
 	readonly roleMap?: typeof ROLE_MAP;
 	readonly roleMechanism?: typeof ROLE_MECHANISM;
 	readonly agentNameByRole?: typeof AGENT_NAME_BY_ROLE;
+	/** Settings file the Bedrock inference-profile prefix is read from. */
+	readonly settingsPath?: string;
 }
 
 /**
@@ -84,9 +87,14 @@ export function agentOverridesFor(
 		let picked: string | undefined;
 
 		for (const candidate of route.candidates) {
-			const verdict = guardRoute(candidateAsModelFixture(candidate), roleKey, { usesToolLoop: true });
+			const ref = resolveBedrockRef(candidate, opts.settingsPath);
+			if (!ref.ok) {
+				lastReason = ref.reason;
+				continue;
+			}
+			const verdict = guardRoute(candidateAsModelFixture(ref.ref), roleKey, { usesToolLoop: true });
 			if (verdict.ok) {
-				picked = `${candidate.provider}/${candidate.id}`;
+				picked = `${ref.ref.provider}/${ref.ref.id}`;
 				break;
 			}
 			lastReason = verdict.reason;

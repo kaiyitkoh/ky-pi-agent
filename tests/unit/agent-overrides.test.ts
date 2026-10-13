@@ -94,6 +94,33 @@ afterEach(() => {
 	}
 });
 
+describe("agentOverridesFor -- Bedrock inference-profile prefix", () => {
+	const BARE = "amazon-bedrock/anthropic.claude-sonnet-4-5-20250929-v1:0";
+
+	it("max pins the planner to the prefixed id that routing requests, default apac.", () => {
+		const result = agentOverridesFor({ mode: "max" }, { settingsPath: freshSettingsPath() });
+		expect(result.ok && result.overrides.planner?.model).toBe("amazon-bedrock/apac.anthropic.claude-sonnet-4-5-20250929-v1:0");
+	});
+
+	it('an empty prefix pins the bare id; another prefix is applied as written', () => {
+		const bare = freshSettingsPath();
+		writeFileSync(bare, JSON.stringify({ kyPiAgent: { bedrockProfilePrefix: "" } }), "utf-8");
+		expect(agentOverridesFor({ mode: "max" }, { settingsPath: bare })).toEqual({ ok: true, overrides: expect.objectContaining({ planner: { model: BARE } }) });
+		const us = freshSettingsPath();
+		writeFileSync(us, JSON.stringify({ kyPiAgent: { bedrockProfilePrefix: "us." } }), "utf-8");
+		const result = agentOverridesFor({ mode: "max" }, { settingsPath: us });
+		expect(result.ok && result.overrides.planner?.model).toBe("amazon-bedrock/us.anthropic.claude-sonnet-4-5-20250929-v1:0");
+	});
+
+	it("an invalid prefix setting refuses the pin, naming the setting", () => {
+		const bad = freshSettingsPath();
+		writeFileSync(bad, JSON.stringify({ kyPiAgent: { bedrockProfilePrefix: "APAC" } }), "utf-8");
+		const result = agentOverridesFor({ mode: "max" }, { settingsPath: bad });
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.reason).toContain("bedrockProfilePrefix");
+	});
+});
+
 // -----------------------------------------------------------------------------
 // agentOverridesFor -- shape
 // -----------------------------------------------------------------------------

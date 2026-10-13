@@ -256,7 +256,10 @@ laptop, recorded in `docs/RUNBOOK.md` (RB-12-06).
 ### Planner pin
 
 `/cheap`, `/balanced` and `/max` write `subagents.agentOverrides` into the
-user-level settings file, which every repo shares. Before the first write, the
+user-level settings file, which every repo shares. A Bedrock Claude pin gets
+the same inference-profile prefix as routing (`resolveBedrockRef` in
+`routing/modes.ts`), so `/max` pins the id Bedrock actually serves; an invalid
+prefix setting refuses the pin. Before the first write, the
 previous value (or its absence) is stored under
 `kyPiAgent.plannerPinRestore` in the same file. The pin is undone on session
 shutdown (not on `/reload`) and, if a crash left the marker behind, at the

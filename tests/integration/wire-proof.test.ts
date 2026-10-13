@@ -81,7 +81,7 @@
  * `tests/integration/mode-switch.test.ts` cases 2/4 already avoid by injecting
  * a temp directory. Every switch this file drives does the same.
  */
-import { existsSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -457,6 +457,8 @@ describe("ROUTE-10 -- the wire dump proves the intended model served the turn", 
 		suiteAgentDir = process.env.PI_CODING_AGENT_DIR;
 		settingsDir = mkdtempSync(join(tmpdir(), "kypi-wire-proof-settings-"));
 		process.env.PI_CODING_AGENT_DIR = settingsDir;
+		// The fixture registers the bare Bedrock id, so the inference-profile prefix is switched off.
+		writeFileSync(join(settingsDir, "settings.json"), JSON.stringify({ kyPiAgent: { bedrockProfilePrefix: "" } }), "utf-8");
 		run = await runFixture();
 	}, 60_000);
 

@@ -140,6 +140,17 @@ function isBedrockClaudeRef(ref: ModelRef): boolean {
 	return ref.provider === "amazon-bedrock" && ref.id.startsWith("anthropic.");
 }
 
+/** The id actually requested: a Bedrock Claude ref gets the configured inference-profile prefix, every other ref is unchanged. */
+export function resolveBedrockRef(
+	candidate: ModelRef,
+	settingsPath?: string,
+): { readonly ok: true; readonly ref: ModelRef } | { readonly ok: false; readonly reason: string } {
+	if (!isBedrockClaudeRef(candidate)) return { ok: true, ref: candidate };
+	const prefix = bedrockProfilePrefix(settingsPath);
+	if (!prefix.ok) return { ok: false, reason: prefix.reason };
+	return { ok: true, ref: { provider: candidate.provider, id: prefix.prefix + candidate.id } };
+}
+
 /** First candidate that resolves AND has configured auth; the refusal reason names every candidate tried. Bedrock Claude ids get the inference-profile prefix from settings. */
 export function pickConfiguredCandidate(
 	registry: ModelRegistryLike,
@@ -148,15 +159,12 @@ export function pickConfiguredCandidate(
 ): CandidateResult {
 	const attempts: string[] = [];
 	for (const candidate of candidates) {
-		let resolved = candidate;
-		if (isBedrockClaudeRef(candidate)) {
-			const prefix = bedrockProfilePrefix(opts.settingsPath);
-			if (!prefix.ok) {
-				attempts.push(`${candidate.provider}/${candidate.id} (${prefix.reason})`);
-				continue;
-			}
-			resolved = { provider: candidate.provider, id: prefix.prefix + candidate.id };
+		const ref = resolveBedrockRef(candidate, opts.settingsPath);
+		if (!ref.ok) {
+			attempts.push(`${candidate.provider}/${candidate.id} (${ref.reason})`);
+			continue;
 		}
+		const resolved = ref.ref;
 		const key = `${resolved.provider}/${resolved.id}`;
 		const model = registry.find(resolved.provider, resolved.id);
 		if (!model) {
