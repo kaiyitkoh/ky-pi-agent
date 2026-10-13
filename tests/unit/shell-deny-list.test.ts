@@ -196,6 +196,13 @@ const TABLE: readonly DenyRow[] = [
 		why: "the script string resolves to `git push origin main`, so the runner rule must see past the quotes too",
 	},
 	{
+		label: "unknown npm global option before exec with a guarded verb",
+		cmd: "npm --loglevel silent exec openspec update",
+		expected: "refused",
+		cause: "unresolved-wrapper",
+		why: "the guard cannot tell whether an unknown global option takes a value, so a later runner subcommand fails closed",
+	},
+	{
 		label: "unknown wrapper option with no guarded verb",
 		cmd: "env --frobnicate ls",
 		expected: "ok",

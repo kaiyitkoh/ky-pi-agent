@@ -228,6 +228,26 @@ const PACKAGE_MANAGER_RUNNERS: ReadonlyMap<string, ReadonlySet<string>> = new Ma
 	["bun", new Set(["x"])],
 ]);
 
+/** Global options each package manager accepts before its subcommand. */
+const PACKAGE_MANAGER_GLOBAL_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, WrapperGrammar>([
+	[
+		"npm",
+		{
+			boolean: new Set(["-y", "--yes", "-s", "--silent", "-q", "--quiet", "-ws", "--workspaces", "--offline", "--prefer-offline"]),
+			value: new Set(["--prefix", "-w", "--workspace"]),
+		},
+	],
+	[
+		"pnpm",
+		{
+			boolean: new Set(["-w", "--workspace-root", "-r", "--recursive", "-s", "--silent"]),
+			value: new Set(["-C", "--dir", "-F", "--filter"]),
+		},
+	],
+	["yarn", { boolean: new Set(["-s", "--silent"]), value: new Set(["--cwd"]) }],
+	["bun", { boolean: new Set(["--silent"]), value: new Set(["--cwd"]) }],
+]);
+
 /** Every wrapper name that fetches or runs a package binary, as recorded in {@link CanonicalInvocation.wrappers}. */
 export const PACKAGE_RUNNER_WRAPPERS: ReadonlySet<string> = new Set([
 	...[...WRAPPER_GRAMMARS].filter(([, grammar]) => grammar === PACKAGE_RUNNER_GRAMMAR).map(([name]) => name),
@@ -556,6 +576,33 @@ function consumeWrapperOptions(
 	return { index: i + operands, confident: true };
 }
 
+interface PackageManagerRunner {
+	readonly subcommandIndex: number;
+	readonly confident: boolean;
+	/** Where resolution stopped when `confident` is false. */
+	readonly stopIndex: number;
+}
+
+/** Find `exec`/`dlx`/`x` past a package manager's global options (`npm --yes exec`, `pnpm -C . dlx`). */
+function locatePackageManagerRunner(values: readonly string[], start: number, verb: string): PackageManagerRunner | undefined {
+	const subcommands = PACKAGE_MANAGER_RUNNERS.get(verb);
+	const globals = PACKAGE_MANAGER_GLOBAL_GRAMMARS.get(verb);
+	if (subcommands === undefined || globals === undefined) {
+		return undefined;
+	}
+	const consumed = consumeWrapperOptions(values, start + 1, globals, () => {});
+	if (consumed.confident) {
+		const isRunner = subcommands.has(values[consumed.index] ?? "");
+		return isRunner ? { subcommandIndex: consumed.index, confident: true, stopIndex: consumed.index } : undefined;
+	}
+	// An unknown global option may or may not take a value, so any later runner subcommand fails closed.
+	const offset = values.slice(consumed.index).findIndex((word) => subcommands.has(word));
+	if (offset === -1) {
+		return undefined;
+	}
+	return { subcommandIndex: consumed.index + offset, confident: false, stopIndex: consumed.index };
+}
+
 /**
  * Consume recognised wrappers and their option grammars; `values[index]` is the real executable.
  * Names go through {@link normaliseExecutable} so `/usr/bin/env git push` and `env.exe` resolve.
@@ -568,15 +615,18 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 
 	while (i < values.length) {
 		const verb = normaliseExecutable(values[i]);
-		const runnerSubcommand = values[i + 1];
-		const isPackageManagerRunner =
-			runnerSubcommand !== undefined && PACKAGE_MANAGER_RUNNERS.get(verb)?.has(runnerSubcommand) === true;
-		const grammar = isPackageManagerRunner ? PACKAGE_RUNNER_GRAMMAR : WRAPPER_GRAMMARS.get(verb);
+		const runner = locatePackageManagerRunner(values, i, verb);
+		const grammar = runner !== undefined ? PACKAGE_RUNNER_GRAMMAR : WRAPPER_GRAMMARS.get(verb);
 		if (grammar === undefined) {
 			break;
 		}
-		wrappers.push(isPackageManagerRunner ? `${verb} ${runnerSubcommand}` : verb);
-		const optionsStart = isPackageManagerRunner ? i + 2 : i + 1;
+		wrappers.push(runner !== undefined ? `${verb} ${values[runner.subcommandIndex]}` : verb);
+		if (runner !== undefined && !runner.confident) {
+			i = runner.stopIndex;
+			confident = false;
+			break;
+		}
+		const optionsStart = runner !== undefined ? runner.subcommandIndex + 1 : i + 1;
 		const consumed = consumeWrapperOptions(values, optionsStart, grammar, (option, value) => {
 			if (verb === "env" && (option === "-C" || option === "--chdir")) {
 				cwdOverride = value;

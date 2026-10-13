@@ -238,6 +238,27 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 		why: "pnpm's dlx subcommand runs a package binary, so it resolves like npx",
 	},
 	{
+		label: "npm global option before exec",
+		cmd: "npm --yes exec openspec update",
+		expectedExecutable: "openspec",
+		expectedWrappers: ["npm exec"],
+		why: "npm accepts global options before its subcommand, so `exec` is not always the next word",
+	},
+	{
+		label: "pnpm -C before dlx",
+		cmd: "pnpm -C . dlx @fission-ai/openspec update",
+		expectedExecutable: "@fission-ai/openspec",
+		expectedWrappers: ["pnpm dlx"],
+		why: "-C takes a value, so the subcommand is two words later",
+	},
+	{
+		label: "yarn --cwd before dlx",
+		cmd: "yarn --cwd . dlx @fission-ai/openspec update",
+		expectedExecutable: "@fission-ai/openspec",
+		expectedWrappers: ["yarn dlx"],
+		why: "same as pnpm -C for yarn's --cwd",
+	},
+	{
 		label: "npm run deploy (task-runner indirection)",
 		cmd: "npm run deploy",
 		outOfScope: true,
