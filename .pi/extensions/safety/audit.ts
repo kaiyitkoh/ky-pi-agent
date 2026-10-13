@@ -32,11 +32,7 @@ export function redactSecrets(text: string): string {
 }
 
 /** Append one audit row to <cwd>/.pi/logs/audit-*.jsonl; returns the path, or undefined on failure. NEVER THROWS. */
-export function writeAuditRow(
-	cwd: string,
-	input: AuditRowInput,
-	opts: WriteAuditRowOptions = {},
-): string | undefined {
+export function writeAuditRow(cwd: string, input: AuditRowInput, opts: WriteAuditRowOptions = {}): string | undefined {
 	const row: AuditRow = {
 		ts: input.ts ?? Date.now(),
 		event: input.event,
@@ -46,16 +42,10 @@ export function writeAuditRow(
 		verdict: input.verdict,
 		reason: redactSecrets(input.reason),
 		pid: input.pid ?? process.pid,
+		...(input.parentToolCallId !== undefined ? { parentToolCallId: input.parentToolCallId } : {}),
 	};
-	if (input.parentToolCallId !== undefined) {
-		row.parentToolCallId = input.parentToolCallId;
-	}
-
 	try {
-		return appendJsonl(cwd, AUDIT_LOG_BASE, row, {
-			rotateBytes: opts.rotateBytes ?? AUDIT_ROTATE_BYTES,
-			now: opts.now,
-		});
+		return appendJsonl(cwd, AUDIT_LOG_BASE, row, { rotateBytes: opts.rotateBytes ?? AUDIT_ROTATE_BYTES, now: opts.now });
 	} catch {
 		// Never rethrown: a throw here could bypass the caller's guard logic.
 		return undefined;

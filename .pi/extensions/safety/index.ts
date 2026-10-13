@@ -6,10 +6,11 @@
 import { homedir, tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
 
+import type { AgentTool } from "@earendil-works/pi-agent-core";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-coding-agent";
-import { Type } from "typebox";
+import { Type, type TSchema } from "typebox";
 
 import { approve, consume, createPending, grantConfirmed, markHookDeferred, peek, validate } from "./approvals.ts";
 import { pruneAuditLogs, writeAuditRow } from "./audit.ts";
@@ -17,12 +18,11 @@ import type { AuditVerdict } from "./schema.ts";
 import { currentBranch, gitConfigValues, resolveLocalBranch } from "./git.ts";
 import { canonicalisePathArg } from "./paths.ts";
 import { evaluate, type PolicyFacts, type Verdict } from "./policy.ts";
-import { BUILTIN_PROTECTED, BUILTIN_PUSH_ONLY, effectiveBranches } from "./branches.ts";
+import { BUILTIN_PROTECTED, effectiveBranches } from "./branches.ts";
 import { classifySubagentCall, disposeChildGuard, isChildGuardRegistered, registerChildGuard } from "./subagents.ts";
 
 export { protectedBranchesFor } from "./branches.ts";
 
-// Exported so tests import these literals instead of retyping them.
 export const APPROVE_TOOL_NAME = "approve_ky_command";
 
 export const HOOK_AUDIT_EVENT = "safety.tool_call_hook";
@@ -33,9 +33,6 @@ export const APPROVAL_AUDIT_EVENT = "safety.approve_ky_command";
 
 /** Forwarded to git.ts#classifyGitInvocation; compared case-insensitively there. */
 export const PROTECTED_BRANCHES: readonly string[] = BUILTIN_PROTECTED;
-
-/** A push may never reach these; a commit on staging is not refused, only pushing to it. */
-export const PUSH_PROTECTED_BRANCHES: readonly string[] = [...BUILTIN_PROTECTED, ...BUILTIN_PUSH_ONLY];
 
 /** An unanswered confirm refuses after this long; Pi dismisses the dialog with false on timeout. */
 export const CONFIRM_TIMEOUT_MS = 300_000;
@@ -49,24 +46,22 @@ async function askUser(ctx: ExtensionContext, title: string, message: string): P
 	return (await ctx.ui.confirm(title, message, { timeout: CONFIRM_TIMEOUT_MS })) === true;
 }
 
-function sessionIdOf(ctx: ExtensionContext): string | undefined {
-	// NEVER THROWS: no session id means no child guard to register, not a failed session start.
+function orElse<T>(read: () => T, fallback: T): T {
 	try {
-		return ctx.sessionManager.getSessionId();
+		return read();
 	} catch {
-		return undefined;
+		return fallback;
 	}
 }
 
-/** Paths of the loaded `subagent` tool; empty when Pi cannot list tools. */
-function subagentSourcePaths(pi: ExtensionAPI): string[] {
-	// NEVER THROWS: no listing means no path, and registration then fails closed.
-	try {
-		return pi.getAllTools().filter((t) => t.name === "subagent").map((t) => t.sourceInfo.path);
-	} catch {
-		return [];
-	}
-}
+// No session id means no child guard to register, not a failed session start.
+const sessionIdOf = (ctx: ExtensionContext): string | undefined => orElse<string | undefined>(() => ctx.sessionManager.getSessionId(), undefined);
+
+// No tool listing means no path, and child-guard registration then fails closed.
+const subagentSourcePaths = (pi: ExtensionAPI): string[] =>
+	orElse(() => pi.getAllTools().filter((t) => t.name === "subagent").map((t) => t.sourceInfo.path), []);
+
+const safeStringify = (value: unknown): string => orElse(() => JSON.stringify(value) ?? "", "");
 
 const APPROVE_CHOICE = "Approve";
 const DENY_CHOICE = "Deny";
@@ -102,11 +97,11 @@ function buildFacts(ctx: ExtensionContext): PolicyFacts {
 		projectRoot: cwd,
 		home: toCanonicalRoot(homedir()),
 		// Lazy: only invoked for an invocation whose executable is literally "git".
-		currentBranchFor: (cwd: string) => currentBranch(cwd),
+		currentBranchFor: currentBranch,
 		protectedBranches: branches.protectedBranches,
 		pushProtectedBranches: branches.pushProtectedBranches,
-		gitConfigFor: (dir: string, key: string) => gitConfigValues(dir, key),
-		gitBranchFor: (dir: string, rev: string) => resolveLocalBranch(dir, rev),
+		gitConfigFor: gitConfigValues,
+		gitBranchFor: resolveLocalBranch,
 		kubeconfigEnv: process.env.KUBECONFIG,
 		tempDir: toCanonicalRoot(tmpdir()),
 	};
@@ -114,25 +109,11 @@ function buildFacts(ctx: ExtensionContext): PolicyFacts {
 
 /** Audit-only field extraction; grep falls back to glob then pattern since it can be blocked with no path. Malformed input yields "". */
 function extractCommandOrPath(toolName: string, input: unknown): string {
-	if (input === null || typeof input !== "object") {
-		return "";
-	}
+	if (input === null || typeof input !== "object") return "";
 	const record = input as Record<string, unknown>;
-	if (toolName === "bash" && typeof record.command === "string") {
-		return record.command;
-	}
-	if (typeof record.path === "string") {
-		return record.path;
-	}
-	if (toolName === "grep") {
-		if (typeof record.glob === "string") {
-			return record.glob;
-		}
-		if (typeof record.pattern === "string") {
-			return record.pattern;
-		}
-	}
-	return "";
+	const fields = toolName === "bash" ? ["command", "path"] : toolName === "grep" ? ["path", "glob", "pattern"] : ["path"];
+	const value = fields.map((f) => record[f]).find((v) => typeof v === "string");
+	return typeof value === "string" ? value : "";
 }
 
 /** NEVER THROWS: a classification bug becomes an explicit block verdict instead of relying on Pi turning a handler failure into a block. */
@@ -214,51 +195,31 @@ function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext
 }
 
 /**
- * Wrap bash/read/write/edit so execute() re-evaluates the params that actually arrive (second enforcement layer).
- * grep/find/ls are deliberately not wrapped: extension tools are force-activated (agent-session.js)
- * against Pi's default set (sdk.js), costing ~532 tokens/turn; they stay hook-only (docs/SAFETY.md).
- * Delegates are built fresh from ctx.cwd per call so policy and the real tool act on the same root.
- * The delegate call omits ctx: AgentTool.execute declares no fifth parameter (agent-core types.d.ts AgentTool).
+ * Wrap one built-in so execute() re-evaluates the params that actually arrive (second enforcement layer). The delegate is
+ * built fresh from ctx.cwd per call so policy and the real tool act on the same root; the process.cwd() instance only
+ * supplies static metadata. The delegate call omits ctx: AgentTool.execute declares no fifth parameter (agent-core types.d.ts).
+ */
+function registerWrapped<P extends TSchema, D>(pi: ExtensionAPI, create: (cwd: string) => AgentTool<P, D>): void {
+	const metadata = create(process.cwd());
+	const toolName = metadata.name;
+	pi.registerTool({
+		...metadata,
+		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
+			wrapperOutcome(toolName, extractCommandOrPath(toolName, params), ctx, classifyAtWrapper(toolName, params, ctx));
+			return create(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
+		},
+	});
+}
+
+/**
+ * grep/find/ls are deliberately not wrapped: extension tools are force-activated (agent-session.js) against Pi's
+ * default set (sdk.js), costing ~532 tokens/turn; they stay hook-only (docs/SAFETY.md).
  */
 function registerWrappedTools(pi: ExtensionAPI): void {
-	// Static metadata only (name/description/schema); this instance's execute never runs.
-	const metadataCwd = process.cwd();
-
-	pi.registerTool({
-		...createBashTool(metadataCwd),
-		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const command = extractCommandOrPath("bash", params);
-			wrapperOutcome("bash", command, ctx, classifyAtWrapper("bash", params, ctx));
-			return createBashTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...createReadTool(metadataCwd),
-		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const command = extractCommandOrPath("read", params);
-			wrapperOutcome("read", command, ctx, classifyAtWrapper("read", params, ctx));
-			return createReadTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...createWriteTool(metadataCwd),
-		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const command = extractCommandOrPath("write", params);
-			wrapperOutcome("write", command, ctx, classifyAtWrapper("write", params, ctx));
-			return createWriteTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
-		},
-	});
-
-	pi.registerTool({
-		...createEditTool(metadataCwd),
-		execute: async (toolCallId, params, signal, onUpdate, ctx) => {
-			const command = extractCommandOrPath("edit", params);
-			wrapperOutcome("edit", command, ctx, classifyAtWrapper("edit", params, ctx));
-			return createEditTool(ctx.cwd).execute(toolCallId, params, signal, onUpdate);
-		},
-	});
+	registerWrapped(pi, createBashTool);
+	registerWrapped(pi, createReadTool);
+	registerWrapped(pi, createWriteTool);
+	registerWrapped(pi, createEditTool);
 }
 
 /** Parameter schema; blast_radius uses StringEnum because Type.Union/Literal breaks Google's API. 275 tokens measured. */
@@ -291,15 +252,14 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { request_id, command, reason, summary, blast_radius } = params;
 			const row = { event: APPROVAL_AUDIT_EVENT, tool: APPROVE_TOOL_NAME, command, cwd: ctx.cwd };
+			const refuse: (why: string, message: string) => never = (why, message) => {
+				writeAuditRow(ctx.cwd, { ...row, verdict: "block", reason: why });
+				throw new Error(message);
+			};
 			if (!validate(request_id, command, reason)) {
-				writeAuditRow(ctx.cwd, {
-					...row,
-					verdict: "block",
-					reason:
-						`validate() refused request_id="${request_id}": no matching unexpired pending entry, or the ` +
+				refuse(
+					`validate() refused request_id="${request_id}": no matching unexpired pending entry, or the ` +
 						"presented command/reason did not match byte-for-byte",
-				});
-				throw new Error(
 					`Approval refused: request_id "${request_id}" does not match a pending, unexpired approval for ` +
 						"this exact command and reason. Re-issue the ORIGINAL blocked command to get a fresh request id.",
 				);
@@ -316,21 +276,20 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 				: undefined;
 
 			if (choice !== APPROVE_CHOICE) {
-				writeAuditRow(ctx.cwd, {
-					...row,
-					verdict: "block",
-					reason: canConfirm(ctx)
+				refuse(
+					canConfirm(ctx)
 						? `user did not select "${APPROVE_CHOICE}" within ${CONFIRM_TIMEOUT_MS} ms`
 						: `no UI that can answer a dialog (mode "${ctx.mode}") -- approval requires an interactive confirmation`,
-				});
-				throw new Error(`Approval refused for "${command}". It stays blocked.`);
+					`Approval refused for "${command}". It stays blocked.`,
+				);
 			}
 
 			if (!approve(request_id, command, reason)) {
 				// Unreachable after validate(); denied rather than assumed.
-				const why = "approve() returned false immediately after validate() returned true -- treated as a refusal, never an allow";
-				writeAuditRow(ctx.cwd, { ...row, verdict: "block", reason: why });
-				throw new Error(`Approval could not be recorded for "${command}". It stays blocked.`);
+				refuse(
+					"approve() returned false immediately after validate() returned true -- treated as a refusal, never an allow",
+					`Approval could not be recorded for "${command}". It stays blocked.`,
+				);
 			}
 
 			writeAuditRow(ctx.cwd, { ...row, verdict: "allow", reason: `approved by explicit user selection -- ${summary}` });
@@ -358,14 +317,6 @@ const DENY_COMMAND_MAX = 2000;
 
 function isDeniedToolName(name: string): boolean {
 	return DENIED_TOOL_NAMES.has(name) || DENIED_TOOL_PREFIXES.some((p) => name.startsWith(p));
-}
-
-function safeStringify(value: unknown): string {
-	try {
-		return JSON.stringify(value) ?? "";
-	} catch {
-		return "";
-	}
 }
 
 /**
@@ -410,73 +361,58 @@ function registerToolCallHook(pi: ExtensionAPI, secondLoad = false): void {
 		const audit = (tool: string, command: string, verdict: AuditVerdict, reason: string): void => {
 			writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool, command, cwd: ctx.cwd, verdict, reason, parentToolCallId: event.parentToolCallId });
 		};
+		const allow = (tool: string, command: string, reason: string): undefined => {
+			audit(tool, command, "allow", reason);
+			return undefined;
+		};
+		const deny = (tool: string, command: string, reason: string): ToolCallEventResult => {
+			audit(tool, command, "block", reason);
+			return { block: true, reason };
+		};
 		const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
 
-		// Deny table: fail closed, even on malformed input.
 		if (isDeniedToolName(event.toolName)) {
 			// Never persist raw input of a denied tool (may carry tokens): command string or top-level keys only.
 			const raw = typeof rec.command === "string" ? rec.command : `[input keys: ${Object.keys(rec).join(",")}]`;
 			const reason =
 				`"${event.toolName}" is not covered by the ky-pi-agent guard (unparseable or unreviewed tool path) -- ` +
 				"it is blocked. Use bash, read, write or edit instead.";
-			audit(event.toolName, raw.slice(0, DENY_COMMAND_MAX), "block", reason);
-			return { block: true, reason };
+			return deny(event.toolName, raw.slice(0, DENY_COMMAND_MAX), reason);
 		}
 
 		if (event.toolName === "bg_run") {
 			const bg = guardBgRun(event.input, ctx);
 			const command = (typeof rec.command === "string" ? rec.command : safeStringify(event.input)).slice(0, DENY_COMMAND_MAX);
-			if (bg.kind === "allow") {
-				audit("bg_run", command, "allow", "hook: allowed (bg_run classified as bash)");
-				return undefined;
-			}
-			audit("bg_run", command, "block", bg.reason);
-			return { block: true, reason: bg.reason };
+			return bg.kind === "allow" ? allow("bg_run", command, "hook: allowed (bg_run classified as bash)") : deny("bg_run", command, bg.reason);
 		}
 
 		if (event.toolName === "subagent") {
 			const call = classifySubagentCall(event.input);
-			const input = safeStringify(event.input).slice(0, DENY_COMMAND_MAX);
-			if (call.kind === "read") {
-				audit("subagent", input, "allow", `hook: read-only subagent action "${call.action}"`);
-				return undefined;
-			}
+			const full = safeStringify(event.input);
+			const input = full.slice(0, DENY_COMMAND_MAX);
+			if (call.kind === "read") return allow("subagent", input, `hook: read-only subagent action "${call.action}"`);
 			if (call.kind === "launch") {
 				const sessionId = sessionIdOf(ctx);
-				if (sessionId !== undefined && isChildGuardRegistered(sessionId)) {
-					audit("subagent", input, "allow", "hook: subagent launch with the required child guard registered");
-					return undefined;
-				}
-				const reason = "subagent launch refused: the safety guard could not be registered as a required child extension, so children would run unguarded";
-				audit("subagent", input, "block", reason);
-				return { block: true, reason };
+				return sessionId !== undefined && isChildGuardRegistered(sessionId)
+					? allow("subagent", input, "hook: subagent launch with the required child guard registered")
+					: deny("subagent", input, "subagent launch refused: the safety guard could not be registered as a required child extension, so children would run unguarded");
 			}
 			if (!canConfirm(ctx)) {
-				const reason = `subagent action "${call.action}" changes agent definitions or schedules and needs a human confirm; none is available (mode "${ctx.mode}")`;
-				audit("subagent", input, "block", reason);
-				return { block: true, reason };
+				return deny("subagent", input, `subagent action "${call.action}" changes agent definitions or schedules and needs a human confirm; none is available (mode "${ctx.mode}")`);
 			}
 			// The human must see the whole definition that would be written, so one too long to show is refused.
-			if (safeStringify(event.input).length > DENY_COMMAND_MAX) {
-				const reason = `subagent action "${call.action}" is longer than ${DENY_COMMAND_MAX} characters, too long to show in full for a confirm`;
-				audit("subagent", input, "block", reason);
-				return { block: true, reason };
+			if (full.length > DENY_COMMAND_MAX) {
+				return deny("subagent", input, `subagent action "${call.action}" is longer than ${DENY_COMMAND_MAX} characters, too long to show in full for a confirm`);
 			}
-			const confirmKey = `${event.toolCallId}\0${safeStringify(event.input)}`;
+			const confirmKey = `${event.toolCallId}\0${full}`;
 			if (secondLoad && takeSubagentConfirm(confirmKey)) {
-				audit("subagent", input, "allow", `hook: subagent action "${call.action}" already confirmed by the user in another loaded copy`);
-				return undefined;
+				return allow("subagent", input, `hook: subagent action "${call.action}" already confirmed by the user in another loaded copy`);
 			}
-			if (!(await askUser(ctx, "Allow this subagent definition change?", `action: ${call.action}
-
-${input}`))) {
-				const reason = `subagent action "${call.action}" was declined by the user`;
-				audit("subagent", input, "block", reason);
-				return { block: true, reason };
+			if (!(await askUser(ctx, "Allow this subagent definition change?", `action: ${call.action}\n\n${input}`))) {
+				return deny("subagent", input, `subagent action "${call.action}" was declined by the user`);
 			}
 			recordSubagentConfirm(confirmKey);
-			audit("subagent", input, "allow", `hook: subagent action "${call.action}" confirmed by the user`);
-			return undefined;
+			return allow("subagent", input, `hook: subagent action "${call.action}" confirmed by the user`);
 		}
 
 		if (!HOOKED_TOOL_NAMES.has(event.toolName)) return undefined;
@@ -484,41 +420,28 @@ ${input}`))) {
 		const command = extractCommandOrPath(toolName, event.input);
 		const verdict = classifyAtWrapper(toolName, event.input, ctx);
 
-		if (verdict.kind === "allow") {
-			audit(toolName, command, "allow", "hook: allowed");
-			return undefined;
-		}
+		if (verdict.kind === "allow") return allow(toolName, command, "hook: allowed");
 
 		if (verdict.kind === "ask") {
 			if (peek(verdict.requestKey) && markHookDeferred(verdict.requestKey, event.toolCallId)) {
-				audit(toolName, command, "allow", `hook: a confirmation grant is present for this exact push -- deferring to the wrapper -- ${verdict.reason}`);
-				return undefined;
+				return allow(toolName, command, `hook: a confirmation grant is present for this exact push -- deferring to the wrapper -- ${verdict.reason}`);
 			}
 			if (!canConfirm(ctx)) {
-				const reason = `${verdict.reason} -- no interactive UI to confirm it (mode "${ctx.mode}"), so it is refused`;
-				audit(toolName, command, "block", reason);
-				return { block: true, reason };
+				return deny(toolName, command, `${verdict.reason} -- no interactive UI to confirm it (mode "${ctx.mode}"), so it is refused`);
 			}
-			if (!(await askUser(ctx, verdict.title, `${command}
-
-${verdict.prompt}`))) {
-				const reason = `${verdict.reason} -- the user declined it`;
-				audit(toolName, command, "block", reason);
-				return { block: true, reason };
+			if (!(await askUser(ctx, verdict.title, `${command}\n\n${verdict.prompt}`))) {
+				return deny(toolName, command, `${verdict.reason} -- the user declined it`);
 			}
 			grantConfirmed(verdict.requestKey, command, verdict.reason);
 			markHookDeferred(verdict.requestKey, event.toolCallId);
-			audit(toolName, command, "allow", `hook: confirmed by the user -- ${verdict.reason}`);
-			return undefined;
+			return allow(toolName, command, `hook: confirmed by the user -- ${verdict.reason}`);
 		}
 
 		if (verdict.kind === "confirm") {
 			// A grant exists: defer to the wrapper, which consumes it; never consume here. Deferral is scoped to one
 			// toolCallId so every double-loaded copy of one call may defer (approvals.ts#markHookDeferred).
 			if (peek(verdict.requestKey) && markHookDeferred(verdict.requestKey, event.toolCallId)) {
-				const why = `hook: an approval grant is present for this exact command -- deferring to the wrapper's one-shot consume -- ${verdict.reason}`;
-				audit(toolName, command, "allow", why);
-				return undefined;
+				return allow(toolName, command, `hook: an approval grant is present for this exact command -- deferring to the wrapper's one-shot consume -- ${verdict.reason}`);
 			}
 			const requestId = createPending(verdict.requestKey, command, verdict.reason);
 			audit(toolName, command, "block", verdict.reason);
@@ -531,8 +454,7 @@ ${verdict.prompt}`))) {
 			};
 		}
 
-		audit(toolName, command, "block", verdict.reason);
-		return { block: true, reason: verdict.reason };
+		return deny(toolName, command, verdict.reason);
 	});
 }
 
@@ -570,30 +492,26 @@ export default function (pi: ExtensionAPI): void {
 	registerToolCallHook(pi);
 
 	pi.on("session_start", async (_event, ctx) => {
-		// NEVER THROWS: pruning is retention only, so a failure must not affect session start.
 		try {
 			pruneAuditLogs(ctx.cwd);
 		} catch {
-			// Swallowed deliberately.
+			// Retention only: a failed prune must not affect session start.
 		}
 		reportBranchWarnings(ctx, effectiveBranches(ctx.cwd).warnings, true);
 		const sessionId = sessionIdOf(ctx);
-		if (sessionId !== undefined) {
-			// Not fatal: the subagent launch branch fails closed on its own, but the cause is recorded and shown.
-			const registered = await registerChildGuard(sessionId, fileURLToPath(new URL("./index.ts", import.meta.url)), ctx.cwd, subagentSourcePaths(pi));
-			if (!registered.ok) {
-				const reason = `the safety guard could not be registered for subagent children, so subagent launches are refused: ${registered.reason}`;
-				writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool: "subagent", command: "", cwd: ctx.cwd, verdict: "block", reason });
-				if (ctx.hasUI) ctx.ui.notify(reason, "warning");
-			}
+		if (sessionId === undefined) return;
+		// Not fatal: the subagent launch branch fails closed on its own, but the cause is recorded and shown.
+		const registered = await registerChildGuard(sessionId, fileURLToPath(new URL("./index.ts", import.meta.url)), ctx.cwd, subagentSourcePaths(pi));
+		if (!registered.ok) {
+			const reason = `the safety guard could not be registered for subagent children, so subagent launches are refused: ${registered.reason}`;
+			writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool: "subagent", command: "", cwd: ctx.cwd, verdict: "block", reason });
+			if (ctx.hasUI) ctx.ui.notify(reason, "warning");
 		}
 	});
 
 	pi.on("session_shutdown", async (_event, ctx) => {
 		const sessionId = sessionIdOf(ctx);
-		if (sessionId !== undefined) {
-			disposeChildGuard(sessionId);
-		}
+		if (sessionId !== undefined) disposeChildGuard(sessionId);
 	});
 
 	// Last, so only a copy whose every registration succeeded answers.

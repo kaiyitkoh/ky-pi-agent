@@ -45,13 +45,8 @@ export const APPROVALS_STORE_KEY = "__kyPiSafetyApprovalsStore";
 
 function getStore(): ApprovalsStore {
 	const globalSlot = globalThis as unknown as Record<string, ApprovalsStore | undefined>;
-	const existing = globalSlot[APPROVALS_STORE_KEY];
-	if (existing !== undefined) {
-		return existing;
-	}
-	const created: ApprovalsStore = { pending: new Map(), granted: new Map(), hookDeferred: new Map() };
-	globalSlot[APPROVALS_STORE_KEY] = created;
-	return created;
+	globalSlot[APPROVALS_STORE_KEY] ??= { pending: new Map(), granted: new Map(), hookDeferred: new Map() };
+	return globalSlot[APPROVALS_STORE_KEY];
 }
 
 /** Record a pending request fingerprinted by policy.ts#computeRequestKey; returns the random request id the model must echo back. */
@@ -65,48 +60,22 @@ export function createPending(requestKey: string, command: string, reason: strin
 
 /** Drop expired entries on every createPending so the maps cannot grow unbounded; no timer. */
 function sweepExpired(store: ApprovalsStore, now: number): void {
-	for (const [id, entry] of store.pending) {
-		if (entry.expiresAt <= now) {
-			store.pending.delete(id);
-		}
-	}
-	for (const [key, grant] of store.granted) {
-		if (grant.expiresAt <= now) {
-			store.granted.delete(key);
-		}
-	}
-	// Deferral markers are short-lived but swept too.
-	for (const [key, marker] of store.hookDeferred) {
-		if (marker.expiresAt <= now) {
-			store.hookDeferred.delete(key);
-		}
+	for (const map of [store.pending, store.granted, store.hookDeferred] as Map<string, { readonly expiresAt: number }>[]) {
+		for (const [key, entry] of map) if (entry.expiresAt <= now) map.delete(key);
 	}
 }
 
 /** Pure: true only for an unexpired id whose command and reason match the pending entry byte-for-byte. */
 export function validate(id: string, command: string, reason: string, now: number = Date.now()): boolean {
-	const store = getStore();
-	const entry = store.pending.get(id);
-	if (entry === undefined) {
-		return false;
-	}
-	if (entry.expiresAt <= now) {
-		return false;
-	}
-	return entry.command === command && entry.reason === reason;
+	const entry = getStore().pending.get(id);
+	return entry !== undefined && entry.expiresAt > now && entry.command === command && entry.reason === reason;
 }
 
 /** On a valid triple, replace the pending entry with a one-shot grant keyed on requestKey; a failed validation leaves it for a corrected retry. */
 export function approve(id: string, command: string, reason: string, now: number = Date.now()): boolean {
-	if (!validate(id, command, reason, now)) {
-		return false;
-	}
 	const store = getStore();
 	const entry = store.pending.get(id);
-	if (entry === undefined) {
-		// Unreachable after validate(); denied rather than assumed.
-		return false;
-	}
+	if (entry === undefined || !validate(id, command, reason, now)) return false;
 	store.pending.delete(id);
 	store.granted.set(entry.requestKey, { command, reason, expiresAt: now + APPROVAL_TTL_MS });
 	return true;
@@ -124,12 +93,8 @@ export function grantConfirmed(requestKey: string, command: string, reason: stri
 
 /** Non-consuming read for the hook: consuming there would leave the wrapper's consume() nothing and block the approved command. */
 export function peek(requestKey: string, now: number = Date.now()): boolean {
-	const store = getStore();
-	const grant = store.granted.get(requestKey);
-	if (grant === undefined) {
-		return false;
-	}
-	return grant.expiresAt > now;
+	const grant = getStore().granted.get(requestKey);
+	return grant !== undefined && grant.expiresAt > now;
 }
 
 /** One-shot: removes the grant whatever the expiry outcome. A different command has a different requestKey and never matches. */
@@ -138,11 +103,8 @@ export function consume(requestKey: string, now: number = Date.now()): boolean {
 	const grant = store.granted.get(requestKey);
 	// The wrapper ran for this key, so any deferral marker is stale.
 	store.hookDeferred.delete(requestKey);
-	if (grant === undefined) {
-		return false;
-	}
 	store.granted.delete(requestKey);
-	return grant.expiresAt > now;
+	return grant !== undefined && grant.expiresAt > now;
 }
 
 /**

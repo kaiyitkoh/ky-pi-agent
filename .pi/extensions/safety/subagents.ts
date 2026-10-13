@@ -8,36 +8,17 @@ import { dirname, isAbsolute, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 /** Actions that only inspect or control an existing run; every other action string is treated as a management change. */
-export const SUBAGENT_READ_ONLY_ACTIONS: ReadonlySet<string> = new Set([
-	"guide",
-	"list",
-	"get",
-	"models",
-	"status",
-	"children.list",
-	"validate",
-	"doctor",
-	"inspector.status",
-	"project.status",
-	"steer",
-	"resume",
-	"stop",
-]);
+export const SUBAGENT_READ_ONLY_ACTIONS: ReadonlySet<string> = new Set(
+	"guide list get models status children.list validate doctor inspector.status project.status steer resume stop".split(" "),
+);
 
 export type SubagentCallKind = { kind: "launch" } | { kind: "read"; action: string } | { kind: "manage"; action: string };
 
 /** An absent action launches children; a non-string action is not trusted and counts as management. */
 export function classifySubagentCall(input: unknown): SubagentCallKind {
-	if (input === null || typeof input !== "object" || Array.isArray(input)) {
-		return { kind: "manage", action: "" };
-	}
-	const action = (input as Record<string, unknown>).action;
-	if (action === undefined) {
-		return { kind: "launch" };
-	}
-	if (typeof action !== "string") {
-		return { kind: "manage", action: "" };
-	}
+	const action = input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>).action : "";
+	if (action === undefined) return { kind: "launch" };
+	if (typeof action !== "string") return { kind: "manage", action: "" };
 	return SUBAGENT_READ_ONLY_ACTIONS.has(action) ? { kind: "read", action } : { kind: "manage", action };
 }
 
@@ -101,9 +82,7 @@ export function resolveRequiredChildModule(sourcePaths: readonly string[]): stri
 }
 
 async function loadRequiredChildModule(cwd: string, sourcePaths: readonly string[]): Promise<RequiredChildModule> {
-	if (testLoader !== undefined) {
-		return (await testLoader(cwd)) as RequiredChildModule;
-	}
+	if (testLoader !== undefined) return (await testLoader(cwd)) as RequiredChildModule;
 	const file = resolveRequiredChildModule(sourcePaths);
 	if (file === undefined) {
 		throw new Error(
@@ -122,9 +101,7 @@ export async function registerChildGuard(
 	cwd: string,
 	subagentSourcePaths: readonly string[] = [],
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
-	if (guards().has(sessionId)) {
-		return { ok: true };
-	}
+	if (guards().has(sessionId)) return { ok: true };
 	try {
 		const mod = await loadRequiredChildModule(cwd, subagentSourcePaths);
 		const handle = mod.registerRequiredChildExtensions({
