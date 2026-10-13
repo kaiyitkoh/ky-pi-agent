@@ -15,11 +15,12 @@
  *   a wrapper the same rule applies to the resolved word, and any expansion in a wrapper word is refused.
  * - `git $((1+1))` does not yield `ArithmeticCommandExpansion`; the fixture is `echo $(( $(echo 1) ))`.
  * - Every wrapper's option arity is tabulated: a wrong flag arity silently mis-resolves
- *   (`sudo -u root git push` must not resolve to `root`); shell-parse.test.ts pins `-u` and `-C`.
- *   An option, operand or `NAME=value` the table cannot account for marks the resolution
- *   unconfident, and an unconfident segment carrying a guarded verb is refused, never allowed.
+ *   (`sudo -u root git push` must not resolve to `root`). An option, operand or `NAME=value` the
+ *   table cannot account for marks the resolution unconfident, and an unconfident segment that
+ *   mentions a guarded verb is refused.
  * - A shell runner carrying a guarded verb (`sh -c "git push"`) is denied outright, never routed
- *   to approval, by substring over the raw segment rather than a recursive re-parse.
+ *   to approval, by a word match rather than a recursive re-parse. "Mentions" means the raw segment
+ *   with quotes and backslashes removed, or a quote-resolved word, so `g''it` counts as `git`.
  *
  * Pure: no ctx, fs or child_process, and no default export (extension-layout.test.ts would
  * treat it as an entry point). Registers nothing and never spells the tool-registration call
@@ -668,11 +669,21 @@ function extractInvocations(
 	return extracted;
 }
 
+/**
+ * Raw text with quotes and backslashes removed, plus the quote-resolved words, so `g''it`, `g""it`
+ * and `\git` (which bash runs as `git`) match even when nested inside a runner's script string.
+ */
+function mentionsGuardedVerb(inv: CanonicalInvocation): boolean {
+	const unquotedRaw = inv.rawSegment.replace(/['"\\]/g, "");
+	return (
+		GUARDED_VERB_PATTERN.test(unquotedRaw) ||
+		[inv.executable, ...inv.args].some((word) => GUARDED_VERB_PATTERN.test(word.replace(/['"\\]/g, "")))
+	);
+}
+
 /** Deny when a resolved invocation hands a guarded verb to a shell runner; executable normalised so `/bin/sh -c` and `bash.exe -c` match. */
 function findShellRunnerDenial(invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined {
-	return invocations.find(
-		(inv) => SHELL_RUNNERS.has(normaliseExecutable(inv.executable)) && GUARDED_VERB_PATTERN.test(inv.rawSegment),
-	);
+	return invocations.find((inv) => SHELL_RUNNERS.has(normaliseExecutable(inv.executable)) && mentionsGuardedVerb(inv));
 }
 
 
@@ -711,7 +722,7 @@ export function canonicalise(command: string): ShellVerdict {
 	}
 
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
-	if (extracted.some((e) => !e.confident && GUARDED_VERB_PATTERN.test(e.invocation.rawSegment))) {
+	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(e.invocation))) {
 		return { kind: "refused", cause: "unresolved-wrapper", detail: describeCause("unresolved-wrapper", command) };
 	}
 
