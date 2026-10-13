@@ -1,95 +1,40 @@
 /**
- * bash command parsing: a fail-closed node-type deny predicate, then wrapper
- * resolution to a canonical invocation, so policy classifies `git push` behind a tabulated
- * wrapper (`env`, `sudo`, `npx`) and a wrapper it cannot resolve fails closed.
- *
- * Invariants:
- * - unbash is tolerant: `errors.length === 0` for `git $(echo push)`, `sh -c "git push"`,
- *   heredocs and `nohup git push &`. Denial is by PRESENCE of node types
- *   (`DENIED_PART_TYPES`, heredoc operators, `Statement.background`, expansion in command
- *   position); `errors.length > 0` is only the last catch-all. `script.errors` may be undefined.
- * - `Word.value`/`Word.parts` are self-memoizing getters absent from `Object.keys()`, so
- *   `walkableKeys()` forces them or the walker never descends into substitutions inside a Word.
- * - Command position includes a guarded verb's arguments: `g=push; git $g` has a literal
- *   `git` name and the expansion in `suffix[0]`. Refuse expansion in `Command.name` always, and
- *   in `suffix[]` when the name is literally a guarded verb (`echo "$HOME"` stays allowed). Behind
- *   a wrapper the same rule applies to the resolved word, and any expansion in a wrapper word is refused.
- * - `git $((1+1))` does not yield `ArithmeticCommandExpansion`; the fixture is `echo $(( $(echo 1) ))`.
- * - Every wrapper's option arity is tabulated: a wrong flag arity silently mis-resolves
- *   (`sudo -u root git push` must not resolve to `root`). An option, operand or `NAME=value` the
- *   table cannot account for marks the resolution unconfident, and an unconfident segment that
- *   mentions a guarded verb is refused.
- * - A shell runner carrying a guarded verb (`sh -c "git push"`) is denied outright, never routed
- *   to approval, by a word match rather than a recursive re-parse. "Mentions" means the raw segment
- *   with quotes and backslashes removed, or a quote-resolved word, so `g''it` counts as `git`.
- *
- * Pure: no ctx, fs or child_process, and no default export (extension-layout.test.ts would
- * treat it as an entry point). Registers nothing and never spells the tool-registration call
- * (contributing-boundary.test.ts matches it as a substring).
+ * bash parsing for policy: a fail-closed node-type deny predicate, then resolution of tabulated wrappers
+ * (`env`, `sudo`, `npx`, ...) to the executable that really runs; a wrapper it cannot resolve fails closed.
+ * Parser quirks and the rules' rationale: docs/SAFETY.md "Implementation invariants".
+ * Pure: no ctx, fs, child_process or default export (extension-layout.test.ts would treat it as an entry point).
  */
 import { parse } from "unbash";
 import type { Command, ParsedScript, Word } from "unbash";
 
+const wordSet = (words: string): Set<string> => new Set(words.split(" ").filter((w) => w !== ""));
 
-/**
- * Runtime `.type` strings unbash emits (not the longer `dist/types.d.ts` interface names).
- * Iteration order is the refusal-cause priority (see {@link detectDeniedPartType}).
- */
+/** Runtime `.type` strings unbash emits; iteration order is the refusal-cause priority. */
 export const DENIED_PART_TYPES = new Set(["CommandExpansion", "ProcessSubstitution", "ArithmeticCommandExpansion"]);
 
 /** Redirect operators that write a heredoc/herestring body — refuse all three. */
 export const HEREDOC_OPERATORS = new Set(["<<", "<<-", "<<<"]);
 
-/** Word-part types that mark an UNRESOLVED shell expansion (not a literal value yet). */
-const EXPANSION_PART_TYPES = new Set(["SimpleExpansion", "ParameterExpansion"]);
+/** Word-part types that mark an UNRESOLVED shell expansion. */
+const EXPANSION_PART_TYPES = ["SimpleExpansion", "ParameterExpansion"];
 
-/**
- * Guarded executables, word-bounded so `git` does not match `digit`. A word followed by a path
- * separator is a directory (`openspec/changes`, `.git/config`), not a verb.
- */
+/** Guarded executables, word-bounded; a word followed by a path separator is a directory (`openspec/changes`), not a verb. */
 export const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl|openspec)\b(?![/\\])/i;
 
-/** Runners that can hide a guarded verb in a script argument; denied only when the segment names a {@link GUARDED_VERB_PATTERN} verb. */
-export const SHELL_RUNNERS = new Set([
-	"sh",
-	"bash",
-	"zsh",
-	"dash",
-	"fish",
-	"xargs",
-	"python",
-	"python3",
-	"node",
-	"perl",
-	"ruby",
-	// `eval STRING` runs in the current shell: same hidden-verb shape as `sh -c`. Closes the literal
-	// case only; `CMD="git push"; eval "$CMD"` is a published residual gap (docs/SAFETY.md).
-	"eval",
-	// Joins its operands into one `sh -c` string, so `watch "git push"` has no separable executable.
-	"watch",
-	"ksh",
-	"mksh",
-	"ash",
-	"csh",
-	"tcsh",
-	// Windows interpreters reachable from Git Bash; unbash cannot parse their command strings.
-	"cmd",
-	"powershell",
-	"pwsh",
-	// Each takes a command string or runs one somewhere this guard cannot see (another user, host or root).
-	"su",
-	"script",
-	"parallel",
-	"ssh",
-	"chroot",
-	"strace",
-	"flock",
-]);
+/**
+ * Executables that run a command string or script argument; denied when the segment names a guarded verb.
+ * `eval` closes only the literal case (`eval "$CMD"` is a published gap); `watch` joins its operands into `sh -c`;
+ * the Windows interpreters' strings are unparseable here; su/ssh/chroot/... run where this guard cannot see.
+ */
+export const SHELL_RUNNERS = wordSet(
+	"sh bash zsh dash fish xargs python python3 node perl ruby eval watch ksh mksh ash csh tcsh " +
+		"cmd powershell pwsh su script parallel ssh chroot strace flock",
+);
 
 /** `find`/`fd` primaries that run a command, which makes them runners like `xargs`. */
-const FIND_EXEC_PRIMARIES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-	["find", new Set(["-exec", "-execdir", "-ok", "-okdir"])],
-	["fd", new Set(["-x", "--exec", "-X", "--exec-batch"])],
+const FIND_EXEC_PRIMARIES = new Map([
+	["find", wordSet("-exec -execdir -ok -okdir")],
+	["fd", wordSet("-x --exec -X --exec-batch")],
 ]);
 
 /** Every cause {@link canonicalise} can return; tests iterate it to prove each is reachable. */
@@ -113,69 +58,16 @@ const CAUSE_BY_DENIED_TYPE: Record<string, ShellRefusalCause> = {
 	ArithmeticCommandExpansion: "arithmetic-expansion",
 };
 
-
-/** `env` flags that take no value argument. */
-const ENV_BOOLEAN_OPTIONS = new Set(["-i", "--ignore-environment", "-0", "--null", "-v", "--verbose", "--debug"]);
-
-/** `env` flags that consume the NEXT word as their value — `-C`/`--chdir` is the directory override. */
-const ENV_VALUE_OPTIONS = new Set(["-u", "--unset", "-C", "--chdir"]);
-
-/** `sudo` flags that take no value argument. */
-const SUDO_BOOLEAN_OPTIONS = new Set([
-	"-i",
-	"--login",
-	"-n",
-	"--non-interactive",
-	"-S",
-	"--stdin",
-	"-E",
-	"--preserve-env",
-	"-H",
-	"--set-home",
-	"-b",
-	"--background",
-	"-k",
-	"--reset-timestamp",
-	"-v",
-	"--validate",
-	"-A",
-	"--askpass",
-	"-s",
-	"--shell",
-]);
-
-/** `sudo` flags that consume the NEXT word as their value — `-u`/`--user` is the Pitfall-2 regression case. */
-const SUDO_VALUE_OPTIONS = new Set([
-	"-u",
-	"--user",
-	"-g",
-	"--group",
-	"-p",
-	"--prompt",
-	"-h",
-	"--host",
-	"-C",
-	"--close-from",
-	"-D",
-	"--chdir",
-	"-R",
-	"--chroot",
-	"-T",
-	"--command-timeout",
-	"-U",
-	"--other-user",
-]);
-
-/** One wrapper's option grammar; anything outside it makes resolution unconfident. */
+/** One wrapper's option grammar; a word outside it makes resolution unconfident. A wrong arity silently mis-resolves. */
 interface WrapperGrammar {
-	readonly boolean: ReadonlySet<string>;
+	readonly boolean?: ReadonlySet<string>;
 	/** Options taking a value, as the next word, `--long=value`, or packed short `-o0`. */
-	readonly value: ReadonlySet<string>;
+	readonly value?: ReadonlySet<string>;
 	/** Options whose value is itself a command string, so no separable executable follows. */
 	readonly shellString?: ReadonlySet<string>;
 	/** Positional words before the command (`timeout DURATION`). */
 	readonly operands?: number;
-	/** Accepts `NAME=value` words before the command, as `env` and `sudo` do. */
+	/** Accepts `NAME=value` words before the command. */
 	readonly assignments?: boolean;
 	/** Accepts a bare numeric option (`nice -5`). */
 	readonly numericOption?: boolean;
@@ -183,119 +75,89 @@ interface WrapperGrammar {
 	readonly query?: ReadonlySet<string>;
 }
 
-const NO_OPTIONS: ReadonlySet<string> = new Set();
-
 /** npx/bunx/pnpm dlx and kin: `-p` names the package, `-c` takes a shell string instead of a binary. */
 const PACKAGE_RUNNER_GRAMMAR: WrapperGrammar = {
-	boolean: new Set([
-		"-y",
-		"--yes",
-		"--no",
-		"--no-install",
-		"--ignore-existing",
-		"-q",
-		"--quiet",
-		"--silent",
-		"--prefer-offline",
-		"--prefer-online",
-		"--offline",
-		"--bun",
-	]),
-	value: new Set(["-p", "--package", "-w", "--workspace", "--registry"]),
-	shellString: new Set(["-c", "--call", "--shell-mode"]),
+	boolean: wordSet("-y --yes --no --no-install --ignore-existing -q --quiet --silent --prefer-offline --prefer-online --offline --bun"),
+	value: wordSet("-p --package -w --workspace --registry"),
+	shellString: wordSet("-c --call --shell-mode"),
 };
 
-const WRAPPER_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, WrapperGrammar>([
+const WRAPPER_GRAMMARS = new Map<string, WrapperGrammar>([
 	[
 		"env",
 		{
-			boolean: ENV_BOOLEAN_OPTIONS,
-			value: ENV_VALUE_OPTIONS,
-			shellString: new Set(["-S", "--split-string"]),
+			boolean: wordSet("-i --ignore-environment -0 --null -v --verbose --debug"),
+			value: wordSet("-u --unset -C --chdir"),
+			shellString: wordSet("-S --split-string"),
 			assignments: true,
 		},
 	],
-	["sudo", { boolean: SUDO_BOOLEAN_OPTIONS, value: SUDO_VALUE_OPTIONS, assignments: true }],
-	["doas", { boolean: new Set(["-n", "-s"]), value: new Set(["-u", "-C"]) }],
-	["exec", { boolean: new Set(["-c", "-l"]), value: new Set(["-a"]) }],
 	[
-		"timeout",
+		"sudo",
 		{
-			boolean: new Set(["--preserve-status", "--foreground", "-v", "--verbose"]),
-			value: new Set(["-s", "--signal", "-k", "--kill-after"]),
-			operands: 1,
+			boolean: wordSet("-i --login -n --non-interactive -S --stdin -E --preserve-env -H --set-home -b --background -k --reset-timestamp -v --validate -A --askpass -s --shell"),
+			value: wordSet("-u --user -g --group -p --prompt -h --host -C --close-from -D --chdir -R --chroot -T --command-timeout -U --other-user"),
+			assignments: true,
 		},
 	],
-	["nice", { boolean: NO_OPTIONS, value: new Set(["-n", "--adjustment"]), numericOption: true }],
-	["ionice", { boolean: new Set(["-t", "--ignore"]), value: new Set(["-c", "--class", "-n", "--classdata"]) }],
-	["nohup", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
-	["chronic", { boolean: new Set(["-e", "-v"]), value: NO_OPTIONS }],
-	["setsid", { boolean: new Set(["-c", "--ctty", "-f", "--fork", "-w", "--wait"]), value: NO_OPTIONS }],
-	[
-		"time",
-		{
-			boolean: new Set(["-p", "--portability", "-v", "--verbose", "-a", "--append", "-q", "--quiet"]),
-			value: new Set(["-f", "--format", "-o", "--output"]),
-		},
-	],
-	["stdbuf", { boolean: NO_OPTIONS, value: new Set(["-i", "--input", "-o", "--output", "-e", "--error"]) }],
-	["unbuffer", { boolean: new Set(["-p"]), value: NO_OPTIONS }],
-	["command", { boolean: new Set(["-p"]), value: NO_OPTIONS, query: new Set(["-v", "-V"]) }],
-	["builtin", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
-	["toybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
-	["busybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
-	["winpty", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
+	["doas", { boolean: wordSet("-n -s"), value: wordSet("-u -C") }],
+	["exec", { boolean: wordSet("-c -l"), value: wordSet("-a") }],
+	["timeout", { boolean: wordSet("--preserve-status --foreground -v --verbose"), value: wordSet("-s --signal -k --kill-after"), operands: 1 }],
+	["nice", { value: wordSet("-n --adjustment"), numericOption: true }],
+	["ionice", { boolean: wordSet("-t --ignore"), value: wordSet("-c --class -n --classdata") }],
+	["nohup", {}],
+	["chronic", { boolean: wordSet("-e -v") }],
+	["setsid", { boolean: wordSet("-c --ctty -f --fork -w --wait") }],
+	["time", { boolean: wordSet("-p --portability -v --verbose -a --append -q --quiet"), value: wordSet("-f --format -o --output") }],
+	["stdbuf", { value: wordSet("-i --input -o --output -e --error") }],
+	["unbuffer", { boolean: wordSet("-p") }],
+	["command", { boolean: wordSet("-p"), query: wordSet("-v -V") }],
+	["builtin", {}],
+	["toybox", {}],
+	["busybox", {}],
+	["winpty", {}],
 	["npx", PACKAGE_RUNNER_GRAMMAR],
 	["pnpx", PACKAGE_RUNNER_GRAMMAR],
 	["bunx", PACKAGE_RUNNER_GRAMMAR],
 ]);
 
-/** Package managers whose named subcommand runs a package binary: `npm exec openspec` resolves like `npx openspec`. */
-const PACKAGE_MANAGER_RUNNERS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
-	["npm", new Set(["exec", "x"])],
-	["pnpm", new Set(["dlx", "exec"])],
-	["yarn", new Set(["dlx", "exec"])],
-	["bun", new Set(["x"])],
-]);
-
-/** Global options each package manager accepts before its subcommand. */
-const PACKAGE_MANAGER_GLOBAL_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, WrapperGrammar>([
+/** Package managers whose named subcommand runs a package binary (`npm exec openspec` resolves like `npx openspec`), with the global options accepted before it. */
+const PACKAGE_MANAGER_RUNNERS = new Map<string, { readonly runners: ReadonlySet<string>; readonly globals: WrapperGrammar }>([
 	[
 		"npm",
 		{
-			boolean: new Set(["-y", "--yes", "-s", "--silent", "-q", "--quiet", "-ws", "--workspaces", "--offline", "--prefer-offline"]),
-			value: new Set(["--prefix", "-w", "--workspace"]),
+			runners: wordSet("exec x"),
+			globals: { boolean: wordSet("-y --yes -s --silent -q --quiet -ws --workspaces --offline --prefer-offline"), value: wordSet("--prefix -w --workspace") },
 		},
 	],
 	[
 		"pnpm",
 		{
-			boolean: new Set(["-w", "--workspace-root", "-r", "--recursive", "-s", "--silent"]),
-			value: new Set(["-C", "--dir", "-F", "--filter"]),
+			runners: wordSet("dlx exec"),
+			globals: { boolean: wordSet("-w --workspace-root -r --recursive -s --silent"), value: wordSet("-C --dir -F --filter") },
 		},
 	],
-	["yarn", { boolean: new Set(["-s", "--silent"]), value: new Set(["--cwd"]) }],
-	["bun", { boolean: new Set(["--silent"]), value: new Set(["--cwd"]) }],
+	["yarn", { runners: wordSet("dlx exec"), globals: { boolean: wordSet("-s --silent"), value: wordSet("--cwd") } }],
+	["bun", { runners: wordSet("x"), globals: { boolean: wordSet("--silent"), value: wordSet("--cwd") } }],
 ]);
 
 /** Every wrapper name that fetches or runs a package binary, as recorded in {@link CanonicalInvocation.wrappers}. */
 export const PACKAGE_RUNNER_WRAPPERS: ReadonlySet<string> = new Set([
 	...[...WRAPPER_GRAMMARS].filter(([, grammar]) => grammar === PACKAGE_RUNNER_GRAMMAR).map(([name]) => name),
-	...[...PACKAGE_MANAGER_RUNNERS].flatMap(([manager, subcommands]) => [...subcommands].map((sub) => `${manager} ${sub}`)),
+	...[...PACKAGE_MANAGER_RUNNERS].flatMap(([manager, { runners }]) => [...runners].map((sub) => `${manager} ${sub}`)),
 ]);
 
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
-
 /** One command's canonical form after wrapper resolution — what policy evaluates. */
 export interface CanonicalInvocation {
-	/** The real executable, with every wrapper (`sudo`, `env`, `nohup`, ...) resolved away. */
+	/** The real executable, with every wrapper resolved away. */
 	readonly executable: string;
-	/** Arguments AFTER the resolved executable. Quote-resolved (`Word.value`), not raw text. */
+	/** Arguments after the resolved executable, quote-resolved (`Word.value`), not raw text. */
 	readonly args: readonly string[];
-	/** Wrapper names encountered, in the order they appeared (e.g. `["sudo"]`, `["env"]`). */
+	/** Wrapper names encountered, in order (e.g. `["sudo"]`, `["npm exec"]`). */
 	readonly wrappers: readonly string[];
-	/** The raw source slice for this one command segment — what {@link GUARDED_VERB_PATTERN} tests against. */
+	/** The raw source slice for this one command segment. */
 	readonly rawSegment: string;
 	/** `git -C`/`--git-dir` wins (the only value a `HEAD == main` oracle can trust), else an `env -C` or `sudo -D` directory. */
 	readonly cwdOverride?: string;
@@ -306,238 +168,93 @@ export type ShellVerdict =
 	| {
 			readonly kind: "ok";
 			readonly invocations: readonly CanonicalInvocation[];
-			/** Every distinct `Redirect.operator` in walk order; plan-mode read-only.ts reuses it so there is one AST walk. */
+			/** Every distinct `Redirect.operator` in walk order, so callers need no second AST walk. */
 			readonly redirectOperators: readonly string[];
 	  };
 
-/**
- * Reduce an executable to the verb policy classifies on: basename, lower-cased, Windows
- * extension stripped. Every bare-verb gate MUST route through it, or `git.exe push` and
- * `/usr/bin/git push` classify as allow.
- */
+/** Basename, lower-cased, Windows extension stripped; every bare-verb gate must use it or `git.exe push` classifies as allow. */
 export function normaliseExecutable(executable: string): string {
 	const base = executable.replace(/\\/g, "/").split("/").pop() ?? executable;
 	return base.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
-
-const LAZY_WORD_KEYS = ["value", "parts"] as const;
-
-function walkableKeys(obj: Record<string, unknown>): string[] {
+/** Depth-first visit of every object node; Word's `value`/`parts` are lazy getters absent from Object.keys(), so they are forced. */
+function walk(node: unknown, visit: (obj: Record<string, unknown>) => void): void {
+	if (node === null || typeof node !== "object") return;
+	if (Array.isArray(node)) {
+		for (const item of node) walk(item, visit);
+		return;
+	}
+	const obj = node as Record<string, unknown>;
+	visit(obj);
 	const keys = new Set(Object.keys(obj));
-	for (const lazy of LAZY_WORD_KEYS) {
-		if (!keys.has(lazy) && lazy in obj) {
-			keys.add(lazy);
-		}
-	}
-	return [...keys];
+	for (const lazy of ["value", "parts"]) if (lazy in obj) keys.add(lazy);
+	for (const key of keys) if (key !== "pos" && key !== "end") walk(obj[key], visit);
 }
 
-/** Every value found under any `.type` field anywhere in `node`'s subtree. */
-function collectTypes(node: unknown, found: Set<string>): void {
-	if (node === null || typeof node !== "object") {
-		return;
-	}
-	if (Array.isArray(node)) {
-		for (const item of node) {
-			collectTypes(item, found);
-		}
-		return;
-	}
-	const obj = node as Record<string, unknown>;
-	if (typeof obj.type === "string") {
-		found.add(obj.type);
-	}
-	for (const key of walkableKeys(obj)) {
-		if (key === "pos" || key === "end") {
-			continue;
-		}
-		collectTypes(obj[key], found);
-	}
+interface ScriptScan {
+	readonly types: Set<string>;
+	readonly redirects: Set<string>;
+	readonly commands: Command[];
+	background: boolean;
 }
 
-/** Every `Redirect.operator` value found anywhere in `node`'s subtree. */
-function collectRedirectOperators(node: unknown, found: Set<string>): void {
-	if (node === null || typeof node !== "object") {
-		return;
-	}
-	if (Array.isArray(node)) {
-		for (const item of node) {
-			collectRedirectOperators(item, found);
-		}
-		return;
-	}
-	const obj = node as Record<string, unknown>;
-	if (Array.isArray(obj.redirects)) {
-		for (const redirect of obj.redirects as Record<string, unknown>[]) {
-			if (typeof redirect.operator === "string") {
-				found.add(redirect.operator);
-			}
-		}
-	}
-	for (const key of walkableKeys(obj)) {
-		if (key === "pos" || key === "end") {
-			continue;
-		}
-		collectRedirectOperators(obj[key], found);
-	}
+function scanScript(script: ParsedScript): ScriptScan {
+	const scan: ScriptScan = { types: new Set(), redirects: new Set(), commands: [], background: false };
+	walk(script, (node) => {
+		if (typeof node.type === "string") scan.types.add(node.type);
+		if (node.type === "Statement" && node.background === true) scan.background = true;
+		if (node.type === "Command") scan.commands.push(node as unknown as Command);
+		if (!Array.isArray(node.redirects)) return;
+		for (const r of node.redirects as Record<string, unknown>[]) if (typeof r.operator === "string") scan.redirects.add(r.operator);
+	});
+	return scan;
 }
 
-/** True if any `Statement` node anywhere in `node`'s subtree has `background === true`. */
-function anyStatementBackgrounded(node: unknown): boolean {
-	if (node === null || typeof node !== "object") {
-		return false;
-	}
-	if (Array.isArray(node)) {
-		return node.some((item) => anyStatementBackgrounded(item));
-	}
-	const obj = node as Record<string, unknown>;
-	if (obj.type === "Statement" && obj.background === true) {
-		return true;
-	}
-	return walkableKeys(obj)
-		.filter((key) => key !== "pos" && key !== "end")
-		.some((key) => anyStatementBackgrounded(obj[key]));
-}
-
-/** Every `Command` node anywhere in `node`'s subtree, in the order the walk encounters them. */
-function collectCommandNodes(node: unknown, found: Command[]): void {
-	if (node === null || typeof node !== "object") {
-		return;
-	}
-	if (Array.isArray(node)) {
-		for (const item of node) {
-			collectCommandNodes(item, found);
-		}
-		return;
-	}
-	const obj = node as Record<string, unknown>;
-	if (obj.type === "Command") {
-		found.push(obj as unknown as Command);
-	}
-	for (const key of walkableKeys(obj)) {
-		if (key === "pos" || key === "end") {
-			continue;
-		}
-		collectCommandNodes(obj[key], found);
-	}
-}
-
-/** Does this `Word`'s subtree contain an unresolved `SimpleExpansion`/`ParameterExpansion`? */
 function hasExpansionPart(word: Word | undefined): boolean {
-	if (word === undefined) {
-		return false;
-	}
-	const types = new Set<string>();
-	collectTypes(word, types);
-	return [...EXPANSION_PART_TYPES].some((t) => types.has(t));
+	let found = false;
+	walk(word, (node) => {
+		found ||= EXPANSION_PART_TYPES.includes(node.type as string);
+	});
+	return found;
 }
 
-/** Is this `Word` a LITERAL (no unresolved expansion of its own) match for {@link GUARDED_VERB_PATTERN}? */
 function isLiteralGuardedExecutable(word: Word | undefined): boolean {
-	if (word === undefined || hasExpansionPart(word)) {
-		return false;
-	}
-	return GUARDED_VERB_PATTERN.test(word.value);
+	return word !== undefined && !hasExpansionPart(word) && GUARDED_VERB_PATTERN.test(word.value);
 }
 
-/** The command-position expansion rule — see the module docstring for the worked example. */
-function hasUnresolvedExpansionInCommandPosition(commandNodes: readonly Command[]): boolean {
-	for (const command of commandNodes) {
-		if (hasExpansionPart(command.name)) {
-			return true;
-		}
-		if (isLiteralGuardedExecutable(command.name)) {
-			for (const suffixWord of command.suffix) {
-				if (hasExpansionPart(suffixWord)) {
-					return true;
-				}
-			}
-		}
-	}
-	return false;
+/** Expansion in `Command.name` always, and in a literally guarded verb's suffix (`g=push; git $g`); `echo "$HOME"` stays allowed. */
+function hasUnresolvedExpansionInCommandPosition(commands: readonly Command[]): boolean {
+	return commands.some((c) => hasExpansionPart(c.name) || (isLiteralGuardedExecutable(c.name) && c.suffix.some((w) => hasExpansionPart(w))));
 }
 
-
-function detectDeniedPartType(script: ParsedScript): string | undefined {
-	const types = new Set<string>();
-	collectTypes(script, types);
-	for (const denied of DENIED_PART_TYPES) {
-		if (types.has(denied)) {
-			return denied;
-		}
-	}
-	return undefined;
+/** Denial is by PRESENCE of node types: unbash parses `sh -c "git push"` and heredocs without errors, so errors are only the last catch-all. */
+function detectRefusalCause(script: ParsedScript, scan: ScriptScan): ShellRefusalCause | undefined {
+	const denied = [...DENIED_PART_TYPES].find((t) => scan.types.has(t));
+	if (denied !== undefined) return CAUSE_BY_DENIED_TYPE[denied];
+	if ([...HEREDOC_OPERATORS].some((op) => scan.redirects.has(op))) return "heredoc";
+	if (scan.background) return "background";
+	if (hasUnresolvedExpansionInCommandPosition(scan.commands)) return "unresolved-expansion-in-command-position";
+	return (script.errors ?? []).length > 0 ? "parse-error" : undefined;
 }
 
-function detectHeredoc(script: ParsedScript): boolean {
-	const operators = new Set<string>();
-	collectRedirectOperators(script, operators);
-	for (const op of HEREDOC_OPERATORS) {
-		if (operators.has(op)) {
-			return true;
-		}
-	}
-	return false;
-}
+const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
+	"command-substitution": (c) => `command substitution ($(...) or a backtick form) in "${c}" hides an arbitrary command from policy`,
+	"process-substitution": (c) => `process substitution (<(...) or >(...)) in "${c}" hides an arbitrary command from policy`,
+	"arithmetic-expansion": (c) =>
+		`a command substitution nested inside an arithmetic expansion in "${c}" hides an arbitrary command from policy`,
+	heredoc: (c) => `a heredoc/herestring redirect in "${c}" can smuggle an arbitrary script past a text-only check`,
+	background: (c) => `"${c}" backgrounds the command (&), which this guard cannot observe complete before returning`,
+	"unresolved-expansion-in-command-position": (c) =>
+		`"${c}" resolves its executable or a guarded verb's subcommand from an unresolved shell variable`,
+	"shell-runner": (c) =>
+		`"${c}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`,
+	"unresolved-wrapper": (c) =>
+		`"${c}" puts a guarded verb behind a wrapper option, operand or assignment this guard cannot resolve to the real executable`,
+	"parse-error": (c) => `"${c}" did not parse cleanly; this catch-all denies rather than falls through to allow`,
+};
 
-/** Fail-closed decision in priority order; parse error is the last catch-all. */
-function detectRefusalCause(script: ParsedScript, commandNodes: readonly Command[]): ShellRefusalCause | undefined {
-	const deniedType = detectDeniedPartType(script);
-	if (deniedType !== undefined) {
-		return CAUSE_BY_DENIED_TYPE[deniedType];
-	}
-	if (detectHeredoc(script)) {
-		return "heredoc";
-	}
-	if (anyStatementBackgrounded(script)) {
-		return "background";
-	}
-	if (hasUnresolvedExpansionInCommandPosition(commandNodes)) {
-		return "unresolved-expansion-in-command-position";
-	}
-	if ((script.errors ?? []).length > 0) {
-		return "parse-error";
-	}
-	return undefined;
-}
-
-function describeCause(cause: ShellRefusalCause, command: string): string {
-	switch (cause) {
-		case "command-substitution":
-			return `command substitution ($(...) or a backtick form) in "${command}" hides an arbitrary command from policy`;
-		case "process-substitution":
-			return `process substitution (<(...) or >(...)) in "${command}" hides an arbitrary command from policy`;
-		case "arithmetic-expansion":
-			return `a command substitution nested inside an arithmetic expansion in "${command}" hides an arbitrary command from policy`;
-		case "heredoc":
-			return `a heredoc/herestring redirect in "${command}" can smuggle an arbitrary script past a text-only check`;
-		case "background":
-			return `"${command}" backgrounds the command (&), which this guard cannot observe complete before returning`;
-		case "unresolved-expansion-in-command-position":
-			return `"${command}" resolves its executable or a guarded verb's subcommand from an unresolved shell variable`;
-		case "shell-runner":
-			return `"${command}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`;
-		case "unresolved-wrapper":
-			return `"${command}" puts a guarded verb behind a wrapper option, operand or assignment this guard cannot resolve to the real executable`;
-		case "parse-error":
-			return `"${command}" did not parse cleanly; this catch-all denies rather than falls through to allow`;
-		default: {
-			const exhaustive: never = cause;
-			return exhaustive;
-		}
-	}
-}
-
-
-interface ResolvedWrappers {
-	readonly wrappers: string[];
-	readonly cwdOverride: string | undefined;
-	/** Index into `values[]` of the first word AFTER every recognised wrapper. */
-	readonly index: number;
-	/** False when some wrapper word fell outside its grammar, so `values[index]` may not be what runs. */
-	readonly confident: boolean;
-}
+const refused = (cause: ShellRefusalCause, command: string): ShellVerdict => ({ kind: "refused", cause, detail: CAUSE_DETAIL[cause](command) });
 
 interface ConsumedOptions {
 	readonly index: number;
@@ -552,119 +269,76 @@ function consumeWrapperOptions(
 	grammar: WrapperGrammar,
 	onValue: (option: string, value: string) => void,
 ): ConsumedOptions {
+	const has = (set: ReadonlySet<string> | undefined, word: string): boolean => set?.has(word) === true;
 	let i = start;
-	while (i < values.length) {
+	for (; i < values.length; i += 1) {
 		const word = values[i];
 		if (word === "--") {
 			i += 1;
 			break;
 		}
-		if (grammar.assignments === true && ASSIGNMENT_WORD.test(word)) {
-			i += 1;
-			continue;
-		}
-		if (!word.startsWith("-") || word === "-") {
-			break;
-		}
+		if (grammar.assignments === true && ASSIGNMENT_WORD.test(word)) continue;
+		if (!word.startsWith("-") || word === "-") break;
 		const eq = word.indexOf("=");
 		const longName = word.startsWith("--") && eq > 0 ? word.slice(0, eq) : word;
 		const shortName = word.startsWith("--") ? word : word.slice(0, 2);
-		if (grammar.shellString?.has(longName) === true || grammar.shellString?.has(shortName) === true) {
+		if (has(grammar.shellString, longName) || has(grammar.shellString, shortName)) return { index: i, confident: false };
+		if (has(grammar.query, word)) return { index: i, confident: true, query: true };
+		if (has(grammar.boolean, word)) continue;
+		if (has(grammar.value, word)) {
+			if (i + 1 >= values.length) return { index: values.length, confident: false };
+			onValue(word, values[i + 1]);
+			i += 1;
+		} else if (longName !== word && has(grammar.value, longName)) {
+			onValue(longName, word.slice(eq + 1));
+		} else if (shortName !== word && has(grammar.value, shortName)) {
+			onValue(shortName, word.slice(2));
+		} else if (grammar.numericOption !== true || !/^-\d+$/.test(word)) {
 			return { index: i, confident: false };
 		}
-		if (grammar.query?.has(word) === true) {
-			return { index: i, confident: true, query: true };
-		}
-		if (grammar.boolean.has(word)) {
-			i += 1;
-			continue;
-		}
-		if (grammar.value.has(word)) {
-			if (i + 1 >= values.length) {
-				return { index: values.length, confident: false };
-			}
-			onValue(word, values[i + 1]);
-			i += 2;
-			continue;
-		}
-		if (longName !== word && grammar.value.has(longName)) {
-			onValue(longName, word.slice(eq + 1));
-			i += 1;
-			continue;
-		}
-		if (shortName !== word && grammar.value.has(shortName)) {
-			onValue(shortName, word.slice(2));
-			i += 1;
-			continue;
-		}
-		if (grammar.numericOption === true && /^-\d+$/.test(word)) {
-			i += 1;
-			continue;
-		}
-		return { index: i, confident: false };
 	}
 	const operands = grammar.operands ?? 0;
-	if (i + operands > values.length) {
-		return { index: values.length, confident: false };
-	}
-	return { index: i + operands, confident: true };
-}
-
-interface PackageManagerRunner {
-	readonly subcommandIndex: number;
-	readonly confident: boolean;
-	/** Where resolution stopped when `confident` is false. */
-	readonly stopIndex: number;
+	return i + operands > values.length ? { index: values.length, confident: false } : { index: i + operands, confident: true };
 }
 
 /** Find `exec`/`dlx`/`x` past a package manager's global options (`npm --yes exec`, `pnpm -C . dlx`). */
-function locatePackageManagerRunner(values: readonly string[], start: number, verb: string): PackageManagerRunner | undefined {
-	const subcommands = PACKAGE_MANAGER_RUNNERS.get(verb);
-	const globals = PACKAGE_MANAGER_GLOBAL_GRAMMARS.get(verb);
-	if (subcommands === undefined || globals === undefined) {
-		return undefined;
-	}
-	const consumed = consumeWrapperOptions(values, start + 1, globals, () => {});
+function locatePackageManagerRunner(
+	values: readonly string[],
+	start: number,
+	verb: string,
+): { readonly subcommandIndex: number; readonly confident: boolean; readonly stopIndex: number } | undefined {
+	const manager = PACKAGE_MANAGER_RUNNERS.get(verb);
+	if (manager === undefined) return undefined;
+	const consumed = consumeWrapperOptions(values, start + 1, manager.globals, () => {});
 	if (consumed.confident) {
-		const isRunner = subcommands.has(values[consumed.index] ?? "");
-		return isRunner ? { subcommandIndex: consumed.index, confident: true, stopIndex: consumed.index } : undefined;
+		return manager.runners.has(values[consumed.index] ?? "")
+			? { subcommandIndex: consumed.index, confident: true, stopIndex: consumed.index }
+			: undefined;
 	}
 	// An unknown global option may or may not take a value, so any later runner subcommand fails closed.
-	const offset = values.slice(consumed.index).findIndex((word) => subcommands.has(word));
-	if (offset === -1) {
-		return undefined;
-	}
-	return { subcommandIndex: consumed.index + offset, confident: false, stopIndex: consumed.index };
+	const offset = values.slice(consumed.index).findIndex((word) => manager.runners.has(word));
+	return offset === -1 ? undefined : { subcommandIndex: consumed.index + offset, confident: false, stopIndex: consumed.index };
 }
 
-/**
- * Consume recognised wrappers and their option grammars; `values[index]` is the real executable.
- * Names go through {@link normaliseExecutable} so `/usr/bin/env git push` and `env.exe` resolve.
- */
-function resolveWrappers(values: readonly string[]): ResolvedWrappers {
+/** Consume recognised wrappers; `values[index]` is the real executable, and `confident` is false when a word fell outside a grammar. */
+function resolveWrappers(values: readonly string[]): { wrappers: string[]; cwdOverride?: string; index: number; confident: boolean } {
 	const wrappers: string[] = [];
 	let cwdOverride: string | undefined;
 	let i = 0;
 	let confident = true;
-
 	while (i < values.length) {
 		const verb = normaliseExecutable(values[i]);
 		const runner = locatePackageManagerRunner(values, i, verb);
 		const grammar = runner !== undefined ? PACKAGE_RUNNER_GRAMMAR : WRAPPER_GRAMMARS.get(verb);
-		if (grammar === undefined) {
-			break;
-		}
+		if (grammar === undefined) break;
 		wrappers.push(runner !== undefined ? `${verb} ${values[runner.subcommandIndex]}` : verb);
 		if (runner !== undefined && !runner.confident) {
 			i = runner.stopIndex;
 			confident = false;
 			break;
 		}
-		const optionsStart = runner !== undefined ? runner.subcommandIndex + 1 : i + 1;
-		const consumed = consumeWrapperOptions(values, optionsStart, grammar, (option, value) => {
-			if ((verb === "env" && option === "-C") || (verb === "sudo" && option === "-D") || option === "--chdir") {
-				cwdOverride = value;
-			}
+		const consumed = consumeWrapperOptions(values, runner !== undefined ? runner.subcommandIndex + 1 : i + 1, grammar, (option, value) => {
+			if ((verb === "env" && option === "-C") || (verb === "sudo" && option === "-D") || option === "--chdir") cwdOverride = value;
 		});
 		if (consumed.query === true) {
 			// The wrapper itself is what runs, and it runs nothing.
@@ -677,31 +351,27 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 			break;
 		}
 	}
-
 	// A wrapper that left an option or assignment in command position has not reached the real executable.
 	const next = values[i];
-	if (wrappers.length > 0 && next !== undefined && (next.startsWith("-") || ASSIGNMENT_WORD.test(next))) {
-		confident = false;
-	}
-
+	if (wrappers.length > 0 && next !== undefined && (next.startsWith("-") || ASSIGNMENT_WORD.test(next))) confident = false;
 	return { wrappers, cwdOverride, index: i, confident };
 }
 
 /** `git -C <dir>` / `--git-dir[=]<dir>`; normalised so `git.exe -C /other push` keeps its override. */
 function extractGitCwdOverride(executable: string, args: readonly string[]): string | undefined {
-	if (normaliseExecutable(executable) !== "git") {
-		return undefined;
-	}
+	if (normaliseExecutable(executable) !== "git") return undefined;
 	for (let i = 0; i < args.length; i += 1) {
-		const arg = args[i];
-		if (arg === "-C" || arg === "--git-dir") {
-			return args[i + 1];
-		}
-		if (arg.startsWith("--git-dir=")) {
-			return arg.slice("--git-dir=".length);
-		}
+		if (args[i] === "-C" || args[i] === "--git-dir") return args[i + 1];
+		if (args[i].startsWith("--git-dir=")) return args[i].slice("--git-dir=".length);
 	}
 	return undefined;
+}
+
+/** Any expansion among wrapper words is refused too: word splitting can turn `timeout $T apply` into `timeout 5 terraform apply`. */
+function hasExpansionBehindWrappers(words: readonly Word[], index: number): boolean {
+	if (index === 0) return false;
+	if (words.slice(0, index + 1).some((w) => hasExpansionPart(w))) return true;
+	return isLiteralGuardedExecutable(words[index]) && words.slice(index + 1).some((w) => hasExpansionPart(w));
 }
 
 interface ExtractedInvocation {
@@ -710,35 +380,12 @@ interface ExtractedInvocation {
 	readonly expansionInCommandPosition: boolean;
 }
 
-/**
- * The command-position rule applied past the wrappers. Any expansion among the wrapper words is
- * refused too, because word splitting can turn `timeout $T apply` into `timeout 5 terraform apply`.
- */
-function hasExpansionBehindWrappers(words: readonly Word[], index: number): boolean {
-	if (index === 0) {
-		return false;
-	}
-	if (words.slice(0, index + 1).some(hasExpansionPart)) {
-		return true;
-	}
-	return isLiteralGuardedExecutable(words[index]) && words.slice(index + 1).some(hasExpansionPart);
-}
-
-/** One entry per `Command` node, wrapper indirection resolved. */
-function extractInvocations(
-	script: ParsedScript,
-	command: string,
-	commandNodes: readonly Command[],
-): ExtractedInvocation[] {
+function extractInvocations(script: ParsedScript, command: string, commands: readonly Command[]): ExtractedInvocation[] {
 	// Backtick-decoded scripts index the decoded `ParsedScript.source`, not the caller's string.
 	const sourceText = script.source ?? command;
-
-	const extracted: ExtractedInvocation[] = [];
-	for (const node of commandNodes) {
-		if (node.name === undefined) {
-			// Assignment-only statement (`g=push`): nothing executes.
-			continue;
-		}
+	// An assignment-only statement (`g=push`) has no name and executes nothing.
+	return commands.flatMap((node) => {
+		if (node.name === undefined) return [];
 		const words = [node.name, ...node.suffix];
 		const values = words.map((w) => w.value);
 		const resolved = resolveWrappers(values);
@@ -748,26 +395,18 @@ function extractInvocations(
 		const executable = viaPackageRunner ? word.replace(/(.)@[^@/]*$/, "$1") : word;
 		const args = values.slice(resolved.index + 1);
 		const cwdOverride = extractGitCwdOverride(executable, args) ?? resolved.cwdOverride;
-
-		extracted.push({
-			invocation: {
-				executable,
-				args,
-				wrappers: resolved.wrappers,
-				rawSegment: sourceText.slice(node.pos, node.end),
-				...(cwdOverride !== undefined ? { cwdOverride } : {}),
+		const rawSegment = sourceText.slice(node.pos, node.end);
+		return [
+			{
+				invocation: { executable, args, wrappers: resolved.wrappers, rawSegment, ...(cwdOverride !== undefined ? { cwdOverride } : {}) },
+				confident: resolved.confident,
+				expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
 			},
-			confident: resolved.confident,
-			expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
-		});
-	}
-	return extracted;
+		];
+	});
 }
 
-/**
- * Raw text with quotes and backslashes removed, plus the quote-resolved words, so `g''it`, `g""it`
- * and `\git` (which bash runs as `git`) match even when nested inside a runner's script string.
- */
+/** Raw text with quotes and backslashes removed, plus quote-resolved words, so `g''it` and `\git` (which bash runs as `git`) match. */
 function mentionsGuardedVerb(inv: CanonicalInvocation): boolean {
 	// Each text is also tested as-is, so a backslash path separator (`C:\Git\cmd\git.exe`) still bounds the verb.
 	return [inv.rawSegment, inv.executable, ...inv.args].some(
@@ -793,11 +432,9 @@ function hidesItsScript(inv: CanonicalInvocation): boolean {
 	return (executable === "powershell" || executable === "pwsh") && inv.args.some((arg) => ENCODED_COMMAND_OPTION.test(arg));
 }
 
-/** Deny when a resolved invocation hands a guarded verb to a shell runner; executable normalised so `/bin/sh -c` and `bash.exe -c` match. */
-function findShellRunnerDenial(invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined {
-	return invocations.find((inv) => isShellRunner(inv) && (mentionsGuardedVerb(inv) || hidesItsScript(inv)));
-}
-
+/** Denied outright, never routed to approval, by a word match rather than a recursive re-parse. */
+const findShellRunnerDenial = (invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined =>
+	invocations.find((inv) => isShellRunner(inv) && (mentionsGuardedVerb(inv) || hidesItsScript(inv)));
 
 /** Parse and fail closed on {@link SHELL_REFUSAL_CAUSES}; otherwise one canonical invocation per `Command` node. */
 export function canonicalise(command: string): ShellVerdict {
@@ -805,41 +442,18 @@ export function canonicalise(command: string): ShellVerdict {
 	try {
 		script = parse(command);
 	} catch (err) {
-		return {
-			kind: "refused",
-			cause: "parse-error",
-			detail: `parse() threw for "${command}": ${err instanceof Error ? err.message : String(err)}`,
-		};
+		const message = err instanceof Error ? err.message : String(err);
+		return { kind: "refused", cause: "parse-error", detail: `parse() threw for "${command}": ${message}` };
 	}
+	const scan = scanScript(script);
+	const cause = detectRefusalCause(script, scan);
+	if (cause !== undefined) return refused(cause, command);
 
-	const commandNodes: Command[] = [];
-	collectCommandNodes(script, commandNodes);
-
-	const cause = detectRefusalCause(script, commandNodes);
-	if (cause !== undefined) {
-		return { kind: "refused", cause, detail: describeCause(cause, command) };
-	}
-
-	const extracted = extractInvocations(script, command, commandNodes);
+	const extracted = extractInvocations(script, command, scan.commands);
 	const invocations = extracted.map((e) => e.invocation);
-
-	if (extracted.some((e) => e.expansionInCommandPosition)) {
-		const expansionCause = "unresolved-expansion-in-command-position";
-		return { kind: "refused", cause: expansionCause, detail: describeCause(expansionCause, command) };
-	}
-
-	const shellRunnerHit = findShellRunnerDenial(invocations);
-	if (shellRunnerHit !== undefined) {
-		return { kind: "refused", cause: "shell-runner", detail: describeCause("shell-runner", command) };
-	}
-
+	if (extracted.some((e) => e.expansionInCommandPosition)) return refused("unresolved-expansion-in-command-position", command);
+	if (findShellRunnerDenial(invocations) !== undefined) return refused("shell-runner", command);
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
-	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(e.invocation))) {
-		return { kind: "refused", cause: "unresolved-wrapper", detail: describeCause("unresolved-wrapper", command) };
-	}
-
-	const redirects = new Set<string>();
-	collectRedirectOperators(script, redirects);
-
-	return { kind: "ok", invocations, redirectOperators: [...redirects] };
+	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(e.invocation))) return refused("unresolved-wrapper", command);
+	return { kind: "ok", invocations, redirectOperators: [...scan.redirects] };
 }

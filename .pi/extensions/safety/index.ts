@@ -12,6 +12,7 @@ import { Type } from "typebox";
 
 import { approve, consume, createPending, markHookDeferred, peek, validate } from "./approvals.ts";
 import { pruneAuditLogs, writeAuditRow } from "./audit.ts";
+import type { AuditVerdict } from "./schema.ts";
 import { currentBranch } from "./git.ts";
 import { canonicalisePathArg } from "./paths.ts";
 import { evaluate, type PolicyFacts, type Verdict } from "./policy.ts";
@@ -143,39 +144,17 @@ export function guardBgRun(input: unknown, ctx: ExtensionContext): Verdict {
  * A throw from execute() becomes isError:true for the model (pi-agent-core agent-loop.js).
  */
 function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext, verdict: Verdict): void {
+	const row = { event: WRAPPER_AUDIT_EVENT, tool: toolName, command, cwd: ctx.cwd };
 	if (verdict.kind === "allow") {
-		writeAuditRow(ctx.cwd, {
-			event: WRAPPER_AUDIT_EVENT,
-			tool: toolName,
-			command,
-			cwd: ctx.cwd,
-			verdict: "allow",
-			reason: "wrapper: re-evaluated the params that actually reached execution and allowed",
-		});
+		writeAuditRow(ctx.cwd, { ...row, verdict: "allow", reason: "wrapper: re-evaluated the params that actually reached execution and allowed" });
 		return;
 	}
-
 	if (verdict.kind === "confirm" && consume(verdict.requestKey)) {
-		writeAuditRow(ctx.cwd, {
-			event: WRAPPER_AUDIT_EVENT,
-			tool: toolName,
-			command,
-			cwd: ctx.cwd,
-			verdict: "allow",
-			reason: `wrapper: one-shot approval grant consumed -- ${verdict.reason}`,
-		});
+		writeAuditRow(ctx.cwd, { ...row, verdict: "allow", reason: `wrapper: one-shot approval grant consumed -- ${verdict.reason}` });
 		return;
 	}
-
 	// Block, or confirm with no matching grant (unapproved, consumed, expired, or a mutated command with a different requestKey).
-	writeAuditRow(ctx.cwd, {
-		event: WRAPPER_AUDIT_EVENT,
-		tool: toolName,
-		command,
-		cwd: ctx.cwd,
-		verdict: "block",
-		reason: verdict.reason,
-	});
+	writeAuditRow(ctx.cwd, { ...row, verdict: "block", reason: verdict.reason });
 	throw new Error(verdict.reason);
 }
 
@@ -229,15 +208,9 @@ function registerWrappedTools(pi: ExtensionAPI): void {
 
 /** Parameter schema; blast_radius uses StringEnum because Type.Union/Literal breaks Google's API. 275 tokens measured. */
 const approveSchema = Type.Object({
-	request_id: Type.String({
-		description: "The request_id from the block reason of the pending approval.",
-	}),
-	command: Type.String({
-		description: "The exact command (or path) that was blocked, byte-for-byte.",
-	}),
-	reason: Type.String({
-		description: "The exact block reason string, byte-for-byte, as given in the pending request.",
-	}),
+	request_id: Type.String({ description: "The request_id from the block reason of the pending approval." }),
+	command: Type.String({ description: "The exact command (or path) that was blocked, byte-for-byte." }),
+	reason: Type.String({ description: "The exact block reason string, byte-for-byte, as given in the pending request." }),
 	summary: Type.String({
 		description: "A one-sentence, human-readable summary of what this command does, for the person approving it.",
 	}),
@@ -262,13 +235,10 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 		parameters: approveSchema,
 		async execute(_toolCallId, params, _signal, _onUpdate, ctx) {
 			const { request_id, command, reason, summary, blast_radius } = params;
-
+			const row = { event: APPROVAL_AUDIT_EVENT, tool: APPROVE_TOOL_NAME, command, cwd: ctx.cwd };
 			if (!validate(request_id, command, reason)) {
 				writeAuditRow(ctx.cwd, {
-					event: APPROVAL_AUDIT_EVENT,
-					tool: APPROVE_TOOL_NAME,
-					command,
-					cwd: ctx.cwd,
+					...row,
 					verdict: "block",
 					reason:
 						`validate() refused request_id="${request_id}": no matching unexpired pending entry, or the ` +
@@ -291,10 +261,7 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 
 			if (choice !== APPROVE_CHOICE) {
 				writeAuditRow(ctx.cwd, {
-					event: APPROVAL_AUDIT_EVENT,
-					tool: APPROVE_TOOL_NAME,
-					command,
-					cwd: ctx.cwd,
+					...row,
 					verdict: "block",
 					reason: ctx.hasUI
 						? `user did not select "${APPROVE_CHOICE}"`
@@ -305,32 +272,13 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 
 			if (!approve(request_id, command, reason)) {
 				// Unreachable after validate(); denied rather than assumed.
-				writeAuditRow(ctx.cwd, {
-					event: APPROVAL_AUDIT_EVENT,
-					tool: APPROVE_TOOL_NAME,
-					command,
-					cwd: ctx.cwd,
-					verdict: "block",
-					reason:
-						"approve() returned false immediately after validate() returned true -- treated as a refusal, " +
-						"never an allow",
-				});
+				const why = "approve() returned false immediately after validate() returned true -- treated as a refusal, never an allow";
+				writeAuditRow(ctx.cwd, { ...row, verdict: "block", reason: why });
 				throw new Error(`Approval could not be recorded for "${command}". It stays blocked.`);
 			}
 
-			writeAuditRow(ctx.cwd, {
-				event: APPROVAL_AUDIT_EVENT,
-				tool: APPROVE_TOOL_NAME,
-				command,
-				cwd: ctx.cwd,
-				verdict: "allow",
-				reason: `approved by explicit user selection -- ${summary}`,
-			});
-
-			return {
-				content: [{ type: "text", text: `Approved. Re-issue the EXACT command now: ${command}` }],
-				details: undefined,
-			};
+			writeAuditRow(ctx.cwd, { ...row, verdict: "allow", reason: `approved by explicit user selection -- ${summary}` });
+			return { content: [{ type: "text", text: `Approved. Re-issue the EXACT command now: ${command}` }], details: undefined };
 		},
 	});
 }
@@ -343,22 +291,12 @@ function registerApprovalTool(pi: ExtensionAPI): void {
  * pi-background-tasks@2.6.9 src/delegate-child-extension.ts:601, src/core/fusion/*.ts). Nested codemode calls reach the hook (pi 1.1.0 agent-session.js:326-343).
  */
 const DENIED_TOOL_NAMES: ReadonlySet<string> = new Set([
-	"powershell",
-	"codemode",
-	"tool_search",
-	"list_mcp_resources",
-	"list_mcp_resource_templates",
-	"read_mcp_resource",
-	"bg_run_pi_attested",
-	"bg_delegate",
-	"delegate_read_artifact",
-	"fusion_reason",
-	"fusion_investigate",
-	"fusion_research",
-	"fusion_validate",
-	"fusion_brainstorm",
-	"fusion_web_fetch",
+	...["powershell", "codemode", "tool_search", "list_mcp_resources", "list_mcp_resource_templates", "read_mcp_resource"],
+	...["bg_run_pi_attested", "bg_delegate", "delegate_read_artifact"],
+	...["fusion_reason", "fusion_investigate", "fusion_research", "fusion_validate", "fusion_brainstorm", "fusion_web_fetch"],
 ]);
+/** Must match policy.ts#evaluate's switch; grep/find/ls are hook-only (not wrapped). */
+const HOOKED_TOOL_NAMES: ReadonlySet<string> = new Set(["bash", "read", "write", "edit", "grep", "find", "ls"]);
 const DENIED_TOOL_PREFIXES: readonly string[] = ["mcp__"];
 const DENY_COMMAND_MAX = 2000;
 
@@ -386,70 +324,40 @@ function safeStringify(value: unknown): string {
  */
 function registerToolCallHook(pi: ExtensionAPI): void {
 	pi.on("tool_call", async (event, ctx): Promise<ToolCallEventResult | undefined> => {
-		const parentToolCallId = event.parentToolCallId;
+		const audit = (tool: string, command: string, verdict: AuditVerdict, reason: string): void => {
+			writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool, command, cwd: ctx.cwd, verdict, reason, parentToolCallId: event.parentToolCallId });
+		};
+		const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
 
 		// Deny table: fail closed, even on malformed input.
 		if (isDeniedToolName(event.toolName)) {
-			const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
 			// Never persist raw input of a denied tool (may carry tokens): command string or top-level keys only.
 			const raw = typeof rec.command === "string" ? rec.command : `[input keys: ${Object.keys(rec).join(",")}]`;
 			const reason =
 				`"${event.toolName}" is not covered by the ky-pi-agent guard (unparseable or unreviewed tool path) -- ` +
 				"it is blocked. Use bash, read, write or edit instead.";
-			writeAuditRow(ctx.cwd, {
-				event: HOOK_AUDIT_EVENT,
-				tool: event.toolName,
-				command: raw.slice(0, DENY_COMMAND_MAX),
-				cwd: ctx.cwd,
-				verdict: "block",
-				reason,
-				parentToolCallId,
-			});
+			audit(event.toolName, raw.slice(0, DENY_COMMAND_MAX), "block", reason);
 			return { block: true, reason };
 		}
 
-		// bg_run is classified exactly as bash (see guardBgRun).
 		if (event.toolName === "bg_run") {
-			const rec = event.input !== null && typeof event.input === "object" ? (event.input as Record<string, unknown>) : {};
 			const bg = guardBgRun(event.input, ctx);
-			writeAuditRow(ctx.cwd, {
-				event: HOOK_AUDIT_EVENT,
-				tool: "bg_run",
-				command: (typeof rec.command === "string" ? rec.command : safeStringify(event.input)).slice(0, DENY_COMMAND_MAX),
-				cwd: ctx.cwd,
-				verdict: bg.kind === "allow" ? "allow" : "block",
-				reason: bg.kind === "allow" ? "hook: allowed (bg_run classified as bash)" : bg.reason,
-				parentToolCallId,
-			});
-			return bg.kind === "allow" ? undefined : { block: true, reason: bg.reason };
+			const command = (typeof rec.command === "string" ? rec.command : safeStringify(event.input)).slice(0, DENY_COMMAND_MAX);
+			if (bg.kind === "allow") {
+				audit("bg_run", command, "allow", "hook: allowed (bg_run classified as bash)");
+				return undefined;
+			}
+			audit("bg_run", command, "block", bg.reason);
+			return { block: true, reason: bg.reason };
 		}
 
-		if (
-			event.toolName !== "bash" &&
-			event.toolName !== "read" &&
-			event.toolName !== "write" &&
-			event.toolName !== "edit" &&
-			event.toolName !== "grep" &&
-			event.toolName !== "find" &&
-			event.toolName !== "ls"
-		) {
-			return undefined;
-		}
-
+		if (!HOOKED_TOOL_NAMES.has(event.toolName)) return undefined;
 		const toolName = event.toolName;
 		const command = extractCommandOrPath(toolName, event.input);
 		const verdict = classifyAtWrapper(toolName, event.input, ctx);
 
 		if (verdict.kind === "allow") {
-			writeAuditRow(ctx.cwd, {
-				event: HOOK_AUDIT_EVENT,
-				tool: toolName,
-				command,
-				cwd: ctx.cwd,
-				verdict: "allow",
-				reason: "hook: allowed",
-				parentToolCallId,
-			});
+			audit(toolName, command, "allow", "hook: allowed");
 			return undefined;
 		}
 
@@ -457,28 +365,12 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			// A grant exists: defer to the wrapper, which consumes it; never consume here. Deferral is scoped to one
 			// toolCallId so every double-loaded copy of one call may defer (approvals.ts#markHookDeferred).
 			if (peek(verdict.requestKey) && markHookDeferred(verdict.requestKey, event.toolCallId)) {
-				writeAuditRow(ctx.cwd, {
-					event: HOOK_AUDIT_EVENT,
-					tool: toolName,
-					command,
-					cwd: ctx.cwd,
-					verdict: "allow",
-					reason: `hook: an approval grant is present for this exact command -- deferring to the wrapper's one-shot consume -- ${verdict.reason}`,
-					parentToolCallId,
-				});
+				const why = `hook: an approval grant is present for this exact command -- deferring to the wrapper's one-shot consume -- ${verdict.reason}`;
+				audit(toolName, command, "allow", why);
 				return undefined;
 			}
-
 			const requestId = createPending(verdict.requestKey, command, verdict.reason);
-			writeAuditRow(ctx.cwd, {
-				event: HOOK_AUDIT_EVENT,
-				tool: toolName,
-				command,
-				cwd: ctx.cwd,
-				verdict: "block",
-				reason: verdict.reason,
-				parentToolCallId,
-			});
+			audit(toolName, command, "block", verdict.reason);
 			return {
 				block: true,
 				reason:
@@ -488,15 +380,7 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			};
 		}
 
-		writeAuditRow(ctx.cwd, {
-			event: HOOK_AUDIT_EVENT,
-			tool: toolName,
-			command,
-			cwd: ctx.cwd,
-			verdict: "block",
-			reason: verdict.reason,
-			parentToolCallId,
-		});
+		audit(toolName, command, "block", verdict.reason);
 		return { block: true, reason: verdict.reason };
 	});
 }

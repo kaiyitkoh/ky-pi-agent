@@ -30,70 +30,42 @@
  */
 import { spawnSync } from "node:child_process";
 
-
 /** `currentBranch` result for a detached HEAD or any `git symbolic-ref` failure; never a real branch name, so never protected. */
 export const DETACHED_HEAD = "(detached HEAD)";
 
+function runGit(cwd: string, args: readonly string[]): { readonly stdout: string; readonly status: number | null } {
+	const result = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	if (result.error) throw new Error(`git ${args.join(" ")} failed to launch in "${cwd}": ${result.error.message}`);
+	return { stdout: (result.stdout ?? "").trim(), status: result.status };
+}
+
 /** The branch checked out at `cwd`, via `git symbolic-ref --short HEAD` (never parsed from `git status` text). */
 export function currentBranch(cwd: string): string {
-	const result = spawnSync("git", ["symbolic-ref", "--short", "HEAD"], {
-		cwd,
-		encoding: "utf-8",
-		shell: false,
-		windowsHide: true,
-	});
-	if (result.error) {
-		throw new Error(`git symbolic-ref --short HEAD failed to launch in "${cwd}": ${result.error.message}`);
-	}
-	if (result.status === 0) {
-		return (result.stdout ?? "").trim();
-	}
-	return DETACHED_HEAD;
+	const result = runGit(cwd, ["symbolic-ref", "--short", "HEAD"]);
+	return result.status === 0 ? result.stdout : DETACHED_HEAD;
 }
 
-/**
- * The HEAD commit SHA at `cwd`. THROWS on failure with no sentinel: an unknown SHA must never
- * compare equal to recorded evidence, so callers wrap it and refuse (fail closed).
- */
+/** THROWS with no sentinel: an unknown id must never compare equal to recorded evidence, so callers refuse (fail closed). */
+function revParse(cwd: string, rev: string, what: string): string {
+	const result = runGit(cwd, ["rev-parse", rev]);
+	if (result.status !== 0) {
+		throw new Error(
+			`git rev-parse ${rev} failed in "${cwd}" (exit ${result.status}) -- no sentinel exists for an unknown ${what}, ` +
+				`because an unknown ${what} can never legitimately match a piece of evidence`,
+		);
+	}
+	return result.stdout;
+}
+
+/** The HEAD commit SHA at `cwd`; throws on failure (see {@link revParse}). */
 export function currentSha(cwd: string): string {
-	const result = spawnSync("git", ["rev-parse", "HEAD"], {
-		cwd,
-		encoding: "utf-8",
-		shell: false,
-		windowsHide: true,
-	});
-	if (result.error) {
-		throw new Error(`git rev-parse HEAD failed to launch in "${cwd}": ${result.error.message}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(
-			`git rev-parse HEAD failed in "${cwd}" (exit ${result.status}) -- no sentinel exists for an ` +
-				"unknown SHA, because an unknown SHA can never legitimately match a piece of evidence",
-		);
-	}
-	return (result.stdout ?? "").trim();
+	return revParse(cwd, "HEAD", "SHA");
 }
 
-/** The tree id of `HEAD`, telling an empty commit (new SHA, same tree) from real movement. Same THROWS contract as {@link currentSha}. */
+/** The tree id of `HEAD`, telling an empty commit (new SHA, same tree) from real movement; throws on failure. */
 export function currentTree(cwd: string): string {
-	const result = spawnSync("git", ["rev-parse", "HEAD^{tree}"], {
-		cwd,
-		encoding: "utf-8",
-		shell: false,
-		windowsHide: true,
-	});
-	if (result.error) {
-		throw new Error(`git rev-parse HEAD^{tree} failed to launch in "${cwd}": ${result.error.message}`);
-	}
-	if (result.status !== 0) {
-		throw new Error(
-			`git rev-parse HEAD^{tree} failed in "${cwd}" (exit ${result.status}) -- no sentinel exists for an ` +
-				"unknown tree, because an unknown tree can never legitimately match a piece of evidence",
-		);
-	}
-	return (result.stdout ?? "").trim();
+	return revParse(cwd, "HEAD^{tree}", "tree");
 }
-
 
 /** One git/glab invocation split into subcommand and args; `shell.ts` does the string parsing. */
 export interface GitInvocation {
@@ -284,7 +256,6 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 	};
 }
 
-
 const GLAB_BLOCKED_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{
 		subcommand: "mr",
@@ -381,7 +352,6 @@ export function classifyGlabInvocation(invocation: GitInvocation, protectedBranc
 		reason: `"${display}" is an unclassified glab form -- defaults to block (fail closed, same posture as git)`,
 	};
 }
-
 
 /** `"protected-branch-rejection"` is the server refusing a protected ref (the one control enforced where the harness runs no code); `"other"` exists so the classifier is tested in both directions. */
 export type PushFailureClassification = "protected-branch-rejection" | "other";

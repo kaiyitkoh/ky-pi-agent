@@ -293,6 +293,38 @@ inside.
   command-bound even when it is. Tracked, not fixed, in `approvals.ts`'s own
   `HOOK_DEFER_TTL_MS` docstring.
 
+## Implementation invariants
+
+Parser facts the bash guard (`.pi/extensions/safety/shell.ts`) depends on, kept
+here rather than in code comments:
+
+- **unbash is tolerant.** `git $(echo push)`, `sh -c "git push"`, heredocs and
+  `nohup git push &` all parse with `errors.length === 0`. Refusal is therefore
+  by the *presence* of node types (`DENIED_PART_TYPES`), heredoc redirect
+  operators, `Statement.background` and expansion in command position; a parse
+  error is only the last catch-all. `script.errors` may be `undefined`.
+- **`Word.value` and `Word.parts` are lazy getters** missing from
+  `Object.keys()`. The AST walk forces them, or it would never descend into a
+  substitution inside a word.
+- **Command position includes a guarded verb's arguments.** `g=push; git $g`
+  has a literal `git` name and the expansion in `suffix[0]`, so expansion is
+  refused in `Command.name` always and in `suffix[]` when the name is
+  literally a guarded verb (`echo "$HOME"` stays allowed). Behind a wrapper the
+  same rule applies to the resolved word, and any expansion among the wrapper
+  words is refused (word splitting can turn `timeout $T apply` into
+  `timeout 5 terraform apply`).
+- **`git $((1+1))` does not yield `ArithmeticCommandExpansion`**; the test
+  fixture for that cause is `echo $(( $(echo 1) ))`.
+- **Every wrapper's option arity is tabulated.** A wrong arity silently
+  mis-resolves (`sudo -u root git push` must not resolve to `root`), so an
+  option, operand or `NAME=value` word the table cannot account for marks the
+  segment unconfident, and an unconfident segment that mentions a guarded verb
+  is refused.
+- **"Mentions a guarded verb"** means the raw segment with quotes and
+  backslashes removed, or any quote-resolved word, so `g''it` and `\git` count
+  as `git`. A shell runner carrying one is denied outright by this word match,
+  never re-parsed and never routed to approval.
+
 ## Authority
 
 **If the code and this document disagree, the code is authoritative and this document is a bug.**

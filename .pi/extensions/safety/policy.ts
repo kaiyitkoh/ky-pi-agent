@@ -39,16 +39,8 @@ function strongerOf(a: Verdict, b: Verdict): Verdict {
 type FieldExtraction = { readonly kind: "ok"; readonly value: string } | { readonly kind: "missing"; readonly reason: string };
 
 function describeShape(value: unknown): string {
-	if (value === undefined) {
-		return "undefined";
-	}
-	if (value === null) {
-		return "null";
-	}
-	if (Array.isArray(value)) {
-		return "an array";
-	}
-	return typeof value;
+	if (value === null) return "null";
+	return Array.isArray(value) ? "an array" : typeof value;
 }
 
 /** Missing, non-string and empty are one malformed shape; no classifier ever sees undefined or "". */
@@ -83,6 +75,15 @@ function stableStringify(value: unknown): string {
 function computeRequestKey(toolName: string, keyedInput: Readonly<Record<string, unknown>>, cwd: string): string {
 	return `${toolName}::${stableStringify(keyedInput)}::${cwd}`;
 }
+
+const pathFactsOf = (facts: PolicyFacts): PathPolicyFacts => ({
+	projectRoot: facts.projectRoot,
+	home: facts.home,
+	kubeconfigEnv: facts.kubeconfigEnv,
+});
+
+const canonicalOf = (text: string, facts: PolicyFacts): string =>
+	canonicalisePathArg({ text, value: text }, { cwd: facts.cwd, home: facts.home });
 
 function fromGitVerdict(verdict: GitVerdict): Verdict {
 	// No approval path for a git/glab block.
@@ -154,16 +155,11 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 
 	strongest = strongerOf(strongest, fromInfraVerdict(classifyInfraInvocation(invocation), requestKey));
 
-	const pathFacts: PathPolicyFacts = {
-		projectRoot: facts.projectRoot,
-		home: facts.home,
-		kubeconfigEnv: facts.kubeconfigEnv,
-	};
+	const pathFacts = pathFactsOf(facts);
 	// Bash args use classifyPathRead, not Write: write containment would block nearly every absolute path a command mentions.
 	// Args are Word.value-resolved, so an unquoted Windows path through bash may mangle (docs/SAFETY.md known bypasses).
 	for (const arg of invocation.args) {
-		const canonicalPath = canonicalisePathArg({ text: arg, value: arg }, { cwd: facts.cwd, home: facts.home });
-		const pathVerdict = classifyPathRead(canonicalPath, pathFacts);
+		const pathVerdict = classifyPathRead(canonicalOf(arg, facts), pathFacts);
 		if (pathVerdict.kind === "block") {
 			strongest = strongerOf(strongest, { kind: "block", reason: pathVerdict.reason });
 		}
@@ -202,15 +198,7 @@ function evaluateRead(input: unknown, facts: PolicyFacts): Verdict {
 	if (pathField.kind === "missing") {
 		return { kind: "block", reason: `read input is malformed: ${pathField.reason}` };
 	}
-	const canonicalPath = canonicalisePathArg(
-		{ text: pathField.value, value: pathField.value },
-		{ cwd: facts.cwd, home: facts.home },
-	);
-	const verdict = classifyPathRead(canonicalPath, {
-		projectRoot: facts.projectRoot,
-		home: facts.home,
-		kubeconfigEnv: facts.kubeconfigEnv,
-	});
+	const verdict = classifyPathRead(canonicalOf(pathField.value, facts), pathFactsOf(facts));
 	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
 }
 
@@ -220,15 +208,7 @@ function evaluateWrite(input: unknown, facts: PolicyFacts): Verdict {
 	if (pathField.kind === "missing") {
 		return { kind: "block", reason: `write/edit input is malformed: ${pathField.reason}` };
 	}
-	const canonicalPath = canonicalisePathArg(
-		{ text: pathField.value, value: pathField.value },
-		{ cwd: facts.cwd, home: facts.home },
-	);
-	const verdict = classifyPathWrite(canonicalPath, {
-		projectRoot: facts.projectRoot,
-		home: facts.home,
-		kubeconfigEnv: facts.kubeconfigEnv,
-	});
+	const verdict = classifyPathWrite(canonicalOf(pathField.value, facts), pathFactsOf(facts));
 	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
 }
 
@@ -261,11 +241,8 @@ function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: Pol
 	if (extraction.kind === "malformed") {
 		return { kind: "block", reason: `${fieldLabel} is malformed: ${extraction.reason}` };
 	}
-	const canonicalPath =
-		extraction.kind === "ok"
-			? canonicalisePathArg({ text: extraction.value, value: extraction.value }, { cwd: facts.cwd, home: facts.home })
-			: facts.projectRoot;
-	const pathFacts: PathPolicyFacts = { projectRoot: facts.projectRoot, home: facts.home, kubeconfigEnv: facts.kubeconfigEnv };
+	const canonicalPath = extraction.kind === "ok" ? canonicalOf(extraction.value, facts) : facts.projectRoot;
+	const pathFacts = pathFactsOf(facts);
 	const fileVerdict = classifyPathRead(canonicalPath, pathFacts);
 	if (fileVerdict.kind === "block") {
 		return { kind: "block", reason: fileVerdict.reason };
@@ -290,15 +267,7 @@ function evaluateGlobField(extraction: OptionalFieldExtraction, facts: PolicyFac
 	if (extraction.kind === "absent") {
 		return { kind: "allow" };
 	}
-	const canonicalPath = canonicalisePathArg(
-		{ text: extraction.value, value: extraction.value },
-		{ cwd: facts.cwd, home: facts.home },
-	);
-	const verdict = classifyPathRead(canonicalPath, {
-		projectRoot: facts.projectRoot,
-		home: facts.home,
-		kubeconfigEnv: facts.kubeconfigEnv,
-	});
+	const verdict = classifyPathRead(canonicalOf(extraction.value, facts), pathFactsOf(facts));
 	return verdict.kind === "block" ? { kind: "block", reason: `grep glob refers to a sensitive file: ${verdict.reason}` } : { kind: "allow" };
 }
 

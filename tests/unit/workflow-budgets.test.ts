@@ -503,7 +503,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/extensions/safety",
-		budget: 2780,
+		budget: 2440,
 		why: "CR-04 (code-review fix pass): another directory importedSubsystemDirs newly discovers -- " +
 			"workflows/index.ts imports classifyGitInvocation/currentBranch/currentSha/currentTree from " +
 			"../safety/git.ts and PROTECTED_BRANCHES from ../safety/index.ts, and safety/ spells " +
@@ -524,7 +524,7 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 			"grew the powershell/MCP/codemode/tool_search/background-tasks deny + bg_run-as-bash branch, audit.ts " +
 			"records parentToolCallId, schema.ts gained the matching field. Re-measured 4,709 raw lines across the " +
 			"same 9 files 2026-10-13 (approvals.ts 411, audit.ts 138, git.ts 621, index.ts 973, infra.ts 431, " +
-			"paths.ts 585, policy.ts 664, schema.ts 81, shell.ts 805), rounded up to the next ten. RAISED 4710 -> 4760 by the 08.1 review fixes (CR-01/WR-01/WR-02 guardBgRun, WR-04 redactSecrets in audit.ts). Re-measured 2,706 raw lines across the same 9 files 2026-10-13, rounded up to the next ten. Re-measured 2,725 after the glab mr create target scan was tightened, rounded up to the next ten. Re-measured 2,765 after push required an explicit non-protected src:dst refspec, rounded up to the next ten. Re-measured 2777 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten",
+			"paths.ts 585, policy.ts 664, schema.ts 81, shell.ts 805), rounded up to the next ten. RAISED 4710 -> 4760 by the 08.1 review fixes (CR-01/WR-01/WR-02 guardBgRun, WR-04 redactSecrets in audit.ts). Re-measured 2,706 raw lines across the same 9 files 2026-10-13, rounded up to the next ten. Re-measured 2,725 after the glab mr create target scan was tightened, rounded up to the next ten. Re-measured 2,765 after push required an explicit non-protected src:dst refspec, rounded up to the next ten. Re-measured 2777 raw lines after the attempt log, drift base and accepted entries moved to the signed ledger, rounded up to the next ten. LOWERED 2780 -> 2440 after the wrapper grammars, infra tables and audit rows were compacted into data tables and helpers: re-measured 2,431 raw lines across the same 9 files 2026-10-13 (approvals.ts 153, audit.ts 87, git.ts 366, index.ts 410, infra.ts 201, paths.ts 394, policy.ts 331, schema.ts 29, shell.ts 460), rounded up to the next ten",
 	},
 	{
 		dir: ".pi/extensions/quality",
