@@ -96,9 +96,12 @@ describe("T1: narrowing happens before the first request", () => {
 		expect((await declared({})).sort()).toEqual((await declared({ profile: "implement" })).sort());
 	});
 
-	it("full applies no narrowing at all", async () => {
+	it("full narrows nothing but the bg_enable loader, whose tools it already carries", async () => {
 		const withoutRouting = listEntryPoints().filter((e) => !e.includes("/routing/"));
-		expect((await declared({ profile: "full" })).sort()).toEqual([...(await declared({ entryPoints: withoutRouting })), "bg_enable"].sort());
+		const full = await declared({ profile: "full" });
+		expect(full.sort()).toEqual((await declared({ entryPoints: withoutRouting })).sort());
+		expect(full).not.toContain("bg_enable");
+		expect(full).toContain("bg_run");
 	});
 
 	it("implement: calling bg_enable declares the background tools and questionnaire on the next request, removing nothing", async () => {

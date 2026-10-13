@@ -18,13 +18,13 @@ const BEFORE_FULL_FLOOR = 4179;
 /**
  * Ceilings in `/budget`-formula tokens (Math.ceil(chars / 4)) on normalised text, each the value measured
  * on 2026-10-13 plus under 3% headroom.
- * recon: measured 1699. review: measured 1827. implement: measured 2342, with `bg_enable` loading questionnaire and bg_* on demand. full: measured 4177.
+ * recon: measured 1699. review: measured 1827. implement: measured 2342, with `bg_enable` loading questionnaire and bg_* on demand. full: measured 4106, without the `bg_enable` loader its tools make useless.
  */
 const FLOOR_CEILINGS = {
 	recon: 1740,
 	review: 1880,
 	implement: 2410,
-	full: 4300,
+	full: 4220,
 } as const;
 
 const PROFILES = ["recon", "review", "implement", "full"] as const;

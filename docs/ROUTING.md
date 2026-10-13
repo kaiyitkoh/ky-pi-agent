@@ -137,12 +137,13 @@ downgrade path anywhere in this subsystem.
 
 ### Tool profiles
 
-`pi --ky-profile recon|review|implement|full` narrows the active tool set at session start, and on each idle prompt to tools the transcript has not declared (see below). The default is `implement`. An unknown value (matching is case-sensitive, so `Full` is unknown) falls back to `implement` and, when there is a UI, shows a warning naming the value. `full` applies no narrowing. An explicit `--tools`/`-t` allowlist on the command line switches narrowing off entirely, so every tool you name stays declared (`pi --tools read,bash,edit,write,bg_run` keeps `bg_run`). Pi does not expose the allowlist to extensions, so routing detects the flag on the process command line; an SDK caller passing `tools` programmatically is still narrowed. A pi-subagents child is covered only if the package passes its frontmatter tool list as `--tools` on the child's command line; that is not verified offline.
+`pi --ky-profile recon|review|implement|full` narrows the active tool set at session start, and on each idle prompt to tools the transcript has not declared (see below). The default is `implement`. An unknown value (matching is case-sensitive, so `Full` is unknown) falls back to `implement` and, when there is a UI, shows a warning naming the value. `full` removes only the `bg_enable` loader, because every tool it loads is already active there. An explicit `--tools`/`-t` allowlist on the command line switches narrowing off entirely, so every tool you name stays declared (`pi --tools read,bash,edit,write,bg_run` keeps `bg_run`). Pi does not expose the allowlist to extensions, so routing detects the flag on the process command line; an SDK caller passing `tools` programmatically is still narrowed. A pi-subagents child is covered only if the package passes its frontmatter tool list as `--tools` on the child's command line; that is not verified offline.
 
 | Tool(s) | recon | review | implement | full |
 |---------|-------|--------|-----------|------|
 | read, bash, approve_ky_command | yes | yes | yes | yes |
-| edit, write, todo, bg_enable | no | no | yes | yes |
+| edit, write, todo | no | no | yes | yes |
+| bg_enable | no | no | yes | no |
 | consult_advisor, lsp_diagnostics | no | yes | yes | yes |
 | lsp_fix | no | no | no | yes |
 | subagent, bg_wait, subagent_supervisor, subagents_enable | no | yes | yes | yes |
@@ -151,7 +152,7 @@ downgrade path anywhere in this subsystem.
 | questionnaire, bg_run, bg_status, bg_logs, bg_kill | no | no | on demand | yes |
 | qoder_delegate | no | no | no | yes |
 
-Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,699 tok, review 1,827, implement 2,342, full 4,177. Under `implement`, `questionnaire` and the `bg_*` tools are loaded on demand by the `bg_enable` loader (`routing/loader.ts`, 90 tokens): the model calls it, and the tools, plus background-tasks' shell-policy prompt section, appear on its next request. Carrying them by default would cost about 1,835 tokens on every turn, the same as `full`. The loader has no prompt metadata of its own; activating the bg tools rebuilds the system prompt once, as any lazily loaded tool with prompt metadata does.
+Measured per-turn floor (`/budget` formula, from `docs/DIAGNOSTICS.md`): recon 1,699 tok, review 1,827, implement 2,342, full 4,106. Under `implement`, `questionnaire` and the `bg_*` tools are loaded on demand by the `bg_enable` loader (`routing/loader.ts`, 90 tokens): the model calls it, and the tools, plus background-tasks' shell-policy prompt section, appear on its next request. Carrying them by default would cost about 1,835 tokens on every turn, the same as `full`. The loader has no prompt metadata of its own; activating the bg tools rebuilds the system prompt once, as any lazily loaded tool with prompt metadata does.
 
 Two rules keep this safe. Pi's registered-but-inactive built-ins (`grep`, `find`, `ls`) are neutral and never removed, because if they are active something chose them. A loadout with neither `edit` nor `write` was already chosen read-only (plan mode, a read-only subagent), so the profile leaves it alone.
 

@@ -32,8 +32,9 @@ export const TOOL_PROFILES: Readonly<Record<string, readonly ProfileName[]>> = {
 	fetch_content: ["recon", "full"],
 	get_search_content: ["recon", "full"],
 	source_check: ["recon", "full"],
+	// Only where the tools below start inactive: under `full` they are already active and the loader would be per-turn waste.
+	bg_enable: ["implement"],
 	// Out of `implement` so it does not carry their schemas and the shell-policy section every turn; `bg_enable` loads them.
-	bg_enable: WRITERS,
 	questionnaire: ["full"],
 	bg_run: ["full"],
 	bg_status: ["full"],
@@ -74,7 +75,6 @@ export function resolveProfile(flag: unknown): ProfileName {
  * already chosen read-only, so it is left alone.
  */
 export function applyProfile(active: readonly string[], profile: ProfileName): string[] | undefined {
-	if (profile === "full") return undefined;
 	if (!active.includes("edit") && !active.includes("write")) return undefined;
 	const next = active.filter((name) => {
 		const allowed = Object.hasOwn(TOOL_PROFILES, name) ? TOOL_PROFILES[name] : undefined;

@@ -1,8 +1,6 @@
 /**
- * `bg_enable`: the loader that activates the background-task tools and `questionnaire` on demand, so the `implement`
- * profile does not pay their schemas and the shell-policy prompt section on every turn. Same shape as pi-web-access's
- * `web_enable` (pi-web-access 0.38.0 `tool-activation.ts:73`): no prompt metadata, activation through `pi.setActiveTools`, visible on
- * the next model request (pi 1.1.0 `docs/extensions.md`, dynamic tool loading). Named exports only.
+ * `bg_enable` activates the background-task tools and `questionnaire` on demand, so `implement` does not pay their schemas every turn.
+ * No prompt metadata, like pi-web-access 0.38.0 `web_enable` (`tool-activation.ts:73`), so activating it never rebuilds the system prompt.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";

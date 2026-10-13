@@ -14,7 +14,8 @@ import {
 
 const rows: Array<[string[], ProfileName[]]> = [
 	[["read", "bash", "approve_ky_command", "web_enable"], ["recon", "review", "implement", "full"]],
-	[["edit", "write", "todo", "bg_enable"], ["implement", "full"]],
+	[["edit", "write", "todo"], ["implement", "full"]],
+	[["bg_enable"], ["implement"]],
 	[["consult_advisor", "lsp_diagnostics"], ["review", "implement", "full"]],
 	[["subagent", "bg_wait", "subagent_supervisor", "subagents_enable"], ["review", "implement", "full"]],
 	[["web_search", "fetch_content", "get_search_content", "source_check"], ["recon", "full"]],
@@ -34,9 +35,9 @@ describe("profile table", () => {
 		}
 	}
 
-	it("lists every table tool for full", () => {
+	it("lists every table tool for full except bg_enable, whose tools full already carries", () => {
 		for (const [name, profiles] of Object.entries(TOOL_PROFILES)) {
-			expect(profiles, name).toContain("full");
+			if (name !== "bg_enable") expect(profiles, name).toContain("full");
 		}
 	});
 
@@ -64,6 +65,9 @@ describe("applyProfile", () => {
 
 	it("does nothing for full", () => {
 		expect(applyProfile(active, "full")).toBeUndefined();
+	});
+	it("drops only bg_enable for full, whose tools full already carries", () => {
+		expect(applyProfile([...active, "bg_enable", "bg_run"], "full")).toEqual([...active, "bg_run"]);
 	});
 	it("narrows implement in input order", () => {
 		expect(applyProfile(active, "implement")).toEqual([

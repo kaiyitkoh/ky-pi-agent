@@ -377,7 +377,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	registerBgLoader(pi);
 	pi.registerFlag("ky-profile", { description: "Tool profile: recon, review, implement (default) or full", type: "string", default: "implement" });
 	// Pi gives extensions no view of a `--tools` allowlist, so read argv; the user's named tools must never be narrowed.
-	const profile = () => (hasExplicitToolAllowlist(process.argv) ? "full" : resolveProfile(pi.getFlag("ky-profile")));
+	const narrow = (active: readonly string[]) => (hasExplicitToolAllowlist(process.argv) ? undefined : applyProfile(active, resolveProfile(pi.getFlag("ky-profile"))));
 	pi.on("session_start", (event, ctx) => {
 		// NEVER THROWS: a bad payload must not stop session start.
 		try {
@@ -394,7 +394,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			if (typeof flag === "string" && resolveProfile(flag) !== flag && ctx.hasUI) ctx.ui.notify(`unknown --ky-profile "${flag}"; using ${DEFAULT_PROFILE}`, "warning");
 			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
 			if (event.reason === "reload" || branch.some((entry) => entry.type === "message")) return;
-			const next = applyProfile(pi.getActiveTools(), profile());
+			const next = narrow(pi.getActiveTools());
 			if (next !== undefined) pi.setActiveTools(next);
 		} catch {
 			// Swallowed deliberately.
@@ -415,7 +415,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 		// NEVER THROWS: a failed narrowing must not block the prompt; the wider loadout is the safe fallback.
 		try {
 			const active = pi.getActiveTools();
-			const next = ctx.isIdle() ? applyProfile(active, profile()) : undefined;
+			const next = ctx.isIdle() ? narrow(active) : undefined;
 			if (next === undefined) return;
 			const declared = new Set(getCurrentTools(ctx.sessionManager.buildSessionProjection().messages).map((t) => t.name));
 			const kept = active.filter((name) => next.includes(name) || declared.has(name));
