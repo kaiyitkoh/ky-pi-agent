@@ -15,10 +15,11 @@ import {
 const rows: Array<[string[], ProfileName[]]> = [
 	[["read", "bash", "approve_ky_command", "web_enable"], ["recon", "review", "implement", "full"]],
 	[["edit", "write", "todo"], ["implement", "full"]],
-	[["consult_advisor", "lsp_diagnostics", "lsp_fix"], ["review", "implement", "full"]],
+	[["consult_advisor", "lsp_diagnostics"], ["review", "implement", "full"]],
 	[["subagent", "bg_wait", "subagent_supervisor", "subagents_enable"], ["review", "implement", "full"]],
 	[["web_search", "fetch_content", "get_search_content", "source_check"], ["recon", "full"]],
-	[["questionnaire", "bg_run", "bg_status", "bg_logs", "bg_kill", "qoder_delegate"], ["full"]],
+	[["questionnaire", "bg_run", "bg_status", "bg_logs", "bg_kill"], ["implement", "full"]],
+	[["lsp_fix", "qoder_delegate"], ["full"]],
 ];
 
 describe("profile table", () => {
@@ -60,14 +61,14 @@ describe("resolveProfile", () => {
 });
 
 describe("applyProfile", () => {
-	const active = ["read", "bash", "edit", "write", "bg_run", "questionnaire", "todo", "consult_advisor", "approve_ky_command"];
+	const active = ["read", "bash", "edit", "write", "qoder_delegate", "questionnaire", "todo", "consult_advisor", "approve_ky_command"];
 
 	it("does nothing for full", () => {
 		expect(applyProfile(active, "full")).toBeUndefined();
 	});
 	it("narrows implement in input order", () => {
 		expect(applyProfile(active, "implement")).toEqual([
-			"read", "bash", "edit", "write", "todo", "consult_advisor", "approve_ky_command",
+			"read", "bash", "edit", "write", "questionnaire", "todo", "consult_advisor", "approve_ky_command",
 		]);
 	});
 	it("leaves a read-only loadout alone", () => {

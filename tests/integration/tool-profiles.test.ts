@@ -21,7 +21,6 @@ import {
 	TOOL_PROFILES,
 	type ProfileName,
 } from "../../.pi/extensions/routing/profiles.ts";
-import { SHELL_POLICY_SECTION } from "../../.pi/extensions/background-tasks/src/core/shell-policy.ts";
 import { transcriptView } from "../helpers/faux.ts";
 import { createHarnessSession, type HarnessHandle, listEntryPoints, withHarnessSession } from "../helpers/harness-session.ts";
 
@@ -40,6 +39,19 @@ async function declared(opts: Parameters<typeof createHarnessSession>[0]): Promi
 	});
 }
 
+/** Stands in for pi-lsp, which the offline harness does not load; the table classifies lsp_fix as full-only. */
+const LSP_FIX_STUB = `export default function (pi) {
+	pi.registerTool({
+		name: "lsp_fix",
+		label: "lsp fix",
+		description: "stub",
+		parameters: { type: "object", properties: {} },
+		async execute() {
+			return { content: [{ type: "text", text: "ok" }], details: undefined };
+		},
+	});
+}`;
+
 const systemCount = (c: TranscriptContext): number => c.messages.filter((m) => m.role === "system").length;
 
 describe("T1: narrowing happens before the first request", () => {
@@ -52,7 +64,7 @@ describe("T1: narrowing happens before the first request", () => {
 	const expectations: Record<string, { has: string[]; lacks: string[] }> = {
 		recon: { has: ["read", "bash", "approve_ky_command"], lacks: ["edit", "write", "todo", "bg_run", "questionnaire", "subagent"] },
 		review: { has: ["read", "bash", "consult_advisor", "approve_ky_command"], lacks: ["edit", "write", "todo", "bg_run", "questionnaire"] },
-		implement: { has: ["read", "bash", "edit", "write", "todo", "consult_advisor", "approve_ky_command"], lacks: ["bg_run", "questionnaire", "web_search"] },
+		implement: { has: ["read", "bash", "edit", "write", "todo", "consult_advisor", "approve_ky_command", "questionnaire", "bg_run", "bg_status"], lacks: ["qoder_delegate", "lsp_fix", "web_search"] },
 	};
 
 	for (const [profile, want] of Object.entries(expectations)) {
@@ -117,35 +129,35 @@ const removedNames = (c: TranscriptContext): string[] =>
 	c.messages.flatMap((m) => (m.role === "system" ? ((m as { toolsRemoved?: { name: string }[] }).toolsRemoved ?? []) : []).map((t) => t.name));
 
 describe("a transcript's loadout is never narrowed again", () => {
-	it("reopening a full-profile transcript under the default keeps bg_run and writes no removal", async () => {
+	it("reopening a full-profile transcript under the default keeps lsp_fix and writes no removal", async () => {
 		const sessionManager = SessionManager.inMemory(tmpdir());
-		await withHarnessSession({ profile: "full", sessionManager, responses: steps(1, []) }, async (h) => {
+		await withHarnessSession({ profile: "full", extraExtensionSource: LSP_FIX_STUB, sessionManager, responses: steps(1, []) }, async (h) => {
 			await h.session.prompt("one");
 		});
 		const sink: TranscriptContext[] = [];
-		await withHarnessSession({ sessionManager, responses: steps(1, sink) }, async (h) => {
-			expect(h.session.getActiveToolNames()).toContain("bg_run");
+		await withHarnessSession({ extraExtensionSource: LSP_FIX_STUB, sessionManager, responses: steps(1, sink) }, async (h) => {
+			expect(h.session.getActiveToolNames()).toContain("lsp_fix");
 			await h.session.prompt("two");
-			expect(getCurrentTools(sink[0]!.messages).map((t) => t.name)).toContain("bg_run");
+			expect(getCurrentTools(sink[0]!.messages).map((t) => t.name)).toContain("lsp_fix");
 			expect(removedNames(sink[0]!)).toEqual([]);
 		});
 	});
 
 	it("session_start on reload in a session with no messages leaves the active set alone", async () => {
-		await withHarnessSession({}, async (h) => {
-			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+		await withHarnessSession({ extraExtensionSource: LSP_FIX_STUB }, async (h) => {
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "lsp_fix"]);
 			await h.session.extensionRunner.emit({ type: "session_start", reason: "reload" });
-			expect(h.session.getActiveToolNames()).toContain("bg_run");
+			expect(h.session.getActiveToolNames()).toContain("lsp_fix");
 		});
 	});
 
 	it("a reload after a request records no removal", async () => {
 		const sink: TranscriptContext[] = [];
-		await withHarnessSession({ responses: steps(2, sink) }, async (h) => {
+		await withHarnessSession({ extraExtensionSource: LSP_FIX_STUB, responses: steps(2, sink) }, async (h) => {
 			await h.session.prompt("one");
-			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "lsp_fix"]);
 			await h.session.extensionRunner.emit({ type: "session_start", reason: "reload" });
-			expect(h.session.getActiveToolNames()).toContain("bg_run");
+			expect(h.session.getActiveToolNames()).toContain("lsp_fix");
 			await h.session.prompt("two");
 			expect(removedNames(sink[1]!)).toEqual([]);
 		});
@@ -153,23 +165,22 @@ describe("a transcript's loadout is never narrowed again", () => {
 
 	it("a tool activated after start-up narrowing, before any request, is dropped before the first request", async () => {
 		const sink: TranscriptContext[] = [];
-		await withHarnessSession({ responses: steps(1, sink) }, async (h) => {
-			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "qoder_delegate"]);
+		await withHarnessSession({ extraExtensionSource: LSP_FIX_STUB, responses: steps(1, sink) }, async (h) => {
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "lsp_fix"]);
 			await h.session.prompt("one");
-			expect(getCurrentTools(sink[0]!.messages).map((t) => t.name)).not.toContain("qoder_delegate");
+			expect(getCurrentTools(sink[0]!.messages).map((t) => t.name)).not.toContain("lsp_fix");
 			expect(removedNames(sink[0]!)).toEqual([]);
 		});
 	});
 
-	it("a dropped bg_run leaves no shell-policy section and the system prompt byte-stable across turns", async () => {
+	it("a dropped lsp_fix leaves the system prompt byte-stable across turns", async () => {
 		const sink: TranscriptContext[] = [];
-		await withHarnessSession({ responses: steps(2, sink) }, async (h) => {
+		await withHarnessSession({ extraExtensionSource: LSP_FIX_STUB, responses: steps(2, sink) }, async (h) => {
 			await h.session.prompt("one");
-			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "lsp_fix"]);
 			await h.session.prompt("two");
 			const [first, second] = [transcriptView(sink[0]!), transcriptView(sink[1]!)];
-			expect(second.tools.map((t) => t.name)).not.toContain("bg_run");
-			expect(second.systemPrompt).not.toContain(SHELL_POLICY_SECTION);
+			expect(second.tools.map((t) => t.name)).not.toContain("lsp_fix");
 			expect(second.systemPrompt).toBe(first.systemPrompt);
 			expect(systemCount(sink[1]!)).toBe(1);
 		});
@@ -182,7 +193,7 @@ describe("a transcript's loadout is never narrowed again", () => {
 		const responses: FauxResponseStep[] = [
 			(c) => {
 				sink.push(c);
-				h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
+				h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "lsp_fix"]);
 				queued = h.session.prompt("follow", { streamingBehavior: "followUp" });
 				return fauxAssistantMessage("ok");
 			},
@@ -191,37 +202,37 @@ describe("a transcript's loadout is never narrowed again", () => {
 				return fauxAssistantMessage("ok");
 			},
 		];
-		await withHarnessSession({ responses }, async (handle) => {
+		await withHarnessSession({ extraExtensionSource: LSP_FIX_STUB, responses }, async (handle) => {
 			h = handle;
 			await h.session.prompt("one");
 			await queued;
 			expect(sink.length, "non-vacuity: the follow-up reached the provider").toBe(2);
-			expect(getCurrentTools(sink[1]!.messages).map((t) => t.name)).toContain("bg_run");
+			expect(getCurrentTools(sink[1]!.messages).map((t) => t.name)).toContain("lsp_fix");
 		});
 	});
 
 	it("a new empty session is still narrowed", async () => {
-		await withHarnessSession({}, async (h) => {
-			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "bg_run"]);
-			expect(h.session.getActiveToolNames(), "non-vacuity: bg_run is active before session_start").toContain("bg_run");
+		await withHarnessSession({ extraExtensionSource: LSP_FIX_STUB }, async (h) => {
+			h.session.setActiveToolsByName([...h.session.getActiveToolNames(), "lsp_fix"]);
+			expect(h.session.getActiveToolNames(), "non-vacuity: lsp_fix is active before session_start").toContain("lsp_fix");
 			await h.session.extensionRunner.emit({ type: "session_start", reason: "new" });
-			expect(h.session.getActiveToolNames()).not.toContain("bg_run");
+			expect(h.session.getActiveToolNames()).not.toContain("lsp_fix");
 		});
 	});
 });
 
 describe("an explicit --tools allowlist is never narrowed", () => {
-	const tools = ["read", "bash", "edit", "write", "bg_run"];
+	const tools = ["read", "bash", "edit", "write", "lsp_fix"];
 
-	it("negative control: without --tools on argv the default profile drops bg_run", async () => {
-		expect(await declared({ tools })).not.toContain("bg_run");
+	it("negative control: without --tools on argv the default profile drops lsp_fix", async () => {
+		expect(await declared({ tools, extraExtensionSource: LSP_FIX_STUB })).not.toContain("lsp_fix");
 	});
 
 	it("with --tools on argv every named tool is declared", async () => {
 		const saved = process.argv;
 		process.argv = [...saved, "--tools", tools.join(",")];
 		try {
-			expect((await declared({ tools })).sort()).toEqual([...tools].sort());
+			expect((await declared({ tools, extraExtensionSource: LSP_FIX_STUB })).sort()).toEqual([...tools].sort());
 		} finally {
 			process.argv = saved;
 		}
@@ -268,8 +279,8 @@ describe("plan mode survives the default profile", () => {
 		});
 	});
 
-	// Pi starts a triggerTurn turn without emitting `input`, so it is not narrowed; docs/ROUTING.md states this limit.
-	it("a turn an extension starts with triggerTurn after leaving plan mode is not narrowed", async () => {
+	// Pins a documented, accepted limit: Pi starts a triggerTurn turn without emitting `input`, so that turn is not narrowed.
+	it("accepted limitation: a triggerTurn turn after leaving plan mode keeps tools outside the profile", async () => {
 		const sink: TranscriptContext[] = [];
 		await withHarnessSession({ profile: "implement", flags: { plan: true }, responses: steps(2, sink) }, async (h) => {
 			await h.session.prompt("one");
@@ -278,7 +289,6 @@ describe("plan mode survives the default profile", () => {
 			expect(sink.length, "non-vacuity: the triggered turn reached the provider").toBe(2);
 			const names = getCurrentTools(sink[1]!.messages).map((t) => t.name);
 			expect(names).toContain("qoder_delegate");
-			expect(names).toContain("bg_run");
 			expect(removedNames(sink[1]!)).toEqual([]);
 		});
 	});

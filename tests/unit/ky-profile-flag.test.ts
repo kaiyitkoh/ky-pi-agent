@@ -10,7 +10,7 @@ type Handler = (event: unknown, ctx: unknown) => unknown;
 
 function startWith(flag: unknown, hasUI: boolean): { notes: [string, string][]; active: string[] } {
 	const handlers = new Map<string, Handler>();
-	let active = ["read", "bash", "edit", "write", "bg_run"];
+	let active = ["read", "bash", "edit", "write", "qoder_delegate"];
 	const pi = {
 		registerCommand: () => {},
 		registerFlag: () => {},
@@ -36,7 +36,7 @@ describe("--ky-profile validation", () => {
 	it("warns on an unknown value and still applies implement", () => {
 		const { notes, active } = startWith("ful", true);
 		expect(notes).toEqual([['unknown --ky-profile "ful"; using implement', "warning"]]);
-		expect(active).not.toContain("bg_run");
+		expect(active).not.toContain("qoder_delegate");
 	});
 
 	it("is case-sensitive: Full is unknown", () => {
