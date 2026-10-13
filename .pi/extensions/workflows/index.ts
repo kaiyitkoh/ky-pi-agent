@@ -9,7 +9,7 @@ import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { IN_FLIGHT, armQuickSettle, clearQuickSettle, notePrompt, settleQuickRun } from "./settle.ts";
-import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun, writeRunEvidence } from "./evidence.ts";
+import { armedCwd, disarmRun, endRun, isRunArmed, isRunPending, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun, writeRunEvidence } from "./evidence.ts";
 import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext, uncommittedPaths } from "../execute/progress.ts";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 
@@ -43,9 +43,9 @@ export default function (pi: ExtensionAPI): void {
 				// Pre-existing changes would be swept into the run's commit by `git add -A`, and would fail the settle anyway.
 				const dirty = uncommittedPaths(ctx.cwd);
 				if (dirty !== "") return void ctx.ui.notify(`quick: the working tree has uncommitted or untracked changes (${dirty}) -- commit or stash them first`, "error");
-				claimWorkflow("quick");
 				const baseSha = currentSha(ctx.cwd);
 				const baseTree = currentTree(ctx.cwd); // read in the same try, so a throw refuses via the catch and never arms a run
+				claimWorkflow("quick");
 				// A typecheck that already fails on the base cannot be blamed on the change.
 				armQuickSettle({ baseSha, baseTypecheckFailed: runTypecheckAt(ctx.cwd, ctx.isProjectTrusted()).status === "fail" });
 				const prompt = `${task}\n\nEnd this work in exactly one atomic commit made with the bash tool, staging only the files you changed (git add <path>...).`;
@@ -86,9 +86,10 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	// An orphaned run (no agent_settled arrived) is disarmed before pruning.
+	// An orphaned run (no agent_settled arrived) is disarmed before pruning; one whose prompt never started ran nothing to reject.
 	pi.on("session_start", (_event, ctx) => {
 		clearQuickSettle();
+		if (isRunPending()) disarmRun();
 		const orphan = endRun("", "");
 		if (orphan !== undefined) writeRunEvidence(orphan.run, "reject", "the run was orphaned: no agent_settled arrived before a new session started");
 		pruneEvidenceLogs(ctx.cwd);

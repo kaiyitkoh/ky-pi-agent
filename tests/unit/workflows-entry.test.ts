@@ -152,6 +152,20 @@ describe("WR-02 (iteration 3) -- the registered session_start handler disarms a 
 	});
 });
 
+describe("a run whose prompt never started is not an orphan", () => {
+	it("session_start disarms it without writing a reject row", async () => {
+		const { pi, handlers } = stubPi();
+		workflows(pi);
+		await withTempLogCwd(async (cwd) => {
+			startRun(cwd, "fixture-base-sha", "fixture-base-tree", "do the task");
+			expect(isRunArmed()).toBe(true);
+			await (handlers.get("session_start") as (...args: unknown[]) => unknown)(undefined, { cwd } as unknown as ExtensionContext);
+			expect(isRunArmed()).toBe(false);
+			expect(logFilesIn(logDir(cwd)).filter((f) => f.startsWith("evidence-"))).toEqual([]);
+		});
+	});
+});
+
 describe("/quick's command handler is a real async function (vacuous-pass guard for the stub above)", () => {
 	it("the quick command's handler is callable", () => {
 		const { pi } = stubPi();

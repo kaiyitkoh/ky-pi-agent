@@ -1548,7 +1548,7 @@ const WORKFLOW_TEXT_BUDGETS: readonly {
 		commandFile: ".pi/extensions/workflows/index.ts",
 		bodies: [],
 		budget: 100,
-		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 97 raw lines " +
+		why: "the harder FEATURES.md Part 2 line 238 ceiling; no skill/prompt body. Measured 98 raw lines " +
 			"2026-10-13 with countRawLines, inside 100 -- the independent greppable assertion on " +
 			"workflows/index.ts still holds",
 	},
