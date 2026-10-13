@@ -251,6 +251,18 @@ moving backwards or sideways is not a commit, so it REJECTS with "not a new
 commit on top of <base>". A rebase onto another upstream also rejects; for
 `/execute`, `--rebase-base` is the way past it.
 
+**Only commits the run made count.** Ancestry alone would accept a `git pull`,
+a merge, a cherry-pick or a `reset` forward, because each lands on a
+descendant of the base. So every commit in `base..HEAD` must also have exactly
+one parent (no merge commit) and an author time AND a committer time no
+earlier than the second the run was armed (`onlyCommitsSince`). A teammate's
+pulled commit, or a cherry-picked one, keeps its original author time and
+rejects. Several fresh commits are accepted, so a follow-up fix commit is not
+punished. The residual: a commit someone else made after the run was armed,
+pulled in by fast-forward, or a commit whose dates were forged with
+`GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE`, still passes; the drift check and the
+reviewer are the defences there.
+
 **The empty-commit branch.**
 `gateCompletion` (`.pi/extensions/workflows/evidence.ts`) checks, after the
 `headSha === baseSha` and ancestry branches and before the evidence-at-HEAD

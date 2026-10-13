@@ -54,6 +54,22 @@ export function isStrictDescendant(cwd: string, baseSha: string, headSha: string
 }
 
 /**
+ * True when every commit in `baseSha..headSha` has one parent and was authored and committed at or after `armedAtMs`.
+ * A pull, merge, cherry-pick or reset forward brings in commits made before the run, so it fails; false when git cannot say.
+ */
+export function onlyCommitsSince(cwd: string, baseSha: string, headSha: string, armedAtMs: number): boolean {
+	const r = spawnSync("git", ["log", "--format=%P|%at|%ct", `${baseSha}..${headSha}`, "--"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	if (r.status !== 0) return false;
+	const rows = (r.stdout ?? "").split("\n").filter((line) => line.trim() !== "");
+	// Git stores whole seconds, so a commit in the arm's own second must still count as after it.
+	const floor = Math.floor(armedAtMs / 1000);
+	return rows.length > 0 && rows.every((row) => {
+		const [parents = "", author = "", committer = ""] = row.split("|");
+		return parents.trim().split(" ").length === 1 && Number(author) >= floor && Number(committer) >= floor;
+	});
+}
+
+/**
  * First match wins: no record, unreadable HEAD, HEAD unmoved, HEAD not built on the base, empty commit, no record at HEAD.
  * Failed intermediate calls are counted, not fatal; the caller checks the declared verification.
  */
@@ -91,8 +107,8 @@ export function gateCompletion(
 		return {
 			ok: false,
 			reason:
-				`HEAD moved to ${headSha}, which is not a new commit on top of ${baseSha} -- a checkout or reset moves HEAD ` +
-				"without committing anything, so it cannot support a completion claim",
+				`HEAD moved to ${headSha}, which is not a new commit on top of ${baseSha} made during this run -- a checkout, reset, ` +
+				"pull, merge or cherry-pick moves HEAD to commits the run did not make, so it cannot support a completion claim",
 		};
 	}
 
@@ -129,6 +145,7 @@ interface RunState {
 	/** The tree HEAD pointed at when armed; used to detect an empty commit. */
 	readonly baseTree: string;
 	readonly records: EvidenceRecord[];
+	readonly armedAt: number;
 	/** The prompt that starts this run; until a prompt containing it starts, the run records and settles nothing. */
 	readonly prompt?: string;
 	started: boolean;
@@ -141,7 +158,7 @@ function runSlot(): RunState | undefined {
 
 /** Arm a run, replacing any prior one. With `prompt`, the run waits for that prompt to start; without, it counts as started. */
 export function startRun(cwd: string, sha: string, tree: string, prompt?: string): void {
-	const state: RunState = { cwd, baseSha: sha, baseTree: tree, records: [], prompt, started: prompt === undefined };
+	const state: RunState = { cwd, baseSha: sha, baseTree: tree, records: [], armedAt: Date.now(), prompt, started: prompt === undefined };
 	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = state;
 }
 
@@ -216,7 +233,7 @@ export function endRun(headSha: string, headTree: string): EndedRun | undefined 
 	if (state === undefined) {
 		return undefined;
 	}
-	const descends = isStrictDescendant(state.cwd, state.baseSha, headSha);
+	const descends = isStrictDescendant(state.cwd, state.baseSha, headSha) && onlyCommitsSince(state.cwd, state.baseSha, headSha, state.armedAt);
 	const verdict = gateCompletion(state.records, headSha, state.baseSha, headTree, state.baseTree, descends);
 	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = undefined;
 	const run: RunSummary = {

@@ -21,7 +21,7 @@
  * `06-01-SUMMARY.md`, not merely asserted here.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -33,6 +33,7 @@ import {
 	gateCompletion,
 	isRunArmed,
 	isStrictDescendant,
+	onlyCommitsSince,
 	recordFromToolResult,
 	recordToolResult,
 	startRun,
@@ -292,7 +293,7 @@ describe("WR-06 -- run-state machinery (startRun / recordToolResult / isRunArmed
 	it("endRun() disarms: a second endRun() call with no intervening startRun() returns undefined", () => {
 		startRun(repo, shaA, treeA);
 		recordToolResult(record("bash", shaB, false));
-		expect(endRun(shaB, treeB)?.ok).toBe(true);
+		expect(endRun(shaB, treeB)).toBeDefined();
 		expect(endRun(shaB, treeB)).toBeUndefined();
 	});
 });
@@ -429,6 +430,64 @@ describe("a HEAD move that is not a new commit on the base is rejected", () => {
 		expect(isStrictDescendant(r, first, third)).toBe(true);
 		expect(isStrictDescendant(r, third, third)).toBe(false);
 		expect(isStrictDescendant(r, "", third)).toBe(false);
+	});
+});
+
+describe("only commits the run made count: a pull, merge or second-hand commit rejects", () => {
+	const OLD_DATE = "2020-01-01T00:00:00Z";
+	const git = (cwd: string, args: string[], env: Record<string, string> = {}) => {
+		const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true, env: { ...process.env, ...env } });
+		expect(r.status, `git ${args.join(" ")}: ${r.stderr}`).toBe(0);
+	};
+	/** A repo on `main` at `base`, with branch `upstream` one commit ahead, dated long before any run is armed. */
+	function setup(): { r: string; base: string } {
+		const r = makeTempRepo("quick-evidence-fresh-");
+		tempDirs.push(r);
+		const base = commitFile(r, "base.txt", "base", "base");
+		git(r, ["checkout", "-q", "-b", "upstream"]);
+		writeFileSync(join(r, "theirs.ts"), "export const theirs = 1;\n");
+		git(r, ["add", "theirs.ts"]);
+		git(r, ["commit", "-q", "-m", "teammate work"], { GIT_AUTHOR_DATE: OLD_DATE, GIT_COMMITTER_DATE: OLD_DATE });
+		git(r, ["checkout", "-q", "-"]);
+		return { r, base };
+	}
+	const settle = (r: string) => {
+		recordToolResult(record("bash", currentSha(r), false));
+		return endRun(currentSha(r), currentTree(r));
+	};
+
+	it("a fast-forward pull of a teammate's earlier commit rejects", () => {
+		const { r, base } = setup();
+		startRun(r, base, currentTree(r));
+		git(r, ["merge", "--ff-only", "-q", "upstream"]);
+		const verdict = settle(r);
+		expect(verdict?.ok, JSON.stringify(verdict)).toBe(false);
+		if (verdict !== undefined && !verdict.ok) expect(verdict.reason).toContain("did not make");
+	});
+
+	it("a merge commit made during the run rejects", () => {
+		const { r, base } = setup();
+		startRun(r, base, currentTree(r));
+		commitFile(r, "mine.ts", "export const mine = 1;", "my work");
+		git(r, ["merge", "--no-ff", "-q", "-m", "merge upstream", "upstream"]);
+		expect(settle(r)?.ok).toBe(false);
+	});
+
+	it("a cherry-pick keeps the old author date and rejects", () => {
+		const { r, base } = setup();
+		startRun(r, base, currentTree(r));
+		git(r, ["cherry-pick", "upstream"]);
+		expect(settle(r)?.ok).toBe(false);
+	});
+
+	it("PAIRED POSITIVE: one or two commits made during the run accept", () => {
+		const { r, base } = setup();
+		startRun(r, base, currentTree(r));
+		commitFile(r, "mine.ts", "export const mine = 1;", "my work");
+		commitFile(r, "mine2.ts", "export const mine2 = 2;", "my follow-up");
+		const verdict = settle(r);
+		expect(verdict?.ok, JSON.stringify(verdict)).toBe(true);
+		expect(onlyCommitsSince(r, base, currentSha(r), Date.now() - 60_000)).toBe(true);
 	});
 });
 
