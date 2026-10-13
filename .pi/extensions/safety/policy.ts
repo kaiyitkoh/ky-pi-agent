@@ -45,7 +45,7 @@ export interface PolicyFacts {
 
 const VERDICT_RANK: Record<Verdict["kind"], number> = { allow: 0, ask: 1, confirm: 2, block: 3 };
 
-/** b replaces a only when strictly stronger: a block is never downgraded. One grant cannot carry both an ask and a confirm, so together they block. */
+// b replaces a only when strictly stronger: a block is never downgraded. One grant cannot carry both an ask and a confirm, so together they block.
 function strongerOf(a: Verdict, b: Verdict): Verdict {
 	const kinds = new Set([a.kind, b.kind]);
 	if (kinds.has("ask") && kinds.has("confirm")) {
@@ -64,7 +64,7 @@ function describeShape(value: unknown): string {
 	return Array.isArray(value) ? "an array" : typeof value;
 }
 
-/** Missing, non-string and empty are one malformed shape; no classifier ever sees undefined or "". */
+// Missing, non-string and empty are one malformed shape; no classifier ever sees undefined or "".
 function extractStringField(input: unknown, field: string): FieldExtraction {
 	if (input === null || typeof input !== "object" || Array.isArray(input)) {
 		return { kind: "missing", reason: `input is not an object (received ${describeShape(input)})` };
@@ -75,7 +75,7 @@ function extractStringField(input: unknown, field: string): FieldExtraction {
 	return { kind: "ok", value };
 }
 
-/** Key-sorted: JSON.stringify order is insertion order and not stable across equivalent objects. */
+// Key-sorted: JSON.stringify order is insertion order and not stable across equivalent objects.
 function stableStringify(value: unknown): string {
 	if (value === null || typeof value !== "object") return JSON.stringify(value);
 	if (Array.isArray(value)) return `[${value.map(stableStringify).join(",")}]`;
@@ -84,7 +84,7 @@ function stableStringify(value: unknown): string {
 	return `{${keys.map((k) => `${JSON.stringify(k)}:${stableStringify(obj[k])}`).join(",")}}`;
 }
 
-/** Pure function of (tool, command/path, cwd) so the hook and the wrapper derive the identical key independently; not a hash. */
+// Pure function of (tool, command/path, cwd) so the hook and the wrapper derive the identical key independently; not a hash.
 function computeRequestKey(toolName: string, keyedInput: Readonly<Record<string, unknown>>, cwd: string): string {
 	return `${toolName}::${stableStringify(keyedInput)}::${cwd}`;
 }
@@ -95,7 +95,7 @@ const pathFactsOf = (facts: PolicyFacts): PathPolicyFacts => ({
 	kubeconfigEnv: facts.kubeconfigEnv,
 });
 
-/** Write facts add `core.hooksPath`, read lazily because only a write needs it; an unreadable config adds nothing. */
+// Write facts add `core.hooksPath`, read lazily because only a write needs it; an unreadable config adds nothing.
 function writeFactsOf(facts: PolicyFacts): PathPolicyFacts {
 	let values: readonly string[] = [];
 	try {
@@ -109,11 +109,11 @@ function writeFactsOf(facts: PolicyFacts): PathPolicyFacts {
 
 const canonicalOf = (text: string, facts: PolicyFacts, cwd = facts.cwd): string => canonicalisePathArg({ text, value: text }, { cwd, home: facts.home });
 
-/** The directory an invocation runs in: each `cd`/`env -C`/`git -C` target resolved against the one before, `~` expanded. */
+// The directory an invocation runs in: each `cd`/`env -C`/`git -C` target resolved against the one before, `~` expanded.
 const invocationDir = (invocation: CanonicalInvocation, facts: PolicyFacts): string =>
 	(invocation.cwdChain ?? []).reduce((dir, next) => canonicalOf(next, facts, dir), facts.cwd);
 
-/** Independent of the cwd: a drive or root path, `~`, or `$HOME`. */
+// Independent of the cwd: a drive or root path, `~`, or `$HOME`.
 const CWD_INDEPENDENT = /^(([A-Za-z]:)?[/\\]|~([/\\]|$)|\$\{?HOME\}?([/\\]|$))/;
 
 function fromGitVerdict(verdict: GitVerdict, requestKey: string): Verdict {
@@ -143,21 +143,21 @@ function fromInfraVerdict(verdict: InfraVerdict, requestKey: string): Verdict {
 	}
 }
 
-/** Global options that point git at another repository or ref namespace than the cwd the guard reads config in. */
+// Global options that point git at another repository or ref namespace than the cwd the guard reads config in.
 const GIT_REPO_REDIRECT_OPTIONS = /^--(git-dir|work-tree|namespace)(=|$)/;
 
 const wordSet = (words: string): ReadonlySet<string> => new Set(words.split(" "));
 
-/** `-c` keys that only affect output formatting; every other override can make git run a program or move a push target. */
+// `-c` keys that only affect output formatting; every other override can make git run a program or move a push target.
 const GIT_FORMATTING_CONFIG_KEYS = wordSet("core.quotepath color.ui");
 
-/** Global options that take no value and cannot change what runs. */
+// Global options that take no value and cannot change what runs.
 const GIT_BOOLEAN_GLOBALS = wordSet(
 	"--no-pager -P --paginate -p --bare --literal-pathspecs --glob-pathspecs --noglob-pathspecs --icase-pathspecs " +
 		"--no-replace-objects --no-optional-locks --no-lazy-fetch",
 );
 
-/** `NAME=value` words a git invocation may carry; any other GIT_* variable can redirect config, hooks or transport. */
+// `NAME=value` words a git invocation may carry; any other GIT_* variable can redirect config, hooks or transport.
 const GIT_ALLOWED_ASSIGNMENTS = wordSet("GIT_PAGER=cat GIT_TERMINAL_PROMPT=0");
 
 /**
@@ -195,7 +195,7 @@ function toGitInvocation(invocation: CanonicalInvocation, strict = true): GitInv
 	return { subcommand: args[i] ?? "", args: args.slice(i + 1), configOverrides, ...(unparsed !== undefined ? { unparsed } : {}) };
 }
 
-/** `git-push` and kin are the git subcommand run as its own executable; classify them as `git <x>`. */
+// `git-push` and kin are the git subcommand run as its own executable; classify them as `git <x>`.
 function asGitSubcommandInvocation(invocation: CanonicalInvocation): CanonicalInvocation | undefined {
 	const match = /^git-(.+)$/.exec(normaliseExecutable(invocation.executable));
 	return match === null ? undefined : { ...invocation, executable: "git", args: [match[1], ...invocation.args] };
@@ -207,7 +207,7 @@ const nonFormattingGitAssignment = (invocation: CanonicalInvocation): string | u
 
 const EXPORTING_BUILTINS = wordSet("export declare typeset readonly local");
 
-/** A `GIT_*` variable set or exported anywhere in a script that runs git reaches that git through the environment. */
+// A `GIT_*` variable set or exported anywhere in a script that runs git reaches that git through the environment.
 function scriptGitVariable(invocations: readonly CanonicalInvocation[], scriptAssignments: readonly string[]): string | undefined {
 	const runsGit = invocations.some((inv) => /^git(-|$)/.test(normaliseExecutable(inv.executable)));
 	if (!runsGit) return undefined;
@@ -218,14 +218,14 @@ function scriptGitVariable(invocations: readonly CanonicalInvocation[], scriptAs
 const GLOB_CHARS = /[*?[]/;
 const LEADING_WILDCARD = /^[*?[{]/;
 
-/** The shell never matches a dotfile with a leading wildcard, so such a basename is judged by its directory part alone. */
+// The shell never matches a dotfile with a leading wildcard, so such a basename is judged by its directory part alone.
 function classifyGlobArg(canonical: string, facts: PathPolicyFacts): PathVerdict {
 	const slash = Math.max(canonical.lastIndexOf("/"), canonical.lastIndexOf("\\"));
 	const base = canonical.slice(slash + 1);
 	return LEADING_WILDCARD.test(base) ? classifyReadGlob(`${canonical.slice(0, slash + 1)}x`, facts) : classifyReadGlob(canonical, facts);
 }
 
-/** The argument itself, plus the file it names when it is `@file` or `key=@file` (curl, jq and others read the file). */
+// The argument itself, plus the file it names when it is `@file` or `key=@file` (curl, jq and others read the file).
 function fileOperandsOf(arg: string): string[] {
 	const operands = [arg];
 	if (arg.startsWith("@")) operands.push(arg.slice(1));
@@ -237,7 +237,7 @@ function fileOperandsOf(arg: string): string[] {
 const SECRET_NAME = /(SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_KEY|ACCESS_KEY|API_KEY|CREDENTIAL)/i;
 const SECRET_EXPANSION = /\$\{?[A-Za-z0-9_]*(SECRET|TOKEN|PASSWORD|PASSWD|PRIVATE_KEY|ACCESS_KEY|API_KEY|CREDENTIAL)/i;
 
-/** Why an invocation prints the environment or a secret-named variable into the model's context, or undefined. */
+// Why an invocation prints the environment or a secret-named variable into the model's context, or undefined.
 function environmentDump(invocation: CanonicalInvocation): string | undefined {
 	const executable = normaliseExecutable(invocation.executable);
 	const named = invocation.args.filter((a) => !a.startsWith("-"));
@@ -249,8 +249,7 @@ function environmentDump(invocation: CanonicalInvocation): string | undefined {
 	return printer && invocation.args.some((a) => SECRET_EXPANSION.test(a)) ? "prints a secret-named variable" : undefined;
 }
 
-/** One invocation's strongest verdict across git/glab, infra and path classification; `sole` means it is the command's only invocation. */
-/** `switched` is set when an earlier `checkout`/`switch` in the command may have moved HEAD onto a protected branch. */
+// `sole`: the command's only invocation; `switched`: an earlier checkout, switch or worktree add may have put HEAD on a protected branch.
 function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string, sole: boolean, switched = false): Verdict {
 	let strongest: Verdict = { kind: "allow" };
 	const invocation = asGitSubcommandInvocation(rawInvocation) ?? rawInvocation;
@@ -323,7 +322,7 @@ interface Walker {
 
 const walkers = (names: readonly string[], walker: Walker): [string, Walker][] => names.map((n) => [n, walker]);
 
-/** Executables that walk a directory tree, with the flag that makes them recurse (`true`: always) and whether they default to `.`. */
+// Executables that walk a directory tree, with the flag that makes them recurse (`true`: always) and whether they default to `.`.
 const RECURSIVE_WALKERS = new Map<string, Walker>([
 	...walkers(["rg", "ag"], { when: true, implicitDot: true, pattern: true }),
 	...walkers(["find", "fd"], { when: true, implicitDot: true }),
@@ -335,7 +334,7 @@ const RECURSIVE_WALKERS = new Map<string, Walker>([
 	...walkers(["tar"], { when: true, implicitDot: false }),
 ]);
 
-/** The directories a recursive walker descends from; a pattern-first search with no path operand walks `.`. */
+// The directories a recursive walker descends from; a pattern-first search with no path operand walks `.`.
 function recursiveRoots(executable: string, args: readonly string[]): string[] {
 	const walker = RECURSIVE_WALKERS.get(executable);
 	const when = walker?.when;
@@ -348,7 +347,7 @@ function recursiveRoots(executable: string, args: readonly string[]): string[] {
 
 const PATTERN_FIRST = new Set(["grep", "egrep", "fgrep", "rg", "ag", "sed", "awk"]);
 
-/** Indexes of a search tool's pattern operands, which are text, not paths: each `-e` value, else the first positional. A `-f` file is still a path. */
+// Indexes of a search tool's pattern operands, which are text, not paths: each `-e` value, else the first positional. A `-f` file is still a path.
 function patternOperands(executable: string, args: readonly string[]): Set<number> {
 	if (!PATTERN_FIRST.has(executable)) return new Set();
 	const flagged = args.flatMap((a, i) => (a === "-e" || a === "--regexp" || a === "--expression" ? [i + 1] : []));
@@ -364,7 +363,7 @@ const WRITE_ONLY_DESTINATIONS = new Set(["cp", "mv", "install", "ln", "tee", "to
 const PATH_SHAPED = /[./\\*?[~]/;
 const SECRET_BARE_NAME = /^(id_\w+|credentials|config|known_hosts|authorized_keys|environ|netrc|npmrc)$/i;
 
-/** Every path an invocation names, read-classified in the session cwd and in the directory its `cd`s lead to (a subshell `cd` does not persist). */
+// Every path an invocation names, read-classified in the session cwd and in the directory its `cd`s lead to (a subshell `cd` does not persist).
 function classifyInvocationPaths(invocation: CanonicalInvocation, executable: string, facts: PolicyFacts, requestKey: string): Verdict {
 	const patterns = patternOperands(executable, invocation.args);
 	if (invocation.afterCd === "unknown" && executable !== "git" && executable !== "glab") {
@@ -408,7 +407,7 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 
 const GIT_PATH_VALUE_OPTIONS = new Set(["-s", "--source", "-b", "-B", "--orphan", "-m", "--conflict"]);
 
-/** Working-tree paths a git subcommand rewrites, or `"unnamed"` when a patch or a pathspec file names them instead. */
+// Working-tree paths a git subcommand rewrites, or `"unnamed"` when a patch or a pathspec file names them instead.
 function gitPathWrites(git: GitInvocation): string[] | "unnamed" {
 	const { subcommand, args } = git;
 	if (subcommand === "am" || (subcommand === "apply" && !args.some((a) => a === "--check" || a === "--stat" || a === "--numstat"))) return "unnamed";
@@ -423,14 +422,14 @@ const DEVICE_FILE = /^\/dev\/(null|stdout|stderr|tty|fd\/\d+)$/i;
 
 const EXTENSION_CODE_TITLE = "Allow this change to extension code?";
 
-/** An extension-code write asks; the canonical paths are the prompt and part of the key, so a grant covers only these files. */
+// An extension-code write asks; the canonical paths are the prompt and part of the key, so a grant covers only these files.
 function askForPaths(reasons: readonly string[], paths: readonly string[], requestKey: string): Verdict {
 	if (paths.length === 0) return { kind: "allow" };
 	const prompt = `Path: ${[...new Set(paths)].join(", ")}`;
 	return { kind: "ask", reason: reasons.join("; "), requestKey: `${requestKey}::${prompt}`, prompt, title: EXTENSION_CODE_TITLE };
 }
 
-/** Bash writes go through the write tool's classifier in every candidate directory; device files, `/tmp` and the temp dir are scratch. */
+// Bash writes go through the write tool's classifier in every candidate directory; device files, `/tmp` and the temp dir are scratch.
 function classifyShellWrites(targets: readonly string[], dirs: Iterable<string>, facts: PolicyFacts, requestKey: string): Verdict {
 	const scratch = ["/tmp", ...(facts.tempDir !== undefined ? [facts.tempDir] : [])];
 	const askReasons: string[] = [];
@@ -451,7 +450,7 @@ function classifyShellWrites(targets: readonly string[], dirs: Iterable<string>,
 	return askForPaths(askReasons, askPaths, requestKey);
 }
 
-/** canonicalise() refusal blocks first; then each invocation is classified and the strongest verdict wins, so one blocked segment blocks the whole command. */
+// canonicalise() refusal blocks first; then each invocation is classified and the strongest verdict wins, so one blocked segment blocks the whole command.
 function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	const commandField = extractStringField(input, "command");
 	if (commandField.kind === "missing") return { kind: "block", reason: `bash input is malformed: ${commandField.reason}` };
@@ -502,7 +501,7 @@ function evaluateRead(input: unknown, facts: PolicyFacts): Verdict {
 	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
 }
 
-/** Shared by write and edit: both take { path } and are governed by classifyPathWrite. */
+// Shared by write and edit: both take { path } and are governed by classifyPathWrite.
 function evaluateWrite(toolName: string, input: unknown, facts: PolicyFacts): Verdict {
 	const pathField = extractStringField(input, "path");
 	if (pathField.kind === "missing") return { kind: "block", reason: `write/edit input is malformed: ${pathField.reason}` };
@@ -554,7 +553,7 @@ function evaluateGlobField(extraction: OptionalFieldExtraction, facts: PolicyFac
 	return verdict.kind === "block" ? { kind: "block", reason: `grep glob refers to a sensitive file: ${verdict.reason}` } : { kind: "allow" };
 }
 
-/** grep returns file content, so only path and glob are checked; pattern is never inspected (the contract is which file is read). */
+// grep returns file content, so only path and glob are checked; pattern is never inspected (the contract is which file is read).
 function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 	if (input === null || typeof input !== "object" || Array.isArray(input)) {
 		return { kind: "block", reason: `grep input is malformed: input is not an object (received ${describeShape(input)})` };
@@ -565,7 +564,7 @@ function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 	return evaluateGlobField(extractOptionalStringField(record, "glob"), facts);
 }
 
-/** find/ls leak names, not contents; a path is evaluated as a search root like grep's (defense in depth). */
+// find/ls leak names, not contents; a path is evaluated as a search root like grep's (defense in depth).
 function evaluateFindOrLs(input: unknown, facts: PolicyFacts): Verdict {
 	if (input === null || typeof input !== "object" || Array.isArray(input)) {
 		return { kind: "block", reason: `find/ls input is malformed: input is not an object (received ${describeShape(input)})` };

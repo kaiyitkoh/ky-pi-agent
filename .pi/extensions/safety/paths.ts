@@ -30,7 +30,7 @@ export interface PathResolutionContext {
 }
 
 
-/** Strip one matched pair of surrounding `"` or `'` characters, if present. */
+// Strip one matched pair of surrounding `"` or `'` characters, if present.
 function stripSurroundingQuotes(text: string): string {
 	if (text.length >= 2) {
 		const first = text[0];
@@ -42,7 +42,7 @@ function stripSurroundingQuotes(text: string): string {
 	return text;
 }
 
-/** Expand a leading `~`, `$HOME` or `${HOME}` against `home`; unbash expands none of them. */
+// Expand a leading `~`, `$HOME` or `${HOME}` against `home`; unbash expands none of them.
 function expandHome(path: string, home: string): string {
 	const trimmedHome = home.replace(/[/\\]+$/, "");
 	const prefixes = ["~/", "$HOME/", "${HOME}/"];
@@ -60,7 +60,7 @@ function expandHome(path: string, home: string): string {
 	return path;
 }
 
-/** Rewrite MSYS drive prefixes `/cygdrive/<x>/...` and `/<x>/...` to `<X>:/...`. */
+// Rewrite MSYS drive prefixes `/cygdrive/<x>/...` and `/<x>/...` to `<X>:/...`.
 function rewriteMsysDrivePrefix(path: string): string {
 	const cygdrive = /^\/cygdrive\/([A-Za-z])(\/.*)?$/.exec(path);
 	if (cygdrive !== undefined && cygdrive !== null) {
@@ -75,7 +75,7 @@ function rewriteMsysDrivePrefix(path: string): string {
 	return path;
 }
 
-/** Backslashes to slashes except a leading UNC `\` pair, which stays as the UNC marker. */
+// Backslashes to slashes except a leading UNC `\` pair, which stays as the UNC marker.
 function normalizeSlashes(path: string): string {
 	if (path.startsWith("\\\\")) {
 		return "\\\\" + path.slice(2).replace(/\\/g, "/");
@@ -83,7 +83,7 @@ function normalizeSlashes(path: string): string {
 	return path.replace(/\\/g, "/");
 }
 
-/** True if `path` is already rooted (drive letter, UNC in either spelling, or a bare leading slash). */
+// True if `path` is already rooted (drive letter, UNC in either spelling, or a bare leading slash).
 function isAbsolutePath(path: string): boolean {
 	if (/^[A-Za-z]:\//.test(path)) {
 		return true;
@@ -101,7 +101,7 @@ interface RootedSegments {
 	readonly parts: string[];
 }
 
-/** Split a slash-normalised absolute path into an immutable root (drive, or UNC server+share) that `..` cannot climb past, and the segments after it. */
+// Split a slash-normalised absolute path into an immutable root (drive, or UNC server+share) that `..` cannot climb past, and the segments after it.
 function rootedSegmentsOf(path: string): RootedSegments {
 	if (path.startsWith("\\\\")) {
 		const rest = path.slice(2).split("/").filter((p) => p.length > 0);
@@ -130,7 +130,7 @@ function joinRootAndParts(root: string, parts: readonly string[]): string {
 	return `${root}/${parts.join("/")}`;
 }
 
-/** Collapse `.` and `..` segments, uppercasing a leading drive letter as part of the same pass (see {@link rootedSegmentsOf}). */
+// Collapse `.` and `..` segments, uppercasing a leading drive letter in the same pass.
 function collapseSegments(path: string): string {
 	const { root, parts } = rootedSegmentsOf(path);
 	const collapsed: string[] = [];
@@ -189,7 +189,7 @@ function basenameOf(canonicalPath: string): string {
 	return parts.length > 0 ? parts[parts.length - 1] : "";
 }
 
-/** Case-insensitive whole-path equality on root + segments, never a raw string compare. */
+// Case-insensitive whole-path equality on root + segments, never a raw string compare.
 function sameCanonicalPath(a: string, b: string): boolean {
 	const left = rootedSegmentsOf(a);
 	const right = rootedSegmentsOf(b);
@@ -202,7 +202,7 @@ function sameCanonicalPath(a: string, b: string): boolean {
 	return left.parts.every((part, i) => part.toLowerCase() === right.parts[i].toLowerCase());
 }
 
-/** True when `target`'s segments start with every one of `root`'s segments, case-insensitively, under the same root. */
+// True when `target`'s segments start with every one of `root`'s segments, case-insensitively, under the same root.
 function isWithinRoot(target: string, root: string): boolean {
 	const t = rootedSegmentsOf(target);
 	const r = rootedSegmentsOf(root);
@@ -215,7 +215,7 @@ function isWithinRoot(target: string, root: string): boolean {
 	return r.parts.every((part, i) => part.toLowerCase() === t.parts[i].toLowerCase());
 }
 
-/** `.env`, `.env.local`, `.env.production` block in any letter case; `.env.example` and `.env.template` are a deliberate carve-out, since blocking documentation trains the user to disable the guard. */
+// `.env`, `.env.local`, `.env.production` block in any letter case; `.env.example` and `.env.template` are a deliberate carve-out, since blocking documentation trains the user to disable the guard.
 function isDotEnvFile(basename: string): boolean {
 	const lower = basename.toLowerCase();
 	if (lower === ".env") {
@@ -228,7 +228,7 @@ function isDotEnvFile(basename: string): boolean {
 	return suffix !== "example" && suffix !== "template";
 }
 
-/** NTFS resolves `name:stream` and `name::$DATA` to `name`, so the final segment is matched without its stream suffix. */
+// NTFS resolves `name:stream` and `name::$DATA` to `name`, so the final segment is matched without its stream suffix.
 function stripStreamSuffix(canonicalPath: string): string {
 	const { root, parts } = rootedSegmentsOf(canonicalPath);
 	if (parts.length === 0) {
@@ -242,17 +242,17 @@ function stripStreamSuffix(canonicalPath: string): string {
 	return joinRootAndParts(root, [...parts.slice(0, -1), last.slice(0, colon)]);
 }
 
-/** Windows short-name alias shape (`DOTENV~1.LOC`): it names a long file the policy tables cannot see. */
+// Windows short-name alias shape (`DOTENV~1.LOC`): it names a long file the policy tables cannot see.
 const SHORT_NAME_ALIAS = /^([^~.]{1,6})~\d{1,6}(\.[^.]{0,3})?$/i;
 
-/** Long names whose 8.3 alias (`AWS~1` for `.aws`, `PIC454~1` for `.pi`) must be refused in any path segment. */
+// Long names whose 8.3 alias (`AWS~1` for `.aws`, `PIC454~1` for `.pi`) must be refused in any path segment.
 const PROTECTED_LONG_NAMES = [
 	...[".aws", ".ssh", ".kube", ".gnupg", ".docker", ".pi", ".git", ".github", ".gitlab-ci.yml", ".husky", ".agents", ".config"],
 	...[".git-credentials", ".gitconfig", ".bashrc", ".bash_profile", ".profile", ".env", ".netrc", ".npmrc", ".terraform.d"],
 	...["credentials", "id_rsa", "id_ed25519", "auth.json", "kypi-ledger"],
 ];
 
-/** The base an 8.3 alias is cut from: leading dots dropped, the extension removed, inner dots and spaces squeezed out. */
+// The base an 8.3 alias is cut from: leading dots dropped, the extension removed, inner dots and spaces squeezed out.
 function shortNameBase(name: string): string {
 	const upper = name.replace(/^\.+/, "").toUpperCase();
 	const dot = upper.lastIndexOf(".");
@@ -261,7 +261,7 @@ function shortNameBase(name: string): string {
 
 const PROTECTED_SHORT_BASES = PROTECTED_LONG_NAMES.map(shortNameBase);
 
-/** An 8.3 segment whose prefix is a truncation of a protected base, or the hashed form (two letters plus four hex digits). */
+// An 8.3 segment whose prefix is a truncation of a protected base, or the hashed form (two letters plus four hex digits).
 function aliasesProtectedName(segment: string): boolean {
 	const match = SHORT_NAME_ALIAS.exec(segment);
 	if (match === null) return false;
@@ -516,7 +516,7 @@ export const SENSITIVE_NAME_PROBES: readonly string[] = [
 const GLOB_META = /[*?[{]/;
 const SENSITIVE_DIR_NAMES: readonly string[] = [".aws", ".kube", ".ssh", ".gnupg"];
 
-/** Compile one glob segment (`*`, `?`, `[..]`, `{a,b}`) to a case-insensitive anchored regex. */
+// Compile one glob segment (`*`, `?`, `[..]`, `{a,b}`) to a case-insensitive anchored regex.
 function globSegmentRegex(segment: string): RegExp {
 	let out = "";
 	let braceDepth = 0;
@@ -588,7 +588,7 @@ export function classifyReadGlob(canonicalGlob: string, facts: PathPolicyFacts):
 	return { kind: "allow" };
 }
 
-/** Home-level directories holding credentials; matched as a SEARCH ROOT segment, case-insensitively. */
+// Home-level directories holding credentials; matched as a SEARCH ROOT segment, case-insensitively.
 const SENSITIVE_SEARCH_ROOT_SEGMENTS = new Set([".aws", ".kube", ".ssh", ".gnupg"]);
 
 /**

@@ -16,7 +16,7 @@ export const DENIED_PART_TYPES = new Set(["CommandExpansion", "ProcessSubstituti
 /** Redirect operators that write a heredoc/herestring body — refuse all three. */
 export const HEREDOC_OPERATORS = new Set(["<<", "<<-", "<<<"]);
 
-/** Word-part types that mark an UNRESOLVED shell expansion. */
+// Word-part types that mark an UNRESOLVED shell expansion.
 const EXPANSION_PART_TYPES = ["SimpleExpansion", "ParameterExpansion"];
 
 /** Guarded executables, word-bounded; a word followed by a path separator is a directory (`openspec/changes`), not a verb. */
@@ -33,13 +33,13 @@ export const SHELL_RUNNERS = wordSet(
 		"trap source . hash alias unalias enable fc bind complete coproc",
 );
 
-/** Builtins whose arguments are command text or bind a name to one, so a guarded verb anywhere in the script taints them. */
+// Builtins whose arguments are command text or bind a name to one, so a guarded verb anywhere in the script taints them.
 const COMMAND_TEXT_BUILTINS = wordSet("trap alias hash enable fc source .");
 
-/** Runners whose first argument is command text rather than a script file. */
+// Runners whose first argument is command text rather than a script file.
 const COMMAND_TEXT_RUNNERS = wordSet("trap alias unalias hash enable fc bind complete coproc");
 
-/** `find`/`fd` primaries that run a command, which makes them runners like `xargs`. */
+// `find`/`fd` primaries that run a command, which makes them runners like `xargs`.
 const FIND_EXEC_PRIMARIES = new Map([
 	["find", wordSet("-exec -execdir -ok -okdir")],
 	["fd", wordSet("-x --exec -X --exec-batch")],
@@ -70,7 +70,7 @@ const CAUSE_BY_DENIED_TYPE: Record<string, ShellRefusalCause> = {
 	ArithmeticCommandExpansion: "arithmetic-expansion",
 };
 
-/** One wrapper's option grammar; a word outside it makes resolution unconfident. A wrong arity silently mis-resolves. */
+// One wrapper's option grammar; a word outside it makes resolution unconfident. A wrong arity silently mis-resolves.
 interface WrapperGrammar {
 	readonly boolean?: ReadonlySet<string>;
 	/** Options taking a value, as the next word, `--long=value`, or packed short `-o0`. */
@@ -87,7 +87,7 @@ interface WrapperGrammar {
 	readonly query?: ReadonlySet<string>;
 }
 
-/** npx/bunx/pnpm dlx and kin: `-p` names the package, `-c` takes a shell string instead of a binary. */
+// npx/bunx/pnpm dlx and kin: `-p` names the package, `-c` takes a shell string instead of a binary.
 const PACKAGE_RUNNER_GRAMMAR: WrapperGrammar = {
 	boolean: wordSet("-y --yes --no --no-install --ignore-existing -q --quiet --silent --prefer-offline --prefer-online --offline --bun"),
 	value: wordSet("-p --package -w --workspace --registry"),
@@ -133,7 +133,7 @@ const WRAPPER_GRAMMARS = new Map<string, WrapperGrammar>([
 	["bunx", PACKAGE_RUNNER_GRAMMAR],
 ]);
 
-/** Package managers whose named subcommand runs a package binary (`npm exec openspec` resolves like `npx openspec`), with the global options accepted before it. */
+// Package managers whose named subcommand runs a package binary (`npm exec openspec` resolves like `npx openspec`), with the global options accepted before it.
 const PACKAGE_MANAGER_RUNNERS = new Map<string, { readonly runners: ReadonlySet<string>; readonly globals: WrapperGrammar }>([
 	[
 		"npm",
@@ -209,7 +209,7 @@ export function normaliseExecutable(executable: string): string {
 	return base.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
-/** Depth-first visit of every object node; Word's `value`/`parts` are lazy getters absent from Object.keys(), so they are forced. */
+// Depth-first visit of every object node; Word's `value`/`parts` are lazy getters absent from Object.keys(), so they are forced.
 function walk(node: unknown, visit: (obj: Record<string, unknown>) => void): void {
 	if (node === null || typeof node !== "object") return;
 	if (Array.isArray(node)) {
@@ -239,7 +239,7 @@ interface ScriptScan {
 const WRITE_REDIRECTS = new Set([">", ">>", ">|", "&>", "&>>", "<>"]);
 const DESCRIPTOR = /^(\d+-?|-)$/;
 
-/** Files a redirect list reads and writes; `<>` does both, and a `<&`/`>&` onto a descriptor touches no file. */
+// Files a redirect list reads and writes; `<>` does both, and a `<&`/`>&` onto a descriptor touches no file.
 function redirectFiles(redirects: readonly Redirect[]): { readonly reads: string[]; readonly writes: string[] } {
 	const reads: string[] = [];
 	const writes: string[] = [];
@@ -294,7 +294,7 @@ const isQuotedPart = (part: { readonly type: string; readonly parts?: readonly {
 	part.type === "AnsiCQuoted" ||
 	(part.type === "DoubleQuoted" && (part.parts ?? []).every((child) => child.type === "Literal"));
 
-/** Allow-list over the word-part union, so a part type added later is refused until it is listed. */
+// Allow-list over the word-part union, so a part type added later is refused until it is listed.
 function isPlainCommandWord(word: Word | undefined): boolean {
 	if (word === undefined) return true;
 	if (word.text === "[" || word.text === "[[") return true;
@@ -319,12 +319,12 @@ function isLiteralGuardedExecutable(word: Word | undefined): boolean {
 	return word !== undefined && !hasExpansionPart(word) && GUARDED_VERB_PATTERN.test(word.value);
 }
 
-/** Expansion in `Command.name` always, and in a literally guarded verb's suffix (`g=push; git $g`); `echo "$HOME"` stays allowed. */
+// Expansion in `Command.name` always, and in a literally guarded verb's suffix (`g=push; git $g`); `echo "$HOME"` stays allowed.
 function hasUnresolvedExpansionInCommandPosition(commands: readonly Command[]): boolean {
 	return commands.some((c) => hasExpansionPart(c.name) || (isLiteralGuardedExecutable(c.name) && c.suffix.some((w) => hasExpansionPart(w))));
 }
 
-/** Denial is by PRESENCE of node types: unbash parses `sh -c "git push"` and heredocs without errors, so errors are only the last catch-all. */
+// Denial is by PRESENCE of node types: unbash parses `sh -c "git push"` and heredocs without errors, so errors are only the last catch-all.
 function detectRefusalCause(script: ParsedScript, scan: ScriptScan): ShellRefusalCause | undefined {
 	const denied = [...DENIED_PART_TYPES].find((t) => scan.types.has(t));
 	if (denied !== undefined) return CAUSE_BY_DENIED_TYPE[denied];
@@ -367,7 +367,7 @@ interface ConsumedOptions {
 	readonly query?: true;
 }
 
-/** Consume one wrapper's options and operands from `start`; `onValue` sees each value option. */
+// Consume one wrapper's options and operands from `start`; `onValue` sees each value option.
 function consumeWrapperOptions(
 	values: readonly string[],
 	start: number,
@@ -406,7 +406,7 @@ function consumeWrapperOptions(
 	return i + operands > values.length ? { index: values.length, confident: false } : { index: i + operands, confident: true };
 }
 
-/** Find `exec`/`dlx`/`x` past a package manager's global options (`npm --yes exec`, `pnpm -C . dlx`). */
+// Find `exec`/`dlx`/`x` past a package manager's global options (`npm --yes exec`, `pnpm -C . dlx`).
 function locatePackageManagerRunner(
 	values: readonly string[],
 	start: number,
@@ -425,7 +425,7 @@ function locatePackageManagerRunner(
 	return offset === -1 ? undefined : { subcommandIndex: consumed.index + offset, confident: false, stopIndex: consumed.index };
 }
 
-/** Consume recognised wrappers; `values[index]` is the real executable, and `confident` is false when a word fell outside a grammar. */
+// Consume recognised wrappers; `values[index]` is the real executable, and `confident` is false when a word fell outside a grammar.
 function resolveWrappers(values: readonly string[]): { wrappers: string[]; dirs: string[]; index: number; confident: boolean } {
 	const wrappers: string[] = [];
 	const dirs: string[] = [];
@@ -465,7 +465,7 @@ function resolveWrappers(values: readonly string[]): { wrappers: string[]; dirs:
 /** git global options that take a value as the next word. */
 export const GIT_GLOBAL_VALUE_OPTIONS = wordSet("-C -c --config-env --git-dir --work-tree --namespace");
 
-/** Every `-C`/`--git-dir` before the subcommand, in order; `git commit -C <commit>` names a commit, not a directory. */
+// Every `-C`/`--git-dir` before the subcommand, in order; `git commit -C <commit>` names a commit, not a directory.
 function gitDirectories(executable: string, args: readonly string[]): string[] {
 	const dirs: string[] = [];
 	for (let i = 0; normaliseExecutable(executable) === "git" && i < args.length && args[i].startsWith("-"); i += 1) {
@@ -482,7 +482,7 @@ export const foldDirectories = (dirs: readonly string[]): string | undefined =>
 
 const CD_COMMANDS = wordSet("cd pushd popd");
 
-/** Any expansion among wrapper words is refused too: word splitting can turn `timeout $T apply` into `timeout 5 terraform apply`. */
+// Any expansion among wrapper words is refused too: word splitting can turn `timeout $T apply` into `timeout 5 terraform apply`.
 function hasExpansionBehindWrappers(words: readonly Word[], index: number): boolean {
 	if (index === 0) return false;
 	if (words.slice(0, index + 1).some((w) => hasExpansionPart(w) || !isPlainCommandWord(w))) return true;
@@ -556,10 +556,10 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 	});
 }
 
-/** Each removal only adds matches: quotes, backslashes, cmd `^`, PowerShell backtick and expansions an unset variable empties (`g${u}it`). */
+// Each removal only adds matches: quotes, backslashes, cmd `^`, PowerShell backtick and expansions an unset variable empties (`g${u}it`).
 const VERB_NORMALISERS = [/['"]/g, /['"\\]/g, /['"\\^`]|\$(\{[^}]*\}|[@*#?!$0-9]|[A-Za-z_]\w*)/g];
 
-/** Tested as-is too, so a backslash path separator (`C:\Git\cmd\git.exe`) still bounds the verb. */
+// Tested as-is too, so a backslash path separator (`C:\Git\cmd\git.exe`) still bounds the verb.
 const variantsOf = (text: string): string[] => [text, ...VERB_NORMALISERS.map((re) => text.replace(re, ""))];
 
 const mentionsGuardedVerb = (texts: readonly string[]): boolean =>
@@ -585,28 +585,28 @@ function runnerTexts(inv: CanonicalInvocation): string[] | undefined {
 	return script.startsWith("-") || namedForVerb ? segmentTexts(inv) : [inv.rawSegment.replace(script, " "), ...inv.args.slice(1)];
 }
 
-/** PowerShell's `-EncodedCommand` and every prefix it accepts (`-e`, `-enc`, `-ec`); `-ExecutionPolicy` does not match. */
+// PowerShell's `-EncodedCommand` and every prefix it accepts (`-e`, `-enc`, `-ec`); `-ExecutionPolicy` does not match.
 const ENCODED_COMMAND_OPTION = /^[-/](ec|e(n(c(o(d(e(d(c(o(m(m(a(n(d)?)?)?)?)?)?)?)?)?)?)?)?)?)$/i;
 
-/** A base64 script hides any verb, so it is refused whatever it contains. */
+// A base64 script hides any verb, so it is refused whatever it contains.
 function hidesItsScript(inv: CanonicalInvocation): boolean {
 	const executable = normaliseExecutable(inv.executable);
 	return (executable === "powershell" || executable === "pwsh") && inv.args.some((arg) => ENCODED_COMMAND_OPTION.test(arg));
 }
 
-/** Denied outright, never routed to approval, by a word match rather than a recursive re-parse. */
+// Denied outright, never routed to approval, by a word match rather than a recursive re-parse.
 const findShellRunnerDenial = (invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined =>
 	invocations.find((inv) => {
 		const texts = runnerTexts(inv);
 		return texts !== undefined && (mentionsGuardedVerb(texts) || hidesItsScript(inv));
 	});
 
-/** A trap, alias, hash or sourced file can carry a verb into a later segment, so any guarded verb in the script taints them. */
+// A trap, alias, hash or sourced file can carry a verb into a later segment, so any guarded verb in the script taints them.
 const carriesVerbAcrossSegments = (invocations: readonly CanonicalInvocation[]): boolean =>
 	invocations.some((inv) => COMMAND_TEXT_BUILTINS.has(normaliseExecutable(inv.executable))) &&
 	mentionsGuardedVerb(invocations.flatMap(segmentTexts));
 
-/** Per-command options that take a value, so the value is not mistaken for a file operand. */
+// Per-command options that take a value, so the value is not mistaken for a file operand.
 const WRITE_VALUE_OPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 	["cp", wordSet("-S --suffix")],
 	["mv", wordSet("-S --suffix")],
@@ -680,7 +680,7 @@ export function writeOperands(inv: Pick<CanonicalInvocation, "executable" | "arg
 const SHELL_INLINE: RegExp = /^-[a-zA-Z]*c$/;
 const SCRIPT_INLINE: RegExp = /^-[a-zA-Z]*[eE]$/;
 
-/** Interpreters' options that make the code an argument rather than a file or stdin. */
+// Interpreters' options that make the code an argument rather than a file or stdin.
 const INLINE_CODE_FLAGS: ReadonlyMap<string, (arg: string) => boolean> = new Map([
 	..."sh bash zsh dash fish ksh mksh ash csh tcsh".split(" ").map((n) => [n, (a: string) => SHELL_INLINE.test(a)] as const),
 	...["python", "python3", "py"].map((n) => [n, (a: string) => a === "-c"] as const),
@@ -693,7 +693,7 @@ const INLINE_CODE_FLAGS: ReadonlyMap<string, (arg: string) => boolean> = new Map
 
 const CODE_RUNNER_NAMES = wordSet("sh bash zsh dash ksh mksh ash csh tcsh fish busybox pwsh powershell cmd node deno bun perl ruby php lua rscript osascript parallel");
 
-/** Programs that run code they read; their code must never come from a pipe, a stdin alias or a file the same command wrote. */
+// Programs that run code they read; their code must never come from a pipe, a stdin alias or a file the same command wrote.
 const isCodeRunner = (executable: string): boolean =>
 	CODE_RUNNER_NAMES.has(executable) || /^(python[\d.]*|py|pypy[\d.]*|lua[\d.]*|perl[\d.]*|ruby[\d.]*|php[\d.]*)$/.test(executable);
 
@@ -701,7 +701,7 @@ const STDIN_ALIAS = /^(-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/[^/]+\/fd\/\d+)$/;
 
 const baseOf = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop()?.toLowerCase() ?? "";
 
-/** Compared by basename because a `cd` may sit between the write and the run. */
+// Compared by basename because a `cd` may sit between the write and the run.
 function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: ScriptScan): boolean {
 	const written = new Set([...scan.writeTargets, ...extracted.flatMap((e) => writeOperands(e.invocation))].map(baseOf));
 	const isWritten = (path: string): boolean => written.has(baseOf(path));
@@ -729,7 +729,7 @@ const XARGS_SHORT = { boolean: "0oprtx", value: "adEILnPsJRS", optional: "eil" }
 const XARGS_LONG_BOOLEAN = wordSet("--null --open-tty --interactive --no-run-if-empty --verbose --exit --show-limits --replace --eof --max-lines");
 const XARGS_LONG_VALUE = wordSet("--arg-file --delimiter --max-args --max-procs --max-chars --process-slot-var");
 
-/** Short options bundle (`-0r`, `-n1`, `-I{}`); `-e`, `-i` and `-l` take an optional attached value. Undefined when an option is unknown. */
+// Short options bundle (`-0r`, `-n1`, `-I{}`); `-e`, `-i` and `-l` take an optional attached value. Undefined when an option is unknown.
 function xargsCommand(args: readonly string[]): WrappedCommand | undefined {
 	let i = 0;
 	for (; i < args.length && args[i].startsWith("-") && args[i] !== "-"; i += 1) {
@@ -790,7 +790,7 @@ export function wrappedCommands(inv: Pick<CanonicalInvocation, "executable" | "a
 
 const INPUT_RUNNERS = wordSet("xargs parallel find fd watch");
 
-/** A wrapped command is refused when it is itself a wrapper, or a code runner whose inline code would receive the input names. */
+// A wrapped command is refused when it is itself a wrapper, or a code runner whose inline code would receive the input names.
 function wrappedRefusal(w: WrappedCommand): ShellRefusalCause | undefined {
 	const executable = normaliseExecutable(w.executable);
 	const managerWithoutSubcommand = PACKAGE_MANAGER_RUNNERS.has(executable) && !w.args.some((a) => !a.startsWith("-"));
@@ -823,10 +823,10 @@ const SED_E_COMMAND = /(^|[;{}\n])\s*(\d+|\$|\/[^/]*\/)?(\s*,\s*(\d+|\$|\/[^/]*\
 const SED_SUBSTITUTE = /s([^\\\n])(?:\\.|(?!\1)[^\\])*\1(?:\\.|(?!\1)[^\\])*\1([a-zA-Z0-9]*)/g;
 const SED_WRITE_DEVICE = /(^|[;{}\s\d$/])[wW]\s*\/dev\//;
 
-/** Interactive programs that run commands from a prompt or an option; a non-interactive agent has no use for them. */
+// Interactive programs that run commands from a prompt or an option; a non-interactive agent has no use for them.
 const INTERACTIVE_COMMAND_RUNNERS = wordSet("less more most man vi vim nvim view ex vimdiff emacs nano pico gdb");
 
-/** The sed scripts in `args`: every -e/--expression value, else the first positional. */
+// The sed scripts in `args`: every -e/--expression value, else the first positional.
 function sedScripts(args: readonly string[]): string[] {
 	const flagged = args.flatMap((a, i) => (a === "-e" || a === "--expression" ? [args[i + 1] ?? ""] : a.startsWith("--expression=") ? [a.slice(13)] : []));
 	return flagged.length > 0 ? flagged : args.filter((a) => !a.startsWith("-")).slice(0, 1);
@@ -835,7 +835,7 @@ function sedScripts(args: readonly string[]): string[] {
 const sedRunsCommand = (script: string): boolean =>
 	SED_E_COMMAND.test(script) || SED_WRITE_DEVICE.test(script) || [...script.matchAll(SED_SUBSTITUTE)].some((m) => /^[^w]*e/.test(m[2]));
 
-/** Why a program runs a command string taken from its own arguments, or undefined; plain awk and sed stay allowed. */
+// Why a program runs a command string taken from its own arguments, or undefined; plain awk and sed stay allowed.
 function commandStringProgram(inv: Pick<CanonicalInvocation, "executable" | "args" | "assignmentWords">): string | undefined {
 	const executable = normaliseExecutable(inv.executable);
 	const args = inv.args;
@@ -877,7 +877,7 @@ const firstCommandString = (invocations: readonly CanonicalInvocation[]): string
 
 const ONE_LINER_RUNNERS = /^(python[\d.]*|py|pypy[\d.]*|node|deno|bun|perl[\d.]*|ruby[\d.]*|php[\d.]*)$/;
 
-/** Calls and modules that open files, start processes or load code by name; a match refuses the one-liner. */
+// Calls and modules that open files, start processes or load code by name; a match refuses the one-liner.
 const INLINE_CODE_EFFECT = new RegExp(
 	[
 		String.raw`\b(open|exec\w*|eval|system|popen\w*|spawn\w*|fork|unlink\w*|rename\w*|remove|rmdir\w*|mkdir\w*|makedirs|write\w*|chmod\w*|symlink\w*|copy\w*|move|getattr|compile|Function|constructor|require|import_module|__import__)\s*\(`,
@@ -886,10 +886,10 @@ const INLINE_CODE_EFFECT = new RegExp(
 	].join("|"),
 );
 
-/** Effects that only print or parse a JSON file, removed before the check. */
+// Effects that only print or parse a JSON file, removed before the check.
 const INLINE_CODE_BENIGN = /\brequire\s*\(\s*(['"])[^'"]*\.json\1\s*\)|\b(process\.|sys\.)?std(out|err)\.write\s*\(/g;
 
-/** An interpreter one-liner (`python -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`) whose code may write, open or run. */
+// An interpreter one-liner (`python -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`) whose code may write, open or run.
 function inlineCodeEffect(inv: Pick<CanonicalInvocation, "executable" | "args">): boolean {
 	const executable = normaliseExecutable(inv.executable);
 	const inline = INLINE_CODE_FLAGS.get(executable) ?? (/^python[\d.]*$/.test(executable) ? (a: string) => a === "-c" : undefined);
