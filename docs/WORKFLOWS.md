@@ -254,14 +254,26 @@ commit on top of <base>". A rebase onto another upstream also rejects; for
 **Only commits the run made count.** Ancestry alone would accept a `git pull`,
 a merge, a cherry-pick or a `reset` forward, because each lands on a
 descendant of the base. So every commit in `base..HEAD` must also have exactly
-one parent (no merge commit) and an author time AND a committer time no
-earlier than the second the run was armed (`onlyCommitsSince`). A teammate's
-pulled commit, or a cherry-picked one, keeps its original author time and
-rejects. Several fresh commits are accepted, so a follow-up fix commit is not
-punished. The residual: a commit someone else made after the run was armed,
-pulled in by fast-forward, or a commit whose dates were forged with
-`GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE`, still passes; the drift check and the
-reviewer are the defences there.
+one parent (no merge commit, no root commit) and an author time AND a
+committer time no earlier than two minutes before the run was armed
+(`onlyCommitsSince`, `COMMIT_CLOCK_TOLERANCE_MS`). The two minutes absorb a
+clock stepped back mid-run by an NTP correction or a resume from sleep. A
+teammate's pulled commit, or a cherry-picked one, keeps its original author
+time and rejects. Several fresh commits are accepted, so a follow-up fix
+commit is not punished. The read passes `-c log.showSignature=false`,
+`--no-show-signature` and an explicit `--format`, and any row that is not
+`<one parent>|<author time>|<committer time>` rejects, so a signing user's
+gitconfig cannot turn their own commits into rejections.
+
+The residuals, which still pass with stock git flags: a commit someone else
+made after the run was armed (or up to two minutes before), pulled in by
+fast-forward; a teammate commit dated ahead of local time by clock skew;
+`git rebase --ignore-date` or `--reset-author-date` of a fetched branch;
+`git merge --squash other`, which makes one fresh single-parent commit of
+someone else's content; `git commit -C <sha> --reset-author`; and any commit
+whose dates were set with `GIT_AUTHOR_DATE`/`GIT_COMMITTER_DATE`, including an
+export left in the shell, which can also falsely reject. The drift check and
+the reviewer are the defences there.
 
 **The empty-commit branch.**
 `gateCompletion` (`.pi/extensions/workflows/evidence.ts`) checks, after the

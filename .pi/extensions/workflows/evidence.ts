@@ -53,20 +53,23 @@ export function isStrictDescendant(cwd: string, baseSha: string, headSha: string
 	return r.status === 0;
 }
 
+/** How far before the arm a commit's dates may fall and still count, so a clock stepped back mid-run is not a false reject. */
+export const COMMIT_CLOCK_TOLERANCE_MS = 120_000;
+
+const COMMIT_ROW = /^([0-9a-f]{40,64})\|(\d+)\|(\d+)$/;
+
 /**
- * True when every commit in `baseSha..headSha` has one parent and was authored and committed at or after `armedAtMs`.
- * A pull, merge, cherry-pick or reset forward brings in commits made before the run, so it fails; false when git cannot say.
+ * True when every commit in `baseSha..headSha` has one parent and was authored and committed no earlier than
+ * `armedAtMs` less the clock tolerance. A pull, merge or cherry-pick brings in older commits, so it fails; false when git cannot say.
  */
 export function onlyCommitsSince(cwd: string, baseSha: string, headSha: string, armedAtMs: number): boolean {
-	const r = spawnSync("git", ["log", "--format=%P|%at|%ct", `${baseSha}..${headSha}`, "--"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
-	if (r.status !== 0) return false;
+	// `log.showSignature` in the user's gitconfig prints verification lines to stdout ahead of each row.
+	const args = ["-c", "log.showSignature=false", "log", "--no-show-signature", "--no-color", "--format=%P|%at|%ct", `${baseSha}..${headSha}`, "--"];
+	const r = spawnSync("git", args, { cwd, encoding: "utf-8", shell: false, windowsHide: true });
 	const rows = (r.stdout ?? "").split("\n").filter((line) => line.trim() !== "");
-	// Git stores whole seconds, so a commit in the arm's own second must still count as after it.
-	const floor = Math.floor(armedAtMs / 1000);
-	return rows.length > 0 && rows.every((row) => {
-		const [parents = "", author = "", committer = ""] = row.split("|");
-		return parents.trim().split(" ").length === 1 && Number(author) >= floor && Number(committer) >= floor;
-	});
+	const floor = Math.floor((armedAtMs - COMMIT_CLOCK_TOLERANCE_MS) / 1000);
+	const fresh = (m: RegExpExecArray | null): boolean => m !== null && Number(m[2]) >= floor && Number(m[3]) >= floor;
+	return r.status === 0 && rows.length > 0 && rows.every((row) => fresh(COMMIT_ROW.exec(row.trim())));
 }
 
 /**

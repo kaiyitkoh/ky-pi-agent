@@ -21,7 +21,7 @@
  * `06-01-SUMMARY.md`, not merely asserted here.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterAll, describe, expect, it } from "vitest";
@@ -488,6 +488,51 @@ describe("only commits the run made count: a pull, merge or second-hand commit r
 		const verdict = settle(r);
 		expect(verdict?.ok, JSON.stringify(verdict)).toBe(true);
 		expect(onlyCommitsSince(r, base, currentSha(r), Date.now() - 60_000)).toBe(true);
+	});
+
+	const commitDated = (r: string, file: string, secondsAgo: number) => {
+		const date = new Date(Date.now() - secondsAgo * 1000).toISOString();
+		writeFileSync(join(r, file), `export const x = ${secondsAgo};\n`);
+		git(r, ["add", file]);
+		git(r, ["commit", "-q", "-m", file], { GIT_AUTHOR_DATE: date, GIT_COMMITTER_DATE: date });
+	};
+
+	it("a commit dated a minute before the arm, as after a clock step back, still counts", () => {
+		const { r, base } = setup();
+		commitDated(r, "mine.ts", 60);
+		expect(onlyCommitsSince(r, base, currentSha(r), Date.now())).toBe(true);
+	});
+
+	it("a commit dated five minutes before the arm does not", () => {
+		const { r, base } = setup();
+		commitDated(r, "mine.ts", 300);
+		expect(onlyCommitsSince(r, base, currentSha(r), Date.now())).toBe(false);
+	});
+
+	const hasSshKeygen = spawnSync("ssh-keygen", ["-?"], { windowsHide: true }).error === undefined;
+	it.runIf(hasSshKeygen)("a signed commit counts when the user's gitconfig sets log.showSignature", () => {
+		const { r, base } = setup();
+		const key = join(r, "..", `${r.split(/[\\/]/).at(-1)}-key`);
+		tempDirs.push(key, `${key}.pub`);
+		const made = spawnSync("ssh-keygen", ["-q", "-t", "ed25519", "-N", "", "-C", "test", "-f", key], { windowsHide: true, input: "" });
+		expect(made.status).toBe(0);
+		const allowed = `${key}.allowed`;
+		tempDirs.push(allowed);
+		writeFileSync(allowed, `test@example.com ${readFileSync(`${key}.pub`, "utf-8")}`);
+		for (const [name, value] of [
+			["gpg.format", "ssh"],
+			["user.signingkey", key],
+			["user.email", "test@example.com"],
+			["commit.gpgsign", "true"],
+			["gpg.ssh.allowedSignersFile", allowed],
+			["log.showSignature", "true"],
+		]) git(r, ["config", name, value as string]);
+		startRun(r, base, currentTree(r));
+		commitFile(r, "mine.ts", "export const mine = 1;", "my signed work");
+		const shown = spawnSync("git", ["log", "-1", "--format=%P|%at|%ct"], { cwd: r, encoding: "utf-8", windowsHide: true });
+		expect(shown.stdout, "the repo must really print a signature line, or this test proves nothing").toContain("signature");
+		const verdict = settle(r);
+		expect(verdict?.ok, JSON.stringify(verdict)).toBe(true);
 	});
 });
 
