@@ -153,7 +153,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [ ] **UI-02**: A statusline shows model, provider, context remaining, session cost, git branch, and changed files — rendered in TUI chrome, never in the system prompt
 - [ ] **UI-03**: A custom startup header ships
 - [ ] **UI-04**: A live widget shows running subagents and their status
-- [ ] **UI-05**: No UI element introduces a system-prompt cache invalidation, verified by watching `cacheRead` stay non-trivial
+- [x] **UI-05**: No UI element introduces a system-prompt cache invalidation, verified by watching `cacheRead` stay non-trivial
 
 ### Comment Discipline
 
@@ -342,7 +342,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | UI-02 | Phase 11 | Pending |
 | UI-03 | Phase 11 | Pending |
 | UI-04 | Phase 11 | Pending |
-| UI-05 | Phase 11 | Pending |
+| UI-05 | Phase 11 | Complete |
 | CMT-01 | Phase 08.2 | Complete |
 | CMT-02 | Phase 08.2 | Complete offline - faux-session delivery proven by tests/unit/comment-rules-delivery.test.ts; live check RB-08-04, OUTSTANDING |
 | CMT-03 | Phase 08.2 | Complete |
