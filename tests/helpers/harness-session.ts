@@ -42,6 +42,14 @@ const PINNED_ENV: Record<string, string | undefined> = {
 	PI_BG_POSIX_SHELL_PATH: undefined,
 };
 
+// The harness extension runs in-process and force-sets these, which would otherwise leak across tests.
+const OPENSPEC_ENV = [
+	"OPENSPEC_TELEMETRY",
+	"DO_NOT_TRACK",
+	"OPENSPEC_NO_UPDATE_CHECK",
+	"OPENSPEC_NO_AUTO_CONFIG",
+] as const;
+
 // Mirrors Pi's loader discovery (no export inspection): `<dir>/*.ts` and `<dir>/<name>/index.ts`.
 const DISCOVERED = /^\.pi\/extensions\/(?:[^/]+\.ts|[^/]+\/index\.ts)$/;
 
@@ -66,6 +74,10 @@ export interface HarnessSessionOptions {
 	tools?: string[];
 	/** Reuse a session manager, e.g. to reopen an earlier transcript. Default: a fresh in-memory one. */
 	sessionManager?: SessionManager;
+	/** User-level skills written to `<agentDir>/skills/<name>/SKILL.md`. Default: none. */
+	agentSkills?: Record<string, string>;
+	/** User-level prompt templates written to `<agentDir>/prompts/<name>.md`. Default: none. */
+	agentPrompts?: Record<string, string>;
 }
 
 export interface HarnessHandle {
@@ -148,6 +160,7 @@ export async function createHarnessSession(
 		if (value === undefined) delete process.env[name];
 		else process.env[name] = value;
 	}
+	for (const name of OPENSPEC_ENV) savedEnv.set(name, process.env[name]);
 	const restoreEnv = (): void => {
 		for (const [name, value] of savedEnv) {
 			if (value === undefined) delete process.env[name];
@@ -168,6 +181,15 @@ export async function createHarnessSession(
 			const extra = join(agentDir, "extensions", "kypi-extra");
 			mkdirSync(extra, { recursive: true });
 			writeFileSync(join(extra, "index.ts"), `${opts.extraExtensionSource}\n`, "utf-8");
+		}
+
+		for (const [name, body] of Object.entries(opts.agentSkills ?? {})) {
+			mkdirSync(join(agentDir, "skills", name), { recursive: true });
+			writeFileSync(join(agentDir, "skills", name, "SKILL.md"), body, "utf-8");
+		}
+		for (const [name, body] of Object.entries(opts.agentPrompts ?? {})) {
+			mkdirSync(join(agentDir, "prompts"), { recursive: true });
+			writeFileSync(join(agentDir, "prompts", `${name}.md`), body, "utf-8");
 		}
 
 		const captured: TranscriptContext[] = [];
