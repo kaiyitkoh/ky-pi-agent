@@ -171,7 +171,7 @@ const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
 const PHASE_NINE_IDS = ["RB-09-01", "RB-09-02", "RB-09-03"] as const;
 const PHASE_TEN_IDS = ["RB-10-01", "RB-10-02", "RB-10-03"] as const;
 const PHASE_ELEVEN_IDS = ["RB-11-01", "RB-11-02", "RB-11-03"] as const;
-const PHASE_TWELVE_IDS = ["RB-12-01", "RB-12-02", "RB-12-03", "RB-12-04", "RB-12-05", "RB-12-06", "RB-12-07"] as const;
+const PHASE_TWELVE_IDS = ["RB-12-01", "RB-12-02", "RB-12-03", "RB-12-04", "RB-12-05", "RB-12-06", "RB-12-07", "RB-12-08"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
@@ -599,6 +599,10 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	],
 	"RB-12-07": [
 		'echo "RB-12-07 confirm card shown=<yes|no>, decline refused=<yes|no>, timeout refused=<yes|no>, $(date -u +%FT%TZ)" >> RB-12-07-RESULT.md',
+	],
+	"RB-12-08": [
+		"sh bin/bootstrap.sh",
+		'echo "RB-12-08 stub rewritten=<yes|no>, try/catch present=<yes|no>, --check-only exit <code>, $(date -u +%FT%TZ)" >> RB-12-08-RESULT.md',
 	],
 };
 

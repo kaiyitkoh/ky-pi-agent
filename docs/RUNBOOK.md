@@ -1893,6 +1893,7 @@ Loading the packages in a live session in another repository is RB-12-05 and sta
 | RB-12-05 | Global setup live in a work repo outside this checkout | OUTSTANDING |
 | RB-12-06 | Bedrock serves the apac Sonnet 4.5 profile on the work laptop | OUTSTANDING |
 | RB-12-07 | An RPC front-end shows the push confirm card and refuses on decline or timeout | OUTSTANDING |
+| RB-12-08 | Every machine's user-scope safety stub is regenerated so a failing guard blocks instead of loading nothing | OUTSTANDING |
 
 ### RB-12-05 - global setup in a repo outside this checkout
 
@@ -1946,3 +1947,20 @@ Loading the packages in a live session in another repository is RB-12-05 and sta
 **Expected output.** Three `yes` answers.
 
 **Offline proxy:** `tests/unit/push-confirm.test.ts` drives the confirm path with a recording UI, including the timeout. It does not use a real RPC client.
+
+### RB-12-08 - refresh the user-scope safety stub
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** The stub lives in each machine's own agent directory, and bootstrap never rewrites it from `--global-setup` or `--check-only`.
+
+**Procedure.**
+
+1. On every machine that runs the guard through the stub, run `sh bin/bootstrap.sh` (the full run) from the checkout.
+2. Open `~/.pi/agent/extensions/ky-safety/index.ts`; it must wrap the `await import(...)` and `mod.default(pi)` in `try`/`catch` and register a blocking `tool_call` handler on failure. An older stub lets a throwing guard leave every repository unguarded.
+3. Run `sh bin/bootstrap.sh --check-only`; it must exit 0.
+4. Record the result: `echo "RB-12-08 stub rewritten=<yes|no>, try/catch present=<yes|no>, --check-only exit <code>, $(date -u +%FT%TZ)" >> RB-12-08-RESULT.md`
+
+**Expected output.** Two `yes` answers and exit 0.
+
+**Offline proxy:** `tests/integration/bootstrap-safety-stub.test.ts` generates the stub, breaks the target it imports and asserts every tool call is blocked. It cannot reach another machine's agent directory.

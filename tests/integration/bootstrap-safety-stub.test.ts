@@ -721,3 +721,70 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 		TIMEOUT_MS,
 	);
 });
+
+describe("the generated stub fails closed when the safety extension throws", () => {
+	afterEach(() => {
+		for (const dir of scratch) {
+			try {
+				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+			} catch {
+				// A leftover temp dir is noise, not a failure.
+			}
+		}
+		scratch = [];
+	});
+
+	const jitiEntry = (): string => {
+		const requireFromRepo = createRequire(join(repoRoot(), "package.json"));
+		const jitiCjs = requireFromRepo.resolve("jiti", { paths: [join(repoRoot(), "node_modules", "@earendil-works", "pi-coding-agent")] });
+		return pathToFileURL(join(jitiCjs, "..", "jiti.mjs")).href;
+	};
+
+	/** Loads the stub through jiti as Pi does, then reports whether loading threw and what every tool_call handler returns for bash and read. */
+	function runStub(stub: string): { threw: string | null; results: unknown[] } {
+		const driver = join(tempDir("kypi-stub-throw-driver-"), "driver.mjs");
+		writeFileSync(
+			driver,
+			[
+				`import { createJiti } from ${JSON.stringify(jitiEntry())};`,
+				"const handlers = [];",
+				'const pi = { on: (event, handler) => { if (event === "tool_call") handlers.push(handler); }, registerTool: () => {} };',
+				"const jiti = createJiti(import.meta.url, { moduleCache: false });",
+				"let threw = null;",
+				`try { const mod = await jiti.import(${JSON.stringify(stub)}, { default: true }); await mod(pi); } catch (e) { threw = String(e); }`,
+				"const results = [];",
+				'for (const h of handlers) for (const toolName of ["bash", "read"]) results.push(await h({ toolName, input: { command: "ls", path: "x" } }, {}));',
+				"process.stdout.write(JSON.stringify({ threw, results }));",
+				"",
+			].join("\n"),
+			"utf-8",
+		);
+		const result = spawnSync("node", [driver], { encoding: "utf-8", timeout: TIMEOUT_MS, windowsHide: true });
+		if (result.status !== 0) throw new Error(`driver failed (status ${result.status}):\n${result.stdout}\n${result.stderr}`);
+		return JSON.parse(result.stdout) as { threw: string | null; results: unknown[] };
+	}
+
+	it.each([
+		["the factory throws", 'export default function () { throw new Error("factory boom"); }\n', "factory boom"],
+		["the import throws", "export default function ( {\n", "failed to load"],
+	])(
+		"%s: loading does not throw and every tool call is blocked",
+		(_name, broken, reasonPart) => {
+			const agentDir = tempDir("kypi-agentdir-");
+			const log = join(tempDir("kypi-log-"), "npm.log").replace(/\\/g, "/");
+			const repoCopy = bootstrapRepoCopy();
+			const run = withStubBin({ npm: npmStub(log) }, (env) => runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }));
+			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+			writeFileSync(join(repoCopy.root, ".pi", "extensions", "safety", "index.ts"), broken, "utf-8");
+
+			const outcome = runStub(stubPath(agentDir).replace(/\\/g, "/"));
+			expect(outcome.threw, "a throw escaping the stub makes Pi drop it and run unguarded").toBeNull();
+			expect(outcome.results.length).toBeGreaterThan(0);
+			for (const r of outcome.results) {
+				expect(r).toMatchObject({ block: true });
+				expect(String((r as { reason: string }).reason)).toContain(reasonPart);
+			}
+		},
+		TIMEOUT_MS,
+	);
+});
