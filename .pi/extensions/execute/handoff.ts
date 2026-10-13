@@ -1,7 +1,6 @@
 /**
  * The /execute handoff packet: a pure builder, a measurement, and an honest probe for the subagent layer.
- * Pure: plain data in and out, no ctx, no I/O. Registers nothing and never reaches a model, so it names none of the
- * bypass routes that tests/unit/chokepoint-lint.test.ts and contributing-boundary.test.ts scan for in raw source.
+ * Pure: no ctx, no I/O, no tool registration, no model access; the raw-source lints hold it to that.
  */
 import type { LegStatus } from "../quality/gates.ts";
 import type { SpecArtifact, VerifiedFact } from "../grill/spec-schema.ts";

@@ -1,8 +1,6 @@
 /**
- * Evidence gate: a completion claim needs a Pi-computed tool result captured at the SHA that is still HEAD.
- * `isError` is trusted because Pi sets it from the real exit code (dist/core/tools/bash.js throws on non-zero;
- * core/extensions/types.d.ts ToolExecutionEndEvent); the model's content blocks are never consulted. Emitted for every finalized call, which is why capture is at tool_execution_end.
- * Owns log base "evidence"; pruning only touches that base. Registers nothing and imports nothing from ../routing or ../safety.
+ * Evidence gate: a completion claim needs a new commit and a Pi-computed tool result captured at it; transcript text is never read.
+ * `isError` comes from the real exit code (pi-coding-agent dist/core/tools/bash.js). Rationale: docs/WORKFLOWS.md section 4.
  */
 import { spawnSync } from "node:child_process";
 
@@ -56,9 +54,8 @@ export function isStrictDescendant(cwd: string, baseSha: string, headSha: string
 }
 
 /**
- * The pure predicate; first match wins and the order is binding: no record, unreadable HEAD, HEAD unmoved, HEAD not built on the
- * base, empty commit (tree unchanged), no record at HEAD. Failed intermediate tool calls are counted and logged, not fatal.
- * The declared verification is checked by the caller. ACCEPT never endorses the diff's content.
+ * First match wins: no record, unreadable HEAD, HEAD unmoved, HEAD not built on the base, empty commit, no record at HEAD.
+ * Failed intermediate calls are counted, not fatal; the caller checks the declared verification.
  */
 export function gateCompletion(
 	records: readonly EvidenceRecord[],

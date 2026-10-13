@@ -218,7 +218,7 @@ text, which is exactly the failure shape `.pi/extensions/diagnostics/prose.ts`'s
 detector exists to catch on the other end of a turn: a model that can
 describe having made a tool call can equally describe having finished
 successfully. `/quick` records `tool_execution_end` — not `tool_result` — for
-every finalized tool call while a run is armed (CR-01, iteration 3): a call
+every finalized tool call while a run is armed and started: a call
 this repository's own safety layer BLOCKED, a schema-validation failure, an
 unknown tool, and an abort are all reported by Pi through `tool_execution_end`
 but never through `tool_result`, so a run in which one of those four occurred

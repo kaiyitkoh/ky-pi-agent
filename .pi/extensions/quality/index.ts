@@ -44,10 +44,7 @@ function localBin(cwd: string, name: string): string | undefined {
  */
 const CMD_EXE_SPAWN_FAILURE = /is not recognized as an internal or external command/i;
 
-/**
- * Production `ExecRunner`: the pinned local binary (or an ancestor's) via {@link commandFor}, never `npx`.
- * Exported for tests/unit/quality-production-exec.test.ts.
- */
+/** Production `ExecRunner`: the pinned local binary (or an ancestor's, up to the git top level) via {@link commandFor}, never `npx`. */
 export const productionExec: ExecRunner = (cmd, args, cwd) => {
 	const bin = localBin(cwd, cmd);
 	if (bin === undefined) {
@@ -304,7 +301,7 @@ export function runChangeGateStage(input: {
 
 export default function (pi: ExtensionAPI): void {
 	// Registered first so a name collision resolves in this file's favour (first-registration-wins; see safety/index.ts default export).
-	// `name` stays a literal because tool-count-baseline.test.ts scans source text for it; this check stops drift.
+	// `name` stays a literal because the tool-count registry reads it from source text; this check stops drift.
 	if (CONSULT_ADVISOR_TOOL_NAME !== "consult_advisor") {
 		throw new Error(
 			`quality/index.ts: CONSULT_ADVISOR_TOOL_NAME is ${JSON.stringify(CONSULT_ADVISOR_TOOL_NAME)}, not ` +

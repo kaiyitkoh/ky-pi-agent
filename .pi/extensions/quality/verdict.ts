@@ -1,7 +1,6 @@
 /**
- * Refute-or-promote over BLOCKERs, the pure stop predicate and the bounded loop; run runRefuteOrPromote before decideWorkflowStop (runBoundedReviewLoop is the reference caller).
- * Fail-safe: an unparseable refutation counts as UPHELD, so it can never silently delete a BLOCKER.
- * Models are reached only via runSingleShotRole; do not spell direct-model-access forms or the tool-registration call here (chokepoint-lint and contributing-boundary tests).
+ * Refute-or-promote over BLOCKERs, then the pure stop predicate; an unparseable refutation counts as UPHELD, never a deletion.
+ * Models are reached only via runSingleShotRole, and the raw-source lints hold this file to that.
  */
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { AssistantMessage, Message, Tool } from "@earendil-works/pi-ai";
