@@ -113,6 +113,21 @@ describe("analyseWire", () => {
 		const w = analyseWire([req("s1", "a", undefined, tool(`at ${probe}`))], { probes: [probe] });
 		expect(w.probeHits).toEqual([{ probe, request: 1 }]);
 	});
+	it("refuses to pick a session when a subagent child logged last", () => {
+		const w = analyseWire([req("parent", "a"), req("child", "c"), req("parent", "a"), req("child", "c")], { probes: [] });
+		expect(w.sessionId).toBeUndefined();
+		expect(w.ambiguousSessions).toEqual(["parent", "child"]);
+		expect(w.requests).toBe(0);
+		const v = verdict(w, [], 0.5);
+		expect(v.status).toBe("INSUFFICIENT");
+		expect(v.reasons.join(" ")).toContain("parent, child");
+		expect(v.reasons.join(" ")).toContain("--session");
+	});
+	it("analyses the named session among several", () => {
+		const w = analyseWire([req("parent", "a"), req("child", "c"), req("parent", "a")], { sessionId: "parent", probes: [] });
+		expect(w.ambiguousSessions).toEqual([]);
+		expect(w.requests).toBe(2);
+	});
 	it("counts requests with no system text as missing", () => {
 		const noSystem = JSON.stringify({ kind: "main.request", sessionId: "s1", payload: { messages: [{ role: "user", content: "u" }] } });
 		const w = analyseWire([noSystem, noSystem], { probes: ["u"] });
@@ -247,6 +262,15 @@ describe("launcher", () => {
 		const r = run(base(dir));
 		expect(r.status).toBe(2);
 		expect(r.stdout).toContain("wire-2026-10-13.jsonl");
+	});
+	it("exits 2 listing the sessions when the log holds more than one", () => {
+		const dir = fixture(["same", "same"]);
+		writeFileSync(join(dir, "wire-2026-10-13.jsonl"), `${[req("s1", "same"), req("s1", "same"), req("child", "other")].join("\n")}\n`);
+		const r = run(base(dir));
+		expect(r.status).toBe(2);
+		expect(r.stdout).toContain("session: (ambiguous)");
+		expect(r.stdout).toContain("s1, child");
+		expect(run([...base(dir), "--session", "s1"]).status).toBe(0);
 	});
 	it("rejects an empty probe instead of checking nothing", () => {
 		const r = run([...base(fixture(["same", "same"])), "--probe", ""]);

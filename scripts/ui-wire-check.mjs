@@ -66,7 +66,7 @@ const ratios = wire.sessionId ? core.turnRatios(lines(turnsPath), wire.sessionId
 const result = core.verdict(wire, ratios, opts.minRatio);
 
 const out = [];
-out.push(`session: ${wire.sessionId ?? "(none)"}`);
+out.push(`session: ${wire.sessionId ?? (wire.ambiguousSessions.length > 0 ? "(ambiguous)" : "(none)")}`);
 out.push(`requests: ${wire.requests}`);
 out.push(`distinct system hashes: ${new Set(wire.hashes).size} (${[...new Set(wire.hashes)].map((h) => h.slice(0, 12)).join(", ")})`);
 out.push(`distinct tool-list hashes: ${new Set(wire.toolHashes).size} (${[...new Set(wire.toolHashes)].map((h) => h.slice(0, 12)).join(", ")})`);

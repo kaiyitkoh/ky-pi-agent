@@ -2,6 +2,8 @@ import { createHash } from "node:crypto";
 
 export interface WireAnalysis {
 	sessionId?: string;
+	/** Every session in the log, set only when no session was chosen and more than one is present. */
+	ambiguousSessions: string[];
 	requests: number;
 	hashes: string[];
 	stable: boolean;
@@ -97,8 +99,10 @@ export function analyseWire(
 			records.push(rec);
 		}
 	}
-	const lastRec = records[records.length - 1];
-	const sessionId = opts.sessionId ?? (typeof lastRec?.sessionId === "string" ? lastRec.sessionId : undefined);
+	const sessions = [...new Set(records.map((r) => r.sessionId).filter((s): s is string => typeof s === "string"))];
+	// Async subagent children log to the same file under their own session, so "the last one" may be a child.
+	const ambiguousSessions = opts.sessionId === undefined && sessions.length > 1 ? sessions : [];
+	const sessionId = opts.sessionId ?? (ambiguousSessions.length > 0 ? undefined : sessions[0]);
 	const mine = records.filter((r) => r.sessionId === sessionId).slice(-(opts.last ?? 10));
 	const probes = opts.probes.filter((p) => p.length > 0);
 	// Tool text is JSON, so a probe with a quote or backslash only appears there in escaped form.
@@ -132,6 +136,7 @@ export function analyseWire(
 	});
 	return {
 		sessionId,
+		ambiguousSessions,
 		requests: mine.length,
 		hashes,
 		stable: new Set(hashes).size <= 1,
@@ -168,7 +173,7 @@ export function turnRatios(lines: readonly string[], sessionId: string): { corr:
 }
 
 export function verdict(
-	wire: Pick<WireAnalysis, "requests" | "stable" | "toolsStable" | "truncated" | "missing" | "probeHits">,
+	wire: Pick<WireAnalysis, "ambiguousSessions" | "requests" | "stable" | "toolsStable" | "truncated" | "missing" | "probeHits">,
 	ratios: readonly { corr: string; ratio: number }[],
 	minRatio: number,
 ): Verdict {
@@ -193,6 +198,10 @@ export function verdict(
 	}
 	if (failed) {
 		return { status: "FAIL", reasons };
+	}
+	if (wire.ambiguousSessions.length > 0) {
+		const ids = wire.ambiguousSessions.join(", ");
+		return { status: "INSUFFICIENT", reasons: [`${wire.ambiguousSessions.length} sessions in this log (${ids}); pass --session <id>`] };
 	}
 	if (wire.requests < 2) {
 		return { status: "INSUFFICIENT", reasons: ["fewer than two main requests in this session"] };

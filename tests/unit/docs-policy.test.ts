@@ -560,7 +560,7 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	],
 	"RB-11-03": [
 		'probe="ky-probe-$(date +%s)" && git switch -c "$probe" && echo x > "$probe.txt"',
-		'sh scripts/ui-wire-check.sh --probe "$probe"',
+		'sh scripts/ui-wire-check.sh --session <id> --probe "$probe"',
 		'echo "RB-11-03 ui-wire-check <PASS|FAIL|INSUFFICIENT>, turn-2 cacheRead ratio: <ratio>, $(date -u +%FT%TZ)" >> RB-11-03-RESULT.md',
 	],
 

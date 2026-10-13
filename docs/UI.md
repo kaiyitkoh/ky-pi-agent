@@ -67,10 +67,12 @@ system prompt or the tool list. Offline proof:
 `tests/integration/ui-prompt-stability.test.ts`. Live proof is `RB-11-03`:
 
 ```sh
-sh scripts/ui-wire-check.sh --probe <text>
+sh scripts/ui-wire-check.sh --session <id> --probe <text>
 ```
 
-It reads the already-redacted `.pi/logs/` files, compares system-prompt and
+Take `<id>` from `/session` in the session under test. Subagent children log to
+the same file under their own ids, so without `--session` a log holding several
+sessions is INSUFFICIENT (exit 2) and the ids are listed. It reads the already-redacted `.pi/logs/` files, compares system-prompt and
 tool-list hashes across requests, searches both for probe text, and reports the turn-2
 `cacheRead` ratio. It sends nothing anywhere. Set `showCacheMissNotices: true` in
 your global settings for a run if you want Pi to flag a miss as it happens.
