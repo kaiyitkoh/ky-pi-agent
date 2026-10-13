@@ -61,6 +61,19 @@ docstring for the structural argument). Concretely, it catches:
   argument, redirect it from a file (`python solve.py < input.txt`), or use
   `jq`. A script written by an earlier, separate tool call stays opaque
   (EV-166).
+- **Commands run over input** — `xargs`, `find -exec`/`-execdir`/`-ok`,
+  `fd -x` and `parallel` are unwrapped and the command they run is
+  classified. That command is refused (cause `unresolved-wrapper`) when it
+  cannot be found (an `xargs` or `parallel` option the guard does not know)
+  or is itself a wrapper (`xargs env`, `xargs timeout 60`, `xargs command`,
+  `xargs sudo`, a package manager with no subcommand), because the input
+  words become the command. A code runner there is refused (cause
+  `generated-script`) when it takes inline code (`xargs sh -c ...`,
+  `find -exec sh -c ...`), because the input names reach the code; a named
+  script or module stays allowed (`xargs python -m py_compile`,
+  `xargs node scripts/lint.mjs`, `xargs -n1 bash -n`). A wrapper such as
+  `env` whose options the guard cannot resolve is refused when a guarded
+  verb or a code runner could be behind it, or when it reads a pipe.
 - **Wrapper indirection** (`env A=1 git push`, `env --`, `sudo --`, `exec`,
   `timeout 5`, `nice -n 5`, `doas`, `ionice`, `stdbuf`, `nohup`, ...) — each
   wrapper's options, operands and `NAME=value` words are consumed from a

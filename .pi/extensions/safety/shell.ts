@@ -349,7 +349,7 @@ const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
 	"generated-script": (c) =>
 		`"${c}" gives a code runner its input through a pipe or a stdin alias, or runs a file the same command writes, so the guard never sees the code; pass input as a file argument or through jq, and write a script in one command and run it in another`,
 	"unresolved-wrapper": (c) =>
-		`"${c}" puts a guarded verb behind a wrapper option, operand or assignment this guard cannot resolve to the real executable`,
+		`"${c}" puts a guarded verb, a code runner or piped input behind a wrapper word this guard cannot resolve, or runs a wrapper under xargs, find -exec or parallel, whose command then comes from the input`,
 	"parse-error": (c) => `"${c}" did not parse cleanly; this catch-all denies rather than falls through to allow`,
 };
 
@@ -693,15 +693,106 @@ function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: Sc
 	if (runners.length > 0 && scan.compoundReads.some(isWritten)) return true;
 	return extracted.some(({ invocation, node }) => {
 		const executable = normaliseExecutable(invocation.executable);
-		const xargsInterpreter = (executable === "xargs" || executable === "parallel") && invocation.args.some((a) => INLINE_CODE_FLAGS.has(normaliseExecutable(a)));
-		if (scan.piped.has(node) && xargsInterpreter) return true;
 		const sourced = executable === "source" || executable === "." ? invocation.args : [];
 		if ([...sourced, ...(/[/\\]/.test(invocation.executable) ? [invocation.executable] : [])].some(isWritten)) return true;
+		const wrapped = (wrappedCommands(invocation) ?? []).filter((w) => isCodeRunner(normaliseExecutable(w.executable)));
+		if (wrapped.some((w) => w.args.some(isWritten))) return true;
 		if (!isCodeRunner(executable)) return false;
 		const stdinFiles = node.redirects.filter((r) => r.operator === "<" || r.operator === "<>").flatMap((r) => r.target?.value ?? []);
 		return scan.piped.has(node) || invocation.args.some((a) => STDIN_ALIAS.test(a)) || [...invocation.args, ...stdinFiles].some(isWritten);
 	});
 }
+
+/** A command xargs, find -exec, fd -x or parallel runs over its input names. */
+export interface WrappedCommand {
+	readonly executable: string;
+	readonly args: readonly string[];
+}
+
+const XARGS_SHORT = { boolean: "0oprtx", value: "adEILnPsJRS", optional: "eil" };
+const XARGS_LONG_BOOLEAN = wordSet("--null --open-tty --interactive --no-run-if-empty --verbose --exit --show-limits --replace --eof --max-lines");
+const XARGS_LONG_VALUE = wordSet("--arg-file --delimiter --max-args --max-procs --max-chars --process-slot-var");
+
+/** Short options bundle (`-0r`, `-n1`, `-I{}`); `-e`, `-i` and `-l` take an optional attached value. Undefined when an option is unknown. */
+function xargsCommand(args: readonly string[]): WrappedCommand | undefined {
+	let i = 0;
+	for (; i < args.length && args[i].startsWith("-") && args[i] !== "-"; i += 1) {
+		const word = args[i];
+		if (word === "--") {
+			i += 1;
+			break;
+		}
+		if (word.startsWith("--")) {
+			const name = word.split("=")[0];
+			if (XARGS_LONG_VALUE.has(name) && !word.includes("=")) i += 1;
+			else if (!XARGS_LONG_BOOLEAN.has(name) && !XARGS_LONG_VALUE.has(name)) return undefined;
+			continue;
+		}
+		for (let k = 1; k < word.length; k += 1) {
+			if (XARGS_SHORT.boolean.includes(word[k])) continue;
+			if (XARGS_SHORT.value.includes(word[k]) && k === word.length - 1) i += 1;
+			else if (!XARGS_SHORT.value.includes(word[k]) && !XARGS_SHORT.optional.includes(word[k])) return undefined;
+			break;
+		}
+	}
+	if (i > args.length) return undefined;
+	return args.length === i ? { executable: "echo", args: [] } : { executable: args[i], args: args.slice(i + 1) };
+}
+
+const PARALLEL_GRAMMAR: WrapperGrammar = {
+	boolean: wordSet("-k --keep-order -v --verbose -q --quote --dry-run --tag -u --ungroup --line-buffer --bar --progress --eta -0 --null -X -m --xargs --halt-on-error"),
+	value: wordSet("-j --jobs -N -n --max-args -I --delay --timeout --results --joblog -a --arg-file -d --delimiter --colsep -C"),
+};
+
+/** Every command an input-driven runner runs, `[]` for any other program, undefined when the command cannot be found. */
+export function wrappedCommands(inv: Pick<CanonicalInvocation, "executable" | "args">): WrappedCommand[] | undefined {
+	const executable = normaliseExecutable(inv.executable);
+	if (executable === "xargs") {
+		const command = xargsCommand(inv.args);
+		return command === undefined ? undefined : [command];
+	}
+	if (executable === "parallel") {
+		const consumed = consumeWrapperOptions(inv.args, 0, PARALLEL_GRAMMAR, () => {});
+		const end = inv.args.findIndex((a, i) => i >= consumed.index && a.startsWith(":::"));
+		const tail = inv.args.slice(consumed.index, end === -1 ? undefined : end);
+		if (!consumed.confident) return undefined;
+		return tail.length === 0 ? [] : [{ executable: tail[0], args: tail.slice(1) }];
+	}
+	const primaries = FIND_EXEC_PRIMARIES.get(executable);
+	if (primaries === undefined) return [];
+	const commands: WrappedCommand[] = [];
+	for (let i = 0; i < inv.args.length; i += 1) {
+		if (!primaries.has(inv.args[i])) continue;
+		const end = inv.args.findIndex((a, j) => j > i && (a === ";" || a === "+"));
+		const tail = inv.args.slice(i + 1, end === -1 ? undefined : end);
+		if (tail.length === 0) return undefined;
+		commands.push({ executable: tail[0], args: tail.slice(1) });
+		i = end === -1 ? inv.args.length : end;
+	}
+	return commands;
+}
+
+const INPUT_RUNNERS = wordSet("xargs parallel find fd watch");
+
+/** A wrapped command is refused when it is itself a wrapper, or a code runner whose inline code would receive the input names. */
+function wrappedRefusal(w: WrappedCommand): ShellRefusalCause | undefined {
+	const executable = normaliseExecutable(w.executable);
+	const managerWithoutSubcommand = PACKAGE_MANAGER_RUNNERS.has(executable) && !w.args.some((a) => !a.startsWith("-"));
+	if (WRAPPER_GRAMMARS.has(executable) || INPUT_RUNNERS.has(executable) || managerWithoutSubcommand) return "unresolved-wrapper";
+	const inline = INLINE_CODE_FLAGS.get(executable);
+	const inlineCode = inline !== undefined && w.args.some(inline);
+	return isCodeRunner(executable) && (inlineCode || w.args.some((a) => STDIN_ALIAS.test(a))) ? "generated-script" : undefined;
+}
+
+const firstWrappedRefusal = (invocations: readonly CanonicalInvocation[]): ShellRefusalCause | undefined => {
+	for (const inv of invocations) {
+		const wrapped = wrappedCommands(inv);
+		if (wrapped === undefined) return "unresolved-wrapper";
+		const cause = wrapped.map(wrappedRefusal).find((c) => c !== undefined);
+		if (cause !== undefined) return cause;
+	}
+	return undefined;
+};
 
 /** Parse and fail closed on {@link SHELL_REFUSAL_CAUSES}; otherwise one canonical invocation per `Command` node. */
 export function canonicalise(command: string): ShellVerdict {
@@ -720,9 +811,13 @@ export function canonicalise(command: string): ShellVerdict {
 	const invocations = extracted.map((e) => e.invocation);
 	if (extracted.some((e) => e.expansionInCommandPosition)) return refused("unresolved-expansion-in-command-position", command);
 	if (findShellRunnerDenial(invocations) !== undefined || carriesVerbAcrossSegments(invocations)) return refused("shell-runner", command);
+	const wrappedCause = firstWrappedRefusal(invocations);
+	if (wrappedCause !== undefined) return refused(wrappedCause, command);
 	if (runsGeneratedScript(extracted, scan)) return refused("generated-script", command);
-	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
-	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
+	// An unresolved wrapper is refused when a guarded verb or a code runner could be behind it, or it reads a pipe; `env -x ls` stays ok.
+	const hidesRunner = (e: ExtractedInvocation): boolean =>
+		mentionsGuardedVerb(segmentTexts(e.invocation)) || scan.piped.has(e.node) || [e.invocation.executable, ...e.invocation.args].some((w) => isCodeRunner(normaliseExecutable(w)));
+	if (extracted.some((e) => !e.confident && hidesRunner(e))) return refused("unresolved-wrapper", command);
 	const redirectTargets = { redirectReadTargets: scan.compoundReads, redirectWriteTargets: scan.compoundWrites };
 	const scriptAssignments = scan.commands.filter((c) => c.name === undefined).flatMap((c) => c.prefix.map((a) => a.text));
 	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], commandCount: scan.commands.length, scriptAssignments, ...redirectTargets };
