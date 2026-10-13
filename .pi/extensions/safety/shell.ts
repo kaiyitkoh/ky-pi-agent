@@ -406,14 +406,15 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 	});
 }
 
-/** Raw text with quotes and backslashes removed, plus quote-resolved words, so `g''it` and `\git` (which bash runs as `git`) match. */
+/** Each removal only adds matches: quotes, backslashes, cmd `^`, PowerShell backtick and expansions an unset variable empties (`g${u}it`). */
+const VERB_NORMALISERS = [/['"]/g, /['"\\]/g, /['"\\^`]|\$(\{[^}]*\}|[@*#?!$0-9]|[A-Za-z_]\w*)/g];
+
+/** Tested as-is too, so a backslash path separator (`C:\Git\cmd\git.exe`) still bounds the verb. */
 function mentionsGuardedVerb(inv: CanonicalInvocation): boolean {
-	// Each text is also tested as-is, so a backslash path separator (`C:\Git\cmd\git.exe`) still bounds the verb.
-	return [inv.rawSegment, inv.executable, ...inv.args].some(
-		(text) =>
-			GUARDED_VERB_PATTERN.test(text) ||
-			GUARDED_VERB_PATTERN.test(text.replace(/['"]/g, "")) ||
-			GUARDED_VERB_PATTERN.test(text.replace(/['"\\]/g, "")),
+	return [inv.rawSegment, inv.executable, ...inv.args].some((text) =>
+		[text, ...VERB_NORMALISERS.map((re) => text.replace(re, ""))].some((variant) =>
+			GUARDED_VERB_PATTERN.test(variant),
+		),
 	);
 }
 

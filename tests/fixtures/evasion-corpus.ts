@@ -385,6 +385,42 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		why: "same as EV-101 behind a wrapper with an operand.",
 		reference: "shell.ts#hasExpansionBehindWrappers",
 	},
+	{
+		id: "EV-113",
+		class: "quoting-whitespace",
+		tool: "bash",
+		input: { command: "sh -c 'g${u}it push origin main'" },
+		expect: "BLOCKED",
+		why: "an unset variable expands to nothing inside the script, so the runner rule also tests the segment with expansions removed.",
+		reference: "shell.ts VERB_NORMALISERS",
+	},
+	{
+		id: "EV-114",
+		class: "quoting-whitespace",
+		tool: "bash",
+		input: { command: 'cmd //c "gi^t push origin main"' },
+		expect: "BLOCKED",
+		why: "`^` is cmd.exe's escape character, so it is removed before the guarded-verb test.",
+		reference: "shell.ts VERB_NORMALISERS",
+	},
+	{
+		id: "EV-115",
+		class: "quoting-whitespace",
+		tool: "bash",
+		input: { command: "powershell -Command 'g`it push origin main'" },
+		expect: "BLOCKED",
+		why: "a backtick is PowerShell's escape character, so it is removed before the guarded-verb test.",
+		reference: "shell.ts VERB_NORMALISERS",
+	},
+	{
+		id: "EV-116",
+		class: "quoting-whitespace",
+		tool: "bash",
+		input: { command: "bash -c 'gi$@t push origin main'" },
+		expect: "BLOCKED",
+		why: "`$@` is empty in a -c script with no operands, so the inner shell runs `git`.",
+		reference: "shell.ts VERB_NORMALISERS",
+	},
 
 	// -------------------------------------------------------------------------
 	// CR-03: exact-string executable matching -- `git.exe`, path-qualified and
