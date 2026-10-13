@@ -75,7 +75,6 @@ export default function (pi: ExtensionAPI): void {
 				const pinnedUnion = pinnedAllowance(rows);
 				const from = ledgerBase(rows);
 				const tasks = tasksOf(plan.plan.tasks);
-				const pinnedT = pinnedTasks(rows);
 				const specHash = specDigest(specText);
 				const pinShown = renderPinChanges(ctx.cwd, slug, rows, { allowance: union, tasks, specText });
 				// Pi runs commands mid-stream, so a re-pin must not accept an edit the running executor is still making.
@@ -105,7 +104,7 @@ export default function (pi: ExtensionAPI): void {
 				if (moved !== undefined) return fail(`execute: ${moved} changed since ${slug} was pinned -- ${restoreAdvice(ctx.cwd, slug, moved, rows)}`);
 				const recorded = new Set(acceptedEntries(rows).map((e) => e.taskId));
 				const task: ParsedTask | undefined = plan.plan.tasks.find((t) => !recorded.has(t.id));
-				const verificationCommand = (pinnedT ?? tasks).find((t) => t.id === task?.id)?.verificationCommand ?? undefined;
+				const verificationCommand = (pinnedTasks(rows) ?? tasks).find((t) => t.id === task?.id)?.verificationCommand ?? undefined;
 				if (task === undefined || verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
 				// Guarded before arming, so a refusal arms nothing; the input backstop re-checks the prompt.
