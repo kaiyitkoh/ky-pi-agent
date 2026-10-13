@@ -35,8 +35,12 @@ docstring for the structural argument). Concretely, it catches:
   only in command position.
 - **Nested shells that embed a guarded verb's literal text** (`sh -c "git
   push"`, `bash -lc "..."`, `eval "git push"`) — denied when the resolved
-  executable is a known shell/interpreter runner AND the raw command segment's
-  text literally contains a guarded verb.
+  executable is a known shell/interpreter runner AND the command segment names a
+  guarded verb (after quotes are removed, so `sh -c 'g''it push'` counts). The
+  runners include the Windows ones reachable from Git Bash (`cmd //c`,
+  `powershell -Command`, `pwsh -c`), `su -c`, `script -c`, `ssh`, `chroot`,
+  `strace`, `flock`, `parallel` and `find -exec`. `powershell -EncodedCommand`
+  is refused whatever it holds, because the base64 script hides every verb.
 - **Wrapper indirection** (`env A=1 git push`, `env --`, `sudo --`, `exec`,
   `timeout 5`, `nice -n 5`, `doas`, `ionice`, `stdbuf`, `nohup`, ...) — each
   wrapper's options, operands and `NAME=value` words are consumed from a

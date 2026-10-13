@@ -203,6 +203,26 @@ const TABLE: readonly DenyRow[] = [
 		why: "the guard cannot tell whether an unknown global option takes a value, so a later runner subcommand fails closed",
 	},
 	{
+		label: "find -exec running a guarded verb",
+		cmd: "find . -exec git push origin main \\;",
+		expected: "refused",
+		cause: "shell-runner",
+		why: "find runs its -exec command per match, the same shape as xargs",
+	},
+	{
+		label: "busybox handing a guarded verb to its own shell",
+		cmd: "busybox ash -c 'git push origin main'",
+		expected: "refused",
+		cause: "shell-runner",
+		why: "busybox resolves to ash, which is a shell runner",
+	},
+	{
+		label: "find without an -exec primary",
+		cmd: "find . -name git",
+		expected: "ok",
+		why: "find is only a runner when it has an -exec-family primary",
+	},
+	{
 		label: "unknown wrapper option with no guarded verb",
 		cmd: "env --frobnicate ls",
 		expected: "ok",

@@ -63,6 +63,29 @@ export const SHELL_RUNNERS = new Set([
 	"eval",
 	// Joins its operands into one `sh -c` string, so `watch "git push"` has no separable executable.
 	"watch",
+	"ksh",
+	"mksh",
+	"ash",
+	"csh",
+	"tcsh",
+	// Windows interpreters reachable from Git Bash; unbash cannot parse their command strings.
+	"cmd",
+	"powershell",
+	"pwsh",
+	// Each takes a command string or runs one somewhere this guard cannot see (another user, host or root).
+	"su",
+	"script",
+	"parallel",
+	"ssh",
+	"chroot",
+	"strace",
+	"flock",
+]);
+
+/** `find`/`fd` primaries that run a command, which makes them runners like `xargs`. */
+const FIND_EXEC_PRIMARIES: ReadonlyMap<string, ReadonlySet<string>> = new Map([
+	["find", new Set(["-exec", "-execdir", "-ok", "-okdir"])],
+	["fd", new Set(["-x", "--exec", "-X", "--exec-batch"])],
 ]);
 
 /** Every cause {@link canonicalise} can return; tests iterate it to prove each is reachable. */
@@ -217,6 +240,7 @@ const WRAPPER_GRAMMARS: ReadonlyMap<string, WrapperGrammar> = new Map<string, Wr
 	["builtin", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 	["toybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 	["busybox", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
+	["winpty", { boolean: NO_OPTIONS, value: NO_OPTIONS }],
 	["npx", PACKAGE_RUNNER_GRAMMAR],
 	["pnpx", PACKAGE_RUNNER_GRAMMAR],
 	["bunx", PACKAGE_RUNNER_GRAMMAR],
@@ -489,7 +513,7 @@ function describeCause(cause: ShellRefusalCause, command: string): string {
 		case "unresolved-expansion-in-command-position":
 			return `"${command}" resolves its executable or a guarded verb's subcommand from an unresolved shell variable`;
 		case "shell-runner":
-			return `"${command}" hands a guarded verb to a shell runner (${[...SHELL_RUNNERS].join(", ")}) as a script argument`;
+			return `"${command}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`;
 		case "unresolved-wrapper":
 			return `"${command}" puts a guarded verb behind a wrapper option, operand or assignment this guard cannot resolve to the real executable`;
 		case "parse-error":
@@ -748,9 +772,24 @@ function mentionsGuardedVerb(inv: CanonicalInvocation): boolean {
 	);
 }
 
+function isShellRunner(inv: CanonicalInvocation): boolean {
+	const executable = normaliseExecutable(inv.executable);
+	const execPrimaries = FIND_EXEC_PRIMARIES.get(executable);
+	return SHELL_RUNNERS.has(executable) || (execPrimaries !== undefined && inv.args.some((arg) => execPrimaries.has(arg)));
+}
+
+/** PowerShell's `-EncodedCommand` and every prefix it accepts (`-e`, `-enc`, `-ec`); `-ExecutionPolicy` does not match. */
+const ENCODED_COMMAND_OPTION = /^[-/](ec|e(n(c(o(d(e(d(c(o(m(m(a(n(d)?)?)?)?)?)?)?)?)?)?)?)?)?)$/i;
+
+/** A base64 script hides any verb, so it is refused whatever it contains. */
+function hidesItsScript(inv: CanonicalInvocation): boolean {
+	const executable = normaliseExecutable(inv.executable);
+	return (executable === "powershell" || executable === "pwsh") && inv.args.some((arg) => ENCODED_COMMAND_OPTION.test(arg));
+}
+
 /** Deny when a resolved invocation hands a guarded verb to a shell runner; executable normalised so `/bin/sh -c` and `bash.exe -c` match. */
 function findShellRunnerDenial(invocations: readonly CanonicalInvocation[]): CanonicalInvocation | undefined {
-	return invocations.find((inv) => SHELL_RUNNERS.has(normaliseExecutable(inv.executable)) && mentionsGuardedVerb(inv));
+	return invocations.find((inv) => isShellRunner(inv) && (mentionsGuardedVerb(inv) || hidesItsScript(inv)));
 }
 
 
