@@ -111,6 +111,7 @@ docstring for the structural argument). Concretely, it catches:
   `aws sts get-caller-identity`, `aws s3 ls`, `kubectl get`, and `terraform
   plan` stay allowed so ordinary orientation does not train reflexive
   approval.
+- **OpenSpec CLI** — `openspec list|view|show|validate|status|instructions` and the other read-only verbs are allowed, and so is `openspec archive`: it writes only inside `openspec/`, and it is a named allow row rather than a path exemption because bash writes are not path-classified. `init` and `update` (they write agent config directories, and `update` can offer an unpinned global self-upgrade), `completion` (edits shell rc files), `feedback` (posts to GitHub), the state-changing second words of `config`, `store` and `workset`, a bare `openspec`, and any unknown subcommand require confirmation.
 - **Deferred-detonation writes**, not only bash — a `write`/`edit` into
   `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.bash_profile`, `~/.profile`,
   `~/.gitconfig`, a `.github/workflows/*.yml`, or `.gitlab-ci.yml` blocks
@@ -178,6 +179,8 @@ the corpus does not know about.
 | EV-65 | sensitive-read | `grep { pattern: "SECRET", glob: ".env*" }` | A glob WILDCARD defeats the exact-basename `isDotEnvFile` check — `.env*` is not `.env` and does not start with the `.env.` prefix that check requires. Deliberately not closed by CR-07: pattern-matching over glob syntax risks the false-positive-trains-the-user-to-disable-the-guard failure mode this project's own `<specifics>` names. | Nothing else on this machine — a genuine residual gap. |
 | EV-73 | sensitive-read | `grep { path: "\\\\localhost\\C$\\Users\\tester\\.aws" }` (UNC alias of the user's OWN `~/.aws`) | WR-14's `$HOME`-anchoring fix (`isSensitiveSearchRoot`) compares `rootedSegmentsOf().root` first — a UNC root never equals a drive-letter root, so a UNC spelling of the SAME real directory fails the home-anchored check outright, even though it resolves to the identical directory on disk. The single-FILE rule still fires for the file itself (`.../.aws/credentials`). | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |
 | EV-74 | sensitive-read | `grep { path: "C:/Users/otheruser/.aws" }` (a DIFFERENT profile's credentials dir) | Before WR-14, the segment check matched `.aws`/`.kube`/`.ssh`/`.gnupg` ANYWHERE, unanchored, so this blocked incidentally. WR-14 anchored the check to the fixture's own `$HOME` to fix a real false positive (an in-project path merely containing one of those segment names); a genuinely different user profile's own secrets directory shares neither the fixture home's root nor reaches it, so it is no longer caught. | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |
+
+The corpus-coupled table above does not list two OpenSpec gaps, by design. `npx @fission-ai/openspec ...` resolves to executable `npx`, which the guard does not classify, so it runs unprompted exactly as any other `npx` call does. And because bash writes are not path-classified, the archive skill's `mv openspec/changes/x openspec/changes/archive/x` is allowed by the absence of a rule, not by a named exemption. GitLab server-side protection is unchanged for both.
 
 ## Pi 1.x tool paths (Phase 08.1)
 

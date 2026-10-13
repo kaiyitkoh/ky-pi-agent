@@ -256,6 +256,51 @@ const ROWS: readonly Row[] = [
 		reasonIncludes: "deploy trigger",
 	},
 
+	// openspec: archive and read-only allow, init/update confirm
+	{
+		name: "openspec archive -- allow",
+		toolName: "bash",
+		input: { command: "openspec archive add-foo -y" },
+		expected: "allow",
+	},
+	{
+		name: "openspec init -- confirm naming agent config",
+		toolName: "bash",
+		input: { command: "openspec init --tools pi" },
+		expected: "confirm",
+		reasonIncludes: "agent config",
+	},
+	{
+		name: "archive skill mv inside openspec/ -- allow",
+		toolName: "bash",
+		input: { command: "mv openspec/changes/x openspec/changes/archive/x" },
+		expected: "allow",
+	},
+	{
+		name: "archive skill mkdir inside openspec/ -- allow",
+		toolName: "bash",
+		input: { command: "mkdir -p openspec/changes/archive" },
+		expected: "allow",
+	},
+	{
+		name: "env wrapper then openspec update -- confirm",
+		toolName: "bash",
+		input: { command: "env -i openspec update" },
+		expected: "confirm",
+	},
+	{
+		name: "openspec list && openspec init -- strongest wins",
+		toolName: "bash",
+		input: { command: "openspec list && openspec init" },
+		expected: "confirm",
+	},
+	{
+		name: "openspec status -- allow",
+		toolName: "bash",
+		input: { command: "openspec status --json" },
+		expected: "allow",
+	},
+
 	{ name: "bash null input", toolName: "bash", input: null, expected: "block" },
 	{ name: "bash array input", toolName: "bash", input: [], expected: "block" },
 	{ name: "bash command is a number", toolName: "bash", input: { command: 12345 }, expected: "block" },
@@ -267,7 +312,7 @@ const ROWS: readonly Row[] = [
 
 describe("SAFE-03/SAFE-10 -- policy-compose.test.ts: table is non-empty (vacuous-pass guard)", () => {
 	it("has at least the rows the plan's <behavior> and <acceptance_criteria> name", () => {
-		expect(ROWS.length, "a shortened table silently drops a named allow/confirm/block case").toBeGreaterThanOrEqual(24);
+		expect(ROWS.length, "a shortened table silently drops a named allow/confirm/block case").toBeGreaterThanOrEqual(31);
 	});
 });
 
@@ -283,6 +328,15 @@ describe("SAFE-03/SAFE-10 -- evaluate() over the table", () => {
 			}
 		});
 	}
+});
+
+describe("openspec rows reach the infra arm", () => {
+	it("at least one openspec row expects confirm, so removing the arm cannot stay green", () => {
+		const confirms = ROWS.filter(
+			(r) => r.expected === "confirm" && typeof (r.input as { command?: unknown })?.command === "string" && /(^|\s)openspec(\s|$)/.test((r.input as { command: string }).command),
+		);
+		expect(confirms.length).toBeGreaterThan(0);
+	});
 });
 
 describe("SAFE-03/SAFE-10 -- every Verdict.kind is reachable by at least one row", () => {
