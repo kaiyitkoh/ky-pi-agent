@@ -37,15 +37,14 @@ import { extractSpecRequirementIds, parseRequirementEntries, requirementIdsWitho
 // ---------------------------------------------------------------------------
 
 describe("FLOW-09 -- probeSubagentAvailability: honest degradation, never a silent pass", () => {
-	it("empty list -> unavailable, reason names both missing tools, pi-subagents, RB-07-02 and RB-09-03", () => {
+	it("empty list -> unavailable, reason names both missing tools and the pinned pi-subagents package", () => {
 		const result = probeSubagentAvailability([]);
 		expect(result.status).toBe("unavailable");
 		if (result.status !== "unavailable") throw new Error("unreachable");
 		expect(result.reason).toContain("subagent");
 		expect(result.reason).toContain("bg_wait");
 		expect(result.reason).toContain("pi-subagents");
-		expect(result.reason).toContain("RB-07-02");
-		expect(result.reason).toContain("RB-09-03");
+		expect(result.reason).toContain("not installed");
 	});
 
 	it("partial (only 'subagent' present) -> unavailable, reason names the ONE still-missing tool", () => {
