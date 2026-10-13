@@ -32,6 +32,7 @@ import {
 	endRun,
 	gateCompletion,
 	isRunArmed,
+	isStrictDescendant,
 	recordFromToolResult,
 	recordToolResult,
 	startRun,
@@ -187,7 +188,7 @@ describe("GATE-07 -- gateCompletion", () => {
 			const head = currentSha(repo);
 			const headTree = currentTree(repo);
 			const baseSha = row.baseSha ?? shaA;
-			const verdict = gateCompletion(row.records, head, baseSha, headTree, treeForSha(baseSha));
+			const verdict = gateCompletion(row.records, head, baseSha, headTree, treeForSha(baseSha), isStrictDescendant(repo, baseSha, head));
 
 			if (row.expected === "accept") {
 				expect(verdict.ok, `${row.why} -- got ${JSON.stringify(verdict)}`).toBe(true);
@@ -211,7 +212,7 @@ describe("GATE-07 -- gateCompletion", () => {
 	}
 
 	it("R1's reason contains no substring of the fabricated transcript -- the gate never looked at it", () => {
-		const verdict = gateCompletion([], currentSha(repo), shaA, currentTree(repo), treeA);
+		const verdict = gateCompletion([], currentSha(repo), shaA, currentTree(repo), treeA, true);
 		expect(verdict.ok).toBe(false);
 		if (!verdict.ok) {
 			expect(verdict.reason).not.toContain("exit 0");
@@ -348,6 +349,7 @@ describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the
 			gate01BaseSha,
 			emptyHeadTree,
 			gate01BaseTree,
+			isStrictDescendant(gate01Repo, gate01BaseSha, emptyHeadSha),
 		);
 		expect(verdict.ok, `an empty commit must not satisfy a completion claim -- this is the exact gap Phase 8 closes -- got ${JSON.stringify(verdict)}`).toBe(false);
 		if (!verdict.ok) {
@@ -367,6 +369,7 @@ describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the
 			gate01BaseSha,
 			changedTree,
 			gate01BaseTree,
+			isStrictDescendant(gate01Repo, gate01BaseSha, changedSha),
 		);
 		expect(verdict.ok, `a genuine content change must still accept -- without this, branch (6) would reject everything -- got ${JSON.stringify(verdict)}`).toBe(true);
 	});
@@ -382,6 +385,7 @@ describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the
 			gate01BaseSha,
 			changedHeadTree,
 			gate01BaseTree,
+			isStrictDescendant(gate01Repo, gate01BaseSha, changedHeadSha),
 		);
 		expect(verdict.ok, JSON.stringify(verdict)).toBe(true);
 		if (verdict.ok) expect(verdict.failedToolCalls).toBe(1);
@@ -391,6 +395,40 @@ describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the
 		const notARepo = mkdtempSync(join(tmpdir(), "quick-not-a-repo-tree-"));
 		tempDirs.push(notARepo);
 		expect(() => currentTree(notARepo)).toThrow();
+	});
+});
+
+describe("a HEAD move that is not a new commit on the base is rejected", () => {
+	const r = makeTempRepo("quick-evidence-ancestry-");
+	tempDirs.push(r);
+	const first = commitFile(r, "one.txt", "one", "first");
+	const second = commitFile(r, "two.txt", "two", "second");
+
+	it("a checkout back to an earlier commit moves HEAD and changes the tree, and still rejects", () => {
+		const checkout = spawnSync("git", ["checkout", "--detach", first], { cwd: r, encoding: "utf-8", shell: false, windowsHide: true });
+		expect(checkout.status, checkout.stderr).toBe(0);
+		const head = currentSha(r);
+		expect(head).toBe(first);
+		expect(isStrictDescendant(r, second, head)).toBe(false);
+		const verdict = gateCompletion([record("bash", head, false)], head, second, currentTree(r), treeOfSha(r, second), isStrictDescendant(r, second, head));
+		expect(verdict.ok, JSON.stringify(verdict)).toBe(false);
+		if (!verdict.ok) expect(verdict.reason).toContain("not a new commit");
+	});
+
+	it("through endRun: an armed run whose HEAD was reset backwards rejects", () => {
+		spawnSync("git", ["checkout", "--detach", second], { cwd: r, shell: false, windowsHide: true });
+		startRun(r, second, treeOfSha(r, second));
+		spawnSync("git", ["reset", "--hard", first], { cwd: r, shell: false, windowsHide: true });
+		recordToolResult(record("bash", first, false));
+		const verdict = endRun(currentSha(r), currentTree(r));
+		expect(verdict?.ok, JSON.stringify(verdict)).toBe(false);
+	});
+
+	it("a commit on top of the base is a strict descendant; the base itself is not", () => {
+		const third = commitFile(r, "three.txt", "three", "third");
+		expect(isStrictDescendant(r, first, third)).toBe(true);
+		expect(isStrictDescendant(r, third, third)).toBe(false);
+		expect(isStrictDescendant(r, "", third)).toBe(false);
 	});
 });
 

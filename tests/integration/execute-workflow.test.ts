@@ -476,6 +476,18 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(bytes(progressFile(h))).toBe(before);
 	});
 
+	it("a reset back to an earlier commit moves HEAD and changes the tree, but is not a commit: rejected, file unchanged", async () => {
+		const h = harness();
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		await h.command(SLUG);
+		const before = bytes(progressFile(h));
+		git(h.repo, ["reset", "--hard", "HEAD~1"]);
+		verify(h);
+		await h.fire("agent_settled", { aborted: false });
+		expect(h.notes.at(-1)?.text).toContain("not a new commit");
+		expect(bytes(progressFile(h))).toBe(before);
+	});
+
 	it("a failing exploratory call and a red-before-fix verification run before the commit do not reject: the final verification decides", async () => {
 		const h = harness();
 		await h.command(SLUG);

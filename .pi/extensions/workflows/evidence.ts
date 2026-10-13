@@ -4,6 +4,8 @@
  * core/extensions/types.d.ts ToolExecutionEndEvent); the model's content blocks are never consulted. Emitted for every finalized call, which is why capture is at tool_execution_end.
  * Owns log base "evidence"; pruning only touches that base. Registers nothing and imports nothing from ../routing or ../safety.
  */
+import { spawnSync } from "node:child_process";
+
 import { redactString } from "../diagnostics/redact.ts";
 import { appendJsonl, pruneLogs } from "../../lib/jsonl.ts";
 
@@ -46,10 +48,17 @@ export function recordFromToolResult(input: {
 	};
 }
 
+/** True when `headSha` is a commit built on top of `baseSha`; false for a checkout or reset to any other commit, or when git cannot say. */
+export function isStrictDescendant(cwd: string, baseSha: string, headSha: string): boolean {
+	if (baseSha === "" || headSha === "" || baseSha === headSha) return false;
+	const r = spawnSync("git", ["merge-base", "--is-ancestor", baseSha, headSha], { cwd, shell: false, windowsHide: true });
+	return r.status === 0;
+}
+
 /**
- * The pure predicate; first match wins and the order is binding: no record, unreadable HEAD, HEAD unmoved, empty commit (tree unchanged), no record at HEAD.
- * A run passes when a commit landed with a changed tree and evidence exists at HEAD; failed intermediate tool calls are counted and
- * logged, not fatal. The declared verification is checked by the caller. ACCEPT never endorses the diff's content.
+ * The pure predicate; first match wins and the order is binding: no record, unreadable HEAD, HEAD unmoved, HEAD not built on the
+ * base, empty commit (tree unchanged), no record at HEAD. Failed intermediate tool calls are counted and logged, not fatal.
+ * The declared verification is checked by the caller. ACCEPT never endorses the diff's content.
  */
 export function gateCompletion(
 	records: readonly EvidenceRecord[],
@@ -57,6 +66,7 @@ export function gateCompletion(
 	baseSha: string,
 	headTree: string,
 	baseTree: string,
+	headDescendsFromBase: boolean,
 ): EvidenceVerdict {
 	if (records.length === 0) {
 		return {
@@ -77,6 +87,15 @@ export function gateCompletion(
 			reason:
 				`no commit was made during this run -- HEAD is still ${headSha}, so the recorded tool results predate ` +
 				"any work landing and cannot support a completion claim",
+		};
+	}
+
+	if (!headDescendsFromBase) {
+		return {
+			ok: false,
+			reason:
+				`HEAD moved to ${headSha}, which is not a new commit on top of ${baseSha} -- a checkout or reset moves HEAD ` +
+				"without committing anything, so it cannot support a completion claim",
 		};
 	}
 
@@ -162,12 +181,13 @@ export function endRun(headSha: string, headTree: string): EvidenceVerdict | und
 	if (state === undefined) {
 		return undefined;
 	}
-	const verdict = gateCompletion(state.records, headSha, state.baseSha, headTree, state.baseTree);
+	const descends = isStrictDescendant(state.cwd, state.baseSha, headSha);
+	const verdict = gateCompletion(state.records, headSha, state.baseSha, headTree, state.baseTree, descends);
 	writeEvidenceRow(state.cwd, {
 		verdict: verdict.ok ? "accept" : "reject",
 		// States what was checked, not an endorsement.
 		reason: verdict.ok
-			? `HEAD moved to ${headSha} with a changed tree; ${verdict.failedToolCalls} failed tool call(s) logged -- whether the commit contains the work is unverified`
+			? `HEAD moved to ${headSha}, a new commit on the base with a changed tree; ${verdict.failedToolCalls} failed tool call(s) logged -- whether the commit contains the work is unverified`
 			: verdict.reason,
 		failedToolCalls: verdict.ok ? verdict.failedToolCalls : state.records.filter((r) => r.isError).length,
 		baseSha: state.baseSha,

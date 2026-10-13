@@ -57,7 +57,7 @@ export function settleQuickRun(input: QuickSettleInput): void {
 			return input.notify(`quick: ${reason}`, "error");
 		}
 		const scope = gate.ranAny ? gate.report.replace(/\n/g, "; ") : "no deterministic check applied to this change";
-		input.notify(`quick: HEAD moved to ${verdict.sha} with a changed tree; ${verdict.failedToolCalls} failed tool call(s) logged; ${scope} -- the work itself is NOT verified`, "info");
+		input.notify(`quick: HEAD moved to ${verdict.sha}, a new commit on the base with a changed tree; ${verdict.failedToolCalls} failed tool call(s) logged; ${scope} -- the work itself is NOT verified`, "info");
 	} catch (err) {
 		input.notify(`quick: gate could not run on the change -- ${err instanceof Error ? err.message : String(err)}`, "error");
 	}

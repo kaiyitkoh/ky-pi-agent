@@ -224,25 +224,19 @@ command) from satisfying a completion claim on its own.
 **Settle runs on `agent_settled`, not `agent_end`.** `agent_settled` is the event that carries the `aborted` flag, which the settle step needs. An aborted settle disarms the run and records nothing: no verdict, no evidence row.
 
 **What an ACCEPT verdict actually guarantees, stated plainly because
-overclaiming here is worse than underclaiming it:** HEAD is a different
-commit than when the run was armed, its tree DIFFERS from the tree recorded
-at arm time (`gateCompletion` branch (6), added by Phase 8 plan 08-12 — see
-below), and no tool call finalized during the run — including a blocked,
-schema-invalid, unknown-tool or aborted one, and including a dropped
-capture — carried a structural failure. **What it does NOT guarantee:**
-that a commit landed at all. `checkout`, `reset` and `revert` all move HEAD
-without committing anything — and `reset --hard` can DELETE a commit
-outright — so "HEAD moved" is not "a commit landed", and moving to an
-older, genuinely different commit moves BOTH the SHA and the tree, so
-branch (6) does not close this particular gap either (CR-01, iteration 4:
-the reviewer obtained an ACCEPT from `git checkout --detach HEAD~1`, which
-made zero commits, and from `git reset --hard HEAD~1`, which destroyed
-one — both remain open, unrelated to what this section closes below).
+overclaiming here is worse than underclaiming it:** HEAD is a NEW commit
+built on top of the commit recorded at arm time (`git merge-base
+--is-ancestor base head`, and HEAD is not the base), its tree DIFFERS from
+the tree recorded at arm time, and evidence was captured at that HEAD.
+`checkout`, `switch` and `reset` move HEAD to a commit that already existed;
+moving backwards or sideways is not a commit, so it REJECTS with "not a new
+commit on top of <base>". A rebase onto another upstream also rejects; for
+`/execute`, `--rebase-base` is the way past it.
 
-**What Phase 8 plan 08-12 (GATE-01) closes: the empty-commit gap.**
-`gateCompletion` (`.pi/extensions/workflows/evidence.ts`) gained a sixth
-ordered branch, positioned immediately after the `headSha === baseSha`
-branch and before the recorded-failure branch: `headTree === baseTree`
+**The empty-commit branch.**
+`gateCompletion` (`.pi/extensions/workflows/evidence.ts`) checks, after the
+`headSha === baseSha` and ancestry branches and before the evidence-at-HEAD
+branch, that `headTree === baseTree`
 rejects, naming both tree ids. `HEAD^{tree}` is read via
 `.pi/extensions/safety/git.ts`'s `currentTree` (mirroring `currentSha`'s
 fail-closed contract exactly — no sentinel for an unknown tree, throws on a
@@ -257,9 +251,9 @@ genuinely DIFFERS from the tree at arm time, still ACCEPTS — deciding
 whether a diff contains the CLAIMED work is a semantic judgement no
 predicate over tree or SHA equality can make. `/quick`'s own notification
 text says only what was checked
-(`quick: HEAD moved to <sha> with a changed tree and no failed tool result
--- no commit was verified and the work itself is NOT verified`), never the
-stronger, and sometimes false, "a commit landed" or "evidence accepted."
+(`quick: HEAD moved to <sha>, a new commit on the base with a changed tree;
+<n> failed tool call(s) logged; <gate legs> -- the work itself is NOT
+verified`), never the stronger "evidence accepted."
 
 ## 5. The workflows and their text ceilings
 

@@ -1064,7 +1064,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		);
 	});
 
-	it("case 9 (CR-01 iteration 4 regression, PROBE W1) -- a checkout that moves HEAD without committing anything is worded as HEAD moving, never as a commit landing", async () => {
+	it("case 9 (PROBE W1) -- a checkout that moves HEAD without committing anything is rejected", async () => {
 		const candidate = flashExecutorCandidate();
 
 		await withFauxSession(
@@ -1127,37 +1127,18 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					expect(rows.length, "more than one evidence row was written for a single /quick run").toBe(1);
 					const row = rows[0] as EvidenceRowShape;
 
-					// PROBE W1's own shape: HEAD moved (a real, successful tool
-					// call), so the gate still accepts -- CR-01 (iteration 4) is
-					// about what the ACCEPT is worded as, never about tightening
-					// the predicate itself (that is Phase 8's job).
-					expect(row.verdict, `expected accept, got: ${JSON.stringify(row)}`).toBe("accept");
-					expect(row.baseSha, "HEAD moved during this run").not.toBe(row.headSha);
+					// A checkout moves HEAD to a commit that already existed: not a new commit on the base, so REJECT.
+					expect(row.verdict, `expected reject, got: ${JSON.stringify(row)}`).toBe("reject");
+					expect(row.reason ?? "").toContain("not a new commit");
 
-					// No NEW commit object was created anywhere in the
-					// repository -- checkout --detach only moves a ref.
 					const totalCommitsAfter = Number(runGit(["rev-list", "--count", "--all"], cwd).trim());
 					expect(totalCommitsAfter, "PROBE W1: a checkout must never create a new commit object").toBe(
 						totalCommitsBefore,
 					);
 
-					// CR-01 (iteration 4): the row's own reason, and the
-					// notification shown to the user, must say what was actually
-					// checked -- never assert that a commit landed.
-					expect(
-						row.reason ?? "",
-						'PROBE W1: the evidence row must not claim "a commit landed" when checkout only moved HEAD',
-					).not.toContain("a commit landed");
-					expect(row.reason ?? "", "the row's own reason must say HEAD moved instead").toContain("HEAD moved");
-
-					expect(notifications.length, "an acceptance must still report an outcome").toBeGreaterThan(0);
 					const last = notifications.at(-1);
-					expect(
-						last?.text ?? "",
-						'PROBE W1: /quick\'s own notification must not claim "a commit landed"',
-					).not.toContain("a commit landed");
-					expect(last?.text ?? "", "the notification must say HEAD moved instead").toContain("HEAD moved");
-					expect(last?.level, "an acceptance is informational, not an error").toBe("info");
+					expect(last?.text ?? "").toContain("not a new commit");
+					expect(last?.level, "a rejection is an error").toBe("error");
 				} finally {
 					restore();
 					setQuickGateExecOverrideForTests(undefined);
