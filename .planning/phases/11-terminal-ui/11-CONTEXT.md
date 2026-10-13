@@ -72,3 +72,14 @@ Extension layout (one `ui` extension vs header/status/widget split); exact palet
 - `CONTRIBUTING.md` — boundary rule
 - `AGENTS.md` — comment rules
 </canonical_refs>
+
+<resolved_open_questions>
+## Orchestrator resolutions of RESEARCH.md open questions (2026-10-13, unattended run; binding)
+
+1. **Subagent widget:** pi-subagents@0.76.1 already ships live widgets (`subagent-async`, `subagent-fleet-status`). Do NOT author a parallel widget (composition rule: install commodity, author only the critical path). UI-04 is met by (a) the composed pi-subagents widget, pinned in `.pi/settings.json`, plus (b) an authored compact subagent count/status segment in the `setStatus` statusline fed by `subagent:*` / `tool_execution_*` (`toolName "subagent"`) events, tested offline against a faithful stub of the exact event shapes found in the package source. The live check that the pi-subagents widget and the statusline segment both appear during a real run is an `RB-11-xx` OUTSTANDING runbook entry. Document this in docs (UI section).
+2. **Header:** short replacement header — harness name, version, active route/mode, and a single-line minimal keybinding hint (e.g. the help key); not the full built-in hint block.
+3. **`DefaultResourceLoader` option names:** confirm at source in Wave 0/first task; fall back to structural schema test only if a real load is not reachable without network/credentials, and say so in the SUMMARY.
+4. **Event firing under `bindExtensions` + faux:** probe first; if `session_start`/`tool_execution_*` do not fire, drive handlers directly with recorded event objects and note it.
+5. **`showCacheMissNotices`:** do not change shipped settings for it; offer as a runbook step in the live cacheRead check.
+6. `"theme": "ky"` (or chosen name) goes into `.pi/settings.json`; package themes need `/reload` after edits — document.
+</resolved_open_questions>
