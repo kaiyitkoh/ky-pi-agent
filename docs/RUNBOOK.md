@@ -1,5 +1,196 @@
 # Runbook — checks that cannot be executed on the development machine
 
+## Work laptop: start here
+
+From a clean Windows machine to a verified install, in order. Run everything
+in Git Bash. Each live check names its RB entry below, which holds the full
+procedure; record results there, flipping the summary row and the `**Status:**`
+line together. Never paste a key, account id, profile name or work hostname
+into this repository.
+
+### 0. Before the first push (development machine)
+
+RB-07-03 is still open: unpushed history carries an AWS account id, an IAM ARN
+and an admin profile name that the working tree no longer does. Decide rewrite
+or accept, per that entry, before `git push`.
+
+### 1. Prerequisites
+
+- Node >= 22.19.0: `node --version`
+- Git for Windows (provides Git Bash and `sh`): `git --version`
+- Pi is pinned at 1.1.0 and installed by bootstrap; do not install it by hand.
+  Close every Pi session before bootstrap (Windows EBUSY otherwise).
+
+### 2. Clone and bootstrap
+
+```
+git clone https://github.com/kaiyitkoh/ky-pi-agent
+cd ky-pi-agent
+export KYPI_DASHSCOPE_BASE_URL="https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"   # optional: workspace-dedicated DashScope host; unset keeps the shared intl host
+sh bin/bootstrap.sh
+sh bin/bootstrap.sh --global-setup
+sh bin/bootstrap.sh --check-only
+sh bin/bootstrap.sh --assert-hardening
+pi --version
+```
+
+Order matters. The full run comes first: it hardens every npm scope, installs
+Pi 1.1.0, the composed packages, the theme, the `models.json`/`auth.json`
+templates, and rewrites the user-scope safety stub at
+`~/.pi/agent/extensions/ky-safety/index.ts` into its fail-closed form (a guard
+that fails to load blocks every tool call instead of loading nothing).
+`--global-setup` refuses until that stub exists. Expected: every command exits
+0, `--check-only` reports one delivery path, and `pi --version` prints `1.1.0`.
+Use this path or the git package (README, Install), never both.
+
+### 3. Credentials (runtime only, nothing committed)
+
+`~/.pi/agent/auth.json` holds `"$DEEPSEEK_API_KEY"` and `"$DASHSCOPE_API_KEY"`,
+resolved from the environment when Pi starts. Export both in `~/.bashrc`, or
+replace the value in `auth.json` itself; that file lives outside the repo.
+
+- **DeepSeek** (built-in provider): `export DEEPSEEK_API_KEY=<key>`
+- **DashScope**: `export DASHSCOPE_API_KEY=<key>`; the endpoint came from
+  `KYPI_DASHSCOPE_BASE_URL` at bootstrap (re-run `sh bin/bootstrap.sh` after
+  setting it).
+- **Bedrock (SSO)**: `aws sso login --profile <profile>`. Bootstrap deliberately
+  installs no `amazon-bedrock` entry. Pi 1.1.0 has no `pi auth login` (its
+  `/login` asks for a Bedrock API key), so add the entry to
+  `~/.pi/agent/auth.json` by hand:
+  `"amazon-bedrock": { "type": "api_key", "env": { "AWS_PROFILE": "<profile>" } }`.
+  The Sonnet 4.5 route requests the inference profile
+  `kyPiAgent.bedrockProfilePrefix` + bare id, default `apac.`. If your region
+  serves another prefix, set it in `~/.pi/agent/settings.json`:
+  `{ "kyPiAgent": { "bedrockProfilePrefix": "us." } }` (`""` means the bare id).
+- **Qoder** (optional, `qoder_delegate` only): `QODER_PERSONAL_ACCESS_TOKEN`,
+  `QODER_AGENT_ID`, `QODER_ENVIRONMENT_ID`.
+
+Expected: `pi --list-models | grep -E 'deepseek|dashscope|amazon-bedrock'`
+lists models from all three providers.
+
+### 4. Protected branches
+
+`main`, `master` and `staging` are built in and cannot be removed. Add more in
+`~/.pi/agent/settings.json` (or a project's `.pi/settings.json`); lists are
+add-only:
+
+```
+{ "safety": { "protectedBranches": ["release"], "pushProtectedBranches": ["production"] } }
+```
+
+`protectedBranches` blocks commits and pushes; `pushProtectedBranches` blocks
+pushes only. A malformed value keeps the previous list and warns.
+
+### 5. Live checks, in order
+
+Install and load:
+
+1. RB-12-08 stub refreshed: open `~/.pi/agent/extensions/ky-safety/index.ts`;
+   it wraps the import in `try`/`catch` and registers a blocking `tool_call`
+   handler on failure. `sh bin/bootstrap.sh --check-only` exits 0.
+2. RB-12-05 global setup, from a work repo outside this checkout: start `pi`;
+   the four packages load, `ky` is the theme, the `subagent` tool lists
+   `planner` and `executor-handoff`, a child's `git push origin HEAD:main` is
+   blocked, and `/plan`, `/execute`, `/review`, `/quick` have no `:1` suffix.
+3. RB-07-02 reconcile installs: `pi list` shows exactly the four specs in
+   `.pi/settings.json` at their pins; `npx vitest run tests/unit/extension-pins.test.ts` exits 0.
+4. RB-01-01 `/share` control: `sh scripts/check-gh-unauthenticated.sh` exits 1,
+   `gh auth logout`, re-run exits 0, and `/share` in Pi aborts. Set up SSH for
+   git first if this laptop pushes over HTTPS.
+5. RB-01-02 clean-profile install (after the `v1.0.0` tag exists):
+   `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0`,
+   then `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi --list-models` shows
+   `ky-harness-selftest`.
+6. RB-01-03 `/reload`: in this checkout, edit `SELFTEST_MODEL_ID` in
+   `.pi/extensions/harness/index.ts`, run `/reload`; the new id appears.
+
+Providers and routing:
+
+7. Default mode. In a work repo run `pi`, then `/mode`. Expected:
+   `mode: cheap (not escalated)` and `executor: deepseek/deepseek-flash` (or
+   `dashscope/deepseek-v4-flash` without a DeepSeek key), with no
+   `executor not applied` warning. Then quit and run
+   `pi --model dashscope/deepseek-v4-pro`, then `/mode`. Expected: the executor
+   stays `dashscope/deepseek-v4-pro` with no notice; `/cheap` then applies the
+   default route.
+8. RB-03-03 Bedrock from a fresh shell with nothing exported: one turn on a
+   Bedrock Claude model; the last `amazon-bedrock` turns row has
+   `outcome: "ok"`. Record the real SSO-expiry message when it next occurs.
+9. RB-12-06 apac profile: `aws bedrock list-inference-profiles --region <region>`
+   lists the apac Sonnet 4.5 profile, or set `kyPiAgent.bedrockProfilePrefix`
+   (step 3) and re-run `/mode`.
+10. RB-03-01 and RB-03-02 DashScope: one turn, then a two-turn tool call; the
+    wire dump shows the explicit compat keys and `status: 200` on both turns.
+11. RB-03-05 DashScope cap and price from the Model Studio console into
+    `.pi/templates/models-template.json`.
+12. RB-02-01 and RB-08-01 wire dumps: one turn per provider; each
+    `main.request` carries that provider's thinking parameters at the
+    selected effort.
+13. RB-02-02 no credential in any dump: the grep in that entry prints nothing.
+14. RB-03-04 R1 experiment: `reasoning_effort` low vs high on DeepSeek, judged
+    against the pre-committed threshold.
+15. RB-05-01 Qoder (optional): one `qoder_delegate` run folds a result back.
+
+Safety:
+
+16. RB-04-02 feature-branch push: asks in the TUI, refuses headless.
+17. RB-04-01 GitLab server-side: a direct `git push origin main` in
+    `<work-repo>` is rejected by GitLab; record the exact text.
+
+Composed packages, quality, UI and context:
+
+18. RB-07-01 smoke ritual: one turn per provider, one subagent spawn, one
+    blocked command, one wire dump.
+19. RB-08-02 LSP leg against a real TypeScript server (`FAIL` with real text,
+    never `UNAVAILABLE`).
+20. RB-08-03 reviewer as a real subagent, plus a live calibration run.
+21. RB-08-04 comment rules reach another project (answer begins
+    `Default to no comment`).
+22. RB-11-01 theme, header and statusline in a real terminal.
+23. RB-11-02 subagent widget and `N agent(s)` segment, blocking and background.
+24. RB-10-02 then RB-11-03 prompt cache: high turn-2 `cacheRead` ratio;
+    `ui-wire-check` PASS across mode switches.
+25. RB-10-03 per-package cost: `/budget` under each `--ky-profile`.
+26. RB-10-01 minimal-vs-full experiment, only from an OS account that holds no
+    cloud credentials.
+
+Workflows:
+
+27. RB-09-01 one real feature through `/grill`, `/plan`, `/execute`, `/review`.
+28. RB-09-02 the merge request `/review` opens targets `staging`.
+29. RB-09-03 a real subagent handoff and the measured token delta.
+
+OpenSpec (opt-in):
+
+30. RB-12-01 install: `sh scripts/openspec-setup.sh --install-cli`, then
+    `sh scripts/openspec-setup.sh`, then `--check` prints
+    `OK: openspec 1.13.2, 12 skills and 12 prompts installed`.
+31. RB-12-02 `/budget` skills slice unchanged; `/skill:openspec-explore` and
+    `/opsx-explore` expand.
+32. RB-12-03 `openspec config get telemetry.enabled` prints `false`, and no
+    request to `edge.openspec.dev` under a capture.
+
+Over time:
+
+33. RB-02-03 a working day of DeepSeek V4 Flash traffic, then the four counts.
+34. First CI run after the push: the `windows-latest` and `macos-latest` jobs
+    in `.github/workflows/ci.yml` pass on GitHub (no RB entry).
+35. RB-12-04 at the next OpenSpec bump; RB-12-07 with an RPC front-end (Orca
+    chat mode).
+
+### 6. Next up
+
+- **Orca desktop setup** (Phase 13): `.planning/research/ORCA-DESKTOP-SETUP.md`.
+  Terminal mode first; chat (RPC) mode needs the push guard to accept `rpc`
+  with a UI, which RB-12-07 then verifies.
+- **Pipe-rule narrowing** (deferred): the strict rule refuses any piped code
+  runner; narrowing it waits for a hardened design (`docs/SAFETY.md`).
+- **Pi 1.2.0 re-pin**: bump `PI_PINNED` in `bin/bootstrap.sh` and the
+  `@earendil-works/*` dev pins together, re-review the composed packages, then
+  re-run RB-07-01 and RB-07-02.
+
+---
+
 This file exists because some things cannot be proven from a desk. A check
 lands here when it needs the work laptop, a clean Pi profile, network egress,
 an interactive terminal, or live credentials — none of which the development

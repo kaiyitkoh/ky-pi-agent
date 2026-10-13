@@ -2,26 +2,34 @@
 
 A personalised coding-agent harness built on [Pi](https://pi.dev).
 
-**Status: work in progress. Nothing here is finished or verified. There is no
-usable release yet.**
+**Status: work in progress.** Everything below is built and proven offline by
+the test suite. The live checks (real providers, the work laptop, a real
+GitLab) are listed in `docs/RUNBOOK.md` and are still **OUTSTANDING**.
 
 ## What this is
 
-A configuration and extension layer over Pi — model routing, quality gates,
-subagents, workflows, and safety rules — packaged as a single repo.
+A configuration and extension layer over Pi: model routing, quality gates,
+subagents, workflows, safety rules and diagnostics, packaged as a single repo.
 
 The goal is to make cheap models produce work you would trust from an expensive
-one, without the harness itself becoming the bottleneck. The intended daily
-driver is a low-cost model, with stronger models reserved for the specific
-points where they earn their cost.
+one, without the harness itself becoming the bottleneck. The daily driver is
+DeepSeek V4 Flash; stronger models (DeepSeek V4 Pro, Claude Sonnet 4.5 on AWS
+Bedrock) are reserved for the roles and moments where they earn their cost.
 
-It is being built for one person's workflow. It is public because there is no
-reason for it not to be, not because it is intended as a general-purpose tool.
+It is built for one person's workflow. It is public because there is no reason
+for it not to be, not because it is intended as a general-purpose tool.
+
+**Setting up a new machine?** Follow `docs/RUNBOOK.md`, section
+"Work laptop: start here": prerequisites, bootstrap, credentials, protected
+branches, then every outstanding live check in order.
 
 ## Install
 
-Two paths. They are **alternatives, not a sequence** — pick one delivery path:
-the bootstrap stub or the git package, never both.
+Requires Node >= 22.19.0 and, on Windows, Git for Windows (Git Bash). Pi is
+pinned at 1.1.0.
+
+Two paths. They are **alternatives, not a sequence**, so
+pick one delivery path: the bootstrap stub or the git package, never both.
 
 **Path A — install as a Pi package, pinned to a release ref:**
 
@@ -34,31 +42,163 @@ unpinned clone is unreviewed code. The ref is an exact tag or commit. The
 package manifest declares the agent definitions (`pi.subagents.agents`), so
 they travel with it.
 
-**Path B — clone and bootstrap:**
+**Path B — clone and bootstrap (recommended for the work laptop):**
 
 ```
 git clone https://github.com/kaiyitkoh/ky-pi-agent
 cd ky-pi-agent
 sh bin/bootstrap.sh
+sh bin/bootstrap.sh --global-setup
+sh bin/bootstrap.sh --check-only
 ```
 
-Bootstrap also writes the user-level Pi settings: the four composed packages at
-exact pins, the `ky` theme, and this checkout's `.pi/agents` as a subagent scan
-directory, so the harness is available in every repository. It merges rather
-than overwrites: your own packages, extensions, theme and `kyPiAgent` keys
-survive, and a different pinned version of one of ours is refused.
-`sh bin/bootstrap.sh --global-setup` runs only that part, and refuses unless a
-full run has already installed the safety stub (or the git package is configured).
+The full run hardens every npm scope, installs Pi 1.1.0, the four composed
+packages at exact pins, the `ky` theme, the `models.json`/`auth.json` templates
+and a user-scope safety stub that loads this checkout's guard and blocks every
+tool call if the guard fails to load. It also registers this checkout's
+`.pi/agents` as a subagent scan directory, so the harness works in every
+repository. It merges rather than overwrites: your own packages, extensions,
+theme and `kyPiAgent` keys survive, and a different pinned version of one of
+ours is refused. `--global-setup` re-runs only the settings merge and refuses
+unless a full run has installed the safety stub (or the git package is
+configured). `sh bin/bootstrap.sh --help` lists every mode.
 
-Do one or the other, **not both**. The bootstrap installs a user-scope safety
-stub that loads this checkout's guard; a git package carries its own copy, and
-two copies can diverge. `sh bin/bootstrap.sh --check-only` fails when both are
-configured. Separately, installing globally *and* dogfooding by `cd`-ing into
-the repo loads the extension twice from two different absolute paths, which
-Pi's canonical-path deduplication does not merge. It is non-fatal and not worth
-engineering around, so the rule is: dogfood, or install globally, never both.
+Do one or the other, **not both**. The stub loads this checkout's guard; a git
+package carries its own copy, and two copies can diverge.
+`sh bin/bootstrap.sh --check-only` fails when both are configured. Separately,
+installing globally *and* dogfooding by `cd`-ing into the repo loads the
+extension twice from two different absolute paths, which Pi does not
+deduplicate. It is non-fatal, so the rule is: dogfood, or install globally,
+never both.
 
-Neither path is finished yet.
+## Commands and modes
+
+Commands cost zero per-turn tokens, so almost everything is a command.
+
+**Routing**
+
+| Command | Does |
+|---|---|
+| `/cheap`, `/balanced`, `/max` | Switch the whole role→model map (executor and subagent pins). |
+| `/escalate` (`on`) / `/escalate off` | Lift the executor to `max`'s route, sticky until cleared; each change is logged. |
+| `/mode` | Show the mode, escalation state and every role's resolved model. |
+
+A fresh session starts in `cheap` and applies its executor, unless `--model`,
+`--provider` or `--models` was passed, in which case your model is kept.
+
+**Workflows**
+
+| Command | Does |
+|---|---|
+| `/quick` | Route, guard, arm evidence and hand a small task to the normal prompt loop. |
+| `/grill` | Interrogate a change into a gated `SPEC.md` before any plan or code. |
+| `/plan` | Turn a gated SPEC into a coverage-complete `PLAN.md`. |
+| `/execute` | Run the next unfinished PLAN task, evidence-gated, appending `PROGRESS.md`. |
+| `/review` | Review against SPEC and PLAN, write `REVIEW.md`, open an MR against `staging`. |
+
+Artifacts live under `.pi/work/<slug>/`. See `docs/WORKFLOWS.md`.
+
+**Plan mode, todos, background tasks, recovery**
+
+| Command / flag | Does |
+|---|---|
+| `pi --plan`, `/plan-mode`, Ctrl+Alt+P | Start in, or toggle, read-only plan mode. |
+| `/plan-todos` | Show plan progress. |
+| `/todos` | Show the todo list on the current branch. |
+| `/bg <command>`, `/jobs`, `/logs <id>`, `/kill <id>` | Start, list, read and stop tracked background shell tasks. |
+| `/tasks`, `/bg-tasks`, `/bg-clear` | Background task manager UI; clear finished notices. |
+| `/checkpoint-restore [sha]` | List working-tree checkpoints, or restore one. |
+| `/loop-police` | Loop-detector status; `reset`, `set KEY=VAL`, `save`. |
+| `/budget` | Per-turn token budget: system prompt, tools, context files, skills, cache. |
+| `/ky-hello` | Liveness check for the harness. |
+
+**Tool profiles.** `pi --ky-profile recon|review|implement|full` picks the tool
+set for a session (default `implement`). Smaller profiles cost fewer tokens
+every turn; `bg_enable` loads the background tools on demand. An explicit
+`--tools` list switches profiles off. See `docs/ROUTING.md`, "Tool profiles".
+
+## Routing and providers
+
+Six roles (executor, planner, reviewer, advisor, vision, summariser) each map
+to an ordered candidate list per mode. Providers:
+
+- **DeepSeek** (Pi's built-in provider): `deepseek-flash` and `deepseek-v4-pro`.
+- **DashScope** (Alibaba, a custom provider from the models template): the same
+  two models, tried after DeepSeek-direct.
+- **Amazon Bedrock**: Claude Sonnet 4.5 for vision, and the advisor, planner
+  and reviewer in the stronger modes. The inference-profile prefix comes from
+  `kyPiAgent.bedrockProfilePrefix` (default `apac.`).
+- **Qoder** (optional): not a provider; `qoder_delegate` hands a task to Qoder's
+  Cloud Agents API and folds the result back.
+
+A capability guard refuses a model that cannot do the job (an image for a
+text-only model, a prompt over the context window, thinking a Bedrock model
+would never receive, a tool loop on DeepSeek R1) and says why; a refused switch leaves the session unchanged. Credentials are resolved at
+runtime from `~/.pi/agent/auth.json` and the environment. See `docs/ROUTING.md`.
+
+## Safety
+
+`.pi/extensions/safety/` is a mistake-catcher, not a security boundary; the
+real control is GitLab's server-side branch protection. The guard parses every
+bash command into an AST (`unbash`) instead of matching strings, and:
+
+- refuses variable indirection, command substitution and nested shells that
+  hide a guarded verb (`g=push; git $g`, `sh -c "git push"`);
+- applies a **strict pipe rule**: any code runner (`sh`, `python`, `node`,
+  `psql` and many more) whose stdin is a pipe is refused, whatever its
+  arguments, and heredocs are refused everywhere;
+- **protected branches**: `main`, `master` and `staging` are built in;
+  `safety.protectedBranches` and `safety.pushProtectedBranches` in settings add
+  more (add-only). Pushes to them, force pushes and tag pushes are blocked; a
+  push to any other branch asks you, and refuses when nobody can be asked
+  (print, json, subagents);
+- gates `terraform apply`, mutating cloud CLIs and writes to credential paths
+  behind a confirm or a block, with an audit log.
+
+See `docs/SAFETY.md` for exactly what is caught and what is not.
+
+## Subagents
+
+Subagents come from the pinned `pi-subagents` package. This repo ships two
+agent definitions in `.pi/agents/`: `planner` (read-only, produces a plan) and
+`executor-handoff` (works from a handoff packet). The planner's model is pinned
+by the current mode. Every child loads the safety guard (a launch is refused if
+it cannot), and a push that would ask is refused in a child because nobody can
+answer.
+
+## UI
+
+The `ky` theme, a two-line header (harness version, Pi version, mode) and one
+`ky-statusline` footer segment (mode, tokens left, changed files, running
+subagents). Nothing UI-related enters the system prompt, so it cannot break the
+prompt cache. See `docs/UI.md`.
+
+## OpenSpec (opt-in)
+
+`sh scripts/openspec-setup.sh --install-cli` then `sh scripts/openspec-setup.sh`
+installs the official OpenSpec skills and prompts at user level, each flagged so
+it costs nothing per turn until you type `/skill:openspec-<name>` or
+`/opsx-<name>`. Nothing is installed by bootstrap. See `docs/OPENSPEC.md`.
+
+## Diagnostics
+
+Every turn writes redacted JSONL under `.pi/logs/` in the working repo:
+`wire-<date>.jsonl` (request and response payloads), `turns-<date>.jsonl` (one
+row per turn, with tokens and cost) and `audit-<date>.jsonl` (safety
+decisions). A detector re-prompts when a cheap model writes a tool call as
+prose. `/budget` shows the per-turn token floor. See `docs/DIAGNOSTICS.md`.
+
+## Documentation
+
+- `docs/RUNBOOK.md` — live checks and the work-laptop start-here checklist
+- `docs/ROUTING.md` — role→model table, mode commands, refusals, tool profiles
+- `docs/SAFETY.md` — what the guard catches and what it does not
+- `docs/WORKFLOWS.md` — `/quick` and the four ceremonial workflows
+- `docs/QUALITY.md` — deterministic gates, the reviewer and calibration
+- `docs/DIAGNOSTICS.md` — log format, redaction and the per-turn floor
+- `docs/EXTENSIONS.md` — provenance of every pinned or vendored extension
+- `docs/UI.md` — theme, header and statusline
+- `docs/OPENSPEC.md` — the opt-in OpenSpec skills
 
 ## Supply chain — what is protected and what is not
 
@@ -71,8 +211,7 @@ permissions, on a laptop that may hold live cloud credentials.
 The control is `ignore-scripts=true`, placed in every npm scope Pi can reach.
 It is not one file, because npm resolves its project config from `--prefix`
 when one is given and from the current directory otherwise, and Pi always
-passes `--prefix` on the npm path. A single correctly-written file in a
-plausible location does not cover the paths that matter.
+passes `--prefix` on the npm path.
 
 **Covered** by the committed root `.npmrc`:
 
@@ -96,8 +235,8 @@ plausible location does not cover the paths that matter.
 - **Any `pi install` on a machine where bootstrap has never been run.** The
   user-scope control is machine state, not repo state.
 
-For both uncovered cases, the ritual is a one-shot environment prefix on the
-single command:
+For both uncovered cases, use a one-shot environment prefix on the single
+command:
 
 ```
 npm_config_ignore_scripts=true pi install https://github.com/other/package
@@ -108,86 +247,51 @@ inherited environment to everything it spawns, including the `bash` tool, so a
 persistent setting would silently skip legitimate native builds inside any
 project you work on during a session. Per-command, or not at all.
 
-## Second machine / macOS setup
-
-The repo-scoped `.npmrc` travels with the clone. The user-scope control does
-**not** — it lives at `~/.pi/agent/npm/.npmrc`, which is machine state, and
-`bin/bootstrap.sh` is how each machine acquires it.
-
-1. Install Node ≥ 22.19.0 and Git. On Windows this means Git for Windows, which
-   provides the Git Bash `sh` that every script here targets.
-2. Clone the repo and `cd` into it.
-3. Run `sh bin/bootstrap.sh`. It probes tools, verifies the pinned Pi version
-   is still published, hardens and *proves* every npm scope, and only then
-   installs anything. It is safe to re-run.
-4. Verify with `sh bin/bootstrap.sh --assert-hardening`. This exits non-zero if
-   any npm scope still permits lifecycle scripts, and it asks npm rather than
-   inspecting the files — the effect is what matters, not the file.
-
-`sh bin/bootstrap.sh --check-only` is the non-mutating variant that CI runs: it
-performs every probe and every repo-side assertion, changes nothing, and exits
-0 on a clean runner where bootstrap has never been applied.
-
-**`--check-only` needs the network.** One of its probes is the published-pin
-preflight (BOOT-04), which asks the npm registry whether the pinned Pi version
-still exists, and a registry that does not answer is a hard `exit 1` — the
-script refuses to guess whether a pin was withdrawn or the network was down.
-Offline, use `sh bin/bootstrap.sh --assert-hardening`, which touches nothing but
-the local npm configuration.
+Verify with `sh bin/bootstrap.sh --assert-hardening`, which exits non-zero if
+any npm scope still permits lifecycle scripts and needs no network.
+`sh bin/bootstrap.sh --check-only` performs every probe without changing
+anything, and **needs the network**: the published-pin preflight asks the npm
+registry whether the pinned Pi version still exists and exits 1 if it cannot.
 
 ## Session sharing
 
-Pi's built-in `/share` uploads the **entire session transcript** — source,
-prompts, anything pasted in — to a GitHub gist. No extension can block it:
-built-in slash commands are dispatched before extension commands and before the
-`input` event, so there is no hook upstream of it.
-
-The only control is that Pi checks `gh auth status` first and aborts when it
-exits non-zero. Check the current state with:
+Pi's built-in `/share` uploads the **entire session transcript** to a GitHub
+gist, and no extension can block it. The only control is that Pi checks
+`gh auth status` first and aborts when it exits non-zero. Check the current
+state with:
 
 ```
 sh scripts/check-gh-unauthenticated.sh
 ```
 
-Apply the control with `gh auth logout`. Note the cost: on a machine that uses
-git-over-HTTPS, that also removes your git credential. Dropping only the `gist`
-scope is not an option — `repo`, `read:org` and `gist` are documented as a
-non-removable minimum set.
-
-## Verification status
-
-`docs/RUNBOOK.md` lists every check that cannot be executed on the development
-machine — the ones needing the work laptop, a clean profile, or an interactive
-terminal. Each carries its command, its expected output, and a status. Checks
-that have not been run are marked **OUTSTANDING**, never passed.
+Apply the control with `gh auth logout`. On a machine that uses git-over-HTTPS
+that also removes your git credential, so set up SSH first. Dropping only the
+`gist` scope is not possible.
 
 ## Platform
 
-Targets Windows (via Git Bash) and macOS. Shell code is POSIX `sh`.
+Windows (Git Bash) now, macOS later. Shell code is POSIX `sh`.
 
 ## Secrets
 
 This is a public repository. No credentials are committed. Provider
-configuration is kept structurally complete with values resolved at runtime
-from the environment.
+configuration is structurally complete, with values resolved at runtime from
+the environment or `~/.pi/agent/auth.json`.
 
 ## Development
 
 ```
 npm install
-npm test
-npm run typecheck
+npx tsc --noEmit
+npx vitest run <file> --maxWorkers=2
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for the rules that are expensive to
-rediscover — in particular the boundary rule governing when a new capability
-may become a tool rather than a command or a skill.
+rediscover, in particular the boundary rule governing when a new capability
+may become a tool rather than a command or a skill, and `AGENTS.md` for code
+conventions.
 
 ## License
 
 See [LICENSE](LICENSE). Pi itself is MIT-licensed and is a separate project by
 Mario Zechner / Earendil Works.
-
----
-
-This README will be rewritten as the project takes shape.
