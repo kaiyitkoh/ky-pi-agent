@@ -299,6 +299,15 @@ it blocks on every branch. Any `GIT_*` assignment in front of a git command
 exported variable, or after `set -a`) blocks the same way. The protected-branch write table
 still applies on top when `HEAD` is protected.
 
+A protected branch cannot be moved by name from another branch either: on
+every branch, `git branch` with a create, move, copy, delete, force or
+upstream flag naming it (`branch -f main feat`, `branch -M feat main`), a
+`fetch`/`pull` refspec whose destination is protected (`fetch . feat:main`),
+and `checkout -B main`/`switch -C main` block. Because `HEAD` is read once,
+before the command runs, a `checkout`/`switch` onto a protected branch (or to
+`-`, the unknown previous branch) makes every later git in the same command
+count as on that branch, so `git switch main && git commit` blocks.
+
 ### Reads that do not arrive as a plain argument
 
 Read classification also covers:

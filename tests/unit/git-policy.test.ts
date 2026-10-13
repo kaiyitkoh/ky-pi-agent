@@ -115,6 +115,16 @@ const ROWS: readonly Row[] = [
 	{ command: "git log --output-indicator-new=x", rest: "log --output-indicator-new=x", kind: "git", currentBranch: "main", expected: "allow", why: "an option that only starts with --output is not --output" },
 	{ command: "git diff --ext-diff", rest: "diff --ext-diff", kind: "git", currentBranch: "feature/x", expected: "block", why: "--ext-diff runs the configured external diff program" },
 	{ command: "git log -SFOO", rest: "log -SFOO", kind: "git", currentBranch: "feature/x", expected: "allow", why: "-O is a pager only for git grep" },
+	{ command: "git branch -f main feat", rest: "branch -f main feat", kind: "git", currentBranch: "feature/x", expected: "block", why: "moves main without checking it out" },
+	{ command: "git branch -M feat main", rest: "branch -M feat main", kind: "git", currentBranch: "feature/x", expected: "block", why: "renames a branch over main" },
+	{ command: "git branch -D main", rest: "branch -D main", kind: "git", currentBranch: "feature/x", expected: "block", why: "deletes the protected branch" },
+	{ command: "git fetch . feat:main", rest: "fetch . feat:main", kind: "git", currentBranch: "feature/x", expected: "block", why: "a local fetch refspec writes main" },
+	{ command: "git checkout -B main", rest: "checkout -B main", kind: "git", currentBranch: "feature/x", expected: "block", why: "-B resets main to the start point" },
+	{ command: "git switch -C main", rest: "switch -C main", kind: "git", currentBranch: "feature/x", expected: "block", why: "-C resets main to the start point" },
+	{ command: "git branch --merged main", rest: "branch --merged main", kind: "git", currentBranch: "feature/x", expected: "allow", why: "a listing filter names main without writing it" },
+	{ command: "git branch feat2 main", rest: "branch feat2 main", kind: "git", currentBranch: "feature/x", expected: "allow", why: "creating a branch from main reads main" },
+	{ command: "git branch -d old", rest: "branch -d old", kind: "git", currentBranch: "feature/x", expected: "allow", why: "deleting an unprotected branch" },
+	{ command: "git fetch origin main", rest: "fetch origin main", kind: "git", currentBranch: "feature/x", expected: "allow", why: "fetching main updates only the remote-tracking ref" },
 	{ command: "git apply --check diff.patch", rest: "apply --check diff.patch", kind: "git", currentBranch: "main", expected: "allow", why: "--check is a dry run -- does not write the tree" },
 
 	// -------------------------------------------------------------------------

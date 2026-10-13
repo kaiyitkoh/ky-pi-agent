@@ -636,6 +636,10 @@ const ROWS: readonly Row[] = [
 	{ name: "export GIT_PAGER=cat before git -- allow, a formatting variable", toolName: "bash", input: { command: "export GIT_PAGER=cat; git log" }, expected: "allow" },
 	{ name: "export of a non-git variable before git -- allow", toolName: "bash", input: { command: "export FOO=1; git status" }, expected: "allow" },
 	{ name: "export GIT_DIR with no git in the script -- allow, each call is a fresh shell", toolName: "bash", input: { command: "export GIT_DIR=x" }, expected: "allow" },
+	{ name: "switch to main, then commit -- block, HEAD is read before the switch runs", toolName: "bash", input: { command: "git switch main && git commit -am x" }, expected: "block" },
+	{ name: "checkout - then commit -- block, the previous branch is unknown", toolName: "bash", input: { command: "git checkout - && git commit -am x" }, expected: "block" },
+	{ name: "switch -c a new branch, then commit -- allow", toolName: "bash", input: { command: "git switch -c feat2 && git commit -am x" }, expected: "allow" },
+	{ name: "checkout main on its own -- allow, switching is not a write", toolName: "bash", input: { command: "git checkout main" }, expected: "allow" },
 	{
 		name: "cd into a project directory, then a relative read -- allow (negative control)",
 		toolName: "bash",

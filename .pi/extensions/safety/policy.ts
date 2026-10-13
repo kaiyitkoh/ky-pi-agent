@@ -9,7 +9,7 @@ import type { PathPolicyFacts } from "./paths.ts";
 import { canonicalisePathArg, classifyPathRead, classifyPathWrite, classifyReadGlob, isSensitiveSearchRoot } from "./paths.ts";
 import type { PathVerdict } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
-import { classifyGitInvocation, classifyGlabInvocation } from "./git.ts";
+import { classifyGitInvocation, classifyGlabInvocation, switchTarget } from "./git.ts";
 import type { InfraVerdict } from "./infra.ts";
 import { classifyInfraInvocation } from "./infra.ts";
 
@@ -235,7 +235,8 @@ function fileOperandsOf(arg: string): string[] {
 }
 
 /** One invocation's strongest verdict across git/glab, infra and path classification; `sole` means it is the command's only invocation. */
-function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string, sole: boolean): Verdict {
+/** `switched` is set when an earlier `checkout`/`switch` in the command may have moved HEAD onto a protected branch. */
+function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string, sole: boolean, switched = false): Verdict {
 	let strongest: Verdict = { kind: "allow" };
 	const invocation = asGitSubcommandInvocation(rawInvocation) ?? rawInvocation;
 	const executable = normaliseExecutable(invocation.executable);
@@ -249,7 +250,7 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 		// A subshell's `cd` does not persist, so the session cwd counts too; an unreadable `cd` target counts as protected.
 		const afterCd =
 			invocation.afterCd === "unknown" ? [facts.protectedBranches[0] ?? ""] : invocation.afterCd === "known" ? [facts.currentBranchFor(facts.cwd)] : [];
-		const branches = [facts.currentBranchFor(gitDir), ...afterCd];
+		const branches = [facts.currentBranchFor(gitDir), ...afterCd, ...(switched ? [facts.protectedBranches[0] ?? ""] : [])];
 		const { gitConfigFor, gitBranchFor } = facts;
 		const gitFacts: GitPolicyFacts = {
 			currentBranch: branches.find((b) => facts.protectedBranches.includes(b)) ?? branches[0],
@@ -396,8 +397,16 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	}
 
 	let strongest: Verdict = { kind: "allow" };
+	let switched = false;
 	for (const invocation of shellVerdict.invocations) {
-		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey, shellVerdict.commandCount === 1));
+		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey, shellVerdict.commandCount === 1, switched));
+		// HEAD is read once, before the command runs, so a later write after a switch onto a protected branch counts as on it.
+		const git = asGitSubcommandInvocation(invocation) ?? invocation;
+		if (normaliseExecutable(git.executable) === "git") {
+			const parsed = toGitInvocation(git);
+			const target = switchTarget(parsed.subcommand, parsed.args);
+			switched ||= target === "-" || (target !== undefined && facts.protectedBranches.some((b) => b.toLowerCase() === target.toLowerCase()));
+		}
 	}
 	// A compound statement's redirect may run in any directory its commands reach.
 	const dirs = new Set([facts.cwd, ...shellVerdict.invocations.map((inv) => invocationDir(inv, facts))]);

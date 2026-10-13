@@ -243,6 +243,51 @@ function restrictedFormReason(subcommand: string, args: readonly string[]): stri
 	}
 }
 
+const BRANCH_MUTATING_FLAGS = new Set(
+	"-f --force -M -m --move -C -c --copy -D -d --delete -u --set-upstream-to --unset-upstream --edit-description".split(" "),
+);
+
+const isProtectedName = (ref: string, protectedBranches: readonly string[]): boolean => {
+	const leaf = ref.replace(/^\+/, "").replace(/^(refs\/)?heads\//i, "");
+	return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
+};
+
+const optionValue = (args: readonly string[], names: readonly string[]): string | undefined => {
+	const at = args.findIndex((a) => names.includes(a));
+	return at === -1 ? undefined : args[at + 1];
+};
+
+/** A protected branch this invocation writes by name from any HEAD: `branch -f main`, `fetch . feat:main`, `checkout -B main`. */
+function protectedRefWrite(subcommand: string, args: readonly string[], protectedBranches: readonly string[]): string | undefined {
+	const named = (refs: readonly (string | undefined)[]): string | undefined =>
+		refs.find((r): r is string => r !== undefined && isProtectedName(r, protectedBranches));
+	switch (subcommand) {
+		case "branch": {
+			const mutating = args.some((a) => BRANCH_MUTATING_FLAGS.has(a.split("=")[0]) || /^-[a-zA-Z]*[fMmCcDdu]/.test(a));
+			const upstream = args.find((a) => a.startsWith("--set-upstream-to="))?.split("=")[1];
+			return mutating ? named([...positionalsOf(args), upstream]) : undefined;
+		}
+		case "fetch":
+		case "pull":
+			return named(positionalsOf(args).filter((r) => r.includes(":")).map((r) => r.slice(r.indexOf(":") + 1)));
+		case "checkout":
+			return named([optionValue(args, ["-b", "-B"])]);
+		case "switch":
+			return named([optionValue(args, ["-c", "-C", "--create", "--force-create"])]);
+		default:
+			return undefined;
+	}
+}
+
+/** The branch a `checkout`/`switch` leaves HEAD on, `"-"` when it cannot be known here, or undefined when HEAD does not move. */
+export function switchTarget(subcommand: string, args: readonly string[]): string | undefined {
+	if ((subcommand !== "checkout" && subcommand !== "switch") || args.includes("--")) return undefined;
+	const created = optionValue(args, subcommand === "checkout" ? ["-b", "-B"] : ["-c", "-C", "--create", "--force-create"]);
+	if (created !== undefined) return created;
+	const target = positionalsOf(args)[0];
+	return target === "-" || args.includes("-") ? "-" : target;
+}
+
 function isProtected(facts: GitPolicyFacts): boolean {
 	return facts.protectedBranches.some((b) => b.toLowerCase() === facts.currentBranch.toLowerCase());
 }
@@ -502,6 +547,10 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 	const program = gitProgramOption(invocation.subcommand, invocation.args);
 	if (program !== undefined) {
 		return { kind: "block", reason: `"${display}": "${program}" runs a program or writes a file -- blocked on every branch` };
+	}
+	const protectedRef = protectedRefWrite(invocation.subcommand, invocation.args, facts.protectedBranches);
+	if (protectedRef !== undefined) {
+		return { kind: "block", reason: `"${display}" moves, creates or deletes the protected branch "${protectedRef}" without checking it out -- blocked on every branch` };
 	}
 
 	const push = invocation.subcommand === "push" ? planPush(invocation.args, invocation.configOverrides ?? [], facts) : undefined;
