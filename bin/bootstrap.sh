@@ -44,6 +44,7 @@ PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 # MSYS tools accept C:/x and reject C:\x, so a drive-letter or UNC value from a
 # Node-launched caller is normalised. A POSIX path may legally hold a backslash,
 # hence the no-forward-slash condition on the catch-all arm.
+# shellcheck disable=SC1003 # '\\' and '\' are literal backslashes, not escaped quotes
 case "$PI_AGENT_DIR" in
 [A-Za-z]:* | '\\'*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
 *'\'*)
@@ -101,7 +102,9 @@ sanitise_npm_env() {
 		printf '       npm ranks environment config above every .npmrc, so certifying\n' >&2
 		printf '       ignore-scripts here would certify the launcher, not the control.\n' >&2
 		printf '       Remedy: start a clean shell (these names cannot be unset by any\n' >&2
+		# shellcheck disable=SC2016 # the backticks are literal command names in the message
 		printf '       POSIX shell, so `unset` and `env -u` are both unavailable) and\n' >&2
+		# shellcheck disable=SC2016 # the backticks are literal command names in the message
 		printf '       re-run. Do not run this script through `npm run` or `npx`.\n' >&2
 		exit 1
 	fi
@@ -579,6 +582,7 @@ merge_models_json() {
 	ensure_agent_dir
 	# Values cross into node through KYPI_* variables, never by interpolation
 	# into the JS source: a base URL is caller-supplied text.
+	# shellcheck disable=SC2016 # the single-quoted JS is node source; its ${} are template literals
 	KYPI_MODELS_SRC="$_src" \
 		KYPI_MODELS_DST="$PI_AGENT_DIR/models.json" \
 		KYPI_DASHSCOPE_BASE_URL="${KYPI_DASHSCOPE_BASE_URL:-}" \
@@ -699,6 +703,7 @@ merge_auth_json() {
 		exit 1
 	fi
 	ensure_agent_dir
+	# shellcheck disable=SC2016 # the single-quoted JS is node source; its ${} are template literals
 	KYPI_AUTH_SRC="$_src" \
 		KYPI_AUTH_DST="$PI_AGENT_DIR/auth.json" \
 		node -e "$KYPI_ATOMIC_JS"'

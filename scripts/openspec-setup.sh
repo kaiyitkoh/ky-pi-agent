@@ -55,11 +55,13 @@ REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd -P)
 
 PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 # Pi expands a leading ~ in PI_CODING_AGENT_DIR (config.js expandTildePath), so match it.
+# shellcheck disable=SC2088 # the quoted ~ is the literal prefix being matched
 case "$PI_AGENT_DIR" in
 "~") PI_AGENT_DIR="$HOME" ;;
 "~/"*) PI_AGENT_DIR="$HOME/${PI_AGENT_DIR#"~/"}" ;;
 esac
 # A Windows-style value arrives with backslashes; MSYS tools accept C:/x only.
+# shellcheck disable=SC1003 # '\\' and '\' are literal backslashes, not escaped quotes
 case "$PI_AGENT_DIR" in
 [A-Za-z]:* | '\\'*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
 *'\'*)

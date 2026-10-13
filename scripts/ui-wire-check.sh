@@ -3,7 +3,7 @@
 # Live prompt-cache check over the local diagnostics logs. Reads already-redacted files only; sends nothing anywhere.
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cli="$script_dir/ui-wire-check.mjs"
 
 die() {

@@ -15,7 +15,7 @@
 # KY_EXP_PI, KY_EXP_OUT.
 set -eu
 
-script_dir=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+script_dir=$(CDPATH='' cd -- "$(dirname -- "$0")" && pwd)
 cli="$script_dir/ctx-experiment.mjs"
 
 die() {
@@ -42,7 +42,7 @@ if [ -n "${KY_EXP_REPEATS:-}" ]; then
 fi
 
 mkdir -p "$out"
-out=$(CDPATH= cd -- "$out" && pwd)
+out=$(CDPATH='' cd -- "$out" && pwd)
 # shellcheck disable=SC2086
 node "$cli" plan --seed "$seed" $repeat_args --defects "${KY_EXP_DEFECTS:-}" >"$out/trials.tsv"
 : >"$out/failures.tsv"
@@ -65,7 +65,7 @@ newline='
 total=$(wc -l <"$out/trials.tsv" | tr -d ' ')
 count=0
 
-while IFS="$tab" read -r trial_id arm defect repeat <&3; do
+while IFS="$tab" read -r trial_id arm defect _ <&3; do
 	count=$((count + 1))
 	file_id=$(printf '%s' "$trial_id" | tr -c 'A-Za-z0-9_.-' '_')
 	trial_root=$(mktemp -d)
