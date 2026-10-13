@@ -559,7 +559,8 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		'echo "RB-11-02 pi-subagents widget seen=<yes|no>, statusline agents peak=<n> back to none=<yes|no>, $(date -u +%FT%TZ)" >> RB-11-02-RESULT.md',
 	],
 	"RB-11-03": [
-		'sh scripts/ui-wire-check.sh --probe "$(git branch --show-current)"',
+		'probe="ky-probe-$(date +%s)" && git switch -c "$probe" && echo x > "$probe.txt"',
+		'sh scripts/ui-wire-check.sh --probe "$probe"',
 		'echo "RB-11-03 ui-wire-check <PASS|FAIL|INSUFFICIENT>, turn-2 cacheRead ratio: <ratio>, $(date -u +%FT%TZ)" >> RB-11-03-RESULT.md',
 	],
 

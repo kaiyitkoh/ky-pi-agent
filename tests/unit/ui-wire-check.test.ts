@@ -190,6 +190,11 @@ describe("launcher", () => {
 		expect(r.status).toBe(2);
 		expect(r.stdout).toContain("wire-2026-10-13.jsonl");
 	});
+	it("rejects an empty probe instead of checking nothing", () => {
+		const r = run([...base(fixture(["same", "same"])), "--probe", ""]);
+		expect(r.status).toBe(64);
+		expect(r.stderr).toContain("--probe must not be empty");
+	});
 	it("rejects an unknown flag with usage", () => {
 		const r = run(["--bogus", "1"]);
 		expect(r.status).not.toBe(0);

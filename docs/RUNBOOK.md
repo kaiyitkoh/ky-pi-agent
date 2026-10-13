@@ -1729,10 +1729,12 @@ Phase 11 shipped the `ky` theme, the startup header, the `ky-statusline` footer 
 **Procedure, on the work laptop.**
 
 1. Optionally set `showCacheMissNotices: true` in your GLOBAL settings for this run only; do not commit it.
-2. Start a fresh session and send two plain turns.
-3. Switch mode (`/cheap`, then `/balanced`), edit a file, run a subagent, and send one more turn. Do not toggle `/plan`; that is a sanctioned prompt change (`RB-10-02`).
-4. Run the check, probing for a name you changed: `sh scripts/ui-wire-check.sh --probe "$(git branch --show-current)"` (add `--probe <changed-file-name>` as well).
-5. Record the result: `echo "RB-11-03 ui-wire-check <PASS|FAIL|INSUFFICIENT>, turn-2 cacheRead ratio: <ratio>, $(date -u +%FT%TZ)" >> RB-11-03-RESULT.md`
+2. In one shell, create a uniquely named throwaway branch and file: `probe="ky-probe-$(date +%s)" && git switch -c "$probe" && echo x > "$probe.txt"`. The probe must be unique: names such as `main` or `index.ts` already appear in the project instructions Pi puts in the system prompt, so they always hit.
+3. Start a fresh session and send two plain turns.
+4. Switch mode (`/cheap`, then `/balanced`), edit `$probe.txt`, run a subagent, and send one more turn. Do not toggle `/plan`; that is a sanctioned prompt change (`RB-10-02`).
+5. In the same shell, run the check: `sh scripts/ui-wire-check.sh --probe "$probe"`. An empty probe exits 64 rather than checking nothing.
+6. Clean up: `git switch - && git branch -D "$probe" && rm "$probe.txt"`.
+7. Record the result: `echo "RB-11-03 ui-wire-check <PASS|FAIL|INSUFFICIENT>, turn-2 cacheRead ratio: <ratio>, $(date -u +%FT%TZ)" >> RB-11-03-RESULT.md`
 
 **Expected output.** PASS, identical system-prompt hashes across requests, no probe hits, and a high turn-2 ratio.
 

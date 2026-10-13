@@ -28,7 +28,11 @@ function parseArgs(argv) {
 		else if (name === "--date") o.date = value;
 		else if (name === "--session") o.session = value;
 		else if (name === "--last") o.last = Number(value);
-		else if (name === "--probe") o.probes.push(value);
+		else if (name === "--probe") {
+			// An empty probe (e.g. a branch lookup on a detached HEAD) would check nothing yet still pass.
+			if (value === "") throw new Error("--probe must not be empty");
+			o.probes.push(value);
+		}
 		else if (name === "--min-ratio") o.minRatio = Number(value);
 		else throw new Error(`unknown flag ${name}`);
 	}
