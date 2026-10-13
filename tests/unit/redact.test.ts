@@ -560,19 +560,70 @@ describe("the two consumers: logs mask by name, model inputs by shape only", () 
 	});
 });
 
-describe("the credential-name rule is linear-time", () => {
-	const hostile: readonly (readonly [string, string])[] = [
+describe("every rule is linear-time", () => {
+	const SIZE = 200_000;
+	const fill = (unit: string): string => unit.repeat(Math.ceil(SIZE / unit.length));
+	// Near-matches are the expensive inputs, so each rule gets every prefix of its own sample three ways,
+	// plus these units, which defeated earlier versions of the table.
+	const HOSTILE_UNITS = ["eyJ", "-u=", " -u =", "--user=", "mysql ", "://a:", "token", 'token="', "-----BEGIN ", "bearer ", "a:"];
+	const hostileFor = (sample: string): string[] => {
+		const out: string[] = [];
+		for (let k = 1; k <= sample.length; k++) {
+			const prefix = sample.slice(0, k);
+			out.push(fill(prefix), prefix + (sample[k - 1] as string).repeat(SIZE), ` ${prefix}${"=".repeat(SIZE)}`);
+		}
+		for (const unit of HOSTILE_UNITS) out.push(fill(unit), unit + (unit.at(-1) as string).repeat(SIZE), unit + "a".repeat(SIZE));
+		return out;
+	};
+
+	SECRET_VALUE_PATTERNS.forEach((pattern, index) => {
+		const sample = SECRET_SAMPLES[index] as Sample;
+		it(`rule ${index} (${sample.label}) scans every 200 KB hostile input in under 100 ms`, () => {
+			let worst = 0;
+			let worstInput = "";
+			for (const input of hostileFor(sample.value)) {
+				const start = performance.now();
+				input.replace(pattern, "");
+				const elapsed = performance.now() - start;
+				if (elapsed > worst) [worst, worstInput] = [elapsed, input];
+			}
+			expect(worst, `slowest input starts ${JSON.stringify(worstInput.slice(0, 24))}`).toBeLessThan(100);
+		});
+	});
+
+	const whole: readonly (readonly [string, string])[] = [
 		["a keyword run", "token".repeat(40_000)],
 		["a keyword run with separators", "token_".repeat(34_000)],
 		["unclosed quoted values", 'token="abc '.repeat(20_000)],
 		["a long spacing run", `token${" ".repeat(200_000)}`],
+		["a run of JWT starts", "eyJ".repeat(100_000)],
+		["a run of curl user flags", "-u=".repeat(70_000)],
+		["a curl flag before a run of equals signs", ` -u ${"=".repeat(200_000)}`],
 	];
-	for (const [label, input] of hostile) {
-		it(`masks 200 KB of ${label} in under 100 ms`, () => {
+	for (const [label, input] of whole) {
+		it(`redactString masks 200 KB of ${label} in under 100 ms`, () => {
 			expect(input.length).toBeGreaterThanOrEqual(200_000);
 			const start = performance.now();
 			redactString(input);
 			expect(performance.now() - start).toBeLessThan(100);
+		});
+	}
+});
+
+describe("a credential-named value is masked whole, at any length", () => {
+	const long = ["Fwo", "GZXIvYXdz"].join("").repeat(60);
+	const cases: readonly (readonly [string, string])[] = [
+		["a 600-character double-quoted value", `password: "${long}"`],
+		["a 600-character JSON value", `"client_secret": "${long}"`],
+		["a 600-character unquoted value", `TOKEN=${long}`],
+		["a value on the next line", `password:\n  ${long}`],
+		["an unclosed quoted value", `aws_session_token = "${long}`],
+	];
+	for (const [label, input] of cases) {
+		it(`masks ${label}`, () => {
+			const out = redactString(`x ${input}\ny`);
+			expect(out).not.toContain(long.slice(-12));
+			expect(out).toContain("[redacted:");
 		});
 	}
 });

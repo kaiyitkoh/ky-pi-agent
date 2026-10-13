@@ -261,7 +261,11 @@ Two independent rules, and the key rule is stronger than the shape rule:
    (`redactForModel`). The **name** half also matches ordinary source such as
    `const token = req.headers.authorization;`, so only logs use it: the wire
    dump, the audit, provider errors and evidence rows (`redactString`). Every
-   rule is length-bounded, so the redactor stays linear on hostile input.
+   rule is linear on hostile input: an unbounded run either ends its rule, so
+   it cannot fail and force a rescan, or is anchored so that one run has one
+   start. A credential-named value is masked whole at any length, quoted,
+   unquoted, unclosed or on the next line. `tests/unit/redact.test.ts` times
+   every rule on 200 KB near-matches built from its own sample.
 
 **Two placeholders, and they mean different things.**
 

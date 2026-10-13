@@ -1,6 +1,6 @@
 /**
  * The one credential table, shared by the wire redactor, the safety audit and every prompt or MR body built from source.
- * Every quantifier is bounded or runs over a class disjoint from what follows it, so each start position costs O(1) on untrusted text.
+ * Linear on untrusted text: an unbounded run either ends its rule, so it cannot fail, or is anchored so that one run has one start.
  */
 
 /** Credentials recognised by their own form. Safe on source code, so model prompts and MR bodies use only these. */
@@ -22,11 +22,11 @@ export const SHAPE_PATTERNS: readonly RegExp[] = [
 	// Token-length only, so prose and code that say "Bearer token" survive; `\s` and the token class are disjoint.
 	/(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]{16,}/gi,
 	// JWT: three base64url segments, the first starting with the encoded `{"`.
-	/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g,
+	/(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g,
 	// The password in URL userinfo, `scheme://user:pass@host`.
 	/(?<keep>:\/\/[^\s/:@]+:)[^\s/@]+(?=@)/g,
-	// `curl -u user:pass` and `--user user:pass`.
-	/(?<keep>(?<![\w-])(?:-u|--user)[ =]+)[^\s:'"]+:[^\s'"]+/g,
+	// `curl -u user:pass` and `--user user:pass`. The separator and the user are disjoint and the user is bounded, so `-u=-u=...` cannot rescan.
+	/(?<keep>(?<![\w-])(?:-u|--user)(?: +|=))[^\s:'"=][^\s:'"]{0,256}:[^\s'"]+/g,
 	// `mysql -pPASSWORD`: the attached form only, scoped to the mysql family so `mkdir -p` and `find -path` survive.
 	/(?<=\bmysql(?:dump|admin)?\b[^\n|;&]{0,200}\s)(?<keep>-p)\S+/g,
 ];
@@ -34,8 +34,8 @@ export const SHAPE_PATTERNS: readonly RegExp[] = [
 /** Credentials recognised by the name beside them. These also hit ordinary code (`const token = req.headers.authorization`), so only on-disk logs use them. */
 export const LOG_ONLY_PATTERNS: readonly RegExp[] = [
 	/(?<keep>bearer\s+)[A-Za-z0-9._~+/=-]+/gi,
-	// The key suffix, spacing and value are length-bounded: an unbounded suffix backtracks quadratically on `tokentoken...`.
-	/(?<keep>(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential)[A-Za-z0-9_-]{0,40}["']?[ \t]{0,16}[=:][ \t]{0,16})(?!\[(?:redacted|REDACTED)\b)(?:"[^"\n]{0,512}"|'[^'\n]{0,512}'|[^\s"'&;]{1,512})/gi,
+	// The suffix and spacing are bounded; the value is not, but with its closing quote optional it cannot fail, so nothing rescans.
+	/(?<keep>(?:password|passwd|secret|token|api[_-]?key|access[_-]?key|authorization|credential)[A-Za-z0-9_-]{0,40}["']?[ \t]{0,16}[=:][ \t]{0,16}(?:\r?\n[ \t]{0,16})?)(?!\[(?:redacted|REDACTED)\b)(?:"[^"\n]*"?|'[^'\n]*'?|[^\s"'&;]+)/gi,
 ];
 
 /** Every pattern, shape rules first, for logs. */
