@@ -601,7 +601,16 @@ Plans:
   2. A live widget shows running subagents and their status.
   3. `cacheRead` stays non-trivial with the full UI enabled, and a wire dump confirms that no volatile value reached the system prompt — every one of them renders in TUI chrome instead.
 
-**Plans**: TBD
+**Plans**: 7 plans
+
+Plans:
+- [ ] 11-01-PLAN.md — Recording UI context, harness uiContext/mode/fauxModels options, event-firing probe test
+- [ ] 11-02-PLAN.md — Authored `ky` theme validated against the installed schema and Pi's loader; `"theme": "ky"` in settings
+- [ ] 11-03-PLAN.md — Pure helpers: statusline formatter, subagent tracker, throttled git probe (TDD)
+- [ ] 11-04-PLAN.md — `ui` extension wiring: `ky-statusline` status, tui header, recording-UI integration tests
+- [ ] 11-05-PLAN.md — Prompt-surface/ACP lint and full-UI prompt-stability proof with negative controls
+- [ ] 11-06-PLAN.md — Live wire-dump check script (`scripts/ui-wire-check.sh`) with tested parser
+- [ ] 11-07-PLAN.md — RB-11-01..03 runbook + docs-policy pins, docs/UI.md, requirements reconciliation, regression sweep
 **Research**: Not needed — the theme format is exact (53 tokens, 51 required, 4 value formats, hot-reload on edit).
 **UI hint**: yes
 
