@@ -613,7 +613,7 @@ Plans:
 
 **Wave 2** *(blocked on Wave 1 completion)*
 
-- [ ] 11-04-PLAN.md — `ui` extension wiring: `ky-statusline` status, tui header, recording-UI integration tests
+- [x] 11-04-PLAN.md — `ui` extension wiring: `ky-statusline` status, tui header, recording-UI integration tests
 
 **Wave 3** *(blocked on Wave 2 completion)*
 
@@ -671,7 +671,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 17/17 | Complete    | 2026-10-12 |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
-| 11. Terminal UI | 4/7 | In Progress|  |
+| 11. Terminal UI | 5/7 | In Progress|  |
 
 ### Phase 12: OpenSpec Opt-in Skill
 
