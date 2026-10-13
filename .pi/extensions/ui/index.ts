@@ -1,5 +1,5 @@
-// Chrome only: Pi's footer already shows model, cost, branch, context percent and cache stats,
-// so this adds just what it lacks (route, provider, changed files, running subagents).
+// Chrome only: Pi's footer already shows model, provider, cost, branch, context percent and cache stats,
+// so this adds just what it lacks (route, tokens left, changed files, running subagents).
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,7 +75,7 @@ export default function (pi: ExtensionAPI): void {
 			tracker.reset();
 			probe?.dispose();
 			const route = restoreRoute(ctx);
-			state = { mode: route.mode, escalated: route.escalated, provider: ctx.model?.provider };
+			state = { mode: route.mode, escalated: route.escalated };
 			// Without a UI nothing shows the count, so headless and child sessions spawn no git at all.
 			probe = ctx.hasUI
 				? createGitProbe({
@@ -128,10 +128,9 @@ export default function (pi: ExtensionAPI): void {
 		}
 	});
 
-	pi.on("model_select", (event, ctx) => {
+	pi.on("model_select", (_event, ctx) => {
 		try {
 			lastCtx = ctx;
-			state.provider = event.model?.provider ?? ctx.model?.provider;
 			refresh();
 		} catch {
 			// Swallowed deliberately.

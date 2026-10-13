@@ -26,10 +26,13 @@ Pi's built-in footer is kept. There is no custom footer.
 | Shown by Pi's footer | Shown by the one `ky-statusline` key |
 |----------------------|--------------------------------------|
 | model, provider when several are configured | mode, with an escalation marker |
-| context percentage | provider |
-| session cost, including cache-warming usage entries | tokens left |
-| git branch | changed files |
-| cache read/write and hit percentage | running subagents (`N agent(s)`) |
+| context percentage | tokens left |
+| session cost, including cache-warming usage entries | changed files |
+| git branch | running subagents (`N agent(s)`) |
+| cache read/write and hit percentage | |
+
+The provider is left to Pi's footer, which shows it whenever more than one
+provider is configured; with a single provider the model already identifies it.
 
 Reusing Pi's footer means cost and cache numbers come from the same source Pi
 uses, instead of a second tally that can drift. The `ky-statusline` key appears on

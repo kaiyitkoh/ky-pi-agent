@@ -6,7 +6,6 @@ export type Fg = (
 export interface StatuslineState {
   mode?: string;
   escalated?: boolean;
-  provider?: string;
   contextLeftTokens?: number;
   changedFiles?: number;
   agentsRunning?: number;
@@ -57,16 +56,12 @@ function isCount(n: unknown): n is number {
 /** Renders only what Pi's default footer lacks; undefined clears the status. */
 export function formatStatusline(state: StatuslineState, fg: Fg): string | undefined {
   const mode = sanitizeLabel(state.mode, 12);
-  const provider = sanitizeLabel(state.provider, 16);
 
   const groups: string[] = [];
 
-  const head: string[] = [];
   if (mode !== undefined) {
-    head.push(fg("accent", mode) + (state.escalated ? fg("warning", "↑") : ""));
+    groups.push(fg("accent", mode) + (state.escalated ? fg("warning", "↑") : ""));
   }
-  if (provider !== undefined) head.push(fg("muted", provider));
-  if (head.length > 0) groups.push(head.join(" "));
 
   if (isCount(state.contextLeftTokens)) {
     groups.push(fg("muted", `${formatTokens(Math.max(0, state.contextLeftTokens))} left`));

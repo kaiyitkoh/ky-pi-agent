@@ -6,6 +6,7 @@ import {
   parsePorcelain,
   sanitizeLabel,
   type Fg,
+  type StatuslineState,
 } from "../../.pi/extensions/ui/statusline.ts";
 import { createAgentTracker } from "../../.pi/extensions/ui/agents.ts";
 import { createGitProbe, GIT_STATUS_ARGS, type ProbeResult } from "../../.pi/extensions/ui/git-probe.ts";
@@ -17,10 +18,15 @@ describe("formatStatusline", () => {
   it("renders every segment in fixed order", () => {
     expect(
       formatStatusline(
-        { mode: "cheap", provider: "deepseek", contextLeftTokens: 870000, changedFiles: 3, agentsRunning: 2 },
+        { mode: "cheap", contextLeftTokens: 870000, changedFiles: 3, agentsRunning: 2 },
         id,
       ),
-    ).toBe("cheap deepseek · 870k left · 3 changed · 2 agents");
+    ).toBe("cheap · 870k left · 3 changed · 2 agents");
+  });
+
+  it("never renders the provider, which Pi's footer already shows", () => {
+    const withProvider = { mode: "cheap", provider: "deepseek" } as StatuslineState;
+    expect(formatStatusline(withProvider, id)).toBe("cheap");
   });
 
   it("marks escalation", () => {
@@ -41,8 +47,8 @@ describe("formatStatusline", () => {
     expect(formatStatusline({ contextLeftTokens: -5 }, id)).toBe("0 left");
   });
 
-  it("strips escape and bell from provider", () => {
-    const out = formatStatusline({ provider: "\u001b[31mevil\u0007" }, id) ?? "";
+  it("strips escape and bell from the mode", () => {
+    const out = formatStatusline({ mode: "\u001b[31mevil\u0007" }, id) ?? "";
     expect(out).not.toContain("\u001b");
     expect(out).not.toContain("\u0007");
     expect(out).toContain("evil");
@@ -53,7 +59,6 @@ describe("formatStatusline", () => {
       {
         mode: "balanced",
         escalated: true,
-        provider: "a".repeat(40),
         contextLeftTokens: 999999,
         changedFiles: 999,
         agentsRunning: 99,
@@ -65,12 +70,12 @@ describe("formatStatusline", () => {
 
   it("routes colours per segment", () => {
     const out = formatStatusline(
-      { mode: "max", escalated: true, provider: "p", contextLeftTokens: 10, changedFiles: 2, agentsRunning: 1 },
+      { mode: "max", escalated: true, contextLeftTokens: 10, changedFiles: 2, agentsRunning: 1 },
       tag,
     ) as string;
     expect(out).toContain("<accent>max");
     expect(out).toContain("<warning>↑");
-    expect(out).toContain("<muted>p");
+    expect(out).toContain("<muted>10 left");
     expect(out).toContain("<warning>2 changed");
     expect(out).toContain("<accent>1 agent");
     expect(out).toMatch(/<dim> · /);
