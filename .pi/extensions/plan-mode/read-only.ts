@@ -79,7 +79,7 @@
  * point that must sit at `index.ts`). Registers nothing; does not spell the
  * tool-registration call in code or prose.
  */
-import { canonicalise, normaliseExecutable } from "../safety/shell.ts";
+import { canonicalise, normaliseExecutable, PACKAGE_RUNNER_WRAPPERS } from "../safety/shell.ts";
 
 /** Plan mode's answer for one bash command. `reason` is shown to the model verbatim. */
 export type PlanModeVerdict = { readonly kind: "allow" } | { readonly kind: "deny"; readonly reason: string };
@@ -564,6 +564,11 @@ export function classifyPlanModeCommand(command: unknown): PlanModeVerdict {
 	}
 
 	for (const invocation of verdict.invocations) {
+		// `npx -y @evil/ls` resolves to `ls`, but it downloads and runs registry code first.
+		const packageRunner = invocation.wrappers.find((w) => PACKAGE_RUNNER_WRAPPERS.has(w));
+		if (packageRunner !== undefined) {
+			return { kind: "deny", reason: `\`${packageRunner}\` runs package code; plan mode is read-only` };
+		}
 		const verb = normaliseExecutable(invocation.executable);
 		if (verb === "") {
 			// e.g. a bare `env`, which canonicalise resolves to an empty executable

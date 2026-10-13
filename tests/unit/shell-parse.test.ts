@@ -226,9 +226,9 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 	{
 		label: "npx with a versioned scoped package",
 		cmd: "npx -y @fission-ai/openspec@1.13.2 update",
-		expectedExecutable: "@fission-ai/openspec@1.13.2",
+		expectedExecutable: "@fission-ai/openspec",
 		expectedWrappers: ["npx"],
-		why: "npx runs the named package's binary; normaliseExecutable reduces the spec to 'openspec' for classification",
+		why: "npx runs the named package's binary; the version is dropped and normaliseExecutable reduces the spec to 'openspec'",
 	},
 	{
 		label: "pnpm dlx as a two-word wrapper",

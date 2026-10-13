@@ -228,6 +228,12 @@ const PACKAGE_MANAGER_RUNNERS: ReadonlyMap<string, ReadonlySet<string>> = new Ma
 	["bun", new Set(["x"])],
 ]);
 
+/** Every wrapper name that fetches or runs a package binary, as recorded in {@link CanonicalInvocation.wrappers}. */
+export const PACKAGE_RUNNER_WRAPPERS: ReadonlySet<string> = new Set([
+	...[...WRAPPER_GRAMMARS].filter(([, grammar]) => grammar === PACKAGE_RUNNER_GRAMMAR).map(([name]) => name),
+	...[...PACKAGE_MANAGER_RUNNERS].flatMap(([manager, subcommands]) => [...subcommands].map((sub) => `${manager} ${sub}`)),
+]);
+
 const ASSIGNMENT_WORD = /^[A-Za-z_][A-Za-z0-9_]*=/;
 
 
@@ -256,15 +262,12 @@ export type ShellVerdict =
 
 /**
  * Reduce an executable to the verb policy classifies on: basename, lower-cased, Windows
- * extension and npm `@version` suffix stripped. Every bare-verb gate MUST route through it,
- * or `git.exe push`, `/usr/bin/git push` and `npx @fission-ai/openspec@1.13.2 update` classify as allow.
+ * extension stripped. Every bare-verb gate MUST route through it, or `git.exe push` and
+ * `/usr/bin/git push` classify as allow.
  */
 export function normaliseExecutable(executable: string): string {
 	const base = executable.replace(/\\/g, "/").split("/").pop() ?? executable;
-	return base
-		.toLowerCase()
-		.replace(/(.)@[^@]*$/, "$1")
-		.replace(/\.(exe|cmd|bat|com)$/, "");
+	return base.toLowerCase().replace(/\.(exe|cmd|bat|com)$/, "");
 }
 
 
@@ -650,7 +653,10 @@ function extractInvocations(
 		const words = [node.name, ...node.suffix];
 		const values = words.map((w) => w.value);
 		const resolved = resolveWrappers(values);
-		const executable = values[resolved.index] ?? "";
+		const word = values[resolved.index] ?? "";
+		// A package spec's `@version` is not part of the binary name; a local `./ls@x` script keeps it.
+		const viaPackageRunner = resolved.wrappers.some((w) => PACKAGE_RUNNER_WRAPPERS.has(w));
+		const executable = viaPackageRunner ? word.replace(/(.)@[^@/]*$/, "$1") : word;
 		const args = values.slice(resolved.index + 1);
 		const cwdOverride = extractGitCwdOverride(executable, args) ?? resolved.cwdOverride;
 
