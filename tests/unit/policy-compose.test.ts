@@ -648,6 +648,12 @@ const ROWS: readonly Row[] = [
 	{ name: "echo $HOME -- allow", toolName: "bash", input: { command: "echo $HOME" }, expected: "allow" },
 	{ name: "a token used in a curl header -- allow, it is sent rather than printed", toolName: "bash", input: { command: 'curl -H "PRIVATE-TOKEN: $GITLAB_TOKEN" https://x' }, expected: "allow" },
 	{ name: "set -e -- allow", toolName: "bash", input: { command: "set -e" }, expected: "allow" },
+	{ name: "rg with a glob-shaped regex -- allow, the pattern is not a path", toolName: "bash", input: { command: "rg '.e*' src" }, expected: "allow" },
+	{ name: "grep -rn '.*env' -- allow", toolName: "bash", input: { command: "grep -rn '.*env' ." }, expected: "allow" },
+	{ name: "rg -e with a glob-shaped regex -- allow", toolName: "bash", input: { command: "rg -e 'id_*' src" }, expected: "allow" },
+	{ name: "grep of a secrets file still blocks on the file operand", toolName: "bash", input: { command: "grep secret .env" }, expected: "block" },
+	{ name: "grep -f reads its pattern file, which is still a path", toolName: "bash", input: { command: "grep -f .env src" }, expected: "block" },
+	{ name: "a script run from home by ~/ -- allow", toolName: "bash", input: { command: "~/x.sh" }, expected: "allow" },
 	{
 		name: "cd into a project directory, then a relative read -- allow (negative control)",
 		toolName: "bash",

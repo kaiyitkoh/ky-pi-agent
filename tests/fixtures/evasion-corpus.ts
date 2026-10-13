@@ -1394,7 +1394,7 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		tool: "bash",
 		input: {"command": "~/bin/git push origin main"},
 		expect: "BLOCKED",
-		why: "the shell expands the command name or a guarded verb's argument after the guard has read it, so a non-literal command word is refused before classification.",
+		why: "a leading ~/ is the home directory, so ~/bin/git resolves to git and the push to main blocks on its destination.",
 		reference: "safety/shell.ts, git.ts, policy.ts, infra.ts",
 	},
 	{

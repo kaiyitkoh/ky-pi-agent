@@ -298,7 +298,8 @@ function isPlainCommandWord(word: Word | undefined): boolean {
 	if (word.text === "[" || word.text === "[[") return true;
 	if (/\s/.test(word.value)) return false;
 	const singleQuoted = word.parts?.length === 1 && word.parts[0].type === "SingleQuoted";
-	if (!singleQuoted && NON_LITERAL_NAME_CHARS.test(word.text)) return false;
+	// A leading `~/` is the home directory, not a pattern, so `~/bin/x` runs a literal path.
+	if (!singleQuoted && NON_LITERAL_NAME_CHARS.test(word.text.replace(/^~\//, ""))) return false;
 	return (word.parts ?? []).every((part) => isQuotedPart(part));
 }
 

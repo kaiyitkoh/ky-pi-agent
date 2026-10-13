@@ -254,8 +254,8 @@ types (plain text, single quotes, ANSI-C quotes, and double quotes holding only
 plain text), so a part type added to the parser later is refused until it is
 listed. A guarded verb's own arguments are refused when they carry a brace
 expansion or extended glob (`git push{,} origin main`). `[`, `'git' status` and
-`"git" status` still pass. Known false positive: a script run as `~/script.sh`
-must be spelled with its full path.
+`"git" status` still pass, and so does a leading `~/` (`~/script.sh`), which
+names the home directory rather than a pattern; `~user/x` is still refused.
 
 `trap`, `source`, `.`, `hash`, `alias`, `unalias`, `enable`, `fc`, `bind`,
 `complete` and `coproc` are shell runners. Their first argument is command
@@ -320,9 +320,10 @@ Read classification also covers:
   file name (`cat .en?`, `cat ~/.aws/cred*`). A basename starting with a
   wildcard is judged by its directory part only, because the shell never matches
   a dotfile with a leading wildcard; the residual is a wildcard-led pattern
-  that matches a non-dot secrets file such as `*_rsa`. A pattern that looks
-  like such a glob is also refused when it is only a regular expression
-  (`rg '.e*'`), a deliberate false positive;
+  that matches a non-dot secrets file such as `*_rsa`. The pattern operand
+  of `grep`, `egrep`, `fgrep`, `rg`, `ag`, `sed` and `awk` (the first
+  positional, or each `-e` value) is text, not a path, and is not classified
+  (`rg '.e*' src` is allowed); a `-f` pattern file still is;
 - case variants of `.env*`, NTFS `name:stream` suffixes and 8.3 short names
   (refused; use the long name): a file name of 8.3 shape, and any path
   segment that is an 8.3 alias of a protected name (`AWS~1` for `.aws`,

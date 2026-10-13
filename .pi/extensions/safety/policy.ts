@@ -332,6 +332,17 @@ function recursiveRoots(executable: string, args: readonly string[]): string[] {
 	return paths.length === 0 && walker.implicitDot ? ["."] : paths;
 }
 
+const PATTERN_FIRST = new Set(["grep", "egrep", "fgrep", "rg", "ag", "sed", "awk"]);
+
+/** Indexes of a search tool's pattern operands, which are text, not paths: each `-e` value, else the first positional. A `-f` file is still a path. */
+function patternOperands(executable: string, args: readonly string[]): Set<number> {
+	if (!PATTERN_FIRST.has(executable)) return new Set();
+	const flagged = args.flatMap((a, i) => (a === "-e" || a === "--regexp" || a === "--expression" ? [i + 1] : []));
+	if (flagged.length > 0 || args.some((a) => /^(-f|--file)(=|$)/.test(a))) return new Set(flagged);
+	const at = args.findIndex((a) => !a.startsWith("-"));
+	return new Set(at === -1 ? [] : [at]);
+}
+
 /** Every path an invocation names, read-classified in the session cwd and in the directory its `cd`s lead to (a subshell `cd` does not persist). */
 function classifyInvocationPaths(invocation: CanonicalInvocation, executable: string, facts: PolicyFacts, requestKey: string): Verdict {
 	const relative = [...invocation.args.filter((a) => !a.startsWith("-")), ...(invocation.redirectReads ?? []), ...(invocation.redirectWrites ?? [])];
@@ -341,7 +352,8 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 	const pathFacts = pathFactsOf(facts);
 	const dir = invocationDir(invocation, facts);
 	const dirs = dir === facts.cwd ? [facts.cwd] : [facts.cwd, dir];
-	const reads = [...invocation.args.flatMap(fileOperandsOf), ...(invocation.redirectReads ?? [])];
+	const patterns = patternOperands(executable, invocation.args);
+	const reads = [...invocation.args.filter((_, i) => !patterns.has(i)).flatMap(fileOperandsOf), ...(invocation.redirectReads ?? [])];
 	// git arguments are revisions as often as paths, and `HEAD~1` has the 8.3 shape; protected-name aliases still block.
 	const ignore = executable === "git" ? ["short-name-alias"] : [];
 	// Args are Word.value-resolved, so an unquoted Windows path through bash may mangle (docs/SAFETY.md known bypasses).

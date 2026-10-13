@@ -497,7 +497,7 @@ const NON_LITERAL_REFUSED: readonly string[] = [
 	"{aws,s3,rm} s3://b --recursive",
 	"gi? push",
 	"/usr/bin/gi[t] push",
-	"~/bin/git push",
+	"~user/bin/git push",
 	"git$' 'push",
 	"git push{,} origin main",
 ];
@@ -510,6 +510,8 @@ const NON_LITERAL_OK: readonly string[] = [
 	"$'git' status",
 	"echo {a,b}",
 	"ls *.md",
+	"~/x.sh",
+	"~/bin/git status",
 ];
 
 describe("fail-closed command-name predicate", () => {
