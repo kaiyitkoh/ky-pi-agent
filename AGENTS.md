@@ -1,25 +1,30 @@
-# ky-pi-agent — agent instructions
-
-## Code comments
-- Default to no comment. Names and types say WHAT; comment only a non-obvious WHY: a constraint, invariant, workaround, or surprising choice.
-- One or two lines. Longer explanation belongs in docs/ or the commit message.
-- Never narrate code ("loop over items", "set default") or restate a signature.
-- No history: no plan, phase, requirement, review or ticket IDs, no "previously", "fixed", "corrected by". Git holds that.
-- No caller or task references ("used by X", "added for Y flow"); they go stale.
-- Cite an external fact as one line with file:line or URL, not a quoted analysis.
-- JSDoc only on exported API: one sentence plus non-obvious params.
-- When editing code, update or delete its comments; a wrong comment is worse than none.
-- Vendored files (each has a PROVENANCE.md) are exempt.
+## Commands
+- Test touched files only: `npx vitest run <file> --maxWorkers=2`. Full `npm test` once, last; never parallel runs.
+- Typecheck: `npx tsc --noEmit`.
 
 ## Conventions
-- Platform: Windows Git Bash now, macOS later. POSIX `sh` only; never PowerShell scripts.
-- Public repo: never commit credentials, secrets, account ids or hostnames.
-- Node >= 22.19.0.
-- Pin exact versions; no bare `npm:pkg` and no unrefed git URLs.
-- Extensions are `.ts` loaded by jiti; no build step. Entry: `.pi/extensions/<name>/index.ts`.
-- `@earendil-works/*` and `typebox` are peerDependencies `"*"`; never bundle them.
-- Use unscoped `typebox`, not `@sinclair/typebox`.
-- Tests: `npx vitest run <file> --maxWorkers=2` (targeted, never parallel runs); typecheck with `npx tsc --noEmit`.
-- Do not register a tool unless CONTRIBUTING.md's boundary rule is met; commands cost zero per-turn tokens.
-- Stage explicit paths, never `git add -A`.
-- Never push or auto-merge to `main`.
+- POSIX `sh` only; no PowerShell, no bashisms.
+- Extensions: `.pi/extensions/<name>/index.ts`, loaded by jiti; no build step.
+- `@earendil-works/*` and `typebox` are peerDependencies `"*"`, never bundled; unscoped `typebox`, never `@sinclair`.
+- Pin exact versions; no bare `npm:pkg` or unrefed git URL.
+- Verify Pi behaviour in `node_modules/@earendil-works/*/dist`, not docs.
+- Smallest correct diff; delete dead code; no speculative options or impossible-case guards.
+
+## Boundaries
+- Public repo: never commit secrets, credentials, account ids or hostnames.
+- No paid or hosted services; zero spend beyond model tokens.
+- Add a tool only if CONTRIBUTING.md's boundary rule is met; else a command or skill.
+- Ask before adding a dependency or removing intentional-looking behaviour.
+
+## Code comments
+- Default to none. Comment only a non-obvious WHY (constraint, invariant, workaround, surprise), in 1-2 lines.
+- Never narrate code or restate a signature.
+- No history: no phase, plan, ticket or review IDs, "previously", "fixed", "used by X". Git holds that.
+- Cite an external fact as one line: file:line or URL.
+- JSDoc only on exported API, one sentence. Update or delete a comment when its code changes.
+- Vendored files (see PROVENANCE.md) are exempt.
+
+## Testing and git
+- Tests use the faux provider (`tests/helpers/`); no real provider, network or credentials.
+- Stage only your paths (agents share this worktree); never `git add -A`, `stash`, `reset --hard`, `clean`.
+- Never push or merge to `main` without the user.

@@ -5,14 +5,11 @@ export const COMMENT_RULES_SECTION = "code_comments";
 
 export const COMMENT_RULES_TEXT = [
 	"## Code comments",
-	"- Default to no comment. Names and types say WHAT; comment only a non-obvious WHY: a constraint, invariant, workaround, or surprising choice.",
-	"- One or two lines. Longer explanation belongs in docs/ or the commit message.",
-	'- Never narrate code ("loop over items", "set default") or restate a signature.',
-	'- No history: no plan, phase, requirement, review or ticket IDs, no "previously", "fixed", "corrected by". Git holds that.',
-	'- No caller or task references ("used by X", "added for Y flow"); they go stale.',
-	"- Cite an external fact as one line with file:line or URL, not a quoted analysis.",
-	"- JSDoc only on exported API: one sentence plus non-obvious params.",
-	"- When editing code, update or delete its comments; a wrong comment is worse than none.",
+	"- Default to none. Comment only a non-obvious WHY (constraint, invariant, workaround, surprise), in 1-2 lines.",
+	"- Never narrate code or restate a signature.",
+	'- No history: no phase, plan, ticket or review IDs, "previously", "fixed", "used by X". Git holds that.',
+	"- Cite an external fact as one line: file:line or URL.",
+	"- JSDoc only on exported API, one sentence. Update or delete a comment when its code changes.",
 ].join("\n");
 
 const FENCED_BLOCK = /^(```|~~~)[^\n]*\n[\s\S]*?^\1[ \t]*\r?$/gm;
