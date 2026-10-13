@@ -140,6 +140,27 @@ has_one_flag() {
 	[ "$(flag_counts "$1")" = "1 1" ]
 }
 
+# Runs a command with OpenSpec telemetry, update checks and auto-config off.
+quiet_env() {
+	env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_NO_AUTO_CONFIG=1 "$@"
+}
+
+# Reports each owned skill or prompt missing under skills dir $1 and prompts dir $2 with prefix $3; prints the count.
+report_missing() {
+	missing_count=0
+	for skill in $OPENSPEC_SKILLS; do
+		[ -f "$1/$skill/SKILL.md" ] && continue
+		printf '%s skill %s\n' "$3" "$skill" >&2
+		missing_count=$((missing_count + 1))
+	done
+	for wf in $OPENSPEC_WORKFLOWS; do
+		[ -f "$2/opsx-$wf.md" ] && continue
+		printf '%s prompt opsx-%s\n' "$3" "$wf" >&2
+		missing_count=$((missing_count + 1))
+	done
+	printf '%s\n' "$missing_count"
+}
+
 check_cli_version() {
 	if ! command -v openspec >/dev/null 2>&1; then
 		printf 'FATAL: openspec is not on PATH. Run: sh scripts/openspec-setup.sh --install-cli\n' >&2
@@ -175,20 +196,11 @@ patch_skill() {
 
 run_check() {
 	check_cli_version
-	failures=0
+	failures=$(report_missing "$SKILLS_DIR" "$PROMPTS_DIR" 'FAIL: missing')
 	for skill in $OPENSPEC_SKILLS; do
 		f="$SKILLS_DIR/$skill/SKILL.md"
-		if [ ! -f "$f" ]; then
-			printf 'FAIL: missing skill %s\n' "$skill" >&2
-			failures=$((failures + 1))
-		elif ! has_one_flag "$f"; then
+		if [ -f "$f" ] && ! has_one_flag "$f"; then
 			printf 'FAIL: skill %s lacks exactly one frontmatter "%s" line\n' "$skill" "$FLAG_LINE" >&2
-			failures=$((failures + 1))
-		fi
-	done
-	for wf in $OPENSPEC_WORKFLOWS; do
-		if [ ! -f "$PROMPTS_DIR/opsx-$wf.md" ]; then
-			printf 'FAIL: missing prompt opsx-%s\n' "$wf" >&2
 			failures=$((failures + 1))
 		fi
 	done
@@ -228,26 +240,11 @@ run_install() {
 	# Positional "." avoids Git Bash rewriting a path-looking argument.
 	(
 		cd "$work/proj"
-		env XDG_CONFIG_HOME="$xdg_native" OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 \
-			OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_NO_AUTO_CONFIG=1 \
-			openspec init --tools pi --profile custom . >/dev/null
+		quiet_env XDG_CONFIG_HOME="$xdg_native" openspec init --tools pi --profile custom . >/dev/null
 	)
 
 	gen="$work/proj/.pi"
-	missing=0
-	for skill in $OPENSPEC_SKILLS; do
-		if [ ! -f "$gen/skills/$skill/SKILL.md" ]; then
-			printf 'FATAL: openspec did not generate skill %s\n' "$skill" >&2
-			missing=$((missing + 1))
-		fi
-	done
-	for wf in $OPENSPEC_WORKFLOWS; do
-		if [ ! -f "$gen/prompts/opsx-$wf.md" ]; then
-			printf 'FATAL: openspec did not generate prompt opsx-%s\n' "$wf" >&2
-			missing=$((missing + 1))
-		fi
-	done
-	if [ "$missing" -gt 0 ]; then
+	if [ "$(report_missing "$gen/skills" "$gen/prompts" 'FATAL: openspec did not generate')" -gt 0 ]; then
 		printf 'Nothing was installed.\n' >&2
 		exit 1
 	fi
@@ -280,10 +277,8 @@ run_install() {
 	done
 
 	# Terminal use of the CLI must not phone home either; deliberately the user's own config.
-	env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_NO_AUTO_CONFIG=1 \
-		openspec config set telemetry.enabled false >/dev/null 2>&1 || :
-	telemetry=$(env OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1 OPENSPEC_NO_UPDATE_CHECK=1 OPENSPEC_NO_AUTO_CONFIG=1 \
-		openspec config get telemetry.enabled 2>/dev/null | tr -d '\r') || telemetry=""
+	quiet_env openspec config set telemetry.enabled false >/dev/null 2>&1 || :
+	telemetry=$(quiet_env openspec config get telemetry.enabled 2>/dev/null | tr -d '\r') || telemetry=""
 	if [ "$telemetry" != "false" ]; then
 		printf 'WARN: telemetry.enabled reads back as "%s", not false; run: openspec config set telemetry.enabled false\n' "$telemetry" >&2
 	fi
