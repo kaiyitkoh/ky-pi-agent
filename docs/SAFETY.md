@@ -127,9 +127,11 @@ docstring for the structural argument). Concretely, it catches:
   `reset`, `merge`, `cherry-pick`, `revert`, `am`, a non-dry-run `apply`, and
   every `rebase` (`git rebase origin/main` rewrites the checked-out branch)
   all block when `HEAD` is protected, while `fetch`, `diff`,
-  `log`, `status`, `show`, `branch`, `remote`, `stash list` and
+  `log`, `status`, `show`, `branch`, `remote`, `checkout`, `switch`,
+  `restore`, `stash` (`push`, `save`, `list`, `show`, `pop`, `apply`) and
   `worktree add -b feat main` all
-  stay allowed — a named allow-case, never merely "absent from the deny list".
+  stay allowed (moving HEAD or the working tree does not write the branch,
+  so `git switch -c feat` is the way off `main`; the block reason says so) — a named allow-case, never merely "absent from the deny list".
   A leading git GLOBAL option before the subcommand (`git -C /repo status`,
   `git --no-pager log`) is skipped correctly rather than misread as an
   unclassified subcommand. `git push` has its own

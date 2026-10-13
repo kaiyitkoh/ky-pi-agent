@@ -13,7 +13,7 @@
  * command can change it) and the verdict is `ask`, so a human sees the resolved branch; unresolvable blocks.
  *
  * With `HEAD` protected: a matching write entry blocks; else a matching read entry allows; else a
- * subcommand in either table with no matching shape (`git stash pop`) or an unknown one blocks
+ * subcommand in either table with no matching shape (`git stash drop`) or an unknown one blocks
  * (fail closed). Fix a false positive by adding a fixture-backed row, never by widening a predicate.
  *
  * `glab mr merge` blocks on every branch: an MR merge is the deploy trigger on GitLab's server,
@@ -154,9 +154,20 @@ export const GIT_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "remote", matches: () => true, why: "read-only remote listing/inspection" },
 	{
 		subcommand: "stash",
-		matches: (args) => args[0] === "list",
-		why: "only the list form is named allowed; stash push/pop/apply are conservatively left unclassified",
+		matches: (args) => args.length === 0 || ["push", "save", "list", "show", "pop", "apply"].includes(args[0]),
+		why: "stashing and applying a stash change the working tree, never the checked-out branch; drop, clear and branch stay unclassified",
 	},
+	{
+		subcommand: "checkout",
+		matches: () => true,
+		why: "moves HEAD or rewrites working-tree files, never the checked-out branch; a protected -B target and a later write are checked separately",
+	},
+	{
+		subcommand: "switch",
+		matches: () => true,
+		why: "moves HEAD, never the checked-out branch; a protected -C target and a later write are checked separately",
+	},
+	{ subcommand: "restore", matches: () => true, why: "restores the index or working tree, never the checked-out branch" },
 	{
 		subcommand: "worktree",
 		matches: () => true,
@@ -595,7 +606,7 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 	if (writeRule !== undefined && writeRule.matches(invocation.args)) {
 		return {
 			kind: "block",
-			reason: `HEAD is "${facts.currentBranch}" (protected) and "${display}" writes to the checked-out branch: ${writeRule.why}`,
+			reason: `HEAD is "${facts.currentBranch}" (protected) and "${display}" writes to the checked-out branch: ${writeRule.why}; run "git switch -c <new-branch>" as its own command first`,
 		};
 	}
 
@@ -609,8 +620,7 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 			kind: "block",
 			reason:
 				`HEAD is "${facts.currentBranch}" (protected) and "${display}" does not match a named allow form ` +
-				`for subcommand "${invocation.subcommand}" -- defaults to block (fail closed; add a read-table ` +
-				`fixture rather than widening a predicate's default)`,
+				`for subcommand "${invocation.subcommand}" -- defaults to block; run "git switch -c <new-branch>" as its own command first`,
 		};
 	}
 
@@ -618,8 +628,7 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 		kind: "block",
 		reason:
 			`HEAD is "${facts.currentBranch}" (protected) and "${display}" is an unclassified subcommand -- defaults ` +
-			`to block (fail closed; add it to the read or write table with a fixture, never ` +
-			`widen the default)`,
+			`to block; run "git switch -c <new-branch>" as its own command first`,
 	};
 }
 
