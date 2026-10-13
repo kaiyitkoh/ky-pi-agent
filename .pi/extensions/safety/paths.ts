@@ -444,11 +444,11 @@ export const DETONATION_TARGETS: readonly PathPattern[] = [
 	},
 ];
 
-/** Block the sensitive read classes; allow their benign neighbours (`.env.example`, `src/config.ts`). */
-export function classifyPathRead(canonicalPath: string, facts: PathPolicyFacts): PathVerdict {
+/** Block the sensitive read classes; allow their benign neighbours (`.env.example`, `src/config.ts`). `ignore` names pattern ids to skip. */
+export function classifyPathRead(canonicalPath: string, facts: PathPolicyFacts, ignore: readonly string[] = []): PathVerdict {
 	const target = stripStreamSuffix(canonicalPath);
 	for (const pattern of SENSITIVE_READ_PATTERNS) {
-		if (pattern.match(target, facts)) {
+		if (!ignore.includes(pattern.id) && pattern.match(target, facts)) {
 			return { kind: "block", reason: pattern.reason(canonicalPath) };
 		}
 	}

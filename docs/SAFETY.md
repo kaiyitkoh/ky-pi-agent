@@ -293,7 +293,8 @@ Read classification also covers:
   (refused; use the long name): a file name of 8.3 shape, and any path
   segment that is an 8.3 alias of a protected name (`AWS~1` for `.aws`,
   `SSH~1`, `GIT~1`, and the hashed form `PIC454~1` for `.pi`), for reads and
-  writes, and the home credential files `~/.aws/**`,
+  writes. A git argument is exempt from the file-name rule only, because
+  `HEAD~1`, `main~2` and `origin/main~2` are revisions, and the home credential files `~/.aws/**`,
   `~/.ssh/**`, `~/.git-credentials`, `~/.docker/config.json` and
   `~/.pi/agent/auth.json`.
 

@@ -287,11 +287,13 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 	const dir = invocationDir(invocation, facts);
 	const dirs = dir === facts.cwd ? [facts.cwd] : [facts.cwd, dir];
 	const reads = [...invocation.args.flatMap(fileOperandsOf), ...(invocation.redirectReads ?? [])];
+	// git arguments are revisions as often as paths, and `HEAD~1` has the 8.3 shape; protected-name aliases still block.
+	const ignore = executable === "git" ? ["short-name-alias"] : [];
 	// Args are Word.value-resolved, so an unquoted Windows path through bash may mangle (docs/SAFETY.md known bypasses).
 	for (const cwd of dirs) {
 		for (const candidate of reads) {
 			const canonical = canonicalOf(candidate, facts, cwd);
-			const pathVerdict = classifyPathRead(canonical, pathFacts);
+			const pathVerdict = classifyPathRead(canonical, pathFacts, ignore);
 			const globVerdict = GLOB_CHARS.test(candidate) && !candidate.startsWith("-") ? classifyGlobArg(canonical, pathFacts) : pathVerdict;
 			const blocked = [pathVerdict, globVerdict].find((v) => v.kind === "block");
 			if (blocked?.kind === "block") return { kind: "block", reason: blocked.reason };
