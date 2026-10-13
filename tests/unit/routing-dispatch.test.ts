@@ -30,18 +30,21 @@
  * ---------------------------------------------------------------------------
  * VACUOUS-PASS GUARD (this project's house rule)
  * ---------------------------------------------------------------------------
- * `usesFallbackChain` is asserted against the IMPORTED `CHAIN`, with a
- * length check first -- an empty `CHAIN` would make the "every entry is a
- * chain member" loop vacuously pass. Mode-state cases run a dedicated test
+ * Mode-state cases run a dedicated test
  * that mutates state and then proves the reset helper actually restores the
  * default, rather than trusting a `beforeEach` that might itself be a no-op.
  */
-import { beforeEach, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import type { Api, Model } from "@earendil-works/pi-ai";
 
 import { guardRoute } from "../../.pi/extensions/routing/guard.ts";
 import {
+	bedrockProfilePrefix,
 	buildNestedApiOptions,
 	getModeState,
 	pickConfiguredCandidate,
@@ -49,7 +52,6 @@ import {
 	resolveRoute,
 	setEscalated,
 	setMode,
-	usesFallbackChain,
 	usesToolLoop,
 	type ModeState,
 	type ModelRegistryLike,
@@ -195,8 +197,21 @@ describe("pickConfiguredCandidate", () => {
 // -----------------------------------------------------------------------------
 
 describe("planRoleCall", () => {
+	let agentDir: string;
+	let savedAgentDir: string | undefined;
+	beforeEach(() => {
+		savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+		agentDir = mkdtempSync(join(tmpdir(), "kypi-plan-agent-"));
+		process.env.PI_CODING_AGENT_DIR = agentDir;
+	});
+	afterEach(() => {
+		if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+		rmSync(agentDir, { recursive: true, force: true });
+	});
+
 	it("returns the GUARD's own reason for a vision role planned against a text-only model", () => {
-		const ref: ModelRef = { provider: "amazon-bedrock", id: "anthropic.claude-sonnet-4-5-20250929-v1:0" };
+		const ref: ModelRef = { provider: "amazon-bedrock", id: "apac.anthropic.claude-sonnet-4-5-20250929-v1:0" };
 		const textOnlyVisionModel = makeModel({ provider: ref.provider, id: ref.id, input: ["text"] });
 		const registry = makeRegistry([{ ref, model: textOnlyVisionModel, authed: true }]);
 		const need: RoleNeed = { image: true };
@@ -261,20 +276,6 @@ describe("usesToolLoop", () => {
 		for (const role of singleShotRoles) {
 			expect(usesToolLoop(role), `role "${role}" must not use a tool loop`).toBe(false);
 		}
-	});
-});
-
-// -----------------------------------------------------------------------------
-// usesFallbackChain -- asserted against the IMPORTED CHAIN, no literal copy
-// -----------------------------------------------------------------------------
-
-describe("usesFallbackChain", () => {
-	it("is true for every {provider,id} in the imported CHAIN and false for a Bedrock ref", () => {
-		expect(CHAIN.length, "vacuity guard -- an empty CHAIN would make the loop below pass on nothing").toBeGreaterThan(0);
-		for (const entry of CHAIN) {
-			expect(usesFallbackChain({ provider: entry.provider, id: entry.id }), `${entry.provider}/${entry.id} is a member of CHAIN`).toBe(true);
-		}
-		expect(usesFallbackChain({ provider: "amazon-bedrock", id: "anthropic.claude-sonnet-4-5-20250929-v1:0" })).toBe(false);
 	});
 });
 
@@ -435,5 +436,76 @@ describe("mode/escalation state", () => {
 		}
 
 		resetModeState();
+	});
+});
+
+describe("Bedrock inference-profile prefix", () => {
+	const BASE = "anthropic.claude-sonnet-4-5-20250929-v1:0";
+	const candidates: ModelRef[] = [{ provider: "amazon-bedrock", id: BASE }];
+	let dir: string;
+	beforeEach(() => {
+		dir = mkdtempSync(join(tmpdir(), "kypi-prefix-"));
+	});
+	afterEach(() => {
+		rmSync(dir, { recursive: true, force: true });
+	});
+
+	function settings(body: unknown): string {
+		const path = join(dir, "settings.json");
+		writeFileSync(path, typeof body === "string" ? body : JSON.stringify(body), "utf-8");
+		return path;
+	}
+
+	function registryHolding(id: string): ModelRegistryLike {
+		const model = makeModel({ provider: "amazon-bedrock", id });
+		return makeRegistry([{ ref: { provider: "amazon-bedrock", id }, model, authed: true }]);
+	}
+
+	it("defaults to apac. when there is no settings file", () => {
+		const result = pickConfiguredCandidate(registryHolding(`apac.${BASE}`), candidates, { settingsPath: join(dir, "none.json") });
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.model.id).toBe(`apac.${BASE}`);
+	});
+
+	it("defaults to apac. when the key is absent", () => {
+		expect(bedrockProfilePrefix(settings({ kyPiAgent: {} }))).toEqual({ ok: true, prefix: "apac." });
+	});
+
+	it("uses the configured prefix", () => {
+		const path = settings({ kyPiAgent: { bedrockProfilePrefix: "us." } });
+		const result = pickConfiguredCandidate(registryHolding(`us.${BASE}`), candidates, { settingsPath: path });
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.model.id).toBe(`us.${BASE}`);
+	});
+
+	it("an empty prefix selects the bare id", () => {
+		const path = settings({ kyPiAgent: { bedrockProfilePrefix: "" } });
+		const result = pickConfiguredCandidate(registryHolding(BASE), candidates, { settingsPath: path });
+		expect(result.ok).toBe(true);
+		if (result.ok) expect(result.model.id).toBe(BASE);
+	});
+
+	it.each(["us", "x y.", "US.", "toolongprefix.", 7])("refuses an invalid value %j and names the setting", (value) => {
+		const path = settings({ kyPiAgent: { bedrockProfilePrefix: value } });
+		const result = pickConfiguredCandidate(registryHolding(BASE), candidates, { settingsPath: path });
+		expect(result.ok).toBe(false);
+		if (!result.ok) expect(result.reason).toContain("kyPiAgent.bedrockProfilePrefix");
+	});
+
+	it("a prefixed id the registry cannot find names the setting and the catalogue prefixes", () => {
+		const path = settings({ kyPiAgent: { bedrockProfilePrefix: "apac." } });
+		const result = pickConfiguredCandidate(registryHolding(BASE), candidates, { settingsPath: path });
+		expect(result.ok).toBe(false);
+		if (!result.ok) {
+			expect(result.reason).toContain("kyPiAgent.bedrockProfilePrefix");
+			for (const prefix of ["au.", "eu.", "global.", "jp.", "us."]) expect(result.reason).toContain(prefix);
+		}
+	});
+
+	it("leaves non-Bedrock candidates untouched", () => {
+		const ref: ModelRef = { provider: "deepseek", id: "deepseek-flash" };
+		const model = makeModel({ provider: ref.provider, id: ref.id });
+		const result = pickConfiguredCandidate(makeRegistry([{ ref, model, authed: true }]), [ref], { settingsPath: join(dir, "none.json") });
+		expect(result.ok).toBe(true);
 	});
 });

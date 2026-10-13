@@ -2,8 +2,7 @@
 // ky-pi-agent — the DashScope provider definition, as a TEMPLATE.
 //
 // WHAT THIS FILE IS. Pi resolves `models.json` from the agent directory only —
-// `join(getAgentDir(), "models.json")` [VERIFIED: pi 0.84.1 dist/config.js:423-425,
-// and again at dist/core/agent-session-services.js:59, dist/core/model-runtime.js:76].
+// `join(getAgentDir(), "models.json")` [VERIFIED: pi 1.1.0 dist/config.js:504].
 // There is no project-scope `models.json`, so a file committed here is read by
 // NOTHING until it is installed. `bin/bootstrap.sh` merges the object below into
 // `$PI_AGENT_DIR/models.json` under the `providers.dashscope` key ONLY, the same
@@ -25,12 +24,11 @@
 // accepts `//` comments (`stripJsonComments`, pi src/core/model-config.ts:261),
 // so there is no excuse for an unsourced figure. Comments are whole-line only.
 //
-// NO BEDROCK ENTRY, DELIBERATELY. Pi's built-in Bedrock catalogue is complete and
-// accurate; redefining a catalogued model is exactly the cross-provider drift
-// PROV-06 forbids. Bedrock is configured through `auth.json` (`env.AWS_PROFILE`)
-// and nothing else. Exactly one provider is defined here, and it is DashScope:
-// the acceptance gate for this file greps the out-of-scope vendor's name to zero,
-// so it is not spelled even in a comment.
+// ONE BEDROCK MODEL ONLY. Pi's built-in Bedrock catalogue has Sonnet 4.5 under the
+// bare id and the au., eu., global., jp. and us. prefixes but not apac. [VERIFIED:
+// pi-ai 1.1.0 dist/providers/data/amazon-bedrock.json]. The apac. entry below is
+// copied from the us. entry; whether AWS serves that profile in the user's account
+// is a live check (docs/RUNBOOK.md RB-12-06). Credentials stay in `auth.json`.
 // ---------------------------------------------------------------------------
 {
   "providers": {
@@ -55,8 +53,8 @@
       // COMPAT — WRITTEN OUT IN FULL, INCLUDING FIELDS THAT MATCH THE DEFAULT.
       // `detectCompat` keys on hard-coded provider ids and base-URL substrings and
       // has NO branch for DashScope, Model Studio, `aliyuncs.com` or Qwen
-      // [VERIFIED: pi-ai 0.84.1 src/api/openai-completions.ts:1442-1540; confirmed
-      // by grep against the installed dist on 2026-08-13]. Every field left to
+      // [VERIFIED: pi-ai 1.1.0 dist/api/openai-completions.js:1221, no
+      // DashScope branch in the function]. Every field left to
       // detection therefore silently takes the generic OpenAI default. Both
       // resulting failures are invisible from the UI, which is the whole reason
       // PROV-03 exists — so nothing below is left implicit.
@@ -98,10 +96,11 @@
       },
       "models": [
         {
-          // The id is DELIBERATELY identical to Pi's built-in DeepSeek-direct id.
+          // The pro entry below is DELIBERATELY identical to Pi's built-in
+          // DeepSeek-direct id (the built-in flash id is `deepseek-flash`).
           // That collision is the point: PROV-06's cross-provider invariant test
           // exists to catch a model inheriting the other provider's context window
-          // or cost table. Renaming it here would dodge the test, not the bug.
+          // or cost table. Renaming it would dodge the test, not the bug.
           "id": "deepseek-v4-flash",
           "name": "DeepSeek V4 Flash (DashScope)",
           // MANDATORY. Every `thinkingFormat` branch is
@@ -172,6 +171,22 @@
             "max": "max"
           },
           "compat": { "requiresReasoningContentOnAssistantMessages": true }
+        }
+      ]
+    },
+    "amazon-bedrock": {
+      "models": [
+        {
+          "id": "apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+          // The name must contain "claude": Pi's prompt-caching and thinking support match on it.
+          "name": "Claude Sonnet 4.5 (APAC)",
+          "api": "bedrock-converse-stream",
+          "reasoning": true,
+          "input": ["text", "image"],
+          // Copied from the catalogue's us. entry; the apac. price is UNVERIFIED.
+          "cost": { "input": 3.3, "output": 16.5, "cacheRead": 0.33, "cacheWrite": 4.125 },
+          "contextWindow": 200000,
+          "maxTokens": 64000
         }
       ]
     }

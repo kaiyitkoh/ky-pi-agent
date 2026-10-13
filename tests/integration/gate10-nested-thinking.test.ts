@@ -61,7 +61,11 @@
  */
 import { fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 
-import { beforeAll, describe, expect, it } from "vitest";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
 import { getModeState, runSingleShotRole, setEscalated, setMode } from "../../.pi/extensions/routing/modes.ts";
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
@@ -234,6 +238,20 @@ async function runFixture(): Promise<Capture[]> {
 let captures: Capture[];
 
 describe("GATE-10 (nested half) -- runSingleShotRole sends the api-appropriate thinking field", () => {
+	// The faux Bedrock model is registered under its bare id, so the profile prefix is set to empty.
+	let savedAgentDir: string | undefined;
+	let prefixAgentDir = "";
+	beforeAll(() => {
+		savedAgentDir = process.env.PI_CODING_AGENT_DIR;
+		prefixAgentDir = mkdtempSync(join(tmpdir(), "kypi-prefix-agent-"));
+		writeFileSync(join(prefixAgentDir, "settings.json"), JSON.stringify({ kyPiAgent: { bedrockProfilePrefix: "" } }), "utf-8");
+		process.env.PI_CODING_AGENT_DIR = prefixAgentDir;
+	});
+	afterAll(() => {
+		if (savedAgentDir === undefined) delete process.env.PI_CODING_AGENT_DIR;
+		else process.env.PI_CODING_AGENT_DIR = savedAgentDir;
+		rmSync(prefixAgentDir, { recursive: true, force: true });
+	});
 	beforeAll(async () => {
 		captures = await runFixture();
 	}, 60_000);

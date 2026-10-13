@@ -85,7 +85,7 @@
  * there. Per Phase 1's recorded lesson, every ordering comparison below is
  * preceded by a non-emptiness assertion on the log itself.
  */
-import { existsSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -424,6 +424,37 @@ describe("ROUTE-02 -- /cheap, /balanced, /max in a real Pi session", () => {
 				overrides?.planner?.model,
 				"the planner pin does not carry a '<provider>/<id>' model string",
 			).toMatch(/^[^/]+\/[^/]+$/);
+		});
+	});
+
+	it("case 2b -- the subagent pin does not outlive the session: shutdown restores the settings file", async () => {
+		resetOrderLog();
+		const settingsDir = freshTempDir("kypi-mode-switch-settings-");
+		process.env.PI_CODING_AGENT_DIR = settingsDir;
+		const settingsPath = join(settingsDir, "settings.json");
+		const original = `${JSON.stringify({ theme: "ky" }, null, 2)}
+`;
+		writeFileSync(settingsPath, original, "utf-8");
+
+		await withModeSwitchSession(async ({ session, modelRuntime }) => {
+			await modelRuntime.setRuntimeApiKey("deepseek", "kypi-fixture-not-a-real-key");
+			await waitForConfiguredAuth(modelRuntime, "deepseek");
+
+			const command = session.extensionRunner.getCommand("balanced");
+			expect(command).toBeDefined();
+			if (command === undefined) {
+				return;
+			}
+			const ctx = session.extensionRunner.createCommandContext();
+			withRecordedWaitForIdle(ctx);
+			await command.handler("", ctx);
+			expect(readFileSync(settingsPath, "utf-8"), "the pin was never written, so the restore below proves nothing").toContain("agentOverrides");
+
+			await session.extensionRunner.emit({ type: "session_shutdown", reason: "reload" });
+			expect(readFileSync(settingsPath, "utf-8"), "a reload must keep the pin").toContain("agentOverrides");
+
+			await session.extensionRunner.emit({ type: "session_shutdown", reason: "quit" });
+			expect(readFileSync(settingsPath, "utf-8")).toBe(original);
 		});
 	});
 

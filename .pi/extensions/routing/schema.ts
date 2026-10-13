@@ -61,7 +61,13 @@ const DASHSCOPE_FLASH: ModelRef = { provider: "dashscope", id: "deepseek-v4-flas
 /** DeepSeek V4 Pro on DashScope. */
 const DASHSCOPE_PRO: ModelRef = { provider: "dashscope", id: "deepseek-v4-pro" };
 
-/** Claude Sonnet 4.5 on Bedrock: the only verified vision-capable model, so a one-entry candidate list. */
+/** Settings key under `kyPiAgent` holding the Bedrock inference-profile prefix. */
+export const BEDROCK_PROFILE_PREFIX_SETTING = "kyPiAgent.bedrockProfilePrefix";
+
+/** Prefix used when the setting is absent. */
+export const BEDROCK_PROFILE_PREFIX_DEFAULT = "apac.";
+
+/** Claude Sonnet 4.5 on Bedrock, base id: the resolver prepends the inference-profile prefix. The only verified vision-capable model, so a one-entry candidate list. */
 const BEDROCK_CLAUDE: ModelRef = { provider: "amazon-bedrock", id: "anthropic.claude-sonnet-4-5-20250929-v1:0" };
 
 const FLASH_CANDIDATES: readonly ModelRef[] = [DEEPSEEK_DIRECT_FLASH, DASHSCOPE_FLASH];

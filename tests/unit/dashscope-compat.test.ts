@@ -156,7 +156,7 @@ async function templatedModelIds(): Promise<string[]> {
 		handle.modelRuntime
 			.getModels()
 			.map((model) => `${model.provider}/${model.id}`)
-			.filter((key) => !baselineKeys.has(key))
+			.filter((key) => !baselineKeys.has(key) && key.startsWith("dashscope/"))
 			.sort(),
 	);
 }

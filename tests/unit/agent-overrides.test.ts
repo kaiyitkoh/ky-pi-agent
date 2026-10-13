@@ -52,6 +52,7 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	agentOverridesFor,
 	resolveSettingsPath,
+	restorePlannerPin,
 	writeAgentOverrides,
 	type AgentOverridesForOptions,
 } from "../../.pi/extensions/routing/agent-overrides.ts";
@@ -271,7 +272,10 @@ describe("writeAgentOverrides -- creation", () => {
 		expect(existsSync(settingsPath)).toBe(true);
 
 		const written = JSON.parse(readFileSync(settingsPath, "utf-8"));
-		expect(written).toEqual({ subagents: { agentOverrides: overrides } });
+		expect(written).toEqual({
+			subagents: { agentOverrides: overrides },
+			kyPiAgent: { plannerPinRestore: { had: false } },
+		});
 	});
 });
 
@@ -290,7 +294,7 @@ describe("writeAgentOverrides -- sibling-key preservation", () => {
 		expect(result.ok, `expected ok:true, got ${JSON.stringify(result)}`).toBe(true);
 
 		const written = JSON.parse(readFileSync(settingsPath, "utf-8"));
-		expect(written.kyPiAgent).toEqual(initial.kyPiAgent);
+		expect(written.kyPiAgent).toEqual({ ...initial.kyPiAgent, plannerPinRestore: { had: false } });
 		expect(written.subagents.defaultModel).toBe("dashscope/deepseek-v4-pro");
 		expect(written.subagents.agentOverrides).toEqual(overrides);
 	});
@@ -486,6 +490,68 @@ describe("writeAgentOverrides -- byte-idempotence", () => {
 		expect(mtimeAfterSecond, "a no-op write must not touch mtime -- content equality alone is not enough").toBe(
 			mtimeAfterFirst,
 		);
+	});
+});
+
+describe("restorePlannerPin", () => {
+	const pin = { planner: { model: "dashscope/deepseek-v4-flash" } };
+
+	function seed(body: unknown): { settingsPath: string; bytes: string } {
+		const settingsPath = freshSettingsPath();
+		const bytes = `${JSON.stringify(body, null, 2)}
+`;
+		writeFileSync(settingsPath, bytes, "utf-8");
+		return { settingsPath, bytes };
+	}
+
+	it("restores the prior bytes when the file had no subagents key", () => {
+		const { settingsPath, bytes } = seed({ theme: "ky", kyPiAgent: { bootstrapVersion: "1.2.3" } });
+		expect(writeAgentOverrides(pin, { settingsPath }).ok).toBe(true);
+		expect(readFileSync(settingsPath, "utf-8")).not.toBe(bytes);
+
+		const result = restorePlannerPin({ settingsPath });
+		expect(result).toMatchObject({ ok: true, restored: true });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("restores an existing agentOverrides value and keeps the first original across several pins", () => {
+		const original = { reviewer: { model: "deepseek/deepseek-flash" } };
+		const { settingsPath, bytes } = seed({ subagents: { defaultModel: "x", agentOverrides: original } });
+		writeAgentOverrides(pin, { settingsPath });
+		writeAgentOverrides({ planner: { model: "dashscope/deepseek-v4-pro" } }, { settingsPath });
+
+		expect(restorePlannerPin({ settingsPath }).ok).toBe(true);
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("restores a crash-left marker in a later process", () => {
+		const { settingsPath, bytes } = seed({ theme: "ky" });
+		writeAgentOverrides(pin, { settingsPath });
+		const left = readFileSync(settingsPath, "utf-8");
+		expect(left).toContain("plannerPinRestore");
+
+		expect(restorePlannerPin({ settingsPath })).toMatchObject({ ok: true, restored: true });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("is a no-op without a marker, byte-unchanged, and for a missing file", () => {
+		const { settingsPath, bytes } = seed({ subagents: { agentOverrides: pin } });
+		expect(restorePlannerPin({ settingsPath })).toMatchObject({ ok: true, restored: false });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+		expect(restorePlannerPin({ settingsPath: join(dirname(settingsPath), "absent.json") })).toMatchObject({ ok: true, restored: false });
+	});
+
+	it("does not add a marker when the pin equals what is already there", () => {
+		const { settingsPath, bytes } = seed({ subagents: { agentOverrides: pin } });
+		writeAgentOverrides(pin, { settingsPath });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("refuses invalid JSON without touching it", () => {
+		const settingsPath = freshSettingsPath();
+		writeFileSync(settingsPath, "{ nope", "utf-8");
+		expect(restorePlannerPin({ settingsPath }).ok).toBe(false);
+		expect(readFileSync(settingsPath, "utf-8")).toBe("{ nope");
 	});
 });
 

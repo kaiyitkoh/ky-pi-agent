@@ -12,7 +12,7 @@ import type {
 import { getCurrentTools } from "@earendil-works/pi-ai";
 
 import { appendJsonl } from "../../lib/jsonl.ts";
-import { agentOverridesFor, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
+import { agentOverridesFor, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { deriveNeed, guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
@@ -348,7 +348,13 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.on("session_start", (event, ctx) => {
 		try {
 			const branch = ctx.sessionManager.getBranch();
+			// Pins written by an earlier process that never shut down cleanly are undone, then re-derived for this session's mode.
+			if (event.reason !== "reload") restorePlannerPin();
 			restoreModeFromBranch(branch);
+			if (event.reason !== "reload" && getModeState().mode !== DEFAULT_MODE) {
+				const pins = agentOverridesFor({ mode: getModeState().mode }, testOverrides?.agentOverridesFor);
+				if (pins.ok) writeAgentOverrides(pins.overrides);
+			}
 			const flag = pi.getFlag("ky-profile");
 			if (typeof flag === "string" && resolveProfile(flag) !== flag && ctx.hasUI) ctx.ui.notify(`unknown --ky-profile "${flag}"; using ${DEFAULT_PROFILE}`, "warning");
 			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
@@ -357,6 +363,15 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			if (next !== undefined) pi.setActiveTools(next);
 		} catch {
 			// Swallowed deliberately.
+		}
+	});
+	// The pin lives in the user-level settings file shared by every repo, so it ends with the session.
+	pi.on("session_shutdown", (event) => {
+		if (event.reason === "reload") return;
+		try {
+			restorePlannerPin();
+		} catch {
+			// Best-effort.
 		}
 	});
 	// Drop out-of-profile tools not yet declared (no removal recorded); `input` precedes before_agent_start, so no prompt section sees them.

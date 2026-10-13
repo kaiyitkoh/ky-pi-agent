@@ -400,7 +400,7 @@ describe("PROV-06 — every placeholder price names the live check that will rep
 describe("PROV-06 — the unverified output cap keeps its mark", () => {
 	it(`every templated model caps output at ${TEMPLATED_MAX_TOKENS}`, () => {
 		const wrong = templated
-			.filter((model) => model.maxTokens !== TEMPLATED_MAX_TOKENS)
+			.filter((model) => model.provider === TEMPLATED_PROVIDER && model.maxTokens !== TEMPLATED_MAX_TOKENS)
 			.map((model) => `${keyOf(model)} = ${model.maxTokens}`);
 
 		expect(
@@ -442,5 +442,27 @@ describe("PROV-06 — the unverified output cap keeps its mark", () => {
 			`${TEMPLATE} no longer mentions RB-03-05, the runbook entry that measures the ` +
 				"unverified figures. A gap with no named owner is a gap nobody closes.",
 		).toContain("RB-03-05");
+	});
+});
+
+describe("the templated Bedrock Sonnet 4.5 profile", () => {
+	const APAC_ID = "apac.anthropic.claude-sonnet-4-5-20250929-v1:0";
+
+	it("composes with image input and a Claude-matching name, next to the catalogued bare id", () => {
+		const apac = all.find((model) => model.provider === "amazon-bedrock" && model.id === APAC_ID);
+		expect(apac, `amazon-bedrock/${APAC_ID} did not compose from the template`).toBeDefined();
+		expect(apac?.input).toContain("image");
+		expect(apac?.name.toLowerCase()).toContain("claude");
+		expect(apac?.reasoning).toBe(true);
+
+		const bare = all.find(
+			(model) => model.provider === "amazon-bedrock" && model.id === "anthropic.claude-sonnet-4-5-20250929-v1:0",
+		);
+		expect(bare, "the catalogued bare Sonnet 4.5 entry must survive the template merge").toBeDefined();
+	});
+
+	it("is the only Bedrock model the template adds", () => {
+		const added = templated.filter((model) => model.provider === "amazon-bedrock").map(keyOf);
+		expect(added).toEqual([`amazon-bedrock/${APAC_ID}`]);
 	});
 });

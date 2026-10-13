@@ -118,6 +118,25 @@ export function resolveSettingsPath(opts: AgentOverridesPathOptions = {}): strin
 	return join(getAgentDir(), "settings.json");
 }
 
+const PLANNER_PIN_MARKER = "plannerPinRestore";
+
+/** Temp file beside the target, then atomic rename: a direct write can truncate the user's settings on a crash. */
+function atomicWrite(path: string, text: string): void {
+	// The uuid avoids pid collisions between two jiti copies in one process; the rm below removes the temp file if rename fails.
+	const tmpPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
+	try {
+		writeFileSync(tmpPath, text, "utf-8");
+		renameSync(tmpPath, path);
+	} catch (err) {
+		try {
+			rmSync(tmpPath, { force: true });
+		} catch {
+			// Best-effort cleanup; the caller reports the original failure.
+		}
+		throw err;
+	}
+}
+
 /** What {@link writeAgentOverrides} returns. */
 export type WriteAgentOverridesResult =
 	| { readonly ok: true; readonly written: boolean; readonly path: string }
@@ -175,7 +194,22 @@ export function writeAgentOverrides(
 			};
 		}
 
+		const existingKy = root.kyPiAgent;
+		if (existingKy !== undefined && (existingKy === null || typeof existingKy !== "object" || Array.isArray(existingKy))) {
+			return {
+				ok: false,
+				reason: `${path}'s "kyPiAgent" key is not a JSON object. Refusing to touch it.`,
+				path,
+			};
+		}
+
 		const subagents: Record<string, unknown> = { ...(existingSubagents as Record<string, unknown> | undefined) };
+		const original = subagents.agentOverrides;
+		const ky: Record<string, unknown> = { ...(existingKy as Record<string, unknown> | undefined) };
+		if (ky[PLANNER_PIN_MARKER] === undefined && JSON.stringify(original) !== JSON.stringify(overrides)) {
+			ky[PLANNER_PIN_MARKER] = original === undefined ? { had: false } : { had: true, value: original };
+			root.kyPiAgent = ky;
+		}
 		subagents.agentOverrides = overrides;
 		root.subagents = subagents;
 
@@ -188,26 +222,60 @@ export function writeAgentOverrides(
 			}
 		}
 
-		// Temp file beside the target, then atomic rename: a direct write can truncate the user's settings on a crash.
-		// The uuid avoids pid collisions between two jiti copies in one process; the rm below removes the temp file if rename fails.
-		const tmpPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
-		try {
-			writeFileSync(tmpPath, nextText, "utf-8");
-			renameSync(tmpPath, path);
-		} catch (err) {
-			try {
-				rmSync(tmpPath, { force: true });
-			} catch {
-				// Best-effort cleanup; the outer catch reports the original failure.
-			}
-			throw err;
-		}
+		atomicWrite(path, nextText);
 
 		return { ok: true, written: true, path };
 	} catch (err) {
 		return {
 			ok: false,
 			reason: `${path} could not be written (${err instanceof Error ? err.message : String(err)}).`,
+			path,
+		};
+	}
+}
+
+/** What {@link restorePlannerPin} returns. */
+export type RestorePlannerPinResult =
+	| { readonly ok: true; readonly restored: boolean; readonly path: string }
+	| { readonly ok: false; readonly reason: string; readonly path: string };
+
+/**
+ * Puts `subagents.agentOverrides` back to what it was before the first pin and removes the marker.
+ * A no-op when no marker exists, so it is safe to call at every session start and shutdown.
+ */
+export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): RestorePlannerPinResult {
+	const path = resolveSettingsPath(opts);
+	try {
+		if (!existsSync(path)) return { ok: true, restored: false, path };
+		const obj: unknown = JSON.parse(readFileSync(path, "utf-8"));
+		if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
+			return { ok: false, reason: `${path} is not a JSON object. Refusing to touch it.`, path };
+		}
+		const root = obj as Record<string, unknown>;
+		const ky = root.kyPiAgent;
+		if (ky === null || typeof ky !== "object" || Array.isArray(ky)) return { ok: true, restored: false, path };
+		const { [PLANNER_PIN_MARKER]: marker, ...restOfKy } = ky as Record<string, unknown>;
+		if (marker === null || typeof marker !== "object") return { ok: true, restored: false, path };
+
+		const subagents = root.subagents;
+		if (subagents !== null && typeof subagents === "object" && !Array.isArray(subagents)) {
+			const next = { ...(subagents as Record<string, unknown>) };
+			const { had, value } = marker as { had?: unknown; value?: unknown };
+			if (had === true) next.agentOverrides = value;
+			else delete next.agentOverrides;
+			if (Object.keys(next).length === 0) delete root.subagents;
+			else root.subagents = next;
+		}
+		if (Object.keys(restOfKy).length === 0) delete root.kyPiAgent;
+		else root.kyPiAgent = restOfKy;
+
+		atomicWrite(path, `${JSON.stringify(root, null, 2)}
+`);
+		return { ok: true, restored: true, path };
+	} catch (err) {
+		return {
+			ok: false,
+			reason: `${path} could not be restored (${err instanceof Error ? err.message : String(err)}).`,
 			path,
 		};
 	}

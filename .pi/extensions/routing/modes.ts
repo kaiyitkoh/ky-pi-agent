@@ -5,13 +5,17 @@
  * Named exports only: a default export would reclassify this file as an extension entry point.
  */
 import type { Api, AssistantMessage, Message, Model, ModelsApiStreamOptions, Tool } from "@earendil-works/pi-ai";
-import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
 
 import { callModel } from "../diagnostics/call-model.ts";
 import { callWithFallback } from "../providers/fallback.ts";
 import { CHAIN } from "../providers/schema.ts";
 import { guardRoute, type GuardNeed } from "./guard.ts";
 import {
+	BEDROCK_PROFILE_PREFIX_DEFAULT,
+	BEDROCK_PROFILE_PREFIX_SETTING,
 	DEFAULT_MODE,
 	ESCALATION_MODE,
 	MODES,
@@ -98,21 +102,76 @@ export type CandidateResult =
 	| { readonly ok: true; readonly model: Model<Api>; readonly ref: ModelRef }
 	| { readonly ok: false; readonly reason: string };
 
-/** First candidate that resolves AND has configured auth; the refusal reason names every candidate tried. */
-export function pickConfiguredCandidate(registry: ModelRegistryLike, candidates: readonly ModelRef[]): CandidateResult {
+const BEDROCK_PREFIX_PATTERN = /^[a-z]{2,6}\.$/;
+const BEDROCK_CATALOGUE_PREFIXES = "au., eu., global., jp., us.";
+
+export type BedrockPrefixResult =
+	| { readonly ok: true; readonly prefix: string }
+	| { readonly ok: false; readonly reason: string };
+
+/** Reads `kyPiAgent.bedrockProfilePrefix` from the agent settings file; a missing file or key yields the default and `""` selects the bare id. */
+export function bedrockProfilePrefix(settingsPath: string = join(getAgentDir(), "settings.json")): BedrockPrefixResult {
+	let value: unknown;
+	try {
+		if (existsSync(settingsPath)) {
+			const root: unknown = JSON.parse(readFileSync(settingsPath, "utf-8"));
+			const section = (root as { kyPiAgent?: unknown } | null)?.kyPiAgent;
+			value = (section as { bedrockProfilePrefix?: unknown } | null | undefined)?.bedrockProfilePrefix;
+		}
+	} catch {
+		value = undefined;
+	}
+	if (value === undefined) return { ok: true, prefix: BEDROCK_PROFILE_PREFIX_DEFAULT };
+	if (typeof value === "string" && (value === "" || BEDROCK_PREFIX_PATTERN.test(value))) {
+		return { ok: true, prefix: value };
+	}
+	return {
+		ok: false,
+		reason: `${BEDROCK_PROFILE_PREFIX_SETTING} must be "" or a region prefix such as "apac.", got ${JSON.stringify(value)}`,
+	};
+}
+
+export interface PickCandidateOptions {
+	/** Injected settings file, for tests. */
+	readonly settingsPath?: string;
+}
+
+function isBedrockClaudeRef(ref: ModelRef): boolean {
+	return ref.provider === "amazon-bedrock" && ref.id.startsWith("anthropic.");
+}
+
+/** First candidate that resolves AND has configured auth; the refusal reason names every candidate tried. Bedrock Claude ids get the inference-profile prefix from settings. */
+export function pickConfiguredCandidate(
+	registry: ModelRegistryLike,
+	candidates: readonly ModelRef[],
+	opts: PickCandidateOptions = {},
+): CandidateResult {
 	const attempts: string[] = [];
 	for (const candidate of candidates) {
-		const key = `${candidate.provider}/${candidate.id}`;
-		const model = registry.find(candidate.provider, candidate.id);
+		let resolved = candidate;
+		if (isBedrockClaudeRef(candidate)) {
+			const prefix = bedrockProfilePrefix(opts.settingsPath);
+			if (!prefix.ok) {
+				attempts.push(`${candidate.provider}/${candidate.id} (${prefix.reason})`);
+				continue;
+			}
+			resolved = { provider: candidate.provider, id: prefix.prefix + candidate.id };
+		}
+		const key = `${resolved.provider}/${resolved.id}`;
+		const model = registry.find(resolved.provider, resolved.id);
 		if (!model) {
-			attempts.push(`${key} (did not resolve)`);
+			attempts.push(
+				resolved === candidate
+					? `${key} (did not resolve)`
+					: `${key} (did not resolve; check ${BEDROCK_PROFILE_PREFIX_SETTING}, catalogue prefixes: ${BEDROCK_CATALOGUE_PREFIXES})`,
+			);
 			continue;
 		}
 		if (!registry.hasConfiguredAuth(model)) {
 			attempts.push(`${key} (no configured auth)`);
 			continue;
 		}
-		return { ok: true, model, ref: candidate };
+		return { ok: true, model, ref: resolved };
 	}
 	return {
 		ok: false,
@@ -125,12 +184,6 @@ export function pickConfiguredCandidate(registry: ModelRegistryLike, candidates:
 export function usesToolLoop(role: Role): boolean {
 	return ROLE_MECHANISM[role] !== "call-model";
 }
-
-/** Chain membership only. Not a dispatch rule: `callWithFallback` always restarts at the chain head, so only the head qualifies (see `runSingleShotRole`). */
-export function usesFallbackChain(ref: ModelRef): boolean {
-	return CHAIN.some((entry) => entry.provider === ref.provider && entry.id === ref.id);
-}
-
 
 /** `GuardNeed` minus `usesToolLoop`, which is derived from the role. */
 export type RoleNeed = Omit<GuardNeed, "usesToolLoop">;
@@ -197,7 +250,7 @@ export function buildNestedApiOptions(
 			throw new Error(
 				`buildNestedApiOptions: no per-level token budget has been chosen for anthropic-messages ` +
 					`(model ${model.provider}/${model.id}) -- ROLE_MAP resolves no anthropic-messages candidate ` +
-					"today (05-RESEARCH.md Assumption A3), so there is nothing measured to map " +
+					"today, so there is nothing measured to map " +
 					`${JSON.stringify(effort)} onto. AnthropicMessagesOptions wants thinkingBudgetTokens, a ` +
 					"concrete number, not a level string -- inventing one here would be a fabricated " +
 					"measurement. Add a real mapping to this function before routing any role through an " +
