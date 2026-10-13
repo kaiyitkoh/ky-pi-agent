@@ -8,11 +8,11 @@ import { join, resolve } from "node:path";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { claimWorkflow, isActiveWorkflow } from "../../lib/active-workflow.ts";
 import { workDir } from "../../lib/work-artifacts.ts";
-import { HARD_QUESTION_BUDGET } from "../grill/scorecard.ts";
+import { HARD_QUESTION_BUDGET, turnBudgetSpent } from "../grill/scorecard.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
-import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { renderPlanMarkdown, validatePlan } from "./plan-schema.ts";
+import { protectedBranchesFor } from "../safety/index.ts";
+import { planTurnBrief, renderPlanMarkdown, validatePlan } from "./plan-schema.ts";
 import { extractSpecRequirementIds } from "./requirement-ids.ts";
 
 /** The artifact this command reads. */
@@ -85,7 +85,7 @@ export default function (pi: ExtensionAPI): void {
 			// Order is the claim: git guard -> resolve slug -> pre-flight -> idle guard -> hand off.
 			const verdict = classifyGitInvocation(
 				{ subcommand: "commit", args: [] },
-				{ currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES },
+				{ currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) },
 			);
 			if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
 
@@ -121,8 +121,8 @@ export default function (pi: ExtensionAPI): void {
 	pi.on("session_start", () => void (run = undefined));
 
 	pi.on("before_agent_start", () => {
-		const reject = armed()?.lastReject;
-		return reject === undefined ? undefined : { message: { customType: "plan-gate", content: `The last ${PLAN_FILE_NAME} was refused by the gate: ${reject}`, display: false } };
+		const content = planTurnBrief(armed()?.lastReject, armed()?.turns === HARD_QUESTION_BUDGET, PLAN_FILE_NAME);
+		return content === undefined ? undefined : { message: { customType: "plan-gate", content, display: false } };
 	});
 
 	pi.on("agent_settled", (event, ctx) => {
@@ -141,10 +141,10 @@ export default function (pi: ExtensionAPI): void {
 				current.lastReject = gated.reason;
 				ctx.ui.notify(`plan: ${PLAN_FILE_NAME} refused -- ${gated.reason}`, "warning");
 			}
-			// The same hard turn budget as /grill, so a plan that never passes cannot stay armed all session.
-			if (current.turns >= HARD_QUESTION_BUDGET) {
+			// The same turn budget as /grill, so a plan that never passes cannot stay armed all session.
+			if (turnBudgetSpent(current.turns)) {
 				run = undefined;
-				ctx.ui.notify(`plan: ${HARD_QUESTION_BUDGET} turns passed with no gated ${PLAN_FILE_NAME} -- run /plan again to continue`, "error");
+				ctx.ui.notify(`plan: ${HARD_QUESTION_BUDGET + 1} turns passed with no gated ${PLAN_FILE_NAME} -- run /plan again to continue`, "error");
 			}
 		} catch (err) {
 			run = undefined;

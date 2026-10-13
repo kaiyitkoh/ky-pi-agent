@@ -2,7 +2,8 @@
  * Subagent calls: launches need the required-child guard registered for the current session, management
  * actions need a human confirm, and the registration matches the pinned pi-subagents contract.
  */
-import { readFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -14,6 +15,7 @@ import {
 	disposeChildGuard,
 	isChildGuardRegistered,
 	registerChildGuard,
+	resolveRequiredChildModule,
 	setRequiredChildLoaderForTests,
 	SUBAGENT_READ_ONLY_ACTIONS,
 } from "../../.pi/extensions/safety/subagents.ts";
@@ -252,5 +254,41 @@ describe("lifecycle handlers", () => {
 			expect(isChildGuardRegistered(SESSION)).toBe(false);
 			expect(notes.join(" ")).toContain("subagent launches are refused");
 		});
+	});
+});
+
+describe("resolveRequiredChildModule", () => {
+	const made: string[] = [];
+	const fakePackage = (name: string, withRegistry: boolean): { root: string; entry: string } => {
+		const root = mkdtempSync(join(tmpdir(), "ky-subagents-"));
+		made.push(root);
+		writeFileSync(join(root, "package.json"), JSON.stringify({ name }));
+		const entry = join(root, "src", "deep", "index.ts");
+		mkdirSync(join(root, "src", "api"), { recursive: true });
+		mkdirSync(join(root, "src", "deep"), { recursive: true });
+		writeFileSync(entry, "");
+		if (withRegistry) writeFileSync(join(root, "src", "api", "required-child-extensions.js"), "");
+		return { root, entry };
+	};
+	afterEach(() => {
+		for (const dir of made.splice(0)) rmSync(dir, { recursive: true, force: true });
+	});
+
+	it("walks up from a nested source path to the pi-subagents package", () => {
+		const { root, entry } = fakePackage("pi-subagents", true);
+		expect(resolveRequiredChildModule([entry], root)).toBe(join(root, "src", "api", "required-child-extensions.js"));
+	});
+
+	it("skips a package.json named anything else", () => {
+		const { root, entry } = fakePackage("something-else", true);
+		expect(resolveRequiredChildModule([entry], root)).toBeUndefined();
+	});
+
+	it("registration fails and a launch stays refused when nothing resolves", async () => {
+		setRequiredChildLoaderForTests(undefined);
+		const { root } = fakePackage("pi-subagents", false);
+		const result = await registerChildGuard(SESSION, "/abs/index.ts", root, [join(root, "src", "deep", "index.ts")]);
+		expect(result.ok).toBe(false);
+		expect(isChildGuardRegistered(SESSION)).toBe(false);
 	});
 });

@@ -288,3 +288,12 @@ export function renderPlanMarkdown(plan: PlanArtifact): string {
 
 	return lines.join("\n");
 }
+
+/** The hidden note for the next /plan turn: the last gate rejection and, on the final turn, an instruction to write the file. */
+export function planTurnBrief(lastReject: string | undefined, finalTurn: boolean, file: string): string | undefined {
+	const lines = [
+		...(lastReject === undefined ? [] : [`The last ${file} was refused by the gate: ${lastReject}`]),
+		...(finalTurn ? [`This is the last turn: write ${file} now.`] : []),
+	];
+	return lines.length === 0 ? undefined : lines.join(" ");
+}

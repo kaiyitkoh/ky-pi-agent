@@ -75,6 +75,9 @@ export const SCORE_GATE = 0.2;
 /** Hard question ceiling (spec-kit's five). At `askedCount >= HARD_QUESTION_BUDGET` nextQuestionSlot returns `exhausted`; a soft budget burns tokens without limit. */
 export const HARD_QUESTION_BUDGET = 5;
 
+// The turn after the last question writes the artifact.
+export const turnBudgetSpent = (settledTurns: number): boolean => settledTurns > HARD_QUESTION_BUDGET;
+
 export interface InterviewPerspective {
 	readonly id: string;
 	readonly label: string;

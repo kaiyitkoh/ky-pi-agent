@@ -6,9 +6,9 @@
  */
 import type { Api, AssistantMessage, Message, Model, ModelsApiStreamOptions, Tool } from "@earendil-works/pi-ai";
 import { getAgentDir, type ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
+import { readSettingValue } from "../../lib/settings.ts";
 import { callModel } from "../diagnostics/call-model.ts";
 import { callWithFallback } from "../providers/fallback.ts";
 import { CHAIN } from "../providers/schema.ts";
@@ -111,16 +111,8 @@ export type BedrockPrefixResult =
 
 /** Reads `kyPiAgent.bedrockProfilePrefix` from the agent settings file; a missing file or key yields the default and `""` selects the bare id. */
 export function bedrockProfilePrefix(settingsPath: string = join(getAgentDir(), "settings.json")): BedrockPrefixResult {
-	let value: unknown;
-	try {
-		if (existsSync(settingsPath)) {
-			const root: unknown = JSON.parse(readFileSync(settingsPath, "utf-8"));
-			const section = (root as { kyPiAgent?: unknown } | null)?.kyPiAgent;
-			value = (section as { bedrockProfilePrefix?: unknown } | null | undefined)?.bedrockProfilePrefix;
-		}
-	} catch {
-		value = undefined;
-	}
+	const read = readSettingValue(settingsPath, ["kyPiAgent", "bedrockProfilePrefix"]);
+	const value = read.ok ? read.value : undefined;
 	if (value === undefined) return { ok: true, prefix: BEDROCK_PROFILE_PREFIX_DEFAULT };
 	if (typeof value === "string" && (value === "" || BEDROCK_PREFIX_PATTERN.test(value))) {
 		return { ok: true, prefix: value };

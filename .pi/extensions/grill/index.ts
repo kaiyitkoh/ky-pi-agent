@@ -11,8 +11,8 @@ import { workDir } from "../../lib/work-artifacts.ts";
 import { ledgerFile } from "../execute/ledger.ts";
 import { ensureHarnessIgnored } from "../execute/progress.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
-import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { HARD_QUESTION_BUDGET, INTERVIEW_PERSPECTIVES, nextQuestionSlot } from "./scorecard.ts";
+import { protectedBranchesFor } from "../safety/index.ts";
+import { HARD_QUESTION_BUDGET, INTERVIEW_PERSPECTIVES, nextQuestionSlot, turnBudgetSpent } from "./scorecard.ts";
 import { validateGatedSpec } from "./spec-gate.ts";
 import { gateRequirementsAuthorship, renderSpecMarkdown, type SpecGateVerdict } from "./spec-schema.ts";
 
@@ -96,7 +96,7 @@ export default function (pi: ExtensionAPI): void {
 
 			const verdict = classifyGitInvocation(
 				{ subcommand: "commit", args: [] },
-				{ currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES },
+				{ currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) },
 			);
 			if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
 
@@ -162,7 +162,7 @@ export default function (pi: ExtensionAPI): void {
 				current.lastReject = gated.reason;
 				ctx.ui.notify(`grill: ${SPEC_FILE_NAME} refused -- ${gated.reason}`, "warning");
 			}
-			if (current.asked > HARD_QUESTION_BUDGET) {
+			if (turnBudgetSpent(current.asked)) {
 				run = undefined;
 				ctx.ui.notify(`grill: question budget spent with no gated ${SPEC_FILE_NAME} -- downstream commands will refuse it; run "/grill --resume" to continue`, "error");
 			}

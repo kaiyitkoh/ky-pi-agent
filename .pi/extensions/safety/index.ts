@@ -17,7 +17,10 @@ import type { AuditVerdict } from "./schema.ts";
 import { currentBranch, gitConfigValues, resolveLocalBranch } from "./git.ts";
 import { canonicalisePathArg } from "./paths.ts";
 import { evaluate, type PolicyFacts, type Verdict } from "./policy.ts";
+import { BUILTIN_PROTECTED, BUILTIN_PUSH_ONLY, effectiveBranches } from "./branches.ts";
 import { classifySubagentCall, disposeChildGuard, isChildGuardRegistered, registerChildGuard } from "./subagents.ts";
+
+export { protectedBranchesFor } from "./branches.ts";
 
 // Exported so tests import these literals instead of retyping them.
 export const APPROVE_TOOL_NAME = "approve_ky_command";
@@ -29,10 +32,10 @@ export const WRAPPER_AUDIT_EVENT = "safety.wrapped_execute";
 export const APPROVAL_AUDIT_EVENT = "safety.approve_ky_command";
 
 /** Forwarded to git.ts#classifyGitInvocation; compared case-insensitively there. */
-export const PROTECTED_BRANCHES: readonly string[] = ["main", "master"];
+export const PROTECTED_BRANCHES: readonly string[] = BUILTIN_PROTECTED;
 
 /** A push may never reach these; a commit on staging is not refused, only pushing to it. */
-export const PUSH_PROTECTED_BRANCHES: readonly string[] = [...PROTECTED_BRANCHES, "staging"];
+export const PUSH_PROTECTED_BRANCHES: readonly string[] = [...BUILTIN_PROTECTED, ...BUILTIN_PUSH_ONLY];
 
 /** An unanswered confirm refuses after this long; Pi dismisses the dialog with false on timeout. */
 export const CONFIRM_TIMEOUT_MS = 300_000;
@@ -55,6 +58,16 @@ function sessionIdOf(ctx: ExtensionContext): string | undefined {
 	}
 }
 
+/** Paths of the loaded `subagent` tool; empty when Pi cannot list tools. */
+function subagentSourcePaths(pi: ExtensionAPI): string[] {
+	// NEVER THROWS: a missing listing only falls back to the npm install roots.
+	try {
+		return pi.getAllTools().filter((t) => t.name === "subagent").map((t) => t.sourceInfo.path);
+	} catch {
+		return [];
+	}
+}
+
 const APPROVE_CHOICE = "Approve";
 const DENY_CHOICE = "Deny";
 
@@ -69,14 +82,15 @@ function toCanonicalRoot(absolutePath: string): string {
 /** Plain-data facts for evaluate(); the one place impure ctx.cwd, homedir() and KUBECONFIG are read. */
 function buildFacts(ctx: ExtensionContext): PolicyFacts {
 	const cwd = toCanonicalRoot(ctx.cwd);
+	const branches = effectiveBranches(ctx.cwd);
 	return {
 		cwd,
 		projectRoot: cwd,
 		home: toCanonicalRoot(homedir()),
 		// Lazy: only invoked for an invocation whose executable is literally "git".
 		currentBranchFor: (cwd: string) => currentBranch(cwd),
-		protectedBranches: PROTECTED_BRANCHES,
-		pushProtectedBranches: PUSH_PROTECTED_BRANCHES,
+		protectedBranches: branches.protectedBranches,
+		pushProtectedBranches: branches.pushProtectedBranches,
 		gitConfigFor: (dir: string, key: string) => gitConfigValues(dir, key),
 		gitBranchFor: (dir: string, rev: string) => resolveLocalBranch(dir, rev),
 		kubeconfigEnv: process.env.KUBECONFIG,
@@ -495,10 +509,14 @@ export default function (pi: ExtensionAPI): void {
 		} catch {
 			// Swallowed deliberately.
 		}
+		for (const warning of effectiveBranches(ctx.cwd).warnings) {
+			writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool: "settings", command: "", cwd: ctx.cwd, verdict: "block", reason: warning });
+			if (ctx.hasUI) ctx.ui.notify(warning, "warning");
+		}
 		const sessionId = sessionIdOf(ctx);
 		if (sessionId !== undefined) {
 			// Not fatal: the subagent launch branch fails closed on its own, but the cause is recorded and shown.
-			const registered = await registerChildGuard(sessionId, fileURLToPath(new URL("./index.ts", import.meta.url)), ctx.cwd);
+			const registered = await registerChildGuard(sessionId, fileURLToPath(new URL("./index.ts", import.meta.url)), ctx.cwd, subagentSourcePaths(pi));
 			if (!registered.ok) {
 				const reason = `the safety guard could not be registered for subagent children, so subagent launches are refused: ${registered.reason}`;
 				writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool: "subagent", command: "", cwd: ctx.cwd, verdict: "block", reason });

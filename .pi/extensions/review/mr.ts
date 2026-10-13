@@ -11,7 +11,7 @@ import type { PlanArtifact } from "../plan-ceremony/plan-schema.ts";
 import type { ReviewArtifact } from "../quality/review-schema.ts";
 import { writeAuditRow } from "../safety/audit.ts";
 import { classifyGlabInvocation } from "../safety/git.ts";
-import { PROTECTED_BRANCHES } from "../safety/index.ts";
+import { protectedBranchesFor } from "../safety/index.ts";
 
 export const MR_TARGET_BRANCH = "staging";
 export const MR_TARGET_BRANCH_FLAG = "--target-branch";
@@ -190,7 +190,7 @@ function attemptMr(input: MrInput, deps: OpenMrDeps): MrOutcome {
 	}
 	const argv = mrCreateArgv(input);
 	const [subcommand = "", ...rest] = argv;
-	const verdict = classifyGlabInvocation({ subcommand, args: rest }, PROTECTED_BRANCHES);
+	const verdict = classifyGlabInvocation({ subcommand, args: rest }, protectedBranchesFor(deps.cwd));
 	if (verdict.kind === "block") return { kind: "refused", reason: verdict.reason };
 
 	const r = deps.exec("glab", [...argv]);

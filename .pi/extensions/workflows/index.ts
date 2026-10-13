@@ -7,7 +7,7 @@ import { runTypecheckAt } from "../quality/index.ts";
 import { deriveNeed } from "../routing/guard.ts";
 import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
-import { PROTECTED_BRANCHES } from "../safety/index.ts";
+import { protectedBranchesFor } from "../safety/index.ts";
 import { IN_FLIGHT, armQuickSettle, clearQuickSettle, notePrompt, settleQuickRun } from "./settle.ts";
 import { armedCwd, disarmRun, endRun, isRunArmed, isRunPending, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun, writeRunEvidence } from "./evidence.ts";
 import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext, uncommittedPaths } from "../execute/progress.ts";
@@ -33,7 +33,7 @@ export default function (pi: ExtensionAPI): void {
 			try {
 				const verdict = classifyGitInvocation(
 					{ subcommand: "commit", args: [] },
-					{ currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES },
+					{ currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) },
 				);
 				if (verdict.kind === "block") return void ctx.ui.notify(verdict.reason, "error");
 				if (isRunArmed() || !ctx.isIdle()) return void ctx.ui.notify(`quick: ${IN_FLIGHT}`, "error");

@@ -13,7 +13,7 @@ import { validatePlan, type ParsedTask } from "../plan-ceremony/plan-schema.ts";
 import { gateDepthFor } from "../quality/gates.ts";
 import { registeredToolNames, runChangeGateStage, runTypecheckAt } from "../quality/index.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
-import { PROTECTED_BRANCHES } from "../safety/index.ts";
+import { protectedBranchesFor } from "../safety/index.ts";
 import { deriveNeed, guardRoute } from "../routing/guard.ts";
 import { acceptedReason, disarmRun, endRun, isRunArmed, isRunPending, startRun, writeRunEvidence } from "../workflows/evidence.ts";
 import { IN_FLIGHT, notePrompt } from "../workflows/settle.ts";
@@ -55,7 +55,7 @@ export default function (pi: ExtensionAPI): void {
 				const slug = arg !== "" ? arg : (candidates[0] as string);
 				const dir = workDir(ctx.cwd, slug);
 
-				const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES });
+				const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) });
 				if (verdict.kind === "block") return fail(verdict.reason);
 
 				if (!existsSync(join(dir, "PLAN.md"))) return fail(`execute: .pi/work/${slug}/PLAN.md does not exist -- run /plan first`);

@@ -3,8 +3,8 @@
  * host-required child extension, so every child loads the guard whatever its agent config says.
  * pi-subagents is a separate module root, so it is imported by file URL from its install root, never by bare specifier.
  */
-import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import { CONFIG_DIR_NAME, getAgentDir } from "@earendil-works/pi-coding-agent";
@@ -70,17 +70,41 @@ export function setRequiredChildLoaderForTests(loader: ((cwd: string) => Promise
 	testLoader = loader;
 }
 
-async function loadRequiredChildModule(cwd: string): Promise<RequiredChildModule> {
+const REGISTRY_FILE = ["src", "api", "required-child-extensions.js"];
+
+function packageRootNamed(start: string, name: string): string | undefined {
+	for (let dir = dirname(start); ; dir = dirname(dir)) {
+		const manifest = join(dir, "package.json");
+		if (existsSync(manifest)) {
+			try {
+				const found = (JSON.parse(readFileSync(manifest, "utf-8")) as { name?: unknown }).name;
+				if (found === name) return dir;
+				if (typeof found === "string") return undefined;
+			} catch {
+				return undefined;
+			}
+		}
+		if (dirname(dir) === dir) return undefined;
+	}
+}
+
+/** The child-extension registry of the pi-subagents Pi loaded (found from the tool's own source path), else of the user or project npm install. */
+export function resolveRequiredChildModule(sourcePaths: readonly string[], cwd: string): string | undefined {
+	for (const source of sourcePaths) {
+		const root = packageRootNamed(source, "pi-subagents");
+		const file = root === undefined ? undefined : join(root, ...REGISTRY_FILE);
+		if (file !== undefined && existsSync(file)) return file;
+	}
+	return [join(getAgentDir(), "npm"), join(cwd, CONFIG_DIR_NAME, "npm")].map((root) => join(root, ...REGISTRY_ENTRY)).find((f) => existsSync(f));
+}
+
+async function loadRequiredChildModule(cwd: string, sourcePaths: readonly string[]): Promise<RequiredChildModule> {
 	if (testLoader !== undefined) {
 		return (await testLoader(cwd)) as RequiredChildModule;
 	}
-	for (const root of [join(getAgentDir(), "npm"), join(cwd, CONFIG_DIR_NAME, "npm")]) {
-		const file = join(root, ...REGISTRY_ENTRY);
-		if (existsSync(file)) {
-			return (await import(pathToFileURL(file).href)) as RequiredChildModule;
-		}
-	}
-	throw new Error("pi-subagents is not installed under the user or project npm root");
+	const file = resolveRequiredChildModule(sourcePaths, cwd);
+	if (file === undefined) throw new Error("pi-subagents was not found from the loaded subagent tool or under the user or project npm root");
+	return (await import(pathToFileURL(file).href)) as RequiredChildModule;
 }
 
 /** Register `safetyEntryPath` as a required extension for every child of `sessionId`; an existing registration counts as success. */
@@ -88,12 +112,13 @@ export async function registerChildGuard(
 	sessionId: string,
 	safetyEntryPath: string,
 	cwd: string,
+	subagentSourcePaths: readonly string[] = [],
 ): Promise<{ ok: true } | { ok: false; reason: string }> {
 	if (guards().has(sessionId)) {
 		return { ok: true };
 	}
 	try {
-		const mod = await loadRequiredChildModule(cwd);
+		const mod = await loadRequiredChildModule(cwd, subagentSourcePaths);
 		const handle = mod.registerRequiredChildExtensions({
 			sessionId,
 			extensions: [{ id: CHILD_GUARD_ID, path: safetyEntryPath }],

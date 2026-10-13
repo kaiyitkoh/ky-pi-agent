@@ -227,6 +227,10 @@ describe("/plan -- refuses an ungated SPEC and gates whatever PLAN.md the model 
 		await h.run("plan", SLUG);
 		modelWrites(join(h.dir, "PLAN.md"), "- [ ] T001 [R9] Create the a module in src/a.ts | verify: npm test\n", 1);
 		for (let i = 0; i < HARD_QUESTION_BUDGET; i++) h.fire("agent_settled");
+		expect(h.notes.at(-1)?.text, "armed for the final write turn").not.toContain("turns passed");
+		const last = h.fire("before_agent_start")[0] as { message: { content: string } };
+		expect(last.message.content).toContain("This is the last turn");
+		h.fire("agent_settled");
 		expect(h.notes.at(-1)?.level).toBe("error");
 		expect(h.notes.at(-1)?.text).toContain("turns passed");
 		expect(h.fire("before_agent_start")[0], "a spent /plan injects nothing into later turns").toBeUndefined();

@@ -21,7 +21,7 @@ import { renderReviewMarkdown, type ReviewArtifact } from "../quality/review-sch
 import { decideWorkflowStop, runRefuteOrPromote } from "../quality/verdict.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
 import { getModeState } from "../routing/modes.ts";
-import { PROTECTED_BRANCHES } from "../safety/index.ts";
+import { protectedBranchesFor } from "../safety/index.ts";
 import { MR_TARGET_BRANCH, buildMrBody, historyMismatch, openMr, sanitizeTitle, spawnExec, upstreamMismatch } from "./mr.ts";
 import { changedFilesSince, compareScope, readTouchedFiles, resolveBaseRef } from "./scope-drift.ts";
 
@@ -56,7 +56,7 @@ export default function (pi: ExtensionAPI): void {
 				claimWorkflow("review");
 				const dir = workDir(ctx.cwd, slug);
 
-				const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(ctx.cwd), protectedBranches: PROTECTED_BRANCHES });
+				const verdict = classifyGitInvocation({ subcommand: "commit", args: [] }, { currentBranch: currentBranch(ctx.cwd), protectedBranches: protectedBranchesFor(ctx.cwd) });
 				if (verdict.kind === "block") return fail(verdict.reason);
 
 				for (const f of ["SPEC.md", "PLAN.md", "PROGRESS.md"]) {
