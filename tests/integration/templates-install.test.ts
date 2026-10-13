@@ -42,7 +42,7 @@
  * about the template, never about a provider.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1133,4 +1133,182 @@ describe("PROV-01 -- neither committed template carries a secret", () => {
 		expect("-".repeat(75).match(TOKEN_SHAPED)).not.toBeNull();
 		expect("requiresReasoningContentOnAssistantMessages".match(TOKEN_SHAPED)).not.toBeNull();
 	});
+});
+
+describe("global setup -- user settings, theme, agent scan dir and the pinned packages", () => {
+	afterEach(() => {
+		for (const dir of scratch) {
+			try {
+				rmSync(dir, { recursive: true, force: true, maxRetries: 3 });
+			} catch {
+				// A leftover temp dir is noise, not a failure.
+			}
+		}
+		scratch = [];
+	});
+
+	const PINS = [
+		"npm:@narumitw/pi-lsp@0.49.9",
+		"npm:pi-session-finder@0.5.6",
+		"npm:pi-subagents@0.76.1",
+		"npm:pi-web-access@0.38.0",
+	];
+	const DISABLES = ["-builtin:mcp", "-builtin:llama.cpp", "-builtin:codemode", "-builtin:tool-search"];
+
+	function runMode(
+		args: string[],
+		agentDir: string,
+		repoCopy: BootstrapRepoCopy,
+		extraEnv: Record<string, string> = { KYPI_SKIP_INSTALL: "1" },
+	): Run & { piLog: string } {
+		const logDir = tempDir("kypi-log-");
+		const log = join(logDir, "npm.log").replace(/\\/g, "/");
+		const piLog = join(logDir, "pi.log").replace(/\\/g, "/");
+		return withStubBin({ npm: npmStub(log), pi: { exitCode: 0, logTo: piLog } }, (env) => {
+			const result = spawnSync("sh", [repoCopy.bootstrapSh, ...args], {
+				cwd: repoCopy.root,
+				env: { ...env, PI_CODING_AGENT_DIR: agentDir, KYPI_DASHSCOPE_BASE_URL: "", ...extraEnv },
+				encoding: "utf-8",
+				timeout: TIMEOUT_MS,
+				windowsHide: true,
+			});
+			if (result.error) throw new Error(`failed to run bootstrap: ${result.error.message}`);
+			return {
+				stdout: result.stdout ?? "",
+				stderr: result.stderr ?? "",
+				status: result.status,
+				log: existsSync(log) ? readFileSync(log, "utf-8") : "",
+				piLog: existsSync(piLog) ? readFileSync(piLog, "utf-8") : "",
+			};
+		});
+	}
+
+	function settingsOf(agentDir: string): Record<string, unknown> {
+		return JSON.parse(readFileSync(join(agentDir, "settings.json"), "utf-8")) as Record<string, unknown>;
+	}
+
+	it("case 1 -- an empty agent dir gains the pins, the disables, the theme and the agent scan dir", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+
+		const run = runMode(["--global-setup"], agentDir, repoCopy);
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expectReachedTheScript(run);
+
+		const settings = settingsOf(agentDir);
+		expect(settings.packages).toEqual(PINS);
+		expect(settings.extensions).toEqual(DISABLES);
+		expect(settings.theme).toBe("ky");
+		expect(settings.subagents).toEqual({
+			agentScanDirs: [join(repoCopy.root, ".pi", "agents").replace(/\\/g, "/")],
+		});
+		expect(settings.kyPiAgent).toMatchObject({ bootstrapVersion: "1", piPinned: "1.1.0" });
+
+		expect(readFileSync(join(agentDir, "themes", "ky.json"), "utf-8")).toBe(
+			readFileSync(join(repoRoot(), ".pi", "themes", "ky.json"), "utf-8"),
+		);
+	}, TIMEOUT_MS);
+
+	it("case 2 -- user packages, extensions, theme and kyPiAgent keys survive, and a second run is byte-identical", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		writeFileSync(
+			join(agentDir, "settings.json"),
+			JSON.stringify({
+				packages: ["npm:foo@1.0.0"],
+				extensions: ["./mine.ts"],
+				theme: "dark",
+				kyPiAgent: { bedrockProfilePrefix: "us." },
+			}),
+			"utf-8",
+		);
+
+		const first = runMode(["--global-setup"], agentDir, repoCopy);
+		expect(first.status, `stderr:\n${first.stderr}`).toBe(0);
+		const afterFirst = readFileSync(join(agentDir, "settings.json"), "utf-8");
+		const settings = JSON.parse(afterFirst) as Record<string, unknown>;
+		expect(settings.packages).toEqual(["npm:foo@1.0.0", ...PINS]);
+		expect(settings.extensions).toEqual(["./mine.ts", ...DISABLES]);
+		expect(settings.theme).toBe("dark");
+		expect(settings.kyPiAgent).toMatchObject({ bedrockProfilePrefix: "us.", bootstrapVersion: "1" });
+
+		const second = runMode(["--global-setup"], agentDir, repoCopy);
+		expect(second.status, `stderr:\n${second.stderr}`).toBe(0);
+		expect(readFileSync(join(agentDir, "settings.json"), "utf-8")).toBe(afterFirst);
+		expect(second.stdout).toContain("settings.json kyPiAgent already current - unchanged");
+	}, TIMEOUT_MS);
+
+	it("case 3 -- a different pinned version of one of our packages is refused, naming both versions", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		const seeded = JSON.stringify({ packages: ["npm:pi-subagents@0.50.0"] });
+		writeFileSync(join(agentDir, "settings.json"), seeded, "utf-8");
+
+		const run = runMode(["--global-setup"], agentDir, repoCopy);
+
+		expect(run.status).not.toBe(0);
+		expect(run.stderr).toContain("npm:pi-subagents@0.50.0");
+		expect(run.stderr).toContain("npm:pi-subagents@0.76.1");
+		expect(readFileSync(join(agentDir, "settings.json"), "utf-8")).toBe(seeded);
+	}, TIMEOUT_MS);
+
+	it("case 4 -- global setup touches no credential, model, env or safety-stub file", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+
+		const run = runMode(["--global-setup"], agentDir, repoCopy);
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+		expect(existsSync(join(agentDir, "auth.json"))).toBe(false);
+		expect(existsSync(join(agentDir, "models.json"))).toBe(false);
+		expect(existsSync(join(agentDir, "extensions"))).toBe(false);
+		expect(existsSync(repoCopy.envExample)).toBe(false);
+	}, TIMEOUT_MS);
+
+	it("case 5 -- without KYPI_SKIP_INSTALL it runs pi install once per pin, after the hardening assertions", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+
+		const run = runMode(["--global-setup"], agentDir, repoCopy, {});
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		const installs = run.piLog.split("\n").filter((l) => l.startsWith("pi install"));
+		expect(installs).toEqual(PINS.map((p) => `pi install ${p}`));
+		expect(run.stdout.indexOf("ignore-scripts=true")).toBeGreaterThan(-1);
+		expect(run.stdout.indexOf("ignore-scripts=true")).toBeLessThan(run.stdout.indexOf("pi install npm:"));
+		expect(run.log).not.toMatch(/^npm install/m);
+	}, TIMEOUT_MS);
+
+	it("case 6 -- a full run merges the apac Bedrock model next to a user model and leaves no temp files", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		writeFileSync(
+			join(agentDir, "models.json"),
+			JSON.stringify({
+				providers: { "amazon-bedrock": { baseUrl: "https://example.invalid", models: [{ id: "mine.model" }] } },
+			}),
+			"utf-8",
+		);
+
+		const run = runMode([], agentDir, repoCopy);
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+		const bedrock = (installedProviders(agentDir)["amazon-bedrock"] ?? {}) as {
+			baseUrl?: string;
+			models?: Array<{ id: string }>;
+		};
+		expect(bedrock.baseUrl).toBe("https://example.invalid");
+		expect(bedrock.models?.map((m) => m.id)).toEqual([
+			"mine.model",
+			"apac.anthropic.claude-sonnet-4-5-20250929-v1:0",
+		]);
+
+		const before = readFileSync(join(agentDir, "models.json"), "utf-8");
+		const second = runMode([], agentDir, repoCopy);
+		expect(second.stdout).toContain("models.json providers.amazon-bedrock already current - unchanged");
+		expect(readFileSync(join(agentDir, "models.json"), "utf-8")).toBe(before);
+
+		const leftovers = readdirSync(agentDir, { recursive: true }).filter((f) => String(f).includes(".tmp-"));
+		expect(leftovers).toEqual([]);
+	}, TIMEOUT_MS);
 });

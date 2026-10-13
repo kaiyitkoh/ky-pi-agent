@@ -99,6 +99,14 @@ export function makeBootstrapRepoCopy(prefix: string): BootstrapRepoCopy {
 	// full bootstrap wire a dangling path, and the check-only report correctly
 	// calls it stale -- so the script has to be here for the same reason
 	// `safety/` is: the copy must contain what the script under test points at.
+	copyFileSync(join(repoRoot(), ".pi", "settings.json"), join(root, ".pi", "settings.json"));
+	mkdirSync(join(root, ".pi", "themes"), { recursive: true });
+	copyFileSync(join(repoRoot(), ".pi", "themes", "ky.json"), join(root, ".pi", "themes", "ky.json"));
+
+	copyFileSync(join(repoRoot(), ".pi", "settings.json"), join(root, ".pi", "settings.json"));
+	mkdirSync(join(root, ".pi", "themes"), { recursive: true });
+	copyFileSync(join(repoRoot(), ".pi", "themes", "ky.json"), join(root, ".pi", "themes", "ky.json"));
+
 	mkdirSync(join(root, ".pi", "scripts"), { recursive: true });
 	copyFileSync(
 		join(repoRoot(), ".pi", "scripts", "worktree-setup-hook.mjs"),

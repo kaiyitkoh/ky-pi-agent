@@ -2,51 +2,31 @@
 #
 # ky-pi-agent cold-machine bootstrap.
 #
-# One script that takes a machine with Node and git on it to a machine that can
-# run this harness safely. It hardens every npm scope Pi can reach, PROVES each
-# one through npm itself, and only then installs anything.
+# Takes a machine with Node and git to one that can run this harness safely.
+# It hardens every npm scope Pi can reach, proves each one through npm itself,
+# and only then installs anything. Details: docs/RUNBOOK.md.
 #
-# ---------------------------------------------------------------------------
-# The ordering clause (BOOT-01) is the whole point
-# ---------------------------------------------------------------------------
-# "ignore-scripts=true precedes the first `pi install`. A pinning policy applied
-# afterwards is applied to code that already ran."  A postinstall that has
-# already executed cannot be un-executed by a control written a second later,
-# and this machine holds live AWS SSO credentials. So the full run asserts, and
-# refuses to continue, BEFORE it reaches the install step. That ordering is
-# enforced structurally: see run_full() near the bottom, where every hardening
-# call is written above the install call and the reason is stated inline.
+# Ordering rule: ignore-scripts=true must be in force before the first
+# `pi install`; a postinstall that already ran cannot be undone. run_full() and
+# run_global_setup() assert first and install after.
 #
-# ---------------------------------------------------------------------------
-# Portability rules this file obeys
-# ---------------------------------------------------------------------------
-#   * Strict POSIX sh. No arrays, no `local`, no bash double-bracket tests, no
-#     bash-4 case-conversion expansions. The macOS CI runner is bash 3.2 with
-#     BSD userland; `sh` is the only target that is the same language on both.
-#   * No version-sort flag on `sort` - absent/inconsistent on BSD. Node
-#     compares node, which is exact and needs no external tool.
-#   * No external JSON processor - not installed here, and not worth a
-#     dependency. All JSON is read/parsed/merged/written by `node -e`.
-#     Never a stream editor on JSON; that is how settings files get corrupted.
-#   * Never PowerShell. Windows runs this through Git Bash.
-#   * LF line endings, enforced by .gitattributes (`*.sh text eol=lf`).
+# Portability: strict POSIX sh (no arrays, no `local`, no double-bracket tests),
+# LF endings, never PowerShell. All JSON is read and written by `node -e`,
+# never by a stream editor.
 #
-# ---------------------------------------------------------------------------
 # Modes
-# ---------------------------------------------------------------------------
 #   (no args)           full run: probe, verify, harden, install, configure
+#   --global-setup      hardening assertions, user settings merge, theme, agent
+#                       scan dir and the pinned composed packages; touches no
+#                       credential, model, env or safety-stub file
 #   --check-only        every probe and repo-side assertion, mutates nothing,
-#                       exits 0 on a clean CI runner. Deterministic stdout.
-#                       NEEDS NETWORK: one of the probes is the published-pin
-#                       preflight, which exits 1 when the registry is silent.
-#   --assert-hardening  the three ignore-scripts assertions only, including the
-#                       user scope. Exits 1 if any scope is ineffective. The
-#                       offline-safe mode: it touches no network.
-#   --check-version     the published-pin preflight only.
-#   --help              this list.
+#                       needs network for the published-pin preflight
+#   --assert-hardening  the ignore-scripts assertions only; offline-safe
+#   --check-version     the published-pin preflight only
+#   --help              this list
 #
-# Test seams: PI_CODING_AGENT_DIR (Pi's own variable, src/config.ts:516-522),
-# KYPI_PI_PINNED, KYPI_SKIP_INSTALL.
+# Test seams: PI_CODING_AGENT_DIR (Pi's own variable), KYPI_PI_PINNED,
+# KYPI_SKIP_INSTALL.
 #
 set -eu
 
@@ -55,25 +35,17 @@ PI_PINNED="${KYPI_PI_PINNED:-1.1.0}"
 NODE_MIN="22.19.0"
 BOOTSTRAP_VERSION="1"
 
-# Resolve the repo from the script's own location so the script is correct from
-# any cwd - including the `sh /abs/path/bin/bootstrap.sh` shape the tests use.
+# Resolved from the script's own location so any cwd works.
 SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/.." && pwd)
 
 PI_AGENT_DIR="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
-# A Windows-style value (from a Node-launched test, say) arrives with
-# backslashes. MSYS tools take C:/x happily and C:\x not at all, so normalise -
-# but only for a drive-letter path, never for a genuine POSIX one.
-# A UNC path (\\server\share\pi) arrives the same way and is NOT drive-lettered;
-# Windows roaming profiles genuinely land on them. `//server/share/...` is the
-# form MSYS accepts, and `tr` maps the leading pair too, which is what we want.
+# MSYS tools accept C:/x and reject C:\x, so a drive-letter or UNC value from a
+# Node-launched caller is normalised. A POSIX path may legally hold a backslash,
+# hence the no-forward-slash condition on the catch-all arm.
 case "$PI_AGENT_DIR" in
 [A-Za-z]:* | '\\'*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
 *'\'*)
-	# Any other value carrying a backslash and no forward slash is a Windows
-	# path in some shape we did not enumerate. A genuine POSIX path may legally
-	# contain a backslash, so the no-forward-slash condition is what keeps this
-	# from corrupting one.
 	case "$PI_AGENT_DIR" in
 	*/*) : ;;
 	*) PI_AGENT_DIR=$(printf '%s' "$PI_AGENT_DIR" | tr '\\' '/') ;;
@@ -82,53 +54,35 @@ case "$PI_AGENT_DIR" in
 esac
 PI_NPM_ROOT="$PI_AGENT_DIR/npm"
 REPO_NPM_PREFIX="$REPO_ROOT/.pi/npm"
+REPO_SETTINGS="$REPO_ROOT/.pi/settings.json"
 
 MISSING_REQUIRED=0
+
+# Prepended to every embedded node script that writes: temp file in the same
+# directory, then rename, so a crash never leaves a truncated credential file.
+# The embedded scripts are single-quoted shell strings and may hold no apostrophe.
+KYPI_ATOMIC_JS='
+const writeAtomic = (file, data, mode) => {
+  const nodeFs = require("node:fs");
+  const tmp = file + ".tmp-" + process.pid;
+  nodeFs.writeFileSync(tmp, data, mode === undefined ? "utf8" : { encoding: "utf8", mode });
+  try { nodeFs.renameSync(tmp, file); } catch (e) {
+    try { nodeFs.unlinkSync(tmp); } catch (e2) { /* nothing to clean */ }
+    throw e;
+  }
+};
+'
 
 # ---------------------------------------------------------------------------
 # Ask npm about files, not about the shell that launched us
 # ---------------------------------------------------------------------------
-# [VERIFIED: executed 2026-08-13, npm 11.13.0] `npm run` and `npx` export the
-# fully resolved config into the child as npm_config_* variables, and npm ranks
-# environment config ABOVE every .npmrc. Running this script through an npm
-# script - or from a test suite launched by one - would therefore make every
-# assertion below answer `true` for a directory containing no config at all.
-# That is not a cosmetic false positive: it would certify a control that had
-# never been exercised. Strip them, so npm answers from files only.
-#
-# Stripping is only half the job. The strip pattern matches valid shell
-# identifiers only, because that is all `unset` accepts: npm also honours keys
-# no POSIX shell can remove - npm_config_ignore-scripts (a hyphen),
-# npm_config_//registry.npmjs.org/:_authToken (slashes and a colon). Under
-# `dash` a special-builtin `unset` error kills the shell outright, `|| true`
-# included [VERIFIED: executed 2026-08-13, dash rc=2], so `unset` cannot be the
-# remedy for those names.
-#
-# It is TEMPTING to dismiss them as per-registry auth rather than policy keys.
-# That is false, and it was a live false-certification: `@npmcli/config` matches
-# /^npm_config_/i and only normalises `_`->`-` for non-nerf-darted keys, so
-# `npm_config_ignore-scripts=true` arrives already in canonical form, outranks
-# every .npmrc, and made `--assert-hardening` print "All npm scopes are
-# hardened" for a directory containing no .npmrc at all
-# [VERIFIED: executed 2026-08-13, npm 11.13.0].
-#
-# So the second pass REFUSES rather than strips. Any npm_config_* surviving the
-# strip means no assertion below is about the files on disk, and a refusal is
-# strictly better than a certificate we cannot back. The refusal is deliberately
-# indiscriminate - it fires on an _authToken key too - because this script has
-# no way to tell which surviving key npm will let outrank a file, and guessing
-# is exactly the mistake that shipped. The remedy is a clean shell, which is
-# always available.
-#
-# THE PREFIX MATCH IS CASE-INSENSITIVE, AND THAT IS LOAD-BEARING ON WINDOWS.
-# [VERIFIED: executed 2026-08-13, vitest 4.1.9 / node 24.16.0] a Node test
-# runner hands its children the SAME keys upper-cased - NPM_CONFIG_IGNORE_SCRIPTS
-# rather than npm_config_ignore_scripts. Windows environment names are
-# case-insensitive and npm lower-cases before reading, so the upper-case form is
-# every bit as effective; a lower-case-only strip therefore leaves the override
-# in place and the script certifies a control it never exercised. Written as
-# explicit bracket classes rather than a `I`/`/i` flag: neither is POSIX, and
-# the macOS runner is BSD sed.
+# npm ranks npm_config_* environment variables above every .npmrc, so an
+# inherited one makes each assertion below answer about the launcher, not the
+# files. Valid shell names are unset; any name no POSIX shell can unset
+# (npm_config_ignore-scripts, npm_config_//registry...:_authToken) is refused,
+# because certifying a control we did not exercise is worse than stopping.
+# The prefix match is case-insensitive: Windows hands children NPM_CONFIG_*.
+# Bracket classes instead of a sed `I` flag, which is not POSIX.
 sanitise_npm_env() {
 	_keys=$(env | sed -n \
 		's/^\([Nn][Pp][Mm]_[Cc][Oo][Nn][Ff][Ii][Gg]_[A-Za-z0-9_]*\)=.*/\1/p' || true)
@@ -136,9 +90,6 @@ sanitise_npm_env() {
 		unset "$_k" || true
 	done
 
-	# Second pass: whatever is left, npm still honours and we cannot remove.
-	# The class here is [^=] - every name, not just shell-legal ones - so a
-	# hyphen, a slash or a colon is caught rather than silently skipped.
 	_stuck=$(env | sed -n \
 		's/^\([Nn][Pp][Mm]_[Cc][Oo][Nn][Ff][Ii][Gg]_[^=]*\)=.*/\1/p' || true)
 	if [ -n "$_stuck" ]; then
@@ -165,9 +116,6 @@ require_node() {
 			"$NODE_MIN" "$PI_PKG" >&2
 		exit 1
 	fi
-	# Node compares node. Every sh version-comparison trick is either absent on
-	# BSD or wrong on a two-digit component, and node is a hard prerequisite by
-	# definition, so there is nothing to gain by doing this in the shell.
 	node -e 'const v = process.versions.node;
 const parts = v.split(".").map(Number);
 if (parts[0] < 22 || (parts[0] === 22 && parts[1] < 19)) {
@@ -194,10 +142,8 @@ probe_one() {
 	return 0
 }
 
-# A missing optional tool warns and never aborts. `glab` in particular is absent
-# on this machine and on both CI runners - GitLab work is Phase 4/9 and lives on
-# the work laptop - so making it required would turn every green run red for a
-# capability nothing in this phase uses.
+# A missing optional tool warns and never aborts: glab is absent on CI and on
+# this machine.
 probe_tools() {
 	printf 'Tool probe:\n'
 	printf '  %-8s %-8s %-8s %s\n' "TOOL" "KIND" "STATUS" "DETAIL"
@@ -217,17 +163,12 @@ probe_tools() {
 }
 
 # ---------------------------------------------------------------------------
-# Published-pin preflight (BOOT-04)
+# Published-pin preflight
 # ---------------------------------------------------------------------------
-# Earendil Works unpublishes old versions: 40 versions survive and the oldest is
-# 0.74.0 [VERIFIED: npm registry, 2026-08-13]. A pin can therefore vanish under
-# a machine that has not been bootstrapped in a while.
-#
-# The discrimination is on the literal E404 token in `npm view`'s JSON error
-# output, NOT on the exit code - a network failure exits non-zero too, and a
-# check that conflates them tells an offline user their pin was withdrawn. That
-# is a worse failure than no check at all, because it sends them to edit a
-# perfectly good pin.
+# Earendil Works unpublishes old versions, so a pin can vanish. The split is on
+# the literal E404 token in npm's JSON error, not the exit code: a network
+# failure exits non-zero too, and calling that "withdrawn" sends an offline
+# user to edit a good pin.
 check_pi_version_published() {
 	_out=$(npm view "${PI_PKG}@${PI_PINNED}" version --json 2>/dev/null) && _rc=0 || _rc=$?
 	if [ "$_rc" -eq 0 ] && [ -n "$_out" ] && [ "${_out#*error}" = "$_out" ]; then
@@ -256,16 +197,8 @@ EOF
 		exit 1
 		;;
 	*)
-		# Deliberately says nothing about the pin being withdrawn. We do not
-		# know, and guessing there is the bug the E404 split exists to avoid.
-		#
-		# It says nothing about the CAUSE either, for the same reason. Only E404
-		# is discriminated above; everything else lands here - E403 (a proxy or
-		# registry policy), E401/ENEEDAUTH (a scoped registry wanting
-		# credentials), ETARGET, and a corporate mirror carrying the package but
-		# not the version. "Check your network or proxy settings" is actionable
-		# for one of those and misdirection for the rest, so report the token npm
-		# actually produced and let the operator read it.
+		# Only E404 is discriminated; E401, E403, ETARGET and network failures
+		# all land here, so the message reports what npm said and guesses nothing.
 		printf 'WARN: could not verify %s@%s against the registry.\n' \
 			"$PI_PKG" "$PI_PINNED" >&2
 		if [ -n "$_out" ]; then
@@ -282,13 +215,10 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
-# Hardening (BOOT-01)
+# Hardening
 # ---------------------------------------------------------------------------
-# Assert the EFFECT, through npm, never the existence of a file. RESEARCH 1.3
-# proved in the field that a correctly-written .npmrc in a plausible location
-# can still be ineffective, because npm resolves the project config from
-# --prefix when one is given and from cwd otherwise, and Pi always passes
-# --prefix on the npm path (package-manager.ts:1778).
+# Assert the effect through npm, never the existence of a file: npm resolves the
+# project config from --prefix when given and Pi always passes --prefix.
 #
 # Arguments: <label> <cwd-or-empty> <prefix-or-empty>
 assert_ignore_scripts_for() {
@@ -316,10 +246,8 @@ assert_ignore_scripts_for() {
 	exit 1
 }
 
-# The two scopes a checkout can cover on its own: the developer's own
-# `npm install` (cwd = repo root, which is also the cwd Pi uses for the
-# `npm install --omit=dev` inside a clone of THIS repo), and project-scope
-# `pi install -l`, whose prefix is <repo>/.pi/npm.
+# The scopes a checkout covers itself: the developer's own `npm install` (cwd =
+# repo root) and project-scope `pi install -l` (prefix <repo>/.pi/npm).
 assert_repo_scopes() {
 	assert_ignore_scripts_for "repo root ($REPO_ROOT)" "$REPO_ROOT" ""
 	assert_ignore_scripts_for "project prefix ($REPO_NPM_PREFIX)" "" "$REPO_NPM_PREFIX"
@@ -329,49 +257,19 @@ assert_user_scope() {
 	assert_ignore_scripts_for "user-scope prefix ($PI_NPM_ROOT)" "" "$PI_NPM_ROOT"
 }
 
-# The largest gap, and the one no committed file can close: `pi install npm:*`
-# at user scope. Pi creates this directory itself (ensureNpmProject,
-# package-manager.ts:1975-1986) and only ever creates files that are absent, so
-# a .npmrc placed here survives.
-#
-# NEVER A WHOLE-FILE REWRITE, for the same reason merge_settings is careful
-# below: this is a normal npm project config for the user-scope prefix, and a
-# private registry, a proxy or a //registry.internal/:_authToken are all
-# legitimate contents. Truncating it is credential destruction, not hardening.
-# Only the `ignore-scripts` line is ours; everything else is the user's.
-#
-# Byte-idempotent: the repair branch leaves `ignore-scripts=true` in the file,
-# so every later run takes the "already hardened" branch and writes nothing.
-# Create the agent directory the way PI would, and never any looser.
-#
-# Pi creates it 0700 and the auth file 0600, but ONLY when they are absent:
-#
-#   pi 0.84.1 dist/core/auth-storage.js:21-31
-#     ensureParentDir()  { if (!existsSync(dir)) mkdirSync(dir, { recursive: true, mode: 0o700 }); }
-#     ensureFileExists() { if (!existsSync(this.authPath)) { writeFileSync(..., { mode: 0o600 }); ... } }
-#
-# So a plain `mkdir -p` gets there first, 0777 & ~umask lands 0755, and Pi's
-# existence guard then short-circuits FOREVER. Pi re-chmods auth.json on every
-# write, so the FILE is repaired at the first `pi auth login` - but the
-# DIRECTORY MODE IS NEVER REPAIRED AT ALL. That directory holds auth.json,
-# models.json and Pi's session transcripts, which .gitignore already describes
-# as able to contain source code, prompts and secrets.
-#
-# CALLED FROM harden_pi_npm_root TOO, and that is the load-bearing call: it runs
-# FIRST in a full run and `mkdir -p "$PI_AGENT_DIR/npm"` creates the parent as a
-# side effect. Tightening only the three merge_* sites would leave the ordinary
-# path creating the directory 0755 before any of them is reached.
-#
-# chmod is best-effort: on Windows it toggles the read-only bit and nothing
-# else, which is why docs/RUNBOOK.md carries the Phase 1 note that 0600 is a
-# no-op there. A failure to tighten is not a reason to abort a bootstrap.
+# Pi creates the agent dir 0700 and auth.json 0600 only when they are absent,
+# so a plain `mkdir -p` here would leave the directory 0755 permanently
+# (pi dist/core/auth-storage.js:21-31). chmod is best-effort: on Windows it only
+# toggles the read-only bit.
 ensure_agent_dir() {
 	mkdir -p "$PI_AGENT_DIR"
 	chmod 700 "$PI_AGENT_DIR" 2>/dev/null || true
 }
 
+# `pi install npm:*` at user scope is the gap no committed file can close. Only
+# the ignore-scripts line is ours; a private registry or auth token already in
+# this .npmrc is the user's and must survive.
 harden_pi_npm_root() {
-	# Before the npm root, so the PARENT is never created 0755 as a side effect.
 	ensure_agent_dir
 	mkdir -p "$PI_NPM_ROOT"
 	_rc_file="$PI_NPM_ROOT/.npmrc"
@@ -382,8 +280,7 @@ harden_pi_npm_root() {
 			printf '%s\n' '#'
 			printf '%s\n' '# Pi installs user-scope extension packages with'
 			printf '%s\n' '#   npm install --prefix ~/.pi/agent/npm ...'
-			printf '%s\n' '# and passes no --ignore-scripts on any code path'
-			printf '%s\n' '# (pi 0.84.1 src/core/package-manager.ts:1750, :1778).'
+			printf '%s\n' '# and passes no --ignore-scripts on any code path.'
 			printf '%s\n' '#'
 			printf '%s\n' '# npm resolves the project config from --prefix, not cwd, so NO file inside'
 			printf '%s\n' '# the ky-pi-agent repo can cover this path. This one can.'
@@ -393,31 +290,9 @@ harden_pi_npm_root() {
 	elif grep -q '^ignore-scripts=true' "$_rc_file"; then
 		printf '  %s already hardened\n' "$_rc_file"
 	else
-		# Back up FIRST, then rebuild from the backup: every line the user put
-		# there is carried over, and only an existing (wrong) ignore-scripts
-		# setting is dropped, because a later duplicate would not reliably win.
-		# `|| [ "$?" -eq 1 ]` on the grep, NOT `|| true`. grep exits 1 when the
-		# filtered result is empty, which is a legitimate input (a one-line
-		# `ignore-scripts=false` file) and which `set -e` would otherwise abort
-		# on. It exits 2 on a real error - an unreadable or vanished backup, a
-		# file grep refuses to read - and `|| true` swallowed that too. The
-		# redirection TRUNCATES "$_rc_file" before grep runs, so on exit 2 the
-		# npm config was left empty and then gained only the two appended lines
-		# below. Discriminating the one legitimate code turns that into a loud
-		# failure with the 0600 backup still on disk, which is the whole reason
-		# the backup is written first. In "a || b", $? inside b is the status of
-		# a. [IN-02]
-		# THE BACKUP IS A DURABLE COPY OF A FILE THAT MAY HOLD A CREDENTIAL - the
-		# comment above says so itself (a private registry, a proxy, a
-		# //registry.internal/:_authToken). It is kept, because the rebuild below
-		# is the only thing standing between the user and a hand-written npm
-		# config, and a failed rebuild with no copy is unrecoverable. But it is
-		# created 0600 BEFORE anything is written into it, and its existence is
-		# reported as something to delete rather than as a courtesy.
-		#
-		# Overwriting rather than rotating is deliberate: the repair branch is
-		# byte-idempotent, so a second repair only happens after the user edits the
-		# file again, and the copy worth having is the current one.
+		# The 0600 backup is written first and kept: the file may hold a registry
+		# token and a failed rebuild with no copy is unrecoverable. grep exit 1
+		# (empty result) is legitimate; exit 2 must abort with the backup intact.
 		: >"$_rc_file.kypi-backup"
 		chmod 600 "$_rc_file.kypi-backup" 2>/dev/null || true
 		cat "$_rc_file" >"$_rc_file.kypi-backup"
@@ -436,10 +311,8 @@ harden_pi_npm_root() {
 	assert_user_scope
 }
 
-# Non-fatal user-scope report for --check-only, which must exit 0 on a clean CI
-# runner where bootstrap has never run. An absent control file is "not applied
-# yet" and gets a remedy; a PRESENT file that npm still ignores is real
-# breakage, and that is fatal in every mode.
+# Absent is "not applied yet" (check-only must pass on a clean runner); present
+# but ineffective is real breakage and always fatal.
 report_user_scope() {
 	if [ ! -f "$PI_NPM_ROOT/.npmrc" ]; then
 		printf '  WARN user-scope npm hardening not applied: %s is absent\n' "$PI_NPM_ROOT/.npmrc"
@@ -453,12 +326,8 @@ report_user_scope() {
 # Install and configure
 # ---------------------------------------------------------------------------
 
-# `npm ls` exits 1 for a global tree holding any extraneous, invalid or
-# unmet-peer package - a very common state - while still printing perfectly good
-# JSON on stdout. Discarding the output on a non-zero exit would therefore make
-# this answer "not installed" on such a machine and re-run `npm install -g` on
-# every single bootstrap, contradicting BOOT-03's "safe to re-run: every step is
-# idempotent". Judge the JSON, not the exit code.
+# `npm ls -g` exits 1 for an extraneous or unmet-peer tree while still printing
+# valid JSON, so the JSON is judged and the exit code is not.
 pi_global_matches_pin() {
 	_ls=$(npm ls -g --depth=0 --json 2>/dev/null || true)
 	[ -n "$_ls" ] || return 1
@@ -482,53 +351,160 @@ install_pi() {
 		return 0
 	fi
 	printf '  installing %s@%s ...\n' "$PI_PKG" "$PI_PINNED"
-	# --ignore-scripts mirrors Pi's own self-update shape (src/config.ts:170-177)
-	# and is free here: the published package declares no postinstall.
+	# The published package declares no postinstall, so --ignore-scripts is free.
 	npm install -g --ignore-scripts "${PI_PKG}@${PI_PINNED}"
 }
 
-# Key-namespaced merge: read, parse, replace only the kyPiAgent key, write back.
-# Never a whole-file rewrite - this file also holds the user's installed-package
-# list and their own settings, and `pi remove <source>` is the documented undo
-# for the part we do not own.
+# The composed packages, their disables and the theme come from the committed
+# .pi/settings.json so there is one source of truth. Merge is additive: user
+# packages, extensions, theme and kyPiAgent keys we do not own survive, and a
+# different pinned version of one of our packages is refused, never re-pinned.
 merge_settings() {
+	if [ ! -f "$REPO_SETTINGS" ]; then
+		printf 'FATAL: missing %s\n' "$REPO_SETTINGS" >&2
+		exit 1
+	fi
 	ensure_agent_dir
 	KYPI_SETTINGS="$PI_AGENT_DIR/settings.json" \
+		KYPI_REPO_SETTINGS="$REPO_SETTINGS" \
+		KYPI_AGENTS_DIR="$REPO_ROOT/.pi/agents" \
 		KYPI_BOOTSTRAP_VERSION="$BOOTSTRAP_VERSION" \
 		KYPI_HARDENED_NPM_ROOT="$PI_NPM_ROOT" \
 		KYPI_PIN="$PI_PINNED" \
-		node -e '
+		node -e "$KYPI_ATOMIC_JS"'
 const fs = require("node:fs");
 const p = process.env.KYPI_SETTINGS;
-let raw = "{}";
-if (fs.existsSync(p)) { raw = fs.readFileSync(p, "utf8").trim() || "{}"; }
-let obj;
-try { obj = JSON.parse(raw); } catch (e) {
-  console.error("FATAL: " + p + " is not valid JSON (" + e.message + "). Refusing to touch it.");
+const readObject = (file, what) => {
+  let parsed;
+  try { parsed = JSON.parse(fs.readFileSync(file, "utf8").trim() || "{}"); } catch (e) {
+    console.error("FATAL: " + file + " is not valid JSON (" + e.message + "). Refusing to " + what + " it.");
+    process.exit(1);
+  }
+  if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
+    console.error("FATAL: " + file + " is not a JSON object. Refusing to " + what + " it.");
+    process.exit(1);
+  }
+  return parsed;
+};
+const repo = readObject(process.env.KYPI_REPO_SETTINGS, "trust");
+const obj = fs.existsSync(p) ? readObject(p, "touch") : {};
+const before = JSON.stringify(obj);
+
+const sourceOf = (entry) => (typeof entry === "string" ? entry : entry && typeof entry.source === "string" ? entry.source : "");
+// Identity is the package name; the trailing @version is not part of it.
+const identityOf = (source) => {
+  const s = source.replace(/^npm:/, "");
+  const at = s.lastIndexOf("@");
+  return at > 0 ? s.slice(0, at) : s;
+};
+const asList = (value, name) => {
+  if (value === undefined) { return []; }
+  if (!Array.isArray(value)) {
+    console.error("FATAL: " + p + " has a " + name + " key that is not an array. Refusing to touch it.");
+    process.exit(1);
+  }
+  return value;
+};
+
+const packages = asList(obj.packages, "packages");
+const added = [];
+for (const pin of asList(repo.packages, "packages")) {
+  const want = sourceOf(pin);
+  if (!want.startsWith("npm:")) { continue; }
+  const existing = packages.map(sourceOf).find((s) => s.startsWith("npm:") && identityOf(s) === identityOf(want));
+  if (existing === undefined) { packages.push(pin); added.push(want); continue; }
+  if (existing !== want) {
+    console.error("FATAL: " + p + " already pins " + existing + " but this checkout pins " + want + ".");
+    console.error("       A pinned version you chose is never re-pinned silently. Remove the entry or");
+    console.error("       change the pin in .pi/settings.json deliberately, then re-run.");
+    process.exit(1);
+  }
+}
+if (packages.length > 0) { obj.packages = packages; }
+
+const extensions = asList(obj.extensions, "extensions");
+for (const entry of asList(repo.extensions, "extensions")) {
+  if (!extensions.includes(entry)) { extensions.push(entry); added.push(entry); }
+}
+if (extensions.length > 0) { obj.extensions = extensions; }
+
+if (obj.theme === undefined && typeof repo.theme === "string") { obj.theme = repo.theme; added.push("theme " + repo.theme); }
+
+const agentsDir = process.env.KYPI_AGENTS_DIR.replace(/\\/g, "/");
+if (obj.subagents !== undefined && (obj.subagents === null || typeof obj.subagents !== "object" || Array.isArray(obj.subagents))) {
+  console.error("FATAL: " + p + " has a subagents key that is not a JSON object. Refusing to touch it.");
   process.exit(1);
 }
-if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-  console.error("FATAL: " + p + " is not a JSON object. Refusing to touch it.");
-  process.exit(1);
-}
-const next = {
+const subagents = obj.subagents === undefined ? {} : obj.subagents;
+const scanDirs = asList(subagents.agentScanDirs, "subagents.agentScanDirs");
+if (!scanDirs.includes(agentsDir)) { scanDirs.push(agentsDir); added.push("agentScanDirs " + agentsDir); }
+subagents.agentScanDirs = scanDirs;
+obj.subagents = subagents;
+
+const owned = {
   bootstrapVersion: process.env.KYPI_BOOTSTRAP_VERSION,
   hardenedNpmRoot: process.env.KYPI_HARDENED_NPM_ROOT,
   piPinned: process.env.KYPI_PIN,
 };
-if (JSON.stringify(obj.kyPiAgent) === JSON.stringify(next)) {
+obj.kyPiAgent = Object.assign({}, obj.kyPiAgent, owned);
+
+if (JSON.stringify(obj) === before) {
   console.log("  settings.json kyPiAgent already current - unchanged");
   process.exit(0);
 }
-obj.kyPiAgent = next;
-fs.writeFileSync(p, JSON.stringify(obj, null, 2) + "\n", "utf8");
+writeAtomic(p, JSON.stringify(obj, null, 2) + "\n");
 console.log("  settings.json kyPiAgent key merged");
+for (const a of added) { console.log("  settings.json added " + a); }
 '
 }
 
-# Marked-region copy. Replace only between the markers when the target exists,
-# append the block when the markers are absent, create the whole file when the
-# target is absent. Byte-identical on a second run.
+# Byte-compared so a second run writes nothing. A user theme of the same name is
+# replaced: the file is the harness's own.
+install_theme() {
+	_theme_src="$REPO_ROOT/.pi/themes/ky.json"
+	_theme_dst="$PI_AGENT_DIR/themes/ky.json"
+	if [ ! -f "$_theme_src" ]; then
+		printf 'FATAL: missing theme %s\n' "$_theme_src" >&2
+		exit 1
+	fi
+	ensure_agent_dir
+	mkdir -p "$PI_AGENT_DIR/themes"
+	if [ -f "$_theme_dst" ] && cmp -s "$_theme_src" "$_theme_dst"; then
+		printf '  %s already current - unchanged\n' "$_theme_dst"
+		return 0
+	fi
+	cp "$_theme_src" "$_theme_dst.tmp-$$"
+	mv "$_theme_dst.tmp-$$" "$_theme_dst"
+	printf '  wrote %s\n' "$_theme_dst"
+}
+
+# One `pi install npm:<name>@<exact>` per pinned package, user scope, after the
+# hardening assertions have passed.
+install_composed_packages() {
+	if [ "${KYPI_SKIP_INSTALL:-0}" = "1" ]; then
+		printf '  skipped: KYPI_SKIP_INSTALL=1\n'
+		return 0
+	fi
+	if ! command -v pi >/dev/null 2>&1; then
+		printf 'FATAL: pi not found on PATH, so the composed packages cannot be installed.\n' >&2
+		exit 1
+	fi
+	_specs=$(KYPI_REPO_SETTINGS="$REPO_SETTINGS" node -e '
+const fs = require("node:fs");
+const repo = JSON.parse(fs.readFileSync(process.env.KYPI_REPO_SETTINGS, "utf8"));
+for (const entry of repo.packages || []) {
+  const source = typeof entry === "string" ? entry : entry && entry.source;
+  if (typeof source === "string" && /^npm:.+@[0-9]/.test(source)) { console.log(source); }
+}
+')
+	for _spec in $_specs; do
+		printf '  pi install %s\n' "$_spec"
+		pi install "$_spec"
+	done
+}
+
+# Marked-region copy: replace between the markers, append when absent, create
+# when the target is absent. Byte-identical on a second run.
 write_env_template() {
 	_src="$REPO_ROOT/.pi/templates/env.example"
 	_dst="$REPO_ROOT/.env.example"
@@ -536,7 +512,7 @@ write_env_template() {
 		printf 'FATAL: missing template %s\n' "$_src" >&2
 		exit 1
 	fi
-	KYPI_ENV_SRC="$_src" KYPI_ENV_DST="$_dst" node -e '
+	KYPI_ENV_SRC="$_src" KYPI_ENV_DST="$_dst" node -e "$KYPI_ATOMIC_JS"'
 const fs = require("node:fs");
 const START = "# ky-pi-agent managed:start";
 const END = "# ky-pi-agent managed:end";
@@ -547,9 +523,6 @@ if (s < 0 || e < 0) {
   console.error("FATAL: template is missing its managed markers");
   process.exit(1);
 }
-// No trailing newline here. It used to be appended and then stripped again at
-// the replacement site, which read as if the two paths handled trailing
-// newlines differently when they do not. The append path adds it explicitly.
 const block = src.slice(s, e + END.length);
 const dst = process.env.KYPI_ENV_DST;
 let out;
@@ -559,13 +532,8 @@ if (!fs.existsSync(dst)) {
   const cur = fs.readFileSync(dst, "utf8");
   const ds = cur.indexOf(START);
   const de = cur.indexOf(END);
-  // ORDER, NOT MERELY PRESENCE. `ds >= 0 && de >= 0` was satisfied by a file
-  // whose END marker sits ABOVE its START marker - a plausible outcome of a
-  // manual merge or a copy-paste. The two slices then OVERLAP:
-  // cur.slice(0, ds) still contains END, and cur.slice(de + END.length) still
-  // contains START plus everything after it. The result is duplicated content
-  // and duplicated markers, and it is NOT idempotent - every later bootstrap
-  // run grows the file further. This is a tracked file in a public repo.
+  // Presence is not enough: an END above a START makes the slices overlap and
+  // the file grows on every run.
   if (ds >= 0 && de > ds) {
     out = cur.slice(0, ds) + block + cur.slice(de + END.length);
   } else if (ds >= 0 || de >= 0) {
@@ -582,55 +550,25 @@ if (fs.existsSync(dst) && fs.readFileSync(dst, "utf8") === out) {
   console.log("  .env.example already current - unchanged");
   process.exit(0);
 }
-fs.writeFileSync(dst, out, "utf8");
+writeAtomic(dst, out);
 console.log("  .env.example written from .pi/templates/env.example");
 '
 }
 
 # ---------------------------------------------------------------------------
-# Install the two config templates into the directory Pi actually reads
+# models.json and auth.json: the files Pi actually reads
 # ---------------------------------------------------------------------------
-# Pi resolves models.json and auth.json from the AGENT DIRECTORY only -
-# join(getAgentDir(), "models.json") [pi 0.84.1 dist/config.js:423-425], and
-# ~/.pi/agent/auth.json [docs/providers.md:111]. There is no project-scope form
-# of either, so the two files committed under .pi/templates/ are read by nothing
-# until these two functions put them somewhere Pi looks.
+# Pi resolves both from the agent directory only (pi dist/config.js:423-425), so
+# the committed templates are inert until installed here. Both refuse a target
+# that is not valid JSON and report "already current - unchanged" on a no-op.
 #
-# Both follow merge_settings above: read, parse with node, REFUSE to touch a
-# target that is not valid JSON, replace only the key that is ours, and report
-# "already current - unchanged" on a no-op so a second run is byte-identical.
+#   models.json  replaces providers.dashscope, and merges the template's
+#                providers.amazon-bedrock models by id. Every other provider,
+#                model and user edit survives.
+#   auth.json    merge-if-absent per provider key; an existing key is never
+#                modified.
 #
-# The two files get DIFFERENT merge semantics, on purpose:
-#
-#   models.json  key-namespaced REPLACE of providers.dashscope. That key is the
-#                harness's own definition, exactly as settings.json's kyPiAgent
-#                key is, and it must be updatable: the documented remedy when
-#                RB-03-01 cannot resolve the shared host is "set
-#                KYPI_DASHSCOPE_BASE_URL and re-run bootstrap", which a
-#                write-only-when-absent rule would silently ignore. Every other
-#                provider, model override and user edit in the file survives.
-#
-#   auth.json    per-key merge-if-ABSENT. This file may hold the user's live
-#                credentials for every provider they have ever configured, and
-#                clobbering it is the worst outcome in this phase. An existing
-#                key is never modified, never merged into, never reordered.
-#
-# Neither belongs in --check-only (which mutates nothing) or in
-# --assert-hardening (the ordering proof, which must need no network and no
-# templates). Both run in run_full after install_pi: they configure Pi, they do
-# not gate the BOOT-01 hardening ordering.
-#
-# NOTHING HERE WRITES A SECRET. Both templates carry $ENV_VAR references only.
-#
-# THAT IS NOT A REASON TO IGNORE FILE MODES, AND TREATING IT AS ONE WAS A BUG.
-# This script does not write a secret, but it CREATES THE CONTAINER THE SECRETS
-# WILL LIVE IN, and by creating it first it disables Pi's own control: Pi
-# creates ~/.pi/agent 0700 and auth.json 0600 only when they are ABSENT
-# (dist/core/auth-storage.js:21-31). Both creation sites therefore match Pi's
-# modes - see ensure_agent_dir above and the explicit mode on the auth write
-# below. The "0600 is a no-op on Windows" note in docs/RUNBOOK.md (Phase 1
-# machine-state notes) is referenced rather than restated, and is why both are
-# best-effort rather than fatal.
+# Neither writes a secret: the templates hold $ENV_VAR references only.
 merge_models_json() {
 	_src="$REPO_ROOT/.pi/templates/models-template.json"
 	if [ ! -f "$_src" ]; then
@@ -638,22 +576,17 @@ merge_models_json() {
 		exit 1
 	fi
 	ensure_agent_dir
-	# Every value crosses into node through a KYPI_* variable, never through
-	# shell interpolation into the JS source: a base URL is caller-supplied text
-	# and would otherwise be a code-injection seam in this script.
+	# Values cross into node through KYPI_* variables, never by interpolation
+	# into the JS source: a base URL is caller-supplied text.
 	KYPI_MODELS_SRC="$_src" \
 		KYPI_MODELS_DST="$PI_AGENT_DIR/models.json" \
 		KYPI_DASHSCOPE_BASE_URL="${KYPI_DASHSCOPE_BASE_URL:-}" \
-		node -e '
+		node -e "$KYPI_ATOMIC_JS"'
 const fs = require("node:fs");
 const src = process.env.KYPI_MODELS_SRC;
 const dst = process.env.KYPI_MODELS_DST;
 
-// The template carries whole-line // comments deliberately - models.json is
-// comment-stripped by Pi (src/core/model-config.ts:261) and every number in it
-// has to carry its source. JSON.parse does not accept them. The strip is
-// WHOLE-LINE ONLY, which is what the template promises in its own header: a
-// naive strip of every // would eat the https:// inside baseUrl.
+// Whole-line // comments only: a naive strip would eat the https:// in baseUrl.
 let parsed;
 try {
   parsed = JSON.parse(
@@ -671,18 +604,15 @@ if (next === null || typeof next !== "object" || Array.isArray(next)) {
   console.error("FATAL: " + src + " defines no providers.dashscope object. Refusing to guess what to install.");
   process.exit(1);
 }
-// The only value this installer transforms. The committed template carries the
-// shared international host; the workspace-dedicated form names a workspace id,
-// which must never enter a public repository, so it arrives here instead.
-//
-// VALIDATED, BECAUSE THE RUNBOOK TELLS OPERATORS TO TYPE IT UNDER PRESSURE.
-// RB-03-01 makes setting this the first documented remedy, with a copy-paste
-// one-liner. A value that lands as http:// - a typo, or a copied internal
-// gateway - means Pi sends the resolved $DASHSCOPE_API_KEY as a cleartext
-// Authorization: Bearer header on every request, with no signal anywhere:
-// baseUrl is never interpolated and never validated by Pi either
-// (provider-composer.ts:142). A value that is not a URL at all fails much
-// later, inside the adapter, as an opaque fetch error.
+const bedrockNext = parsed.providers["amazon-bedrock"];
+if (bedrockNext !== undefined && (bedrockNext === null || typeof bedrockNext !== "object" || !Array.isArray(bedrockNext.models))) {
+  console.error("FATAL: " + src + " has a providers.amazon-bedrock entry without a models array. Refusing to guess what to install.");
+  process.exit(1);
+}
+
+// The workspace-dedicated host names a workspace id that must never enter a
+// public repo, so it arrives here. It is validated because a typo that lands
+// as http:// would put the bearer key on the wire in cleartext.
 const override = process.env.KYPI_DASHSCOPE_BASE_URL;
 if (override) {
   let parsedUrl;
@@ -719,14 +649,45 @@ if (providers !== undefined && (providers === null || typeof providers !== "obje
   console.error("FATAL: " + dst + " has a providers key that is not a JSON object. Refusing to touch it.");
   process.exit(1);
 }
-if (providers !== undefined && JSON.stringify(providers.dashscope) === JSON.stringify(next)) {
+const outProviders = providers === undefined ? {} : providers;
+let changed = false;
+
+if (JSON.stringify(outProviders.dashscope) === JSON.stringify(next)) {
   console.log("  models.json providers.dashscope already current - unchanged");
-  process.exit(0);
+} else {
+  outProviders.dashscope = next;
+  changed = true;
+  console.log("  models.json providers.dashscope key merged");
 }
-obj.providers = providers === undefined ? {} : providers;
-obj.providers.dashscope = next;
-fs.writeFileSync(dst, JSON.stringify(obj, null, 2) + "\n", "utf8");
-console.log("  models.json providers.dashscope key merged");
+
+if (bedrockNext !== undefined) {
+  const current = outProviders["amazon-bedrock"];
+  if (current !== undefined && (current === null || typeof current !== "object" || Array.isArray(current) ||
+      (current.models !== undefined && !Array.isArray(current.models)))) {
+    console.error("FATAL: " + dst + " has a providers.amazon-bedrock entry that is not an object with a models array. Refusing to touch it.");
+    process.exit(1);
+  }
+  const merged = current === undefined ? Object.assign({}, bedrockNext, { models: [] }) : current;
+  const models = merged.models === undefined ? [] : merged.models;
+  const touched = [];
+  for (const model of bedrockNext.models) {
+    const at = models.findIndex((m) => m && m.id === model.id);
+    if (at < 0) { models.push(model); touched.push(model.id); continue; }
+    if (JSON.stringify(models[at]) !== JSON.stringify(model)) { models[at] = model; touched.push(model.id); }
+  }
+  if (touched.length === 0 && current !== undefined) {
+    console.log("  models.json providers.amazon-bedrock already current - unchanged");
+  } else {
+    merged.models = models;
+    outProviders["amazon-bedrock"] = merged;
+    changed = true;
+    console.log("  models.json providers.amazon-bedrock models merged: " + touched.join(", "));
+  }
+}
+
+if (!changed) { process.exit(0); }
+obj.providers = outProviders;
+writeAtomic(dst, JSON.stringify(obj, null, 2) + "\n");
 '
 }
 
@@ -739,14 +700,13 @@ merge_auth_json() {
 	ensure_agent_dir
 	KYPI_AUTH_SRC="$_src" \
 		KYPI_AUTH_DST="$PI_AGENT_DIR/auth.json" \
-		node -e '
+		node -e "$KYPI_ATOMIC_JS"'
 const fs = require("node:fs");
 const src = process.env.KYPI_AUTH_SRC;
 const dst = process.env.KYPI_AUTH_DST;
 
-// No comment stripping here, in either direction: auth.json is read as strict
-// JSON by Pi, so a template carrying a comment would already be broken and a
-// destination carrying one is not a file this script may silently rewrite.
+// Strict JSON in both directions: Pi reads auth.json strictly, and a
+// destination holding a comment is not a file this script may rewrite.
 let tpl;
 try { tpl = JSON.parse(fs.readFileSync(src, "utf8")); } catch (e) {
   console.error("FATAL: " + src + " is not valid JSON (" + e.message + ").");
@@ -771,26 +731,11 @@ if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
   process.exit(1);
 }
 
-// An entry still carrying an unedited REPLACE_WITH_ placeholder is NOT installed.
-//
-// This is not cosmetic. Pi resolves Bedrock as
-//   credential?.env?.AWS_PROFILE ?? (await env("AWS_PROFILE"))
-// [pi-ai 0.84.1 src/providers/amazon-bedrock.ts:65], i.e. the STORED value wins
-// over the ambient one. Installing REPLACE_WITH_AWS_PROFILE_NAME on a laptop
-// where `export AWS_PROFILE=work` already made Bedrock work therefore does not
-// merely fail to help - it silently breaks a working machine, and every later
-// request resolves a profile that does not exist. docs/RUNBOOK.md RB-03-03
-// step 1 tells the operator to check `echo $AWS_PROFILE`, which is exactly the
-// state this would have shadowed.
-//
-// Skipping leaves the ambient branch in Pi working, and leaves `pi auth login`
-// free to write the real entry. The template still documents the SHAPE; it just
-// stops being installed as though it were configuration.
-//
-// NO APOSTROPHE MAY APPEAR ANYWHERE IN THIS EMBEDDED SCRIPT, comments included:
-// the whole block is a POSIX sh single-quoted string, so one apostrophe ends it
-// and the rest is parsed as shell. `sh -n bin/bootstrap.sh` catches it, and
-// tests/unit/lf-and-shell.test.ts runs that parse over every tracked *.sh.
+// An entry still carrying a REPLACE_WITH_ placeholder is not installed: Pi
+// resolves a stored env.AWS_PROFILE ahead of the ambient one
+// (pi-ai src/providers/amazon-bedrock.ts:65), so the placeholder would shadow a
+// working `export AWS_PROFILE=...`. No apostrophe may appear anywhere in this
+// embedded script, comments included; it is a single-quoted shell string.
 const SENTINEL = "REPLACE_WITH_";
 const carriesSentinel = (node) => {
   if (typeof node === "string") { return node.startsWith(SENTINEL); }
@@ -799,11 +744,6 @@ const carriesSentinel = (node) => {
   return false;
 };
 
-// MERGE-IF-ABSENT, per provider key. An existing entry is left exactly as it
-// was - not merged into, not normalised, not reordered. "Absent" means absent,
-// never "absent or different": a dashscope entry holding the real key must
-// survive a re-run untouched, and so must a provider this template never heard
-// of. [threat T-03-06-01]
 const added = [];
 const skipped = [];
 for (const key of Object.keys(tpl)) {
@@ -822,60 +762,30 @@ if (added.length === 0) {
   console.log("  auth.json already current - unchanged");
   process.exit(0);
 }
-// mode 0600 on CREATION, then an explicit chmod for the update case: `mode` is
-// honoured by open(2) only when the file does not already exist, so a file this
-// script created 0644 on an earlier run would keep that mode forever otherwise.
-// Pi does exactly this pair (dist/core/auth-storage.js:26-30) and is right to:
-// this is the file a credential is about to be written into.
-fs.writeFileSync(dst, JSON.stringify(obj, null, 2) + "\n", { encoding: "utf8", mode: 0o600 });
+// Mode 0600 applies only on creation, so chmod covers a file made looser earlier.
+writeAtomic(dst, JSON.stringify(obj, null, 2) + "\n", 0o600);
 try { fs.chmodSync(dst, 0o600); } catch (e) { /* Windows: toggles the read-only bit only */ }
 console.log("  auth.json provider entries added: " + added.join(", "));
 '
 }
 
 # ---------------------------------------------------------------------------
-# Wire the worktree setup hook into pi-subagents' OWN config file (EXT-02/EXT-08)
+# pi-subagents worktree hook
 # ---------------------------------------------------------------------------
-# pi-subagents@0.49.0 reads NO configuration from `.pi/settings.json` at all --
-# `getConfigPath()` [pi-subagents src/extension/config.ts:90-92] resolves to
-# `join(getAgentDir(), "extensions", "subagent", "config.json")`, a DEDICATED
-# global file this repo does not track (07-09-SUMMARY.md Task 1). Key-namespaced
-# merge, same discipline as merge_settings/merge_models_json above: only the two
-# `worktreeSetupHook*` keys are ever replaced; every other key a user or a later
-# `pi-subagents` `/agent-config` write puts in this file survives untouched.
-#
-# ABSOLUTE PATH, ON PURPOSE. `resolveWorktreeSetupHook`
-# [pi-subagents src/runs/shared/worktree.ts:264-295] resolves a repo-relative
-# hook path against WHATEVER `repoRoot` a session's cwd happens to be in, not
-# against this repository. This config file is written at USER (machine) scope
-# and therefore applies to every repo the operator ever runs Pi in on this
-# machine -- an absolute path is the only form that keeps working outside a
-# ky-pi-agent checkout, and the hook script itself is already repo-agnostic (it
-# reads `repoRoot`/`worktreePath` from the JSON payload pi-subagents gives it on
-# stdin, never from its own location).
-#
-# `agentScope` is deliberately NOT written anywhere by this function. Task 1 of
-# 07-09 read pi-subagents' `ExtensionConfig` interface in full
-# [pi-subagents src/shared/types.ts:1902-1966] and found no `agentScope` config
-# key exists at any scope -- `agentScope` is a PER-INVOCATION parameter on the
-# `subagent` tool's own schema [pi-subagents src/extension/schemas.ts:333],
-# resolved by `resolveExecutionAgentScope()`
-# [pi-subagents src/agents/agent-scope.ts:3-6] to `"both"` whenever a caller
-# (the model) omits it. `.pi/agents/planner.md` is therefore already discovered
-# by default with no configuration write required. See 07-09-SUMMARY.md for the
-# full citation trail and the corrected record against the stale 07-04 decision.
+# pi-subagents reads this dedicated file, not settings.json (src/extension/
+# config.ts:90-92). Only the two worktreeSetupHook keys are replaced; any other
+# key survives. The path is absolute because the file is user scope and applies
+# in every repo. Tab indent matches pi-subagents own saveConfig().
 merge_subagent_config() {
 	ensure_agent_dir
 	_subagent_config_dir="$PI_AGENT_DIR/extensions/subagent"
 	mkdir -p "$_subagent_config_dir"
 	KYPI_SUBAGENT_CONFIG="$_subagent_config_dir/config.json" \
 		KYPI_WORKTREE_HOOK="$REPO_ROOT/.pi/scripts/worktree-setup-hook.mjs" \
-		node -e '
+		node -e "$KYPI_ATOMIC_JS"'
 const fs = require("node:fs");
 const p = process.env.KYPI_SUBAGENT_CONFIG;
-// Normalised here, not by the shell: mirrors install_safety_extension below --
-// a native (non-MSYS) child such as this one receives an auto-converted
-// backslash form for a Windows absolute path argument.
+// A native child receives an auto-converted backslash form of a Windows path.
 const hookPath = process.env.KYPI_WORKTREE_HOOK.replace(/\\/g, "/");
 const timeoutMs = 30000;
 
@@ -896,89 +806,26 @@ if (obj.worktreeSetupHook === hookPath && obj.worktreeSetupHookTimeoutMs === tim
 }
 obj.worktreeSetupHook = hookPath;
 obj.worktreeSetupHookTimeoutMs = timeoutMs;
-// Tab indent, matching pi-subagents own saveConfig()
-// [pi-subagents src/extension/config.ts:104-107] byte-for-byte, so a later
-// in-app config write (e.g. a future `/agent-config` command) is not the first
-// thing to ever reformat this file.
-fs.writeFileSync(p, JSON.stringify(obj, null, "\t") + "\n", "utf8");
+writeAtomic(p, JSON.stringify(obj, null, "\t") + "\n");
 console.log("  subagent config.json worktreeSetupHook key merged: " + p);
 '
 }
 
 # ---------------------------------------------------------------------------
-# Install the safety extension at USER scope, idempotently (SAFE-11)
+# Safety extension at user scope
 # ---------------------------------------------------------------------------
-# Project-scoped extensions never load without an interactive trust grant
-# (RESEARCH.md Pitfall 15): trust resolves `false` with no UI, so a headless
-# subagent silently never loads a project-scoped guard, and the absence reads
-# as "nothing dangerous happened" rather than "the guard was absent". That is
-# exactly the failure signature this function closes.
+# A project-scoped extension never loads headless (trust resolves false with no
+# UI), and the absence reads as "nothing dangerous happened". The user-scope
+# stub loads the checkout's guard regardless of trust.
 #
-# The mechanism is the one 04-01-SUMMARY.md's Wave-0 spike already proved
-# against a REAL spawned `pi` process on Windows -- not re-decided here: a
-# plain re-export stub, `export { default } from "<abs path>";`, loaded
-# through jiti with no `file://` URL and no directory copy needed.
+# The stub imports the target unconditionally: an existence check against the
+# project copy would skip BOTH copies in an untrusted headless run. When the
+# target itself is missing, the stub blocks every tool call instead of loading
+# nothing. Both copies loading is a duplicate hook, which the deferral marker
+# keyed on toolCallId tolerates (docs/SAFETY.md, "Load order is part of this").
 #
-# Every backslash is normalised to a forward slash BEFORE the path is
-# embedded in the generated TypeScript string literal -- `C:\Users\...`
-# inside a TS string literal is a set of escape sequences, not a path, and on
-# Windows that is every path. This is the bootstrap.sh equivalent of the same
-# rule `tests/helpers/session.ts`'s `writeUserScopeShim` states and obeys.
-#
-# Follows write_env_template's idempotency discipline exactly: compute the
-# intended content, compare it byte-for-byte against what is already on disk,
-# and print "already current - unchanged" rather than rewriting.
-#
-# Placement matters: called from run_full() AFTER install_pi, alongside
-# merge_settings/write_env_template/merge_models_json/merge_auth_json -- this
-# function configures Pi, it does not gate the BOOT-01 hardening ordering, so
-# it must never move above install_pi.
-#
-# CR-09 (supersedes CR-06's own note, kept here rather than deleted so the
-# history of the mistake is legible): the stub used to GUARD ITSELF BY
-# EXISTENCE -- `if (existsSync(<cwd>/.pi/extensions/safety/index.ts)) return;`
-# -- reasoning that when THIS repository is the trusted project, Pi ALSO
-# auto-discovers the project-scoped copy at `.pi/extensions/safety/index.ts`,
-# so registering twice would double the `tool_call` hook. That reasoning was
-# wrong: Pi only auto-discovers a project-scoped `.pi/extensions/` copy when
-# the project is TRUSTED [dist/core/package-manager.js:1980,
-# `if (projectTrusted) { addResources("extensions", ...) }`], and headless
-# trust resolves `false` with NO UI bound
-# [dist/core/project-trust.js, `resolveProjectTrusted`: `if
-# (!options.projectTrustContext.hasUI) return false;`] absent a persisted
-# `~/.pi/agent/trust.json` decision. So in every UNTRUSTED headless run rooted
-# at a repository that itself ships a project-scoped copy (`--mode json`,
-# `-p`, a spawned subagent) -- which describes THIS repository on a machine
-# with no trust decision recorded -- the project copy never loads (filtered
-# out for lack of trust) AND the existence check finds the file on disk and
-# returns early, so NEITHER copy registers. Executed: the stub run with `cwd`
-# = this repository's own root registered `[]` tools and `[]` events --
-# exactly the failure signature this function's own docstring, above, says it
-# exists to close. Existence-on-disk is not a valid proxy for "will actually
-# load"; only project TRUST decides that, and this stub has no way to probe
-# trust state.
-#
-# The fix: the stub below ALWAYS imports and calls the real safety extension,
-# unconditionally, with no existence check of any kind. The double-load
-# hazard the existence check was trying to prevent (both copies genuinely
-# loading, in the one case where the project IS trusted and this repository
-# is also the session's own cwd) is real and is accepted rather than
-# "solved" -- a duplicate `tool_call` hook produces duplicate audit rows.
-# CR-11: an earlier version of this comment claimed that was "at worst a
-# duplicate block, never a missed one" -- executed and found FALSE. Both
-# copies' hooks fire for the SAME tool call, and the deferral marker that
-# lets an APPROVED command's re-issue through
-# (`.pi/extensions/safety/approvals.ts#markHookDeferred`, WR-12) used to be
-# keyed on the command alone, so the SECOND copy's hook always saw the marker
-# already claimed and blocked -- permanently defeating the confirm -> approve
-# -> re-issue protocol (SAFE-10) the moment a second copy loaded. That is
-# fixed: the marker is now ALSO keyed on `event.toolCallId`, so every hook of
-# the SAME tool call can defer and only a genuinely different, unconsumed
-# re-issue is refused. See `.pi/extensions/safety/index.ts`'s own CR-06/
-# CR-09/CR-11 docstring section for the other half of this (why the dedupe
-# cannot instead live inside the extension itself, and the full citation
-# trail for the CR-11 fix), and `docs/SAFETY.md`'s "Load order is part of
-# this" section for the published account of the accepted double load.
+# Backslashes are normalised before the path is embedded in a TS string literal,
+# where they would be escape sequences.
 install_safety_extension() {
 	_safety_src="$REPO_ROOT/.pi/extensions/safety/index.ts"
 	if [ ! -f "$_safety_src" ]; then
@@ -991,47 +838,28 @@ install_safety_extension() {
 	mkdir -p "$_safety_dir"
 	KYPI_SAFETY_SRC="$_safety_src" \
 		KYPI_SAFETY_STUB="$_safety_stub" \
-		node -e '
+		node -e "$KYPI_ATOMIC_JS"'
 const fs = require("node:fs");
-// Normalised here, not by the shell: the value arrives from bash, and on
-// Windows a native (non-MSYS) child process such as this one receives an
-// auto-converted backslash form for any argument that looked like an
-// absolute POSIX path. Node itself never introduces the backslashes; this
-// mirrors exactly what writeUserScopeShim (tests/helpers/session.ts) does to
-// a Windows absolute path before it goes into a TS string literal.
 const specifier = process.env.KYPI_SAFETY_SRC.replace(/\\/g, "/");
 const dst = process.env.KYPI_SAFETY_STUB;
+const literal = JSON.stringify(specifier);
 const out = [
   "// Generated by ky-pi-agent bin/bootstrap.sh. See docs/RUNBOOK.md.",
   "//",
-  "// Re-exports the safety extension entry point at USER SCOPE so it loads",
-  "// regardless of project trust (SAFE-11) -- project-scoped extensions never",
-  "// load in a headless subagent, which has no UI to grant trust with.",
-  "//",
-  "// CR-09: this stub ALWAYS imports and calls the real safety extension --",
-  "// no existsSync(...) guard, no globalThis flag, no dedupe of any kind. An",
-  "// earlier shape returned early when a project-scoped copy of the safety",
-  "// extension existed ON DISK at the session own cwd, reasoning that Pi",
-  "// would also auto-discover and load that copy. Wrong: Pi only",
-  "// auto-discovers a project-scoped .pi/extensions/ copy when the project is",
-  "// TRUSTED, and headless trust resolves false with no UI bound absent a",
-  "// persisted decision -- so in an UNTRUSTED headless run rooted at a",
-  "// repository that itself ships a project-scoped copy, the project copy",
-  "// never loaded AND this stub existence check found the file and",
-  "// returned early, so NEITHER copy ever registered the tool_call hook.",
-  "// See bin/bootstrap.sh own CR-09 docstring section for the executed",
-  "// proof and the full citation trail. Removing the guard means BOTH copies",
-  "// genuinely load when the project IS trusted and this repository is also",
-  "// the session own cwd -- a duplicate tool_call hook, duplicate audit",
-  "// rows. That double load is the deliberate, published trade (see",
-  "// docs/SAFETY.md, Load order is part of this): the confirm -> approve ->",
-  "// re-issue protocol (SAFE-10) is proven to survive it -- see",
-  "// .pi/extensions/safety/approvals.ts#markHookDeferred (CR-11), which",
-  "// keys the deferral marker on event.toolCallId so every loaded hook can",
-  "// defer for the SAME tool call while a genuinely unconsumed re-issue",
-  "// still blocks.",
+  "// Loads the safety extension at user scope so it applies regardless of project",
+  "// trust. If the checkout was moved or deleted, every tool call is blocked",
+  "// rather than running unguarded.",
+  "import { existsSync } from \"node:fs\";",
+  "",
   "export default async function (pi) {",
-  "  const mod = await import(" + JSON.stringify(specifier) + ");",
+  "  if (!existsSync(" + literal + ")) {",
+  "    pi.on(\"tool_call\", () => ({",
+  "      block: true,",
+  "      reason: \"ky-safety: the safety extension is missing at \" + " + literal + " + \". Every tool call is blocked. Re-run bin/bootstrap.sh from a ky-pi-agent checkout.\",",
+  "    }));",
+  "    return;",
+  "  }",
+  "  const mod = await import(" + literal + ");",
   "  await mod.default(pi);",
   "}",
   "",
@@ -1040,16 +868,13 @@ if (fs.existsSync(dst) && fs.readFileSync(dst, "utf8") === out) {
   console.log("  " + dst + " already current - unchanged");
   process.exit(0);
 }
-fs.writeFileSync(dst, out, "utf8");
+writeAtomic(dst, out);
 console.log("  wrote " + dst);
 '
 }
 
-# Non-fatal user-scope report for --check-only, mirroring report_user_scope
-# above: absent is "not applied yet" and gets a remedy; PRESENT but pointing
-# at a target that no longer exists (T-04-48 -- a moved or deleted clone) is
-# real breakage and is fatal in every mode, since a stale stub is silently
-# unguarded rather than loudly broken.
+# Absent is "not applied yet"; present but pointing at a missing target is a
+# moved or deleted clone and is fatal in every mode.
 report_safety_extension() {
 	_safety_stub="$PI_AGENT_DIR/extensions/ky-safety/index.ts"
 	if [ ! -f "$_safety_stub" ]; then
@@ -1069,6 +894,7 @@ if (!m) {
 if (!fs.existsSync(m[1])) {
   console.error("FATAL: " + stub + " points at " + m[1] + ", which does not exist.");
   console.error("       This usually means the repository clone that wrote this stub was moved or deleted.");
+  console.error("       Every tool call is blocked until it is rewritten.");
   console.error("       Remedy: run bin/bootstrap.sh with no arguments to rewrite it.");
   process.exit(1);
 }
@@ -1076,24 +902,53 @@ console.log("  " + stub + " -> " + m[1] + " (target exists)");
 '
 }
 
-# ---------------------------------------------------------------------------
-# WR-02: the --check-only counterpart to merge_subagent_config
-# ---------------------------------------------------------------------------
-# `install_safety_extension` has had a paired `report_safety_extension` since
-# T-04-48, with the reasoning stated inline there: "a stale stub is silently
-# unguarded rather than loudly broken". `merge_subagent_config` had no
-# equivalent, and it carries the IDENTICAL hazard in a wider blast radius: it
-# writes an ABSOLUTE path into a USER-scope, machine-wide config file, so if
-# this ky-pi-agent clone is moved or deleted, every subagent worktree spawn on
-# this machine -- in every repository, not just this one -- points at a
-# nonexistent hook. Whether `pi-subagents` then fails loudly or silently
-# degrades is not something this repository controls and is untested here
-# (RB-07-01 leg 2 is OUTSTANDING), which is precisely why the check must be
-# loud on THIS side of the boundary.
-#
-# Exits non-zero on a broken wiring, exactly like report_safety_extension.
-# An ABSENT config is a WARN and not a failure: a machine that has never run
-# the full bootstrap has nothing broken, it has something not yet done.
+# Exactly one safety delivery path per machine. The stub plus a git package of
+# this repo is two diverging copies and fails. A user-level git or local package
+# resolving to this checkout only warns: it double-loads inside this repo.
+report_delivery_paths() {
+	_dp_settings="$PI_AGENT_DIR/settings.json"
+	_dp_stub="$PI_AGENT_DIR/extensions/ky-safety/index.ts"
+	if [ ! -f "$_dp_settings" ]; then
+		printf '  no user settings.json - nothing to compare\n'
+		return 0
+	fi
+	KYPI_DP_SETTINGS="$_dp_settings" KYPI_DP_STUB="$_dp_stub" KYPI_DP_REPO="$REPO_ROOT" node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const file = process.env.KYPI_DP_SETTINGS;
+let obj;
+try { obj = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) {
+  console.error("FATAL: " + file + " is not valid JSON (" + e.message + ").");
+  process.exit(1);
+}
+const list = obj && Array.isArray(obj.packages) ? obj.packages : [];
+const sources = list.map((e) => (typeof e === "string" ? e : e && typeof e.source === "string" ? e.source : ""));
+const norm = (s) => s.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+const repo = norm(process.env.KYPI_DP_REPO);
+const gitRepo = /github\.com[\/:]kaiyitkoh\/ky-pi-agent(\.git)?(@|\/|$)/i;
+const git = sources.filter((s) => gitRepo.test(s));
+const local = sources.filter((s) => {
+  if (/^(npm|git|https?|ssh):/i.test(s) || gitRepo.test(s) || s === "") { return false; }
+  const bare = s.replace(/^local:/i, "");
+  return norm(path.resolve(path.dirname(file), bare)) === repo;
+});
+const stub = fs.existsSync(process.env.KYPI_DP_STUB);
+for (const s of git.concat(local)) {
+  console.log("  WARN user-level package " + s + " loads this checkout, so it double-loads inside this repo");
+}
+if (git.length > 0 && stub) {
+  console.error("FATAL: one delivery path only: the user-scope safety stub and the git package " + git[0] + " are both configured.");
+  console.error("       They are two copies of the guard that can diverge. Keep the stub (bin/bootstrap.sh)");
+  console.error("       or the git package (pi install), never both. Remove one and re-run.");
+  process.exit(1);
+}
+if (git.length === 0 && local.length === 0) { console.log("  one delivery path (no user-level package loads this checkout)"); }
+'
+}
+
+# The --check-only counterpart of merge_subagent_config. The hook path is
+# absolute and user scope, so a moved or deleted clone breaks worktree spawns in
+# every repo on the machine; absent config is a WARN, a dangling path is fatal.
 report_subagent_config() {
 	_sa_cfg="$PI_AGENT_DIR/extensions/subagent/config.json"
 	if [ ! -f "$_sa_cfg" ]; then
@@ -1144,21 +999,25 @@ Usage: sh bin/bootstrap.sh [MODE]
 Modes:
   (no arguments)      Full run. Probes tools, verifies the pinned Pi version is
                       still published, hardens and VERIFIES every npm scope,
-                      then installs Pi, merges settings, writes .env.example,
+                      then installs Pi, merges user settings (composed packages,
+                      builtin disables, theme, agent scan dir), installs the ky
+                      theme and the composed packages, writes .env.example,
                       installs the models.json / auth.json templates, installs
-                      the safety extension at user scope (SAFE-11), and wires
-                      the worktree setup hook into pi-subagents' own config
-                      file (EXT-02/EXT-08) into the agent directory. Safe to
+                      the safety extension at user scope and wires the worktree
+                      setup hook into pi-subagents' own config file. Safe to
                       re-run: every step is idempotent.
+  --global-setup      Asserts the ignore-scripts scopes, then merges user
+                      settings, installs the theme and installs the pinned
+                      composed packages. Touches no credential, model, env or
+                      safety-stub file.
   --check-only        Every probe and every repo-side assertion; mutates
                       nothing. Exits 0 on a clean CI runner. Deterministic
                       output, so two consecutive runs are byte-identical.
                       REQUIRES NETWORK: the published-pin preflight is one of
                       the probes and exits 1 if the registry does not answer.
-  --assert-hardening  Only the three ignore-scripts assertions, including the
-                      user scope. Exits 1 with ignore-scripts on stderr if any
-                      scope is ineffective. This is the BOOT-01 ordering proof
-                      and the runbook re-check, and it needs no network.
+  --assert-hardening  Only the ignore-scripts assertions, including the user
+                      scope. Exits 1 with ignore-scripts on stderr if any
+                      scope is ineffective. Needs no network.
   --check-version     Only the published-pin preflight.
   --help              This message.
 
@@ -1167,7 +1026,7 @@ Environment:
                        Defaults to \$HOME/.pi/agent. Redirect it to point every
                        user-scope path at a temp directory.
   KYPI_PI_PINNED       Override the pinned Pi version (default ${PI_PINNED}).
-  KYPI_SKIP_INSTALL    Set to 1 to skip the global npm install step.
+  KYPI_SKIP_INSTALL    Set to 1 to skip every npm and pi install step.
   KYPI_DASHSCOPE_BASE_URL
                        DashScope endpoint written into the installed models.json.
                        Set it to the workspace-dedicated regional form - a host
@@ -1205,16 +1064,32 @@ run_check_only() {
 	report_user_scope
 	printf 'Safety extension (user scope):\n'
 	report_safety_extension
+	printf 'Safety delivery path:\n'
+	report_delivery_paths
 	printf 'Worktree setup hook (user scope, machine-wide):\n'
 	report_subagent_config
 	printf 'check-only complete.\n'
 }
 
-# BOOT-01 ORDERING CLAUSE, ENFORCED HERE.
+run_global_setup() {
+	sanitise_npm_env
+	printf 'ky-pi-agent bootstrap --global-setup\n'
+	printf 'Node:\n'
+	require_node
+	printf 'Hardening assertions (ignore-scripts) - must all pass before any install:\n'
+	assert_repo_scopes
+	assert_user_scope
+	printf 'Configuration:\n'
+	merge_settings
+	install_theme
+	printf 'Composed packages:\n'
+	install_composed_packages
+	printf 'Global setup complete.\n'
+}
+
 # Every hardening assertion, and the write that makes the user scope pass one,
-# happen BEFORE install_pi. Do not reorder these lines: an install that has
-# already run lifecycle scripts cannot be retroactively protected, and this is
-# the only place in the harness where that ordering is expressible.
+# precedes install_pi and install_composed_packages. Do not reorder: an install
+# that already ran lifecycle scripts cannot be retroactively protected.
 run_full() {
 	sanitise_npm_env
 	printf 'ky-pi-agent bootstrap\n'
@@ -1231,11 +1106,14 @@ run_full() {
 	install_pi
 	printf 'Configuration:\n'
 	merge_settings
+	install_theme
 	write_env_template
 	merge_models_json
 	merge_auth_json
 	install_safety_extension
 	merge_subagent_config
+	printf 'Composed packages:\n'
+	install_composed_packages
 
 	printf 'Summary:\n'
 	printf '  repo root          %s\n' "$REPO_ROOT"
@@ -1245,12 +1123,8 @@ run_full() {
 	printf 'Bootstrap complete. Re-check any time with: sh bin/bootstrap.sh --assert-hardening\n'
 }
 
-# `case "${1:-}"` inspects $1 only, so every later operand would be silently
-# discarded: `--check-only --assert-hardening` would run check-only and drop the
-# ordering proof without a word, and `--check-only --chek-only` would not even
-# catch the typo the single-argument form does. This script's entire contract is
-# WHICH assertions ran, so a dropped mode flag is a false report of what was
-# checked, not a convenience.
+# `case "${1:-}"` sees $1 only, so a second operand would be dropped silently
+# and the report of which assertions ran would be false.
 if [ "$#" -gt 1 ]; then
 	printf 'FATAL: this script takes at most one mode argument; got %s: %s\n' "$#" "$*" >&2
 	usage >&2
@@ -1260,6 +1134,9 @@ fi
 case "${1:-}" in
 "")
 	run_full
+	;;
+--global-setup)
+	run_global_setup
 	;;
 --check-only)
 	run_check_only

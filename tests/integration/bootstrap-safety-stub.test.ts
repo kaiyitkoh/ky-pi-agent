@@ -672,4 +672,52 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 		},
 		TIMEOUT_MS,
 	);
+
+	it(
+		"case 9 -- a stub whose target checkout is gone blocks every tool call instead of loading nothing",
+		() => {
+			const agentDir = tempDir("kypi-agentdir-");
+			const logDir = tempDir("kypi-log-");
+			const log = join(logDir, "npm.log").replace(/\\/g, "/");
+			const repoCopy = bootstrapRepoCopy();
+
+			const run = withStubBin({ npm: npmStub(log) }, (env) =>
+				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
+			);
+			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+
+			const stub = stubPath(agentDir).replace(/\\/g, "/");
+			rmSync(join(repoCopy.root, ".pi", "extensions", "safety"), { recursive: true, force: true });
+
+			const driverPath = join(tempDir("kypi-missing-driver-"), "driver.mjs");
+			writeFileSync(
+				driverPath,
+				[
+					`import { createJiti } from ${JSON.stringify(JITI_ENTRY)};`,
+					"const handlers = {};",
+					"const pi = { on: (name, fn) => { handlers[name] = fn; }, registerTool: () => {} };",
+					"const jiti = createJiti(import.meta.url, { moduleCache: false });",
+					`const mod = await jiti.import(${JSON.stringify(stub)}, { default: true });`,
+					"await mod(pi);",
+					"const outcome = handlers.tool_call ? await handlers.tool_call({ toolName: \"read\", input: {} }, {}) : null;",
+					"process.stdout.write(JSON.stringify(outcome));",
+					"",
+				].join("\n"),
+				"utf-8",
+			);
+			const result = spawnSync("node", [driverPath], {
+				cwd: repoCopy.root,
+				encoding: "utf-8",
+				timeout: TIMEOUT_MS,
+				windowsHide: true,
+			});
+			expect(result.status, `stderr:\n${result.stderr}`).toBe(0);
+			const outcome = JSON.parse(result.stdout) as { block?: boolean; reason?: string } | null;
+			expect(outcome, "the stub must register a tool_call handler when its target is missing").not.toBeNull();
+			expect(outcome?.block).toBe(true);
+			expect(outcome?.reason).toContain("bootstrap.sh");
+			expect(outcome?.reason).toContain("index.ts");
+		},
+		TIMEOUT_MS,
+	);
 });

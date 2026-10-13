@@ -27,7 +27,7 @@
  * timestamp, a duration or a run counter from ever creeping into it.
  */
 import { spawnSync } from "node:child_process";
-import { mkdtempSync, readFileSync, readdirSync, rmSync, statSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -327,5 +327,72 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(envAfterSecond, ".env.example must be byte-identical across two runs").toBe(
 			envAfterFirst,
 		);
+	}, TIMEOUT_MS);
+
+	function writeUserSettings(agentDir: string, packages: unknown[]): void {
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages }, null, 2), "utf-8");
+	}
+
+	function writeStub(agentDir: string): void {
+		const dir = join(agentDir, "extensions", "ky-safety");
+		mkdirSync(dir, { recursive: true });
+		const target = join(repoRoot(), ".pi", "extensions", "safety", "index.ts").replace(/\\/g, "/");
+		writeFileSync(
+			join(dir, "index.ts"),
+			`export default async function (pi) {\n  const mod = await import(${JSON.stringify(target)});\n  await mod.default(pi);\n}\n`,
+			"utf-8",
+		);
+	}
+
+	function checkOnlyStubbed(agentDir: string): Run {
+		const logDir = tempDir("kypi-log-");
+		const log = join(logDir, "npm.log").replace(/\\/g, "/");
+		return withStubBin({ npm: npmStub(log) }, (env) =>
+			runBootstrap(["--check-only"], { agentDir, env }),
+		);
+	}
+
+	it("case 5 -- the stub plus a git ky-pi-agent package is two delivery paths and fails", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		writeStub(agentDir);
+		writeUserSettings(agentDir, ["git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0"]);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status).toBe(1);
+		expect(run.stderr).toContain("one delivery path");
+	}, TIMEOUT_MS);
+
+	it("case 6 -- a git ky-pi-agent package without the stub warns about the double load and exits 0", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		writeUserSettings(agentDir, ["git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0"]);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toMatch(/WARN user-level package git:github\.com\/kaiyitkoh\/ky-pi-agent@v1\.0\.0 .*double-loads/);
+	}, TIMEOUT_MS);
+
+	it("case 7 -- a local package entry resolving to this checkout warns, with or without the stub", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		writeStub(agentDir);
+		writeUserSettings(agentDir, [repoRoot().replace(/\\/g, "/")]);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain("double-loads");
+	}, TIMEOUT_MS);
+
+	it("case 8 -- unrelated user packages produce the single-path line and no warning", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		writeStub(agentDir);
+		writeUserSettings(agentDir, ["npm:foo@1.0.0"]);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain("one delivery path (no user-level package loads this checkout)");
+		expect(run.stdout).not.toContain("double-loads");
 	}, TIMEOUT_MS);
 });
