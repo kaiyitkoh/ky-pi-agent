@@ -250,6 +250,33 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 	return strongerOf(strongest, classifyInvocationPaths(invocation, executable, facts));
 }
 
+const sensitiveRootReason = (canonicalPath: string): string =>
+	`"${canonicalPath}" is at or above a sensitive location -- a recursive search rooted here would expose its contents`;
+
+const GREP_RECURSIVE = /^(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive|--directories=recurse)$/;
+
+/** Executables that walk a directory tree, with the flag that makes them recurse (`true`: always) and whether they default to `.`. */
+const RECURSIVE_WALKERS: ReadonlyMap<string, { readonly when: RegExp | true; readonly implicitDot: boolean; readonly pattern?: true }> = new Map([
+	...["rg", "ag"].map((n) => [n, { when: true, implicitDot: true, pattern: true }] as const),
+	...["find", "fd"].map((n) => [n, { when: true, implicitDot: true }] as const),
+	...["grep", "egrep", "fgrep"].map((n) => [n, { when: GREP_RECURSIVE, implicitDot: true, pattern: true }] as const),
+	["ls", { when: /^(-[a-zA-Z]*R[a-zA-Z]*|--recursive)$/, implicitDot: true }],
+	["cp", { when: /^(-[a-zA-Z]*[rRa][a-zA-Z]*|--recursive|--archive)$/, implicitDot: false }],
+	["rsync", { when: /^(-[a-zA-Z]*[ra][a-zA-Z]*|--recursive|--archive)$/, implicitDot: false }],
+	["zip", { when: /^(-[a-zA-Z]*r[a-zA-Z]*|--recurse-paths)$/, implicitDot: false }],
+	["tar", { when: true, implicitDot: false }],
+]);
+
+/** The directories a recursive walker descends from; a pattern-first search with no path operand walks `.`. */
+function recursiveRoots(executable: string, args: readonly string[]): string[] {
+	const walker = RECURSIVE_WALKERS.get(executable);
+	if (walker === undefined || (walker.when !== true && !args.some((a) => (walker.when as RegExp).test(a)))) return [];
+	const positionals = args.filter((a) => !a.startsWith("-"));
+	const explicitPattern = args.some((a) => /^(-e|-f|--regexp|--file)(=|$)/.test(a));
+	const paths = walker.pattern === true && !explicitPattern ? positionals.slice(1) : positionals;
+	return paths.length === 0 && walker.implicitDot ? ["."] : paths;
+}
+
 /** Every path an invocation names, read-classified in the session cwd and in the directory its `cd`s lead to (a subshell `cd` does not persist). */
 function classifyInvocationPaths(invocation: CanonicalInvocation, executable: string, facts: PolicyFacts): Verdict {
 	const relative = [...invocation.args.filter((a) => !a.startsWith("-")), ...(invocation.redirectReads ?? []), ...(invocation.redirectWrites ?? [])];
@@ -268,6 +295,10 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 			const globVerdict = GLOB_CHARS.test(candidate) && !candidate.startsWith("-") ? classifyGlobArg(canonical, pathFacts) : pathVerdict;
 			const blocked = [pathVerdict, globVerdict].find((v) => v.kind === "block");
 			if (blocked?.kind === "block") return { kind: "block", reason: blocked.reason };
+		}
+		for (const root of recursiveRoots(executable, invocation.args)) {
+			const canonical = canonicalOf(root, facts, cwd);
+			if (isSensitiveSearchRoot(canonical, pathFacts)) return { kind: "block", reason: sensitiveRootReason(canonical) };
 		}
 	}
 	return { kind: "allow" };
@@ -346,12 +377,7 @@ function evaluateSearchRootField(extraction: OptionalFieldExtraction, facts: Pol
 	const pathFacts = pathFactsOf(facts);
 	const fileVerdict = classifyPathRead(canonicalPath, pathFacts);
 	if (fileVerdict.kind === "block") return { kind: "block", reason: fileVerdict.reason };
-	if (isSensitiveSearchRoot(canonicalPath, pathFacts)) {
-		return {
-			kind: "block",
-			reason: `"${canonicalPath}" is at or above a sensitive location -- a recursive search rooted here would expose its contents`,
-		};
-	}
+	if (isSensitiveSearchRoot(canonicalPath, pathFacts)) return { kind: "block", reason: sensitiveRootReason(canonicalPath) };
 	return { kind: "allow" };
 }
 

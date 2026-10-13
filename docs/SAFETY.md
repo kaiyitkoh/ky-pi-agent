@@ -127,6 +127,11 @@ docstring for the structural argument). Concretely, it catches:
   covered case (see Known bypasses, EV-65). A search-root spelling that does
   not share `$HOME`'s own root — a UNC alias, or a different profile's
   directory — is a separate, narrower published gap (EV-73, EV-74).
+  The same root check applies to bash commands that walk a tree: `rg`, `ag`,
+  `find`, `fd`, `tar`, and `grep -r`, `ls -R`, `cp -r`, `rsync -r`, `zip -r`,
+  on each path operand (not the search pattern), or on the directory the
+  command runs in when a search names no path, so `grep -r PRIVATE ~` and
+  `cd ~ && rg token` block.
   `grep`/`find`/`ls` are three of Pi's own seven built-in tools and are
   evaluated by the same `policy.ts#evaluate()` switch `bash`/`read`/`write`/
   `edit` go through — but, unlike those four, this extension does not

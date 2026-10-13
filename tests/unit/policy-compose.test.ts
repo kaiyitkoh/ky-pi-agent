@@ -555,6 +555,43 @@ const ROWS: readonly Row[] = [
 		expected: "allow",
 	},
 	{
+		name: "recursive grep rooted at home -- block",
+		toolName: "bash",
+		input: { command: "grep -rn PRIVATE ~" },
+		expected: "block",
+		reasonIncludes: "recursive search",
+	},
+	{
+		name: "rg into ~/.aws -- block",
+		toolName: "bash",
+		input: { command: "rg secret ~/.aws" },
+		expected: "block",
+	},
+	{
+		name: "tar of home -- block, it reads every file below",
+		toolName: "bash",
+		input: { command: "tar czf out.tgz ~" },
+		expected: "block",
+	},
+	{
+		name: "recursive grep inside the project -- allow (negative control)",
+		toolName: "bash",
+		input: { command: "grep -rn foo src" },
+		expected: "allow",
+	},
+	{
+		name: "rg with no path in the project -- allow (negative control)",
+		toolName: "bash",
+		input: { command: "rg -i foo" },
+		expected: "allow",
+	},
+	{
+		name: "non-recursive grep naming home as a file operand -- allow (negative control)",
+		toolName: "bash",
+		input: { command: "grep foo ~/notes.txt" },
+		expected: "allow",
+	},
+	{
 		name: "cd into a project directory, then a relative read -- allow (negative control)",
 		toolName: "bash",
 		input: { command: "cd src && cat index.ts" },
