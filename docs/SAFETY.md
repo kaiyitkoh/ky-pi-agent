@@ -495,7 +495,26 @@ the corpus does not know about.
 | EV-73 | sensitive-read | `grep { path: "\\\\localhost\\C$\\Users\\tester\\.aws" }` (UNC alias of the user's OWN `~/.aws`) | WR-14's `$HOME`-anchoring fix (`isSensitiveSearchRoot`) compares `rootedSegmentsOf().root` first — a UNC root never equals a drive-letter root, so a UNC spelling of the SAME real directory fails the home-anchored check outright, even though it resolves to the identical directory on disk. The single-FILE rule still fires for the file itself (`.../.aws/credentials`). | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |
 | EV-74 | sensitive-read | `grep { path: "C:/Users/otheruser/.aws" }` (a DIFFERENT profile's credentials dir) | Before WR-14, the segment check matched `.aws`/`.kube`/`.ssh`/`.gnupg` ANYWHERE, unanchored, so this blocked incidentally. WR-14 anchored the check to the fixture's own `$HOME` to fix a real false positive (an in-project path merely containing one of those segment names); a genuinely different user profile's own secrets directory shares neither the fixture home's root nor reaches it, so it is no longer caught. | Nothing else on this machine — a narrowing introduced by WR-14's own fix, published rather than silently reopened. |
 
-`openspec` is a guarded verb, so `sh -c "openspec update"`, `xargs openspec init` and `node .../openspec.js update` are refused by the shell-runner rule, and `npx`, `pnpx`, `bunx`, `npm exec`, `pnpm dlx|exec`, `yarn dlx|exec` and `bun x` resolve to the package binary (`@fission-ai/openspec@x.y.z` classifies as `openspec`), including after the manager's global options (`npm --yes exec`, `pnpm -C . dlx`). An unknown global option before a runner subcommand is treated as an unresolvable wrapper. A package manager running a bare script or binary name (`yarn openspec update`) is EV-94 above. A script file handed to an interpreter is opaque, so its name is only tested when it starts with a guarded verb: an agent running `sh scripts/openspec-setup.sh` is refused (run that script from your own terminal), while `node scripts/gen-openspec.mjs` is not. `find` and `fd` are tested only on the words after `-exec`/`-x`, so `find openspec -name '*.md' -exec wc -l {} +` is not refused. A guarded word followed by a path separator is a directory, not a verb, so a runner over paths under `openspec/` (`ls openspec/changes | xargs -I{} cat openspec/changes/{}/proposal.md`) is not refused. Bash writes are not path-classified, so the archive skill's `mv openspec/changes/x openspec/changes/archive/x` is allowed by the absence of a rule, not by a named exemption.
+### Accepted residual: code the model writes and an ordinary command runs
+
+A command guard reads command lines. Code the model writes with the
+`write` or `edit` tool (a test file, a `Makefile` target, a `package.json`
+script, a build or test config) and that a later, ordinary command runs
+(`npm test`, `make`, `pytest`, `npm run build`) is not in any command line
+the guard sees, so it cannot be classified. This whole class is accepted and
+is not enumerated; EV-39, EV-40, EV-94 and EV-166 are instances of it. The
+compensating controls are:
+
+- GitLab server-side protection of `main`, which refuses a push to it
+  whatever program sends the push;
+- the protected-path write rules, which block or ask a human before any tool
+  writes a git hook, a CI file, a hook manager's config, a shell rc file,
+  extension code or an agent definition;
+- the audit log (`.pi/extensions/safety/audit.ts`), which records every
+  allowed and blocked tool call, so a write and the run that used it can be
+  reviewed afterwards.
+
+`openspec` is a guarded verb, so `sh -c "openspec update"`, `xargs openspec init` and `node .../openspec.js update` are refused by the shell-runner rule, and `npx`, `pnpx`, `bunx`, `npm exec`, `pnpm dlx|exec`, `yarn dlx|exec` and `bun x` resolve to the package binary (`@fission-ai/openspec@x.y.z` classifies as `openspec`), including after the manager's global options (`npm --yes exec`, `pnpm -C . dlx`). An unknown global option before a runner subcommand is treated as an unresolvable wrapper. A package manager running a bare script or binary name (`yarn openspec update`) is EV-94 above. A script file handed to an interpreter is opaque, so its name is only tested when it starts with a guarded verb: an agent running `sh scripts/openspec-setup.sh` is refused (run that script from your own terminal), while `node scripts/gen-openspec.mjs` is not. `find` and `fd` are tested only on the words after `-exec`/`-x`, so `find openspec -name '*.md' -exec wc -l {} +` is not refused. A guarded word followed by a path separator is a directory, not a verb, so a runner over paths under `openspec/` (`ls openspec/changes | xargs -I{} cat openspec/changes/{}/proposal.md`) is not refused. The archive skill's `mv openspec/changes/x openspec/changes/archive/x` is allowed because the write classifier finds both paths inside the project, not by a named exemption.
 
 ## Pi 1.x tool paths (Phase 08.1)
 
