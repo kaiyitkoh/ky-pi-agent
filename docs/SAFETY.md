@@ -46,21 +46,35 @@ docstring for the structural argument). Concretely, it catches:
 - **Scripts the guard cannot read** (cause `generated-script`) — a code
   runner (`sh`, `bash`, `zsh`, `dash`, `ksh`, `fish`, `busybox`, `pwsh`,
   `powershell`, `cmd`, `python*`, `node`, `deno`, `bun`, `perl`, `ruby`,
-  `php`, `lua`, `Rscript`, `osascript`, `parallel`) is refused whatever its
-  arguments when its stdin is a pipe (heredocs and here-strings are refused
-  everywhere), when any argument is a stdin alias (`-`, `/dev/stdin`,
-  `/dev/fd/N`, `/proc/<pid>/fd/N`), and when any argument or input redirect
-  names a file the same command writes, whatever the file is called
-  (`echo ... > p; sh p`, `tee p && sh p`, `cp p.sh q; sh q`). A file run by
-  path (`./x.sh`) or sourced (`source x.sh`) after the same command wrote it
-  is refused too. So `echo 'git push ...' | sh`, `| bash /dev/stdin`,
-  `| sh -c sh`, `curl ... | sh` and `base64 -d | sh` all block. Files are
-  matched by basename, because a `cd` may sit between. Known false
-  positives: `cat data.json | python script.py` and
-  `curl ... | python -m json.tool` are refused; pass the data as a file
-  argument, redirect it from a file (`python solve.py < input.txt`), or use
-  `jq`. A script written by an earlier, separate tool call stays opaque
-  (EV-166).
+  `php`, `lua`, `Rscript`, `osascript`, `parallel`) on a pipe is refused only
+  when its stdin would be its code. With a script file, a `-m` module or
+  inline `-c`/`-e` code that does not evaluate its input, the pipe is data
+  and the command is allowed (`cat data.json | python script.py`,
+  `curl ... | python -m json.tool`, `X | node s.js`, `X | bash s.sh`,
+  `X | python -c "import sys,json; print(json.load(sys.stdin))"`). Refused:
+  a bare `python`/`node`/`perl`/`ruby` or any `sh`/`bash` with no script
+  (`curl ... | sh`), `bash -s`, any `-i`, `PYTHONINSPECT=` (prefix, `env` or
+  an earlier statement), a script operand of `-`, `/dev/stdin`, `/dev/fd/N` or
+  `/proc/<pid>/fd/N`, an interpreter option the guard has no grammar for
+  before the script, `python -m code|pdb|IPython|runpy`, perl/ruby `-x`,
+  `deno repl`, `| sh -c sh` and `| bash -c 'bash -s'` (a shell started by a
+  piped shell), and piped inline code that evaluates its input (`eval`,
+  `exec`, `compile`, `Function`, `vm`, `pickle`, `marshal`, `yaml`, a bare
+  `load(`, perl `do`). `cmd`, `pwsh`, `powershell`, `busybox`, `parallel` and
+  `osascript` on a pipe are refused whatever their arguments. Any argument
+  that is a stdin alias, and any argument or input redirect naming a file
+  the same command writes, is refused whether or not there is a pipe
+  (`echo ... > p; sh p`, `tee p && sh p`, `cp p.sh q; sh q`); `python -m foo`
+  counts `foo.py`, `foo` and anything under `foo/` as written files. A file
+  run by path (`./x.sh`) or sourced (`source x.sh`) after the same command
+  wrote it is refused too. Heredocs and here-strings are refused everywhere.
+  Files are matched by basename, because a `cd` may sit between. Known false
+  positives: `X | python script.py -` (a `-` argument anywhere is refused)
+  and an unknown interpreter option before the script; pass the data as a
+  file argument or redirect it from a file. Residual: inline code on a pipe is
+  checked against a word list of evaluators and deserializers, so an
+  evaluator reached by an unlisted name is not seen. A script written by an
+  earlier, separate tool call stays opaque (EV-166).
 - **Programs that take a command string** (cause `command-string-program`)
   — refused whatever the string holds: an `awk`/`gawk`/`mawk`/`nawk`
   program with `system(`, `| getline`, `|&`, `@load` or a print into a
@@ -189,7 +203,9 @@ docstring for the structural argument). Concretely, it catches:
   |cordon|exec` all require confirmation before they change a live resource;
   `aws sts get-caller-identity`, `aws s3 ls`, `kubectl get`, and `terraform
   plan` stay allowed so ordinary orientation does not train reflexive
-  approval.
+  approval. terraform's `-chdir=DIR`, `-version` and `-help` are read before the
+  subcommand, so `terraform -chdir=infra plan` allows and `-chdir=infra apply`
+  still confirms.
 - **OpenSpec CLI** — `openspec list|view|show|validate|status|instructions` and the other read-only verbs are allowed, and so is `openspec archive`: it writes only inside `openspec/`, and it is a named allow row rather than a path exemption. `init` and `update` (they write agent config directories, and `update` can offer an unpinned global self-upgrade), `completion` (edits shell rc files), `feedback` (posts to GitHub), `context --code-workspace` (writes a workspace file at an arbitrary path), the state-changing second words of `config`, `store` and `workset`, a bare `openspec`, and any unknown subcommand require confirmation.
 - **Deferred-detonation writes** — a `write`/`edit` into
   a git hook (`.git/hooks/*`, `.git/modules/*/hooks/*`, or the directory

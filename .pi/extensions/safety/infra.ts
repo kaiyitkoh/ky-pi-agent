@@ -155,7 +155,12 @@ function terraformSecretDump(key: string, args: readonly string[]): InfraVerdict
 	return dumps ? sensitiveRead(`"terraform ${key}" in raw or JSON form prints state values, including secrets, into model context`) : undefined;
 }
 
-function classifyTerraformInvocation(args: readonly string[]): InfraVerdict {
+function classifyTerraformInvocation(rawArgs: readonly string[]): InfraVerdict {
+	// terraform's only global options precede the subcommand.
+	let skip = 0;
+	while (/^--?chdir=/.test(rawArgs[skip] ?? "")) skip += 1;
+	const args = rawArgs.slice(skip);
+	if (/^(-v|-version|--version|-h|-help|--help)$/.test(args[0] ?? "")) return { kind: "allow" };
 	const key = subcommandKey(args, wordSet("state workspace"));
 	if (key === undefined) return confirm('"terraform" with no subcommand -- fail closed to confirmation');
 	const dump = terraformSecretDump(key, args);

@@ -138,6 +138,16 @@ const ROWS: readonly Row[] = [
 	{ command: "terraform workspace select x", expected: "allow", why: "two-word subcommand: read-only" },
 	{ command: "terraform workspace list", expected: "allow", why: "two-word subcommand: read-only" },
 
+	{ command: "terraform -chdir=infra plan", expected: "allow", why: "-chdir is a global option read before the subcommand" },
+	{ command: "terraform -chdir=infra validate", expected: "allow", why: "-chdir is a global option read before the subcommand" },
+	{ command: "terraform -chdir=a -chdir=b fmt", expected: "allow", why: "repeated global options are all skipped" },
+	{ command: "terraform -version", expected: "allow", why: "prints the version and exits" },
+	{ command: "terraform -help", expected: "allow", why: "prints help and exits" },
+	{ command: "terraform -chdir=infra apply", expected: "confirm", why: "the subcommand is still classified after -chdir" },
+	{ command: "terraform -chdir=infra state rm x", expected: "confirm", why: "two-word subcommand after -chdir" },
+	{ command: "terraform -chdir=infra", expected: "confirm", why: "no subcommand fails closed" },
+	{ command: "terraform -chdir=infra show -json", expected: "sensitive-read", why: "the state dump is still detected after -chdir" },
+
 	// -------------------------------------------------------------------------
 	// terraform -- unknown subcommand, fail closed to CONFIRM (not a hard block)
 	// -------------------------------------------------------------------------

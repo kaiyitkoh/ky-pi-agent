@@ -48,6 +48,53 @@ interface DenyRow {
 	readonly why: string;
 }
 
+const PIPE_ROWS: readonly DenyRow[] = [
+	{ label: "piped data: curl -s https://example.invalid | python -m json.tool", cmd: "curl -s https://example.invalid | python -m json.tool", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | python3 -u -W ignore script.py", cmd: "cat x | python3 -u -W ignore script.py", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | node s.js", cmd: "cat x | node s.js", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | node --no-warnings s.js", cmd: "cat x | node --no-warnings s.js", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | bash s.sh", cmd: "cat x | bash s.sh", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | bash -e s.sh", cmd: "cat x | bash -e s.sh", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | python -c \"import sys,json; print(json.load(sys.stdin))\"", cmd: "cat x | python -c \"import sys,json; print(json.load(sys.stdin))\"", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | perl -ne 'print if /a/'", cmd: "cat x | perl -ne 'print if /a/'", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | ruby -e 'puts STDIN.read.upcase'", cmd: "cat x | ruby -e 'puts STDIN.read.upcase'", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | sh -c 'cat > out.txt'", cmd: "cat x | sh -c 'cat > out.txt'", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat x | deno run s.ts", cmd: "cat x | deno run s.ts", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: python -m foo", cmd: "python -m foo", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "piped data: cat d | python -m foo", cmd: "cat d | python -m foo", expected: "ok", why: "stdin is data, not the interpreter's code" },
+	{ label: "pipe grammar: cat x | python", cmd: "cat x | python", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | node", cmd: "cat x | node", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | perl", cmd: "cat x | perl", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | ruby", cmd: "cat x | ruby", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | python -u", cmd: "cat x | python -u", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | bash -s", cmd: "cat x | bash -s", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | bash -s arg", cmd: "cat x | bash -s arg", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | bash -i s.sh", cmd: "cat x | bash -i s.sh", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | python -i s.py", cmd: "cat x | python -i s.py", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | perl -pi -e 's/a/b/'", cmd: "cat x | perl -pi -e 's/a/b/'", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | PYTHONINSPECT=1 python s.py", cmd: "cat x | PYTHONINSPECT=1 python s.py", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | env PYTHONINSPECT=1 python s.py", cmd: "cat x | env PYTHONINSPECT=1 python s.py", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: PYTHONINSPECT=1; cat x | python s.py", cmd: "PYTHONINSPECT=1; cat x | python s.py", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | python -", cmd: "cat x | python -", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | python --frob s.py", cmd: "cat x | python --frob s.py", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | node --frob s.js", cmd: "cat x | node --frob s.js", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | perl -x", cmd: "cat x | perl -x", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | deno repl", cmd: "cat x | deno repl", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | ruby -e 'eval STDIN.read'", cmd: "cat x | ruby -e 'eval STDIN.read'", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | perl -e 'eval join \"\", <STDIN>'", cmd: "cat x | perl -e 'eval join \"\", <STDIN>'", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | node -e \"process.stdin.on('data', d => (0,eval)(String(d)))\"", cmd: "cat x | node -e \"process.stdin.on('data', d => (0,eval)(String(d)))\"", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | python -c \"import pickle,sys; pickle.loads(sys.stdin.buffer.read())\"", cmd: "cat x | python -c \"import pickle,sys; pickle.loads(sys.stdin.buffer.read())\"", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | cmd //c s.bat", cmd: "cat x | cmd //c s.bat", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | pwsh -File s.ps1", cmd: "cat x | pwsh -File s.ps1", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | busybox sh s.sh", cmd: "cat x | busybox sh s.sh", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | osascript s.scpt", cmd: "cat x | osascript s.scpt", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | python -m code", cmd: "cat x | python -m code", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: cat x | python s.py -", cmd: "cat x | python s.py -", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: echo x > foo.py; cat d | python -m foo", cmd: "echo x > foo.py; cat d | python -m foo", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: echo x > foo/__main__.py; python -m foo", cmd: "echo x > foo/__main__.py; python -m foo", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+	{ label: "pipe grammar: echo x > foo.py; python -m foo.bar", cmd: "echo x > foo.py; python -m foo.bar", expected: "refused", cause: "generated-script", why: "stdin may be read as code, or the module was just written" },
+];
+
 const TABLE: readonly DenyRow[] = [
 	{
 		label: "command substitution $(...)",
@@ -411,16 +458,14 @@ const TABLE: readonly DenyRow[] = [
 	{
 		label: "a piped interpreter running a script file",
 		cmd: "cat data.json | python script.py",
-		expected: "refused",
-		cause: "generated-script",
-		why: "the script may read its code from the pipe; a code runner's stdin is never a pipe",
+		expected: "ok",
+		why: "the pipe is the script's data; its code comes from the file",
 	},
 	{
-		label: "a piped interpreter with inline code",
+		label: "a piped interpreter with inline code that does not evaluate its input",
 		cmd: "echo | node -e 'process.stdin.pipe(process.stdout)'",
-		expected: "refused",
-		cause: "generated-script",
-		why: "inline code can eval what it reads from the pipe",
+		expected: "ok",
+		why: "the inline code is the program; the pipe is data",
 	},
 	{
 		label: "a piped shell given /dev/stdin as its script",
@@ -902,6 +947,7 @@ const TABLE: readonly DenyRow[] = [
 		expected: "ok",
 		why: "a pure print",
 	},
+	...PIPE_ROWS,
 ];
 
 describe("SAFE-03 -- shell-deny-list table is non-empty (vacuous-pass guard)", () => {
