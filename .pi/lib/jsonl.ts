@@ -3,16 +3,15 @@
  * Lives in `.pi/lib/` because `safety/` may import nothing from `diagnostics/`, and Pi auto-discovers only `.pi/extensions`.
  *
  * `appendFileSync` per record, never a held descriptor: one would keep writing into the file rotation renamed away.
- * Rename-based rotation needs no lock: four concurrent appending processes lost no record (Windows, node 24.16.0;
- * POSIX `O_APPEND` atomicity for very large writes is not guaranteed). Concurrent rotation is narrowed, not locked:
- * the live size is re-read before rotating and no rename overwrites an existing rotated file.
+ * Appends take no lock (POSIX `O_APPEND` atomicity for very large writes is not guaranteed). Rotation is serialised by a `mkdir` lock and
+ * re-checks the live size under it; an append that races the rename lands whole in one fragment or the other.
  * `withFileMutationQueue` is per process (pi 1.1.0 `core/tools/file-mutation-queue.ts:4`); subagents are separate processes.
  *
  * Every path is confined to {@link logDir}, a `base` must match {@link BASE_RE}, and rotation and prune touch only
  * regular files, so a planted symlink is never renamed or unlinked. Mutable state lives on `globalThis` because jiti
  * can load this file twice through different import graphs.
  */
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, unlinkSync } from "node:fs";
+import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmdirSync, unlinkSync } from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
@@ -37,6 +36,8 @@ const DEFAULT_RETENTION_DAYS = 14;
 const DEFAULT_ROTATE_BYTES = 8_000_000;
 /** A cached size is kept exact by adding each write; the re-read only corrects for other processes. */
 const SIZE_RECHECK_MS = 1000;
+/** Far above any rotation's duration, so only a crashed holder's lock is ever taken over. */
+const ROTATE_LOCK_STALE_MS = 10_000;
 /** Makes `..`, separators, drive letters and absolute paths impossible before `join` sees a base. */
 const BASE_RE = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 /** `<base>-YYYY-MM-DD.jsonl` or `<base>-YYYY-MM-DD.<n>.jsonl`. */
@@ -124,10 +125,34 @@ function escapeForRegExp(literal: string): string {
 }
 
 /**
+ * Take the rotation lock for `file`: `mkdir` is atomic on every platform, so at most one process renames at a time.
+ * A lock older than {@link ROTATE_LOCK_STALE_MS} is a crashed holder's and is taken over.
+ */
+function tryLock(lock: string): boolean {
+	try {
+		mkdirSync(lock);
+		return true;
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "EEXIST") return false;
+	}
+	try {
+		if (Date.now() - lstatSync(lock).mtimeMs < ROTATE_LOCK_STALE_MS) return false;
+		rmdirSync(lock);
+		mkdirSync(lock);
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** `busy` when another process holds the rotation lock; nothing moved and the caller should simply append. */
+type RotateOutcome = "rotated" | "failed" | "busy";
+
+/**
  * Shift `<stem>.<n>.jsonl` up, highest first, and rename the live file to `<stem>.1.jsonl`; indices at or past
- * `maxRotated` are unlinked, so a lowered cap also bounds what an older one left.
- * `due` is re-asked before anything moves: a sibling may have rotated since the caller's check, and rotating its
- * near-empty successor again would evict a full file.
+ * `maxRotated` are unlinked, so a lowered cap also bounds what an older one left. Returns false only when the live
+ * file could not be renamed. `due` is re-asked under the lock: a sibling may have rotated since the caller's check,
+ * and rotating its near-empty successor again would evict a full file.
  */
 export function rotate(
 	cwd: string,
@@ -136,8 +161,33 @@ export function rotate(
 	renameFile: typeof renameSync = renameSync,
 	due: () => boolean = () => true,
 ): boolean {
+	return rotateLocked(cwd, file, maxRotated, renameFile, due) !== "failed";
+}
+
+// Without the lock two processes can both see `.1` free and rename onto it in turn; POSIX rename replaces the
+// target silently, so the first rotation's records are lost.
+function rotateLocked(
+	cwd: string,
+	file: string,
+	maxRotated: number,
+	renameFile: typeof renameSync,
+	due: () => boolean,
+): RotateOutcome {
 	assertInsideLogDir(cwd, file);
-	if (!due()) return true;
+	const lock = `${file}.lock`;
+	if (!tryLock(lock)) return "busy";
+	try {
+		return due() ? shiftAndRotate(file, maxRotated, renameFile, due) : "rotated";
+	} finally {
+		try {
+			rmdirSync(lock);
+		} catch {
+			// A lock left behind goes stale and is taken over; failing the append for it would lose the record.
+		}
+	}
+}
+
+function shiftAndRotate(file: string, maxRotated: number, renameFile: typeof renameSync, due: () => boolean): RotateOutcome {
 	const dir = dirname(file);
 	const stale = new RegExp(`^${escapeForRegExp(basename(file, EXT))}\\.(\\d+)\\${EXT}$`);
 	for (const name of listDir(dir)) {
@@ -160,18 +210,18 @@ export function rotate(
 
 	if (maxRotated >= 1 && isRegularFile(file) && due()) {
 		const dst = rotatedPath(file, 1);
-		// Another process rotated in between and its `.1` is still in place; the live file it left behind is new.
-		if (existsSync(dst)) return true;
+		// `.1` could not shift (a holder has it open on Windows); renaming onto it would replace it.
+		if (existsSync(dst)) return "rotated";
 		try {
 			renameFile(file, dst);
 			produced().add(dst);
 		} catch {
 			// The append that follows keeps growing the live file rather than losing the record.
-			return false;
+			return "failed";
 		}
 		sizeCache().set(file, { size: 0, checkedAt: Date.now() });
 	}
-	return true;
+	return "rotated";
 }
 
 function freshSize(file: string, nowMs: number): number {
@@ -214,12 +264,14 @@ export function appendJsonl(cwd: string, base: string, record: unknown, opts: Ap
 		const backoff = rotateBackoff();
 		const state = backoff.get(file);
 		if (state === undefined || nowMs >= state.retryAt) {
-			const rotated = rotate(cwd, file, opts.maxRotated ?? DEFAULT_MAX_ROTATED_FILES, opts.renameFile, () =>
+			const outcome = rotateLocked(cwd, file, opts.maxRotated ?? DEFAULT_MAX_ROTATED_FILES, opts.renameFile ?? renameSync, () =>
 				overCap(regularFileSize(file) ?? 0),
 			);
 			const fresh = regularFileSize(file) ?? 0;
-			// A rotation skipped to avoid overwriting another process's file counts as a failure while the live file is still over.
-			if (rotated && !overCap(fresh)) {
+			// Busy is no failure: the holder rotates, and this record goes to whichever file is live.
+			if (outcome === "busy") {
+				size = fresh;
+			} else if (outcome === "rotated" && !overCap(fresh)) {
 				backoff.delete(file);
 				size = fresh;
 			} else {

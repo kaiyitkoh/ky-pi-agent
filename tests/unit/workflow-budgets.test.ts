@@ -582,8 +582,8 @@ const DIRECTORY_BUDGETS: readonly { dir: string; budget: number; why: string }[]
 	},
 	{
 		dir: ".pi/lib",
-		budget: 490,
-		why: "The shared library every subsystem imports, budgeted as one directory. LOWERED 790 -> 490 (2026-10-14): jsonl.ts shares one globalThis slot helper, reads a size with one lstat and folds prune into one pass, win-quote.ts and work-artifacts.ts lost their narration; 488 raw lines (jsonl.ts 298, work-artifacts.ts 59, win-quote.ts 23).",
+		budget: 540,
+		why: "The shared library every subsystem imports, budgeted as one directory. LOWERED 790 -> 490 (2026-10-14): jsonl.ts shares one globalThis slot helper, reads a size with one lstat and folds prune into one pass, win-quote.ts and work-artifacts.ts lost their narration; 488 raw lines (jsonl.ts 298, work-artifacts.ts 59, win-quote.ts 23). RAISED 490 -> 540 (2026-10-14), bug fix: rotation takes a mkdir lock, so two processes can no longer rename onto the same rotated file and silently replace it; 540 raw lines (jsonl.ts 349).",
 	},
 	{
 		dir: ".pi/extensions/grill",

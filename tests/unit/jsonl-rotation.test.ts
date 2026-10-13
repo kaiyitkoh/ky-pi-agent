@@ -22,7 +22,7 @@
  * manipulation behaves differently on Windows and macOS and the requirement is
  * about the date stamp in the file name anyway.
  */
-import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -549,6 +549,61 @@ describe("concurrent rotation never replaces another process's rotated file", ()
 
 			expect(readIntact(held, "the held rotated file")).toEqual([makeRecord(50, "HELD")]);
 			expect(readIntact(live, "the live file")).toHaveLength(3);
+		});
+	});
+});
+
+describe("rotation is serialised by a lock directory", () => {
+	const over = (cwd: string, now: Date): string => {
+		for (let i = 1; i <= 2; i += 1) libAppendJsonl(cwd, "lockedlog", makeRecord(i), { rotateBytes: RECORD_BYTES * 2, now });
+		return logPath(cwd, "lockedlog", now);
+	};
+
+	it("appends without rotating, and without backing off, while another process holds the lock", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = over(cwd, now);
+			mkdirSync(`${live}.lock`);
+			libAppendJsonl(cwd, "lockedlog", makeRecord(3), { rotateBytes: RECORD_BYTES * 2, now });
+			expect(existsSync(rotatedPath(live, 1)), "a held lock must stop this process renaming").toBe(false);
+			expect(readIntact(live, "the live file")).toHaveLength(3);
+
+			rmdirSync(`${live}.lock`);
+			libAppendJsonl(cwd, "lockedlog", makeRecord(4), { rotateBytes: RECORD_BYTES * 2, now });
+			expect(readIntact(rotatedPath(live, 1), "the rotation after release")).toHaveLength(3);
+			expect(existsSync(`${live}.lock`), "the lock is released after rotating").toBe(false);
+		});
+	});
+
+	it("a sibling that rotates mid-rename cannot make this rename replace its rotated file", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = over(cwd, now);
+			let raced = false;
+			// The sibling runs between this process's free-`.1` check and its rename, the window a lock must close.
+			const racing = ((src: string, dst: string): void => {
+				if (!raced && src === live) {
+					raced = true;
+					libAppendJsonl(cwd, "lockedlog", makeRecord(50), { rotateBytes: RECORD_BYTES * 2, now });
+				}
+				renameSync(src, dst);
+			}) as unknown as typeof renameSync;
+			libAppendJsonl(cwd, "lockedlog", makeRecord(3), { rotateBytes: RECORD_BYTES * 2, now, renameFile: racing });
+			const all = [live, rotatedPath(live, 1), rotatedPath(live, 2)].filter((p) => existsSync(p)).flatMap((p) => readIntact(p, p));
+			expect(all, "every record survives the raced rotation").toHaveLength(4);
+		});
+	});
+
+	it("takes over a lock a crashed holder left behind", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = over(cwd, now);
+			mkdirSync(`${live}.lock`);
+			const old = new Date(Date.now() - 60_000);
+			utimesSync(`${live}.lock`, old, old);
+			libAppendJsonl(cwd, "lockedlog", makeRecord(3), { rotateBytes: RECORD_BYTES * 2, now });
+			expect(readIntact(rotatedPath(live, 1), "the rotated file")).toHaveLength(2);
+			expect(existsSync(`${live}.lock`)).toBe(false);
 		});
 	});
 });

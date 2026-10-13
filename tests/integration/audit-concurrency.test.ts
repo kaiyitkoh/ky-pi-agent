@@ -114,6 +114,7 @@ import { repoRoot } from "../helpers/git.ts";
 import { readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
 
 /** `file://` URL of the real shipped writer -- see the module docstring's WR-04 section for why a plain path specifier does not work here. */
+const JSONL_TS = pathToFileURL(join(repoRoot(), ".pi", "lib", "jsonl.ts")).href;
 const AUDIT_TS = pathToFileURL(join(repoRoot(), ".pi", "extensions", "safety", "audit.ts")).href;
 
 /** One label per child process. */
@@ -454,4 +455,47 @@ describe("SAFE-14 -- concurrent appends to the shared audit stream", () => {
 			).toBe(LABELS.length * RECORDS_PER_CHILD_ROTATED);
 		});
 	});
+
+	// Eight writers and a cap far below the run, with retention far above the rotation count, so any shortfall is a
+	// rename race and never the retention window. Repeated, because the race shows in a minority of runs.
+	it("case 3 -- eight processes rotating the shared writer many times lose no record across repeated rounds", async () => {
+		const writers = 8;
+		const perWriter = 60;
+		for (let round = 0; round < 3; round++) {
+			await withTempLogCwd(async (cwd) => {
+				mkdirSync(logDir(cwd), { recursive: true });
+				const script = join(cwd, "append-lib-child.mjs");
+				writeFileSync(
+					script,
+					[
+						`import { appendJsonl } from ${JSON.stringify(JSONL_TS)};`,
+						"const [cwd, label, count, startAt] = process.argv.slice(2);",
+						"const wait = Number(startAt) - Date.now();",
+						"if (wait > 0) await new Promise((resolve) => setTimeout(resolve, wait));",
+						"for (let i = 0; i < Number(count); i++) {",
+						'	appendJsonl(cwd, "stress", { label, i, pad: "x".repeat(150) }, { rotateBytes: 2_000, maxRotated: 200 });',
+						"}",
+						'process.stdout.write(JSON.stringify({ label, written: Number(count), startedAt: 0, finishedAt: 0, pid: process.pid }));',
+						"",
+					].join("\n"),
+					"utf-8",
+				);
+				const startAt = Date.now() + BARRIER_LEAD_MS;
+				await Promise.all(
+					Array.from({ length: writers }, (_, n) => runChild(script, [cwd, `w${n}`, String(perWriter), String(startAt)])),
+				);
+				const dir = logDir(cwd);
+				const fragments = readdirSync(dir).filter((name) => name.startsWith("stress-") && name.endsWith(".jsonl"));
+				expect(fragments.length, "the cap must force rotations").toBeGreaterThan(2);
+				let total = 0;
+				for (const name of fragments) {
+					const { records, unparseable } = readTornSafe(join(dir, name));
+					expect(unparseable, `round ${round}: torn record in ${name}`).toEqual([]);
+					total += records.length;
+				}
+				expect(total, `round ${round}: records lost across a rotation that raced a sibling`).toBe(writers * perWriter);
+				expect(readdirSync(dir).filter((name) => name.endsWith(".lock")), "no rotation lock may be left behind").toEqual([]);
+			});
+		}
+	}, 120_000);
 });
