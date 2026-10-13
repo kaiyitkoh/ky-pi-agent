@@ -349,7 +349,7 @@ const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
 	"shell-runner": (c) =>
 		`"${c}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`,
 	"generated-script": (c) =>
-		`"${c}" has a code runner read its code from a pipe or a stdin alias (no script file, -m module or -c/-e code; or -s, -i or PYTHONINSPECT; or a shell, pwsh, cmd, busybox, osascript or parallel on a pipe), or runs a file or module the same command writes, so the guard never sees the code; pass a script file, a module, or inline code that does not evaluate its input, and write a script in one command and run it in another`,
+		`"${c}" gives a code runner its input through a pipe or a stdin alias (whatever its arguments), feeds input words to one through xargs or parallel, sets an interpreter startup variable, reads an awk or sed program from stdin, or runs or imports a file the same command writes, so the guard never sees the code; pass input as a file argument or through jq, and write a script in one command and run it in another`,
 	"command-string-program": (c) =>
 		`"${c}" runs a program that takes a command string from its own arguments (awk system() or a pipe, sed e or w /dev/, tar --to-command or -I, rsync -e, bat --pager, make --eval or -f -, sort --compress-program) or an interactive pager or editor`,
 	"inline-code-effect": (c) =>
@@ -689,196 +689,90 @@ const INLINE_CODE_FLAGS: ReadonlyMap<string, (arg: string) => boolean> = new Map
 	["cmd", (a: string) => /^\/{1,2}[ck]$/i.test(a)],
 ]);
 
-const CODE_RUNNER_NAMES = wordSet("sh bash zsh dash ksh mksh ash csh tcsh fish busybox pwsh powershell cmd node deno bun perl ruby php lua rscript osascript parallel");
+// A deny-list with known gaps: REPLs and tools whose input language can run shell commands count as code runners too.
+const CODE_RUNNER_NAMES = wordSet(
+	"sh bash zsh dash ksh mksh ash csh tcsh fish busybox pwsh powershell cmd node deno bun perl ruby php lua rscript osascript parallel " +
+		"su script rlwrap strace flock watch tsx ts-node ipython irb pry julia r tclsh wish expect jshell jython graalpy micropython " +
+		"sqlite3 psql mysql ed dc",
+);
+
+const PYTHON_RUNNER = /^(python[\d.]*w?|py|pypy[\d.]*|pytest|py\.test)$/;
+
+// Package managers whose `run` subcommand starts an interpreter from the project environment.
+const RUN_SUBCOMMAND_RUNNERS = wordSet("uv poetry pipenv conda");
 
 // Programs that run code they read; their code must never come from a pipe, a stdin alias or a file the same command wrote.
 const isCodeRunner = (executable: string): boolean =>
-	CODE_RUNNER_NAMES.has(executable) || /^(python[\d.]*|py|pypy[\d.]*|lua[\d.]*|perl[\d.]*|ruby[\d.]*|php[\d.]*)$/.test(executable);
+	CODE_RUNNER_NAMES.has(executable) || PYTHON_RUNNER.test(executable) || /^(lua[\d.]*|perl[\d.]*|ruby[\d.]*|php[\d.]*)$/.test(executable);
 
-const STDIN_ALIAS = /^(-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/[^/]+\/fd\/\d+)$/;
-
-// Programs that read their code from stdin whatever their arguments.
-const ALWAYS_STDIN_CODE = wordSet("cmd pwsh powershell busybox parallel osascript");
-const SHELL_FAMILY = wordSet("sh bash zsh dash ksh mksh ash csh tcsh fish");
-const SHELL_LETTERS = /^[aefhklmnpuvxBCEHPT]*$/;
-const SHELL_LONG_FLAGS = wordSet("--login --norc --noprofile --posix");
-const SHELL_LONG_VALUES = wordSet("--rcfile --init-file");
-const PYTHON_FAMILY = /^(python[\d.]*|py|pypy[\d.]*)$/;
-const PYTHON_FLAGS = /^-[uBEsSOqIPbdRvx]+$/;
-// Modules that are an interactive prompt or evaluator over stdin.
-const STDIN_CODE_MODULES = wordSet("code codeop pdb ipdb IPython ptpython bpython idlelib runpy");
-const JS_BOOLEAN = wordSet(
-	"--no-warnings --enable-source-maps --trace-warnings --trace-uncaught --no-deprecation --expose-gc --preserve-symlinks -q --quiet --no-check -A",
-);
-const JS_VALUE = wordSet("-r --require --import --loader --experimental-loader --env-file --conditions -C --max-old-space-size --title");
-const PERL_CLUSTER = /^[wWtTnpalc0-9s]*$/;
-const RUBY_CLUSTER = /^[wWnpalc]*$/;
-
-// Evaluators and deserializers a piped one-liner could feed its input to; json.load and ast.literal_eval stay allowed.
-const PIPED_INLINE_EVAL = new RegExp(
-	String.raw`\b(eval|exec\w*|compile|instance_eval|class_eval|module_eval|instance_exec|class_exec|Function|vm|require_relative|pickle|cPickle|marshal|Marshal|shelve|dill|yaml|YAML|Storable)\b|(?<![.\w])load\b|\bdo\s*['"$<]`,
-);
-
-type OptionStep = number | "code" | "file" | { readonly inline: string | null } | { readonly module: string | null };
-type OptionRule = (word: string) => OptionStep | undefined;
-type InterpreterScan = "code" | "file" | { readonly inline: string } | { readonly module: string };
-
-const shellRule: OptionRule = (w) => {
-	if (w.startsWith("--")) {
-		const name = w.split("=")[0];
-		if (SHELL_LONG_FLAGS.has(name)) return 0;
-		return SHELL_LONG_VALUES.has(name) ? (w.includes("=") ? 0 : 1) : undefined;
-	}
-	if (w === "-o" || w === "+o") return 1;
-	const cluster = w.slice(1);
-	if (/[si]/.test(cluster)) return "code";
-	if (cluster.endsWith("c")) return SHELL_LETTERS.test(cluster.slice(0, -1)) ? { inline: null } : undefined;
-	return SHELL_LETTERS.test(cluster) ? 0 : undefined;
+const runsCode = (inv: Pick<CanonicalInvocation, "executable" | "args">): boolean => {
+	const executable = normaliseExecutable(inv.executable);
+	return isCodeRunner(executable) || (RUN_SUBCOMMAND_RUNNERS.has(executable) && inv.args.includes("run"));
 };
 
-const pythonRule: OptionRule = (w) => {
-	if (w === "-c") return { inline: null };
-	if (w === "-m") return { module: null };
-	if (/^-m./.test(w)) return { module: w.slice(2) };
-	if (/^-[WX]/.test(w)) return w.length === 2 ? 1 : 0;
-	if (/^-[a-zA-Z]*i/.test(w)) return "code";
-	return PYTHON_FLAGS.test(w) ? 0 : undefined;
-};
+const STDIN_ALIAS = /^(-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/[^/]+\/fd\/\d+|php:\/\/(stdin|fd\/0))$/i;
 
-const jsRule: OptionRule = (w) => {
-	const name = w.split("=")[0];
-	const attached = w.includes("=");
-	if (/^(-e|-p|--eval|--print)$/.test(name)) return { inline: attached ? w.slice(name.length + 1) : null };
-	if (w === "-i" || w === "--interactive") return "code";
-	if (JS_BOOLEAN.has(w) || /^--(allow-|unstable|input-type=)/.test(w)) return 0;
-	return JS_VALUE.has(name) ? (attached ? 0 : 1) : undefined;
-};
+// Python imports these from the working directory or sys.path without naming them on the command line.
+const PYTHON_IMPORTABLE = /\.(py|pyc|pyd|so|pth)$/;
 
-const perlRule: OptionRule = (w) => {
-	if (/^-[IMm]/.test(w)) return w.length === 2 ? 1 : 0;
-	const cluster = w.slice(1);
-	if (/[ix]/.test(cluster)) return "code";
-	if (/^[wWtTnpalc0-9s]*[eE]$/.test(cluster)) return { inline: null };
-	return PERL_CLUSTER.test(cluster) ? 0 : undefined;
-};
-
-const rubyRule: OptionRule = (w) => {
-	if (/^-[IrE]/.test(w)) return w.length === 2 ? 1 : 0;
-	const cluster = w.slice(1);
-	if (/[ix]/.test(cluster)) return "code";
-	if (/^[wWnpalc]*e$/.test(cluster)) return { inline: null };
-	return RUBY_CLUSTER.test(cluster) ? 0 : undefined;
-};
-
-const phpRule: OptionRule = (w) => {
-	if (w === "-r") return { inline: null };
-	if (w === "-f") return "file";
-	if (/^-[nq]+$/.test(w)) return 0;
-	return /^-[dcz]/.test(w) ? (w.length === 2 ? 1 : 0) : undefined;
-};
-
-const looksLikePath = (w: string): boolean => /[./\\]/.test(w);
-
-// Reading left to right: an option the grammar does not list, or no program at all, means stdin may be the code.
-function scanInterpreter(rule: OptionRule, args: readonly string[], operandOk: (w: string) => boolean = () => true): InterpreterScan {
-	for (let i = 0; i < args.length; i += 1) {
-		const w = args[i];
-		if (w === "--" || !/^[-+]./.test(w)) {
-			const operand = w === "--" ? args[i + 1] : w;
-			return operand === undefined || STDIN_ALIAS.test(operand) || !operandOk(operand) ? "code" : "file";
-		}
-		const step = rule(w);
-		if (step === undefined || step === "code") return "code";
-		if (step === "file") return args[i + 1] === undefined || STDIN_ALIAS.test(args[i + 1]) ? "code" : "file";
-		if (typeof step === "number") {
-			i += step;
-			continue;
-		}
-		if ("inline" in step) {
-			const code = step.inline ?? args[i + 1];
-			return code === undefined ? "code" : { inline: code };
-		}
-		const name = step.module ?? args[i + 1];
-		return name === undefined ? "code" : { module: name };
-	}
-	return "code";
-}
-
-function scanFor(executable: string, args: readonly string[]): InterpreterScan {
-	if (SHELL_FAMILY.has(executable)) return scanInterpreter(shellRule, args);
-	if (PYTHON_FAMILY.test(executable)) return scanInterpreter(pythonRule, args);
-	if (executable === "deno" && args[0] === "eval") return args[1] === undefined ? "code" : { inline: args[1] };
-	if (executable === "node" || executable === "deno" || executable === "bun") {
-		return scanInterpreter(jsRule, executable !== "node" && args[0] === "run" ? args.slice(1) : args, looksLikePath);
-	}
-	if (/^perl[\d.]*$/.test(executable)) return scanInterpreter(perlRule, args);
-	if (/^ruby[\d.]*$/.test(executable)) return scanInterpreter(rubyRule, args);
-	if (/^php[\d.]*$/.test(executable)) return scanInterpreter(phpRule, args);
-	return scanInterpreter(() => undefined, args);
-}
-
-function pipedInlineRunsInput(executable: string, code: string): boolean {
-	if (!SHELL_FAMILY.has(executable)) return PIPED_INLINE_EVAL.test(code);
-	const inner = canonicalise(code);
-	if (inner.kind === "refused") return true;
-	return inner.invocations.some((inv) => {
-		const wrapped = wrappedCommands(inv);
-		if (wrapped === undefined) return true;
-		return [inv, ...wrapped].some((c) => {
-			const name = normaliseExecutable(c.executable);
-			return isCodeRunner(name) || SHELL_RUNNERS.has(name);
-		});
-	});
-}
-
-// True when a code runner on a pipe may read its program from stdin; `executable` is already normalised.
-function stdinIsCode(executable: string, args: readonly string[], assignmentWords: readonly string[], wrappers: readonly string[]): boolean {
-	if (ALWAYS_STDIN_CODE.has(executable) || wrappers.some((w) => ALWAYS_STDIN_CODE.has(w)) || assignmentWords.some((a) => a.startsWith("PYTHONINSPECT="))) return true;
-	const scanned = scanFor(executable, args);
-	if (scanned === "code") return true;
-	if (scanned === "file") return false;
-	if ("module" in scanned) return STDIN_CODE_MODULES.has(scanned.module.split(".")[0]);
-	return pipedInlineRunsInput(executable, scanned.inline);
-}
-
-// The module `python -m` runs, when it is the program.
-function pythonModule(executable: string, args: readonly string[]): string | undefined {
-	if (!PYTHON_FAMILY.test(executable)) return undefined;
-	const scanned = scanInterpreter(pythonRule, args);
-	return typeof scanned === "object" && "module" in scanned ? scanned.module : undefined;
-}
+// Variables that make an interpreter load code before or instead of its script.
+const STARTUP_VARIABLE = /\b(BASH_ENV|NODE_OPTIONS|RUBYOPT|PERL5OPT|PERL5DB|PERL5LIB|PYTHONINSPECT|PYTHONSTARTUP|PHP_INI_SCAN_DIR)\b/;
+const NODE_OPTIONS_BENIGN = /\bNODE_OPTIONS=(["']?)(--(max-old-space-size|max-semi-space-size|stack-size)=\d+ ?)+\1(?=[\s;&|]|$)/g;
 
 const baseOf = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop()?.toLowerCase() ?? "";
+
+// The word itself, an `--opt=value` value and an attached short-option value (`-rfile`), any of which can name a file.
+const optionValues = (arg: string): string[] => [arg, ...(arg.includes("=") ? [arg.slice(arg.indexOf("=") + 1)] : []), ...(/^-[A-Za-z]./.test(arg) ? [arg.slice(2)] : [])];
+
+// A written basename inside a word, as a whole name: `require "w.pl"` matches w.pl, `new.pl` does not.
+const mentionsName = (word: string, name: string): boolean => new RegExp(`(^|[^\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w.])`).test(word.toLowerCase());
+
+// The program file awk (-f, gawk -E) or sed (-f) reads its script from.
+function programFiles(inv: Pick<CanonicalInvocation, "executable" | "args">): string[] {
+	const executable = normaliseExecutable(inv.executable);
+	const names = /^[gmn]?awk$/.test(executable) ? ["-f", "--file", "-E", "--exec"] : executable === "sed" ? ["-f", "--file"] : [];
+	return inv.args.flatMap((a, i) => {
+		const name = names.find((n) => a === n || a.startsWith(n.startsWith("--") ? `${n}=` : n));
+		if (name === undefined) return [];
+		return a === name ? [inv.args[i + 1] ?? "-"] : [a.slice(name.length + (name.startsWith("--") ? 1 : 0))];
+	});
+}
 
 // Compared by basename because a `cd` may sit between the write and the run.
 function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: ScriptScan): boolean {
 	const writtenPaths = [...scan.writeTargets, ...extracted.flatMap((e) => writeOperands(e.invocation))];
 	const written = new Set(writtenPaths.map(baseOf));
-	const scriptAssignments = scan.commands.filter((c) => c.name === undefined).flatMap((c) => c.prefix.map((a) => a.text));
-	const writesModule = (name: string): boolean => {
-		const top = name.split(".")[0].toLowerCase();
-		return writtenPaths.some((p) => {
-			const segments = p.replace(/\\/g, "/").toLowerCase().split("/").filter((x) => x !== "");
-			return segments.at(-1) === `${top}.py` || segments.at(-1) === top || segments.slice(0, -1).includes(top);
-		});
-	};
 	const isWritten = (path: string): boolean => written.has(baseOf(path));
-	const runners = extracted.filter((e) => isCodeRunner(normaliseExecutable(e.invocation.executable)));
-	if (runners.length > 0 && scan.compoundReads.some(isWritten)) return true;
+	const mentionable = writtenPaths.filter((p) => !/^(\/dev\/|nul$)/i.test(p)).map(baseOf).filter((b) => b !== "");
+	const runners = extracted.filter((e) => runsCode(e.invocation));
+	// `exec 0<f` and a bare `< f` rebind stdin for every later command.
+	const stdinRebinds = scan.commands.filter((c) => c.name === undefined || c.name.value === "exec").flatMap((c) => redirectFiles(c.redirects).reads);
+	if (runners.length > 0 && [...scan.compoundReads, ...stdinRebinds].some(isWritten)) return true;
+	const writesPythonCode = [...written].some((b) => PYTHON_IMPORTABLE.test(b));
 	return extracted.some(({ invocation, node }) => {
 		const executable = normaliseExecutable(invocation.executable);
 		const sourced = executable === "source" || executable === "." ? invocation.args : [];
 		if ([...sourced, ...(/[/\\]/.test(invocation.executable) ? [invocation.executable] : [])].some(isWritten)) return true;
-		const wrapped = (wrappedCommands(invocation) ?? []).filter((w) => isCodeRunner(normaliseExecutable(w.executable)));
-		if (wrapped.some((w) => w.args.some(isWritten))) return true;
-		if (!isCodeRunner(executable)) return false;
+		const wrapped = wrappedCommands(invocation) ?? [];
+		if ([invocation, ...wrapped].flatMap(programFiles).some((f) => STDIN_ALIAS.test(f) || isWritten(f))) return true;
+		if (wrapped.filter(runsCode).some((w) => w.args.some(isWritten))) return true;
+		// A wrapper with no command left (`sudo -s`, `sudo -i`) starts a shell that reads stdin.
+		if (executable === "" && invocation.wrappers.length > 0 && scan.piped.has(node)) return true;
+		if (!runsCode(invocation)) return false;
+		if (writesPythonCode && (PYTHON_RUNNER.test(executable) || RUN_SUBCOMMAND_RUNNERS.has(executable))) return true;
+		const perlModules = /^perl[\d.]*$/.test(executable)
+			? invocation.args.flatMap((a) => (/^-[Mm]./.test(a) ? [`${a.slice(2).split("=")[0].replace(/::/g, "/")}.pm`] : []))
+			: [];
+		const values = invocation.args.flatMap(optionValues);
 		const stdinFiles = node.redirects.filter((r) => r.operator === "<" || r.operator === "<>").flatMap((r) => r.target?.value ?? []);
-		const module = pythonModule(executable, invocation.args);
-		if (module !== undefined && writesModule(module)) return true;
-		const pipedCode = scan.piped.has(node) && stdinIsCode(executable, invocation.args, [...(invocation.assignmentWords ?? []), ...scriptAssignments], invocation.wrappers);
-		return pipedCode || invocation.args.some((a) => STDIN_ALIAS.test(a)) || [...invocation.args, ...stdinFiles].some(isWritten);
+		if (scan.piped.has(node) || values.some((v) => STDIN_ALIAS.test(v))) return true;
+		return [...values, ...perlModules, ...stdinFiles].some(isWritten) || invocation.args.some((a) => mentionable.some((b) => mentionsName(a, b)));
 	});
 }
+
+// A startup variable set or named anywhere in a command that runs code; a heap-size NODE_OPTIONS stays allowed.
+const setsStartupVariable = (command: string, invocations: readonly CanonicalInvocation[]): boolean =>
+	invocations.some((inv) => runsCode(inv) || (wrappedCommands(inv) ?? []).some(runsCode)) && STARTUP_VARIABLE.test(command.replace(NODE_OPTIONS_BENIGN, ""));
 
 /** A command xargs, find -exec, fd -x or parallel runs over its input names. */
 export interface WrappedCommand {
@@ -951,21 +845,31 @@ export function wrappedCommands(inv: Pick<CanonicalInvocation, "executable" | "a
 
 const INPUT_RUNNERS = wordSet("xargs parallel find fd watch");
 
+const REPLACE_OPTION = /^(-[0oprtx]*[Ii]|--replace)/;
+
+// xargs and parallel turn their input into the runner's arguments, so only a fixed script operand keeps the code visible.
+const inputPicksCode = (outer: CanonicalInvocation, w: WrappedCommand): boolean => {
+	const first = w.args[0] === "-m" && PYTHON_RUNNER.test(normaliseExecutable(w.executable)) ? w.args[1] : w.args[0];
+	return first === undefined || first.startsWith("-") || w.args.some((a) => a.includes("{")) || outer.args.some((a) => REPLACE_OPTION.test(a));
+};
+
 // A wrapped command is refused when it is itself a wrapper, or a code runner whose inline code would receive the input names.
-function wrappedRefusal(w: WrappedCommand): ShellRefusalCause | undefined {
+function wrappedRefusal(outer: CanonicalInvocation, w: WrappedCommand): ShellRefusalCause | undefined {
 	const executable = normaliseExecutable(w.executable);
 	const managerWithoutSubcommand = PACKAGE_MANAGER_RUNNERS.has(executable) && !w.args.some((a) => !a.startsWith("-"));
 	if (WRAPPER_GRAMMARS.has(executable) || INPUT_RUNNERS.has(executable) || managerWithoutSubcommand) return "unresolved-wrapper";
+	if (!runsCode(w)) return undefined;
 	const inline = INLINE_CODE_FLAGS.get(executable);
 	const inlineCode = inline !== undefined && w.args.some(inline);
-	return isCodeRunner(executable) && (inlineCode || w.args.some((a) => STDIN_ALIAS.test(a))) ? "generated-script" : undefined;
+	const fromInput = ["xargs", "parallel"].includes(normaliseExecutable(outer.executable)) && inputPicksCode(outer, w);
+	return inlineCode || fromInput || w.args.some((a) => STDIN_ALIAS.test(a)) ? "generated-script" : undefined;
 }
 
 const firstWrappedRefusal = (invocations: readonly CanonicalInvocation[]): ShellRefusalCause | undefined => {
 	for (const inv of invocations) {
 		const wrapped = wrappedCommands(inv);
 		if (wrapped === undefined) return "unresolved-wrapper";
-		const cause = wrapped.map(wrappedRefusal).find((c) => c !== undefined);
+		const cause = wrapped.map((w) => wrappedRefusal(inv, w)).find((c) => c !== undefined);
 		if (cause !== undefined) return cause;
 	}
 	return undefined;
@@ -1053,6 +957,11 @@ const INLINE_CODE_BENIGN = /\brequire\s*\(\s*(['"])[^'"]*\.json\1\s*\)|\b(proces
 // An interpreter one-liner (`python -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`) whose code may write, open or run.
 function inlineCodeEffect(inv: Pick<CanonicalInvocation, "executable" | "args">): boolean {
 	const executable = normaliseExecutable(inv.executable);
+	// perl splices a -M/-m value into `use ...;`, so anything beyond a module name and import list is code.
+	const perlModuleCode =
+		/^perl[\d.]*$/.test(executable) &&
+		inv.args.some((a, i) => /^-[Mm]/.test(a) && !/^-?[\w:]+(=[\w:,]*)?$/.test(a.length === 2 ? (inv.args[i + 1] ?? "") : a.slice(2)));
+	if (perlModuleCode) return true;
 	const inline = INLINE_CODE_FLAGS.get(executable) ?? (/^python[\d.]*$/.test(executable) ? (a: string) => a === "-c" : undefined);
 	if (inline === undefined || !ONE_LINER_RUNNERS.test(executable)) return false;
 	const codes = inv.args.flatMap((a, i) => (inline(a) ? [inv.args[i + 1] ?? ""] : []));
@@ -1080,7 +989,7 @@ export function canonicalise(command: string): ShellVerdict {
 	if (wrappedCause !== undefined) return refused(wrappedCause, command);
 	if (firstCommandString(invocations) !== undefined) return refused("command-string-program", command);
 	if (invocations.some(inlineCodeEffect)) return refused("inline-code-effect", command);
-	if (runsGeneratedScript(extracted, scan)) return refused("generated-script", command);
+	if (runsGeneratedScript(extracted, scan) || setsStartupVariable(command, invocations)) return refused("generated-script", command);
 	// An unresolved wrapper is refused when a guarded verb or a code runner could be behind it, or it reads a pipe; `env -x ls` stays ok.
 	const hidesRunner = (e: ExtractedInvocation): boolean =>
 		mentionsGuardedVerb(segmentTexts(e.invocation)) || scan.piped.has(e.node) || [e.invocation.executable, ...e.invocation.args].some((w) => isCodeRunner(normaliseExecutable(w)));

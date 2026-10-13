@@ -45,36 +45,45 @@ docstring for the structural argument). Concretely, it catches:
   is refused whatever it holds, because the base64 script hides every verb.
 - **Scripts the guard cannot read** (cause `generated-script`) — a code
   runner (`sh`, `bash`, `zsh`, `dash`, `ksh`, `fish`, `busybox`, `pwsh`,
-  `powershell`, `cmd`, `python*`, `node`, `deno`, `bun`, `perl`, `ruby`,
-  `php`, `lua`, `Rscript`, `osascript`, `parallel`) on a pipe is refused only
-  when its stdin would be its code. With a script file, a `-m` module or
-  inline `-c`/`-e` code that does not evaluate its input, the pipe is data
-  and the command is allowed (`cat data.json | python script.py`,
-  `curl ... | python -m json.tool`, `X | node s.js`, `X | bash s.sh`,
-  `X | python -c "import sys,json; print(json.load(sys.stdin))"`). Refused:
-  a bare `python`/`node`/`perl`/`ruby` or any `sh`/`bash` with no script
-  (`curl ... | sh`), `bash -s`, any `-i`, `PYTHONINSPECT=` (prefix, `env` or
-  an earlier statement), a script operand of `-`, `/dev/stdin`, `/dev/fd/N` or
-  `/proc/<pid>/fd/N`, an interpreter option the guard has no grammar for
-  before the script, `python -m code|pdb|IPython|runpy`, perl/ruby `-x`,
-  `deno repl`, `| sh -c sh` and `| bash -c 'bash -s'` (a shell started by a
-  piped shell), and piped inline code that evaluates its input (`eval`,
-  `exec`, `compile`, `Function`, `vm`, `pickle`, `marshal`, `yaml`, a bare
-  `load(`, perl `do`). `cmd`, `pwsh`, `powershell`, `busybox`, `parallel` and
-  `osascript` on a pipe are refused whatever their arguments. Any argument
-  that is a stdin alias, and any argument or input redirect naming a file
-  the same command writes, is refused whether or not there is a pipe
-  (`echo ... > p; sh p`, `tee p && sh p`, `cp p.sh q; sh q`); `python -m foo`
-  counts `foo.py`, `foo` and anything under `foo/` as written files. A file
+  `powershell`, `cmd`, `python*`, `pytest`, `node`, `deno`, `bun`, `perl`,
+  `ruby`, `php`, `lua`, `Rscript`, `osascript`, `parallel`, the pass-through
+  runners `su`, `script`, `rlwrap`, `strace`, `flock`, `watch` and
+  `uv|poetry|pipenv|conda run`, the REPLs `tsx`, `ts-node`, `ipython`, `irb`,
+  `pry`, `julia`, `R`, `tclsh`, `wish`, `expect`, `jshell`, `jython`,
+  `graalpy`, `micropython`, and `sqlite3`, `psql`, `mysql`, `ed`, `dc`, whose
+  input language runs shell commands) is refused whatever its arguments when
+  its stdin is a pipe, and so is a privilege wrapper with no command
+  (`sudo -s`, `sudo -i`). The pipe rule is deliberately strict: a narrower
+  rule that allowed a piped interpreter with a script file or harmless inline
+  code was reverted after review found it bypassable (option parsing after
+  `-c`, repeated `-e`, startup variables, option values, unlisted
+  evaluators); narrowing it is deferred until a hardened design exists.
+  Heredocs and here-strings are refused everywhere. Also refused, pipe or
+  not: any argument, `--opt=value` value or attached short-option value that
+  is a stdin alias (`-`, `/dev/stdin`, `/dev/fd/N`, `/proc/<pid>/fd/N`,
+  `php://stdin`); a code runner whose argument, option value, perl `-M`
+  module, or input redirect names a file the same command writes, or whose
+  inline code mentions that file by name (`echo ... > p; sh p`,
+  `tee p && sh p`, `cp p.sh q; sh q`, `node --require=p.js`,
+  `perl -e 'require "p.pl"'`); a Python runner (`python*`, `pytest`, or one
+  under `uv run`) in a command that writes any `.py`, `.pyc`, `.pyd`, `.so`
+  or `.pth` file, because imports, `conftest.py` and `sitecustomize.py` load
+  it unnamed; `exec 0<f` or a bare `< f` on a written file before a code
+  runner; an `awk`/`sed` program file (`-f`, `gawk -E`) that is a stdin alias
+  or written by the same command; and any code runner in a command that sets
+  or names `BASH_ENV`, `NODE_OPTIONS`, `RUBYOPT`, `PERL5OPT`, `PERL5DB`,
+  `PERL5LIB`, `PYTHONINSPECT`, `PYTHONSTARTUP` or `PHP_INI_SCAN_DIR` (a
+  heap-size-only `NODE_OPTIONS=--max-old-space-size=N` stays allowed). A file
   run by path (`./x.sh`) or sourced (`source x.sh`) after the same command
-  wrote it is refused too. Heredocs and here-strings are refused everywhere.
-  Files are matched by basename, because a `cd` may sit between. Known false
-  positives: `X | python script.py -` (a `-` argument anywhere is refused)
-  and an unknown interpreter option before the script; pass the data as a
-  file argument or redirect it from a file. Residual: inline code on a pipe is
-  checked against a word list of evaluators and deserializers, so an
-  evaluator reached by an unlisted name is not seen. A script written by an
-  earlier, separate tool call stays opaque (EV-166).
+  wrote it is refused too. Files are matched by basename, because a `cd` may
+  sit between. So `echo 'git push ...' | sh`, `| bash /dev/stdin`,
+  `| sh -c sh`, `curl ... | sh` and `base64 -d | sh` all block. Known false
+  positives: `cat data.json | python script.py`,
+  `curl ... | python -m json.tool` and `python gen.py > out.py` are refused;
+  pass the data as a file argument, redirect it from a file
+  (`python solve.py < input.txt`), or use `jq`. The runner list is a deny-list
+  with known gaps. A script written by an earlier, separate tool call stays
+  opaque (EV-166).
 - **Programs that take a command string** (cause `command-string-program`)
   — refused whatever the string holds: an `awk`/`gawk`/`mawk`/`nawk`
   program with `system(`, `| getline`, `|&`, `@load` or a print into a
@@ -98,9 +107,13 @@ docstring for the structural argument). Concretely, it catches:
   `xargs sudo`, a package manager with no subcommand), because the input
   words become the command. A code runner there is refused (cause
   `generated-script`) when it takes inline code (`xargs sh -c ...`,
-  `find -exec sh -c ...`), because the input names reach the code; a named
-  script or module stays allowed (`xargs python -m py_compile`,
-  `xargs node scripts/lint.mjs`, `xargs -n1 bash -n`). A wrapper such as
+  `find -exec sh -c ...`), because the input names reach the code. Under
+  `xargs` or `parallel` it is also refused unless its first argument is a
+  fixed script operand (or `python -m MODULE`), with no `{` in its arguments
+  and no `-I`/`-i`/`--replace`, because the input words would otherwise
+  become its options or code (`xargs sh`, `xargs -n1 bash -n`,
+  `xargs -I X python s.py X`). A named script or module stays allowed
+  (`xargs python -m py_compile`, `xargs node scripts/lint.mjs`). A wrapper such as
   `env` whose options the guard cannot resolve is refused when a guarded
   verb or a code runner could be behind it, or when it reads a pipe.
 - **Wrapper indirection** (`env A=1 git push`, `env --`, `sudo --`, `exec`,
