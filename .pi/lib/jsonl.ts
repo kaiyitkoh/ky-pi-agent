@@ -41,6 +41,23 @@ import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
  */
 export const LOG_DIR_SEGMENT = "logs";
 
+/**
+ * Streams written by subsystems that have no prune of their own (the Qoder transcript and the escalation record).
+ * The diagnostics session-start prune owns them, so they age out by the same retention rule as its own logs.
+ */
+export const QODER_LOG_BASE = "qoder";
+export const ESCALATION_LOG_BASE = "escalation";
+export const AUXILIARY_LOG_BASES: readonly string[] = [QODER_LOG_BASE, ESCALATION_LOG_BASE];
+
+/** Delay after the first failed live-file rename; doubles per failure (1 s, 2 s, 4 s). */
+const ROTATE_RETRY_BASE_MS = 1000;
+
+/** Failed rotations of one file after which this process stops trying and lets the file grow. */
+const MAX_ROTATE_FAILURES = 4;
+
+/** `globalThis` key for per-file rotation failure state; same duplicate-module hazard as {@link SIZE_CACHE_KEY}. */
+const ROTATE_BACKOFF_KEY = "__kypiJsonlRotateBackoff";
+
 /** File extension of every log this module writes. */
 const EXT = ".jsonl";
 
@@ -78,7 +95,7 @@ const DEFAULT_ROTATE_BYTES = 8_000_000;
  * How stale a cached file size may be before it is re-`stat`ed.
  *
  * A `stat` per append is free at DeepSeek turn rates; caching keeps it free at
- * subagent fan-out (RESEARCH §10.5). The cached value is kept exact by adding
+ * subagent fan-out. The cached value is kept exact by adding
  * each write's byte count to it, so the re-`stat` only corrects for writes made
  * by another process.
  */
@@ -115,6 +132,14 @@ function sizeCacheSlot(): Map<string, { size: number; checkedAt: number }> {
 	return g[SIZE_CACHE_KEY] as Map<string, { size: number; checkedAt: number }>;
 }
 
+function rotateBackoffSlot(): Map<string, { failures: number; retryAt: number }> {
+	const g = globalThis as Record<string, unknown>;
+	if (!(g[ROTATE_BACKOFF_KEY] instanceof Map)) {
+		g[ROTATE_BACKOFF_KEY] = new Map<string, { failures: number; retryAt: number }>();
+	}
+	return g[ROTATE_BACKOFF_KEY] as Map<string, { failures: number; retryAt: number }>;
+}
+
 /** The process-wide produced-paths set, created on first use. See {@link producedPaths}. */
 function producedSlot(): Set<string> {
 	const g = globalThis as Record<string, unknown>;
@@ -127,8 +152,8 @@ function producedSlot(): Set<string> {
 /**
  * Absolute path of the directory holding every dated log for `cwd`.
  *
- * `CONFIG_DIR_NAME` is Pi's own exported constant rather than a literal `.pi`
- * [CITED: pi 0.84.1 src/index.ts:7], so a rebranded distribution keeps working
+ * `CONFIG_DIR_NAME` is Pi's own exported constant rather than a literal `.pi`,
+ * so a rebranded distribution keeps working
  * and the logs stay next to the rest of the project's runtime state.
  */
 export function logDir(cwd: string): string {
@@ -232,7 +257,12 @@ function escapeForRegExp(literal: string): string {
  * Takes `cwd` so it is confined like `logPath`: it reads, renames and unlinks
  * relative to `file`'s directory, so `file` must sit inside `logDir(cwd)` too.
  */
-export function rotate(cwd: string, file: string, maxRotated: number = DEFAULT_MAX_ROTATED_FILES): void {
+export function rotate(
+	cwd: string,
+	file: string,
+	maxRotated: number = DEFAULT_MAX_ROTATED_FILES,
+	renameFile: typeof renameSync = renameSync,
+): boolean {
 	// The same second line of defence `logPath` applies, for the entry point a
 	// caller can reach with a path it built itself.
 	assertInsideLogDir(cwd, file);
@@ -262,7 +292,7 @@ export function rotate(cwd: string, file: string, maxRotated: number = DEFAULT_M
 		}
 		const dst = rotatedPath(file, n + 1);
 		try {
-			renameSync(src, dst);
+			renameFile(src, dst);
 			producedSlot().add(dst);
 		} catch {
 			// A rotated file another process holds open stays where it is. The
@@ -273,15 +303,15 @@ export function rotate(cwd: string, file: string, maxRotated: number = DEFAULT_M
 	if (maxRotated >= 1 && isRegularFile(file)) {
 		const dst = rotatedPath(file, 1);
 		try {
-			renameSync(file, dst);
+			renameFile(file, dst);
 			producedSlot().add(dst);
 		} catch {
-			// Rotation failed; the next append will simply keep growing the live
-			// file rather than losing the record. Never throw from here.
-			return;
+			// The append that follows keeps growing the live file rather than losing the record.
+			return false;
 		}
 		sizeCacheSlot().set(file, { size: 0, checkedAt: Date.now() });
 	}
+	return true;
 }
 
 /** Live size of `file`, re-`stat`ed at most once per {@link SIZE_RECHECK_MS}. */
@@ -304,6 +334,8 @@ export interface AppendOptions {
 	maxRotated?: number;
 	/** Injected clock, for deterministic tests. */
 	now?: Date;
+	/** Rename used by rotation; injectable so tests can make the live file refuse to move. */
+	renameFile?: typeof renameSync;
 }
 
 /**
@@ -344,8 +376,21 @@ export function appendJsonl(
 	const nowMs = now.getTime();
 	let size = cachedSize(file, nowMs);
 	if (size > 0 && size + bytes > cap) {
-		rotate(cwd, file, maxRotated);
-		size = 0;
+		const backoff = rotateBackoffSlot();
+		const state = backoff.get(file);
+		if (state === undefined || nowMs >= state.retryAt) {
+			if (rotate(cwd, file, maxRotated, opts.renameFile)) {
+				backoff.delete(file);
+				size = 0;
+			} else {
+				const failures = (state?.failures ?? 0) + 1;
+				const retryAt =
+					failures >= MAX_ROTATE_FAILURES
+						? Number.POSITIVE_INFINITY
+						: nowMs + ROTATE_RETRY_BASE_MS * 2 ** (failures - 1);
+				backoff.set(file, { failures, retryAt });
+			}
+		}
 	}
 
 	appendFileSync(file, text, "utf8");
@@ -387,7 +432,7 @@ function ageInDays(stamp: { y: number; m: number; d: number }, now: Date): numbe
  * Delete logs past the retention window and rotated files past the cap.
  *
  * Returns the absolute paths deleted, sorted. Typically called from
- * `session_start`: cheap, deterministic, and off the hot path (RESEARCH §10.5).
+ * `session_start`: cheap, deterministic, and off the hot path.
  *
  * Age is computed from the file's DATE STAMP against an injectable `now`, never
  * from an mtime. A stamp is what the name promises, it survives a copy between

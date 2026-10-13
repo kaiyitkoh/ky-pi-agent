@@ -5,7 +5,7 @@
  * Official API only (docs.qoder.com, Bearer PAT at https://api.qoder.com/api/v1/cloud); the unofficial npm providers forge signatures against Qoder's ToS.
  * The SSE event enum is known-incomplete, so unknown events are skipped; the live check is in docs/RUNBOOK.md.
  */
-import { appendJsonl } from "../../lib/jsonl.ts";
+import { appendJsonl, QODER_LOG_BASE } from "../../lib/jsonl.ts";
 import { redactDeep } from "../diagnostics/redact.ts";
 
 /** The personal access token. Generated once at qoder.com/account/integrations, shown only once. */
@@ -25,9 +25,6 @@ export const DEFAULT_QODER_BASE_URL = "https://api.qoder.com/api/v1/cloud";
 
 /** The personal access token's required prefix. A token that lacks it is not a Qoder PAT. */
 const TOKEN_PREFIX = "pt-";
-
-/** Own base name for the transcript stream, distinct from diagnostics' and safety's own bases. */
-const QODER_LOG_BASE = "qoder";
 
 /** Upper bound on a delegated task's length after trimming; catches a runaway payload (ASVS V5). */
 export const MAX_TASK_CHARS = 20_000;

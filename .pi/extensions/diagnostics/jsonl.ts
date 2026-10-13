@@ -4,6 +4,7 @@
  * {@link OWNED_BASES} (what this subsystem may delete) and the per-stream size caps. Registers nothing.
  */
 import {
+	AUXILIARY_LOG_BASES,
 	appendJsonl as libAppendJsonl,
 	logDir as libLogDir,
 	logPath as libLogPath,
@@ -26,7 +27,7 @@ export const producedPaths = libProducedPaths;
 export const resetProducedPaths = libResetProducedPaths;
 
 /** Stream base names this binding may DELETE; never widen without a test (a paired negative covers foreign names). */
-const OWNED_BASES: readonly string[] = [WIRE_LOG_BASE, TURNS_LOG_BASE];
+const OWNED_BASES: readonly string[] = [WIRE_LOG_BASE, TURNS_LOG_BASE, ...AUXILIARY_LOG_BASES];
 
 /** Default size cap for a stream, by base name. */
 function defaultRotateBytes(base: string): number {

@@ -4,6 +4,8 @@
  * (pi 1.1.0 dist/core/extensions/runner.js:1066-1079). Known limits and the single-request-at-a-time
  * assumption: docs/DIAGNOSTICS.md. Registers hooks only, never a tool.
  */
+import { createHash } from "node:crypto";
+
 import type {
 	BeforeProviderHeadersEvent,
 	BeforeProviderRequestEvent,
@@ -18,6 +20,7 @@ import {
 	MAX_ROTATED_FILES,
 	WIRE_LOG_BASE,
 	WIRE_ROTATE_BYTES,
+	WIRE_TAIL_MESSAGES,
 	type WireKind,
 	type WireRecord,
 } from "./schema.ts";
@@ -74,7 +77,7 @@ export function currentCorrelationId(): string | undefined {
  * (tests/unit/wire-record-typing.test.ts).
  */
 export type WireFieldsFor<K extends WireKind> = K extends `${string}.request`
-	? { payload: unknown }
+	? { payload: unknown; messageCount?: number; messagesHash?: string }
 	: K extends `${string}.headers`
 		? { headers: Record<string, string | null> }
 		: { status: number; headers?: Record<string, string | null> };
@@ -97,6 +100,26 @@ export function wireRecord<K extends WireKind>(
 		kind,
 		...fields,
 	} as WireRecord;
+}
+
+/**
+ * Cut `messages` in an already-redacted request payload to the last {@link WIRE_TAIL_MESSAGES}, returning the full
+ * count and a hash beside it. A payload without a `messages` array is returned unchanged.
+ */
+export function boundRequestPayload(redacted: unknown): { payload: unknown; messageCount?: number; messagesHash?: string } {
+	if (typeof redacted !== "object" || redacted === null || Array.isArray(redacted)) {
+		return { payload: redacted };
+	}
+	const messages = (redacted as { messages?: unknown }).messages;
+	if (!Array.isArray(messages)) {
+		return { payload: redacted };
+	}
+	const messagesHash = createHash("sha256").update(JSON.stringify(messages)).digest("hex").slice(0, 16);
+	const payload =
+		messages.length > WIRE_TAIL_MESSAGES
+			? { ...redacted, messages: messages.slice(-WIRE_TAIL_MESSAGES) }
+			: redacted;
+	return { payload, messageCount: messages.length, messagesHash };
 }
 
 /** Register the three main-loop provider hooks. `safeHandler` and `noteRow` are injected to avoid an import cycle. */
@@ -141,7 +164,7 @@ export function registerWireHooks(
 					corr: currentCorrelationId() ?? UNCORRELATED,
 					sessionId: ctx.sessionManager.getSessionId(),
 					// `redactDeep` copies; the live payload stays byte-identical.
-					payload: redactDeep(event.payload),
+					...boundRequestPayload(redactDeep(event.payload)),
 				}),
 			);
 			// No return: a non-`undefined` return replaces the payload (pi 1.1.0 runner.js:1077-1078).

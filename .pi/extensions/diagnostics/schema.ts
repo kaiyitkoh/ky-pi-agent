@@ -31,6 +31,9 @@ export const WIRE_ROTATE_BYTES = 32_000_000;
 /** Rotate `turns-*` at 8 MB: ~600 B per row is roughly 14,000 turns. */
 export const TURNS_ROTATE_BYTES = 8_000_000;
 
+/** Messages kept verbatim in a request wire row; older ones are summarised by count and hash so rows stop growing with history. */
+export const WIRE_TAIL_MESSAGES = 4;
+
 /** Rotated files kept per stream per day; the oldest is unlinked first by `rotate` in `jsonl.ts`. */
 export const MAX_ROTATED_FILES = 10;
 
@@ -194,7 +197,15 @@ interface WireRecordBase {
  * `headers` is optional since Bedrock supplies only `x-amzn-requestid` (`bedrock-converse-stream.ts`).
  */
 export type WireRecord =
-	| (WireRecordBase & { payload: unknown; headers?: never; status?: never })
+	| (WireRecordBase & {
+			payload: unknown;
+			/** Length of the full `messages` array before it was cut to the tail. */
+			messageCount?: number;
+			/** Truncated SHA-256 of the full redacted `messages` array. */
+			messagesHash?: string;
+			headers?: never;
+			status?: never;
+	  })
 	| (WireRecordBase & {
 			headers: Record<string, string | null>;
 			payload?: never;

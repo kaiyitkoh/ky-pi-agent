@@ -11,7 +11,7 @@ import type {
 } from "@earendil-works/pi-coding-agent";
 import { getCurrentTools } from "@earendil-works/pi-ai";
 
-import { appendJsonl } from "../../lib/jsonl.ts";
+import { appendJsonl, ESCALATION_LOG_BASE } from "../../lib/jsonl.ts";
 import { agentOverridesFor, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { deriveNeed, guardRoute } from "./guard.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
@@ -116,9 +116,6 @@ async function applyMode(
 		"info",
 	);
 }
-
-/** Routing-owned JSONL base name; never pruned because writes are rare. */
-const ESCALATION_LOG_BASE = "escalation";
 
 /**
  * NEVER THROWS: best-effort record, written after `setModel` succeeded so a failed write cannot turn a switch into an error.

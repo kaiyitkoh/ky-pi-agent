@@ -46,7 +46,8 @@ import { fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { logDir, logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
-import { WIRE_LOG_BASE, type WireKind } from "../../.pi/extensions/diagnostics/schema.ts";
+import { WIRE_LOG_BASE, WIRE_TAIL_MESSAGES, type WireKind } from "../../.pi/extensions/diagnostics/schema.ts";
+import { boundRequestPayload } from "../../.pi/extensions/diagnostics/wire.ts";
 import {
 	buildOpenAiFixturePayload,
 	SECRET_FIXTURE_TOKEN,
@@ -68,6 +69,8 @@ interface Row {
 	kind?: WireKind;
 	corr?: string;
 	payload?: { model?: string; messages?: unknown[] };
+	messageCount?: number;
+	messagesHash?: string;
 	status?: number;
 	headers?: Record<string, string | null>;
 }
@@ -242,10 +245,12 @@ describe("DIAG-01 / DIAG-07 — the wire dump of one live turn", () => {
 		const view = capture.context ? transcriptView(capture.context) : undefined;
 		const expectedMessages = (view?.messages.length ?? 0) + (view?.systemPrompt ? 1 : 0);
 		expect(
-			request?.payload?.messages?.length,
-			"the recorded payload carries a different number of messages than the context the " +
-				"provider received. The dump would be describing a request that was never sent",
+			request?.messageCount,
+			"the recorded message count differs from the context the provider received. The dump " +
+				"would be describing a request that was never sent",
 		).toBe(expectedMessages);
+		expect(request?.messagesHash, "the full-history hash is missing from the request row").toMatch(/^[0-9a-f]{16}$/);
+		expect(request?.payload?.messages?.length).toBe(Math.min(expectedMessages, WIRE_TAIL_MESSAGES));
 
 		const response = capture.rows.find((r) => r.kind === "main.response");
 		expect(
@@ -314,5 +319,33 @@ describe("DIAG-01 / DIAG-07 — the wire dump of one live turn", () => {
 					"the full prompt body of every turn, and this repository is public",
 			).toBe(true);
 		}
+	});
+});
+
+describe("wire request rows stay bounded as history grows", () => {
+	function payloadWith(turns: number): unknown {
+		return {
+			model: "m",
+			messages: Array.from({ length: turns }, (_, i) => ({ role: "user", content: `turn ${i} ${"x".repeat(200)}` })),
+		};
+	}
+
+	it("keeps the last WIRE_TAIL_MESSAGES, the full count and a hash", () => {
+		const bounded = boundRequestPayload(payloadWith(50));
+		expect((bounded.payload as { messages: unknown[] }).messages).toHaveLength(WIRE_TAIL_MESSAGES);
+		expect(bounded.messageCount).toBe(50);
+		expect(bounded.messagesHash).toMatch(/^[0-9a-f]{16}$/);
+		expect(boundRequestPayload(payloadWith(50)).messagesHash).toBe(bounded.messagesHash);
+		expect(boundRequestPayload(payloadWith(49)).messagesHash).not.toBe(bounded.messagesHash);
+	});
+
+	it("row size is flat between 10 and 50 turns", () => {
+		const size = (turns: number): number => JSON.stringify(boundRequestPayload(payloadWith(turns))).length;
+		expect(size(50)).toBeLessThan(size(10) * 1.2);
+	});
+
+	it("passes a payload with no messages array through unchanged", () => {
+		const input = { model: "m", input: ["a"] };
+		expect(boundRequestPayload(input)).toEqual({ payload: input });
 	});
 });

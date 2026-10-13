@@ -22,7 +22,7 @@
  * manipulation behaves differently on Windows and macOS and the requirement is
  * about the date stamp in the file name anyway.
  */
-import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -35,6 +35,7 @@ import {
 	rotate,
 	type AppendOptions,
 } from "../../.pi/extensions/diagnostics/jsonl.ts";
+import { appendJsonl as libAppendJsonl } from "../../.pi/lib/jsonl.ts";
 import { TURNS_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
 import { logFilesIn, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
 
@@ -449,6 +450,66 @@ describe("DIAG-08 / T-02-03-07 — a base name cannot escape the log directory",
 				"the paired positive. Without it, a confinement check that threw on every input would " +
 					"pass every escape case above while breaking rotation for the whole subsystem",
 			).toEqual([makeRecord(1, OLDEST_MARKER)]);
+		});
+	});
+});
+
+describe("retention covers the Qoder and escalation streams", () => {
+	it("deletes aged qoder-* and escalation-* logs and keeps fresh ones", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const dir = logDir(cwd);
+			mkdirSync(dir, { recursive: true });
+			const old = join(dir, "qoder-2026-06-01.jsonl");
+			const oldEsc = join(dir, "escalation-2026-06-01.jsonl");
+			const fresh = join(dir, "qoder-2026-08-12.jsonl");
+			for (const path of [old, oldEsc, fresh]) writeFileSync(path, "{}\n", "utf-8");
+
+			const deleted = pruneLogs(cwd, { retentionDays: 14, now });
+
+			expect(deleted).toEqual([old, oldEsc].sort());
+			expect(logFilesIn(dir)).toEqual([basename(fresh)]);
+		});
+	});
+});
+
+describe("a locked live file does not stall or lose appends", () => {
+	it("keeps appending, backs off between rotation attempts and gives up after four failures", async () => {
+		await withTempLogCwd(async (cwd) => {
+			let attempts = 0;
+			const refuse = ((): never => {
+				attempts += 1;
+				throw Object.assign(new Error("EBUSY"), { code: "EBUSY" });
+			}) as unknown as typeof renameSync;
+			const start = new Date(2026, 7, 13, 9, 0, 0).getTime();
+			const at = (offsetMs: number): Date => new Date(start + offsetMs);
+			const opts = (offsetMs: number): Parameters<typeof libAppendJsonl>[3] => ({
+				rotateBytes: RECORD_BYTES * 2,
+				now: at(offsetMs),
+				renameFile: refuse,
+			});
+
+			libAppendJsonl(cwd, "lockedlog", makeRecord(1), opts(0));
+			libAppendJsonl(cwd, "lockedlog", makeRecord(2), opts(0));
+			libAppendJsonl(cwd, "lockedlog", makeRecord(3), opts(0));
+			expect(attempts, "first over-cap append tries once").toBe(1);
+
+			libAppendJsonl(cwd, "lockedlog", makeRecord(4), opts(500));
+			expect(attempts, "inside the 1 s backoff no attempt is made").toBe(1);
+
+			libAppendJsonl(cwd, "lockedlog", makeRecord(5), opts(1100));
+			expect(attempts, "after 1 s the next attempt runs").toBe(2);
+			libAppendJsonl(cwd, "lockedlog", makeRecord(6), opts(1100 + 1500));
+			expect(attempts, "the second backoff is 2 s, not 1 s").toBe(2);
+			libAppendJsonl(cwd, "lockedlog", makeRecord(7), opts(1100 + 2100));
+			expect(attempts).toBe(3);
+			libAppendJsonl(cwd, "lockedlog", makeRecord(8), opts(1100 + 2100 + 4100));
+			expect(attempts, "fourth failure is the last").toBe(4);
+			libAppendJsonl(cwd, "lockedlog", makeRecord(9), opts(1_000_000));
+			expect(attempts, "after the bound no further attempt is made").toBe(4);
+
+			const live = logPath(cwd, "lockedlog", at(0));
+			expect(readIntact(live, "the live file")).toHaveLength(9);
 		});
 	});
 });

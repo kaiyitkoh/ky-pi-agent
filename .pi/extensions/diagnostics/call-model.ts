@@ -28,7 +28,7 @@ import {
 	type WireRecord,
 } from "./schema.ts";
 import { composeTurnRow } from "./turns.ts";
-import { nextCorrelationId, wireRecord, type WireFieldsFor } from "./wire.ts";
+import { boundRequestPayload, nextCorrelationId, wireRecord, type WireFieldsFor } from "./wire.ts";
 
 /**
  * The caller's option bag minus the keys this function owns. Distributive (`T extends unknown`):
@@ -159,7 +159,7 @@ export async function callModel<TApi extends Api>(
 		onPayload: (payload: unknown) => {
 			// `redactDeep` copies, so the live payload stays byte-identical. Contained: a throw kills the request.
 			contained(() => {
-				record("nested.request", { payload: redactDeep(payload) });
+				record("nested.request", boundRequestPayload(redactDeep(payload)));
 			});
 			// Returns nothing: a non-`undefined` return replaces the payload (pi 1.1.0 runner.js:1077-1078).
 			return undefined;
