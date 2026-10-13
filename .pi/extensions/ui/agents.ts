@@ -19,16 +19,13 @@ function idOf(payload: unknown): string | undefined {
 // parent (subagent-executor.js:7424); a plain call is an async launch counted through its bus event.
 function isForegroundLaunch(args: unknown): boolean {
   if (typeof args !== "object" || args === null) return false;
-  const a = args as { action?: unknown; async?: unknown; clarify?: unknown };
+  const a = args as { action?: unknown; async?: unknown; clarify?: unknown; workflow?: unknown; workflowScript?: unknown };
+  // Workflow children launch as async runners even under a blocking call (subagent-executor.js:4435).
+  if (a.workflow !== undefined || a.workflowScript !== undefined) return false;
   return a.action === undefined && (a.async === false || a.clarify === true);
 }
 
-/**
- * Child-status and foreground-complete bus events are deliberately not counted:
- * children belong to a run already counted, and foreground runs are already
- * tracked through their tool call. An async workflow is counted through its children. Management actions and async launches are not
- * foreground runs; an async launch is counted through its bus event instead.
- */
+/** Counts async runners by bus event and blocking subagent calls by tool call; workflows count through their runner children. */
 export function createAgentTracker() {
   const asyncIds = new Set<string>();
   const foreground = new Set<string>();

@@ -172,6 +172,15 @@ describe("agent tracker", () => {
     expect(t.running()).toBe(2);
   });
 
+  it("counts a blocking workflow through its children only, not its tool call", () => {
+    const t = createAgentTracker();
+    expect(t.onToolStart("subagent", "c1", { workflow: "x", async: false })).toBe(false);
+    expect(t.onToolStart("subagent", "c2", { workflowScript: "x.js", clarify: true })).toBe(false);
+    t.onBusEvent("subagent:async-started", { id: "child-1", mode: "single", parentWorkflowRunId: "c1" });
+    t.onBusEvent("subagent:async-started", { id: "child-2", mode: "single", parentWorkflowRunId: "c1" });
+    expect(t.running()).toBe(2);
+  });
+
   it("dedupes starts and ignores unknown completes", () => {
     const t = createAgentTracker();
     t.onBusEvent("subagent:async-started", { id: "r1" });
