@@ -640,6 +640,16 @@ describe("restorePlannerPin", () => {
 		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true, now: 30 * hour })).toMatchObject({ restored: false });
 	});
 
+	it("an owner time in the future, after the clock stepped back, counts as expired, and its own re-pin refreshes it", () => {
+		const { settingsPath } = seed({ theme: "ky" });
+		const hour = 60 * 60 * 1000;
+		writeAgentOverrides(pin, { settingsPath, pid: 111, now: 10 * hour });
+		writeAgentOverrides(pin, { settingsPath, pid: 111, now: 0 });
+		expect(JSON.parse(readFileSync(settingsPath, "utf-8")).kyPiAgent.plannerPinRestore.owners).toEqual([{ pid: 111, at: 0 }]);
+		writeAgentOverrides(pin, { settingsPath, pid: 111, now: 10 * hour });
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true, now: 0 })).toMatchObject({ restored: true });
+	});
+
 	it("an owner recorded as a bare pid by an older marker counts as expired", () => {
 		const { settingsPath } = seed({ subagents: { agentOverrides: pin }, kyPiAgent: { plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [111] } } });
 		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true })).toMatchObject({ restored: true });

@@ -151,6 +151,8 @@ interface PinMarker {
 const OWNER_TTL_MS = 86_400_000;
 // 1 h: a re-pin within this window keeps the recorded time, so repeating an identical pin stays a no-op write.
 const OWNER_REFRESH_MS = 3_600_000;
+// An owner time more than a minute ahead means the clock stepped back since, so it counts as expired.
+const ownerAge = (o: PinOwner, now: number): number => (o.at > now + 60_000 ? Infinity : now - o.at);
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
@@ -277,7 +279,7 @@ export function writeAgentOverrides(
 		if (Object.keys(marker.keys).length > 0) {
 			const pid = opts.pid ?? process.pid;
 			const now = opts.now ?? Date.now();
-			const mine = marker.owners.find((o) => o.pid === pid && now - o.at < OWNER_REFRESH_MS);
+			const mine = marker.owners.find((o) => o.pid === pid && ownerAge(o, now) < OWNER_REFRESH_MS);
 			ky[PLANNER_PIN_MARKER] = { ...marker, owners: [...marker.owners.filter((o) => o.pid !== pid), mine ?? { pid, at: now }] };
 			root.kyPiAgent = ky;
 		}
@@ -331,7 +333,7 @@ export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): Restore
 		const isAlive = opts.isAlive ?? processAlive;
 		const now = opts.now ?? Date.now();
 		const recorded = ownersOf(marker);
-		const owners = recorded.filter((o) => o.pid !== pid && now - o.at < OWNER_TTL_MS && isAlive(o.pid));
+		const owners = recorded.filter((o) => o.pid !== pid && ownerAge(o, now) < OWNER_TTL_MS && isAlive(o.pid));
 		if (owners.length > 0) {
 			if (owners.length !== recorded.length) {
 				root.kyPiAgent = { ...ky, [PLANNER_PIN_MARKER]: { ...marker, owners } };

@@ -306,11 +306,12 @@ run and that re-running the mode command re-pins it.
 The file is still shared: when two sessions are in different modes, the last
 writer's models apply to both until one switches again or a new session
 starts. A session idle for more than 24 hours without a mode switch loses its
-ownership, so a later process may restore the user's own overrides under it;
-that moves its planner to the cheaper default, never to a dearer one. The
+ownership, as does one whose recorded time is over a minute in the future
+(the clock stepped back), so a later process may restore the user's own
+overrides under it, whatever model those name. The
 read-modify-write of the file is not locked across processes: two sessions
 starting or ending in the same instant can lose one owner entry, and the pin
-is then restored early (the cheaper direction) or held until the 24-hour
+is then restored early to the user's own override or held until the 24-hour
 expiry.
 
 ### Accepted decisions
