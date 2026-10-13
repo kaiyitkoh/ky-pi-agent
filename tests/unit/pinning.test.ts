@@ -98,14 +98,14 @@ const REQUIRED_DEV_PINS: Record<string, string> = {
 	"@earendil-works/pi-tui": "1.1.0",
 	"@earendil-works/pi-agent-core": "1.1.0",
 	typebox: "1.3.27",
-	typescript: "5.9.3",
 	vitest: "4.1.11",
 	"@types/node": "24.12.4",
 };
 
 /**
  * `dependencies` (runtime, installed by `npm install --omit=dev`) mirrors
- * `REQUIRED_DEV_PINS`' shape for exactly one package, `unbash@4.0.10`.
+ * `REQUIRED_DEV_PINS`' shape for `unbash@4.0.10` and `typescript@5.9.3` (the quality
+ * extension imports typescript at load time).
  *
  * Why this cannot live in `devDependencies`: Pi installs a consumer's clone
  * with `npm install --omit=dev` (CLAUDE.md, "Runtime deps must be in
@@ -124,6 +124,7 @@ const REQUIRED_DEV_PINS: Record<string, string> = {
  * keys are allowed to be there, and at what version.
  */
 const REQUIRED_RUNTIME_PINS: Record<string, string> = {
+	typescript: "5.9.3",
 	unbash: "4.0.10",
 };
 
