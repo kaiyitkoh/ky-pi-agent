@@ -203,7 +203,7 @@ const ROWS: readonly Row[] = [
 	// -------------------------------------------------------------------------
 	// glab -- blocked unconditionally on every branch (the deploy trigger)
 	// -------------------------------------------------------------------------
-	{ command: "glab mr merge", rest: "mr merge", kind: "glab", currentBranch: "main", expected: "block", why: "the MR merge IS the deploy trigger (decision 13)" },
+	{ command: "glab mr merge", rest: "mr merge", kind: "glab", currentBranch: "main", expected: "block", why: "the MR merge IS the deploy trigger" },
 	{ command: "glab mr merge", rest: "mr merge", kind: "glab", currentBranch: "feature/x", expected: "block", why: "unconditional on branch -- the merge target is what deploys, not HEAD" },
 	{ command: "glab mr merge 123", rest: "mr merge 123", kind: "glab", currentBranch: "main", expected: "block", why: "merge with an explicit IID is still a merge" },
 	{ command: "glab mr merge --auto-merge", rest: "mr merge --auto-merge", kind: "glab", currentBranch: "main", expected: "block", why: "merge with a flag is still a merge" },

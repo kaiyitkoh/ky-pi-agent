@@ -24,12 +24,11 @@
  *
  * `currentBranch` runs `git symbolic-ref --short HEAD` with `shell: false`. A non-zero exit returns
  * {@link DETACHED_HEAD}, a named sentinel never equal to a protected name, not `undefined`, which a
- * caller's `=== "main"` would read as falsy and fail open. Callers resolve the cwd first:
- * `CanonicalInvocation.cwdOverride` (`git -C`) beats `ctx.cwd`, so `git -C /other/repo push`
- * evaluates that repo's HEAD.
+ * caller's `=== "main"` would read as falsy and fail open. Callers resolve the cwd first: the
+ * directory a command's `cd`, `env -C` and `git -C` lead to beats `ctx.cwd`, so
+ * `git -C /other/repo push` evaluates that repo's HEAD.
  *
- * Registers nothing and never spells the tool-registration call (contributing-boundary.test.ts
- * matches it as a substring).
+ * Registers nothing and never spells the tool-registration call, which a lint matches as a substring.
  */
 import { spawnSync } from "node:child_process";
 
@@ -144,7 +143,7 @@ export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	},
 ];
 
-/** Subcommands safe even when `HEAD` is protected; each needs a named allow row in git-policy.test.ts. */
+/** Subcommands safe even when `HEAD` is protected; each is a named allow, never a default. */
 export const GIT_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "fetch", matches: () => true, why: "reads from a remote, never mutates the checked-out branch" },
 	{ subcommand: "diff", matches: () => true, why: "read-only comparison" },
@@ -612,7 +611,7 @@ const GLAB_BLOCKED_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{
 		subcommand: "mr",
 		matches: (args) => args[0] === "merge",
-		why: "an MR merge is the deploy trigger in the user's work repo (CONTEXT.md decision 13)",
+		why: "an MR merge is the deploy trigger in the user's work repo",
 	},
 ];
 

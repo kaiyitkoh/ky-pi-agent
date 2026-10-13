@@ -3,7 +3,7 @@
  * write/delete blocking, deferred-detonation write-target blocking. Pure text manipulation: no
  * `realpath`, no fs, no `process.env`, no default export; `cwd`, `home`, `projectRoot` and
  * `kubeconfigEnv` are caller-supplied. Registers nothing and never spells the tool-registration
- * call (contributing-boundary.test.ts matches it as a substring).
+ * call, which a lint matches as a substring.
  *
  * Invariants:
  * - Normalises whatever arrives in `.text` and never reads `.value`. The bash caller currently passes
@@ -289,7 +289,7 @@ function parentDirOf(canonicalPath: string): string {
 /** The git-dir subdirectory holding the harness's signed /execute ledger and key. */
 export const HARNESS_LEDGER_SEGMENT = "kypi-ledger";
 
-/** Read classes that must never reach the model: `.env`-family, AWS/SSH/git/docker/Pi credentials, kubeconfig, Terraform state, the harness ledger. Each has a paired negative in path-policy.test.ts. */
+/** Read classes that must never reach the model: `.env`-family, AWS/SSH/git/docker/Pi credentials, kubeconfig, Terraform state, the harness ledger. */
 export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 	{
 		id: "dotenv",
