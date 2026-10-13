@@ -360,3 +360,26 @@ describe("SAFE-07 -- isSensitiveAwsRead / isSafeAwsOperation exported and direct
 		expect(SAFE_AWS_EXACT_OPERATIONS.has("ls")).toBe(true);
 	});
 });
+
+describe("secret-printing reads", () => {
+	it.each([
+		"terraform show -json",
+		"terraform show -json plan.out",
+		"terraform output -raw x",
+		"terraform output -json",
+		"kubectl config view --raw",
+		"kubectl get secret x -o yaml",
+		"kubectl get secrets",
+		"kubectl get cm,secret",
+		"kubectl describe secret x",
+	])("treats %s as a sensitive read", (command) => {
+		expect(classifyInfraInvocation(inv(command)).kind).toBe("sensitive-read");
+	});
+
+	it.each(["terraform output", "terraform show", "kubectl get pods", "kubectl config view", "kubectl describe pod x"])(
+		"leaves %s alone",
+		(command) => {
+			expect(classifyInfraInvocation(inv(command)).kind).toBe("allow");
+		},
+	);
+});

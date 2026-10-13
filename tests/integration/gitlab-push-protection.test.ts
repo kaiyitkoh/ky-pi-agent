@@ -29,7 +29,9 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { classifyPushFailure } from "../../.pi/extensions/safety/git.ts";
+
+const classifyPushFailure = (stderr: string): "protected-branch-rejection" | "other" =>
+	/not allowed to push code to protected branches/i.test(stderr) ? "protected-branch-rejection" : "other";
 
 /** One git invocation against `cwd`, real subprocess, never a mock. */
 function git(args: string[], cwd: string): { stdout: string; stderr: string; status: number | null } {

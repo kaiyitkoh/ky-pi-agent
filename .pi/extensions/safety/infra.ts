@@ -146,18 +146,47 @@ function subcommandKey(args: readonly string[], twoWordParents: ReadonlySet<stri
 const unclassified = (what: string, noun: string): InfraVerdict =>
 	confirm(`"${what}" is an unclassified ${noun} -- defaults to confirm (fail-safe, not a hard block: add a table row rather than widening a default)`);
 
+const sensitiveRead = (reason: string): InfraVerdict => ({ kind: "sensitive-read", reason });
+
+/** `terraform show -json` and `output -raw/-json` print values the plain forms mask as sensitive. */
+function terraformSecretDump(key: string, args: readonly string[]): InfraVerdict | undefined {
+	const flags = args.slice(1).map((a) => a.replace(/^--/, "-").toLowerCase());
+	const dumps = key === "show" ? flags.includes("-json") : key === "output" && (flags.includes("-raw") || flags.includes("-json"));
+	return dumps ? sensitiveRead(`"terraform ${key}" in raw or JSON form prints state values, including secrets, into model context`) : undefined;
+}
+
 function classifyTerraformInvocation(args: readonly string[]): InfraVerdict {
 	const key = subcommandKey(args, wordSet("state workspace"));
 	if (key === undefined) return confirm('"terraform" with no subcommand -- fail closed to confirmation');
+	const dump = terraformSecretDump(key, args);
+	if (dump !== undefined) return dump;
 	if (TERRAFORM_CONFIRM_SUBCOMMANDS.has(key)) {
 		return confirm(`"terraform ${key}" mutates state or a live resource and cannot be trivially undone`);
 	}
 	return TERRAFORM_ALLOW_SUBCOMMANDS.has(key) ? { kind: "allow" } : unclassified(`terraform ${key}`, "subcommand");
 }
 
+const KUBECTL_SECRET_RESOURCE = /^secrets?(\.v1)?(\/|$)/i;
+
+/** True when a `get`/`describe` names the secret resource type in any position, including a comma list (`cm,secret`). */
+const namesSecretResource = (args: readonly string[]): boolean =>
+	args.slice(1).some((a) => !a.startsWith("-") && a.split(",").some((part) => KUBECTL_SECRET_RESOURCE.test(part)));
+
+function kubectlSecretRead(verb: string, args: readonly string[]): InfraVerdict | undefined {
+	if ((verb === "get" || verb === "describe") && namesSecretResource(args)) {
+		return sensitiveRead(`"kubectl ${verb}" on secrets prints cluster secret material into model context`);
+	}
+	if (verb === "config" && args[1] === "view" && args.some((a) => a === "--raw" || a === "--raw=true")) {
+		return sensitiveRead('"kubectl config view --raw" prints client credentials into model context');
+	}
+	return undefined;
+}
+
 function classifyKubectlInvocation(args: readonly string[]): InfraVerdict {
 	const verb = args[0];
 	if (verb === undefined) return confirm('"kubectl" with no verb -- fail closed to confirmation');
+	const secretRead = kubectlSecretRead(verb, args);
+	if (secretRead !== undefined) return secretRead;
 	if (verb === "exec") {
 		return confirm(`"kubectl exec" runs arbitrary commands inside a live workload -- the bash guard cannot see into a remote shell`);
 	}

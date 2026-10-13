@@ -6,7 +6,8 @@
 import type { CanonicalInvocation } from "./shell.ts";
 import { canonicalise, foldDirectories, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
-import { canonicalisePathArg, classifyPathRead, classifyPathWrite, isSensitiveSearchRoot } from "./paths.ts";
+import { canonicalisePathArg, classifyPathRead, classifyPathWrite, classifyReadGlob, isSensitiveSearchRoot } from "./paths.ts";
+import type { PathVerdict } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
 import { classifyGitInvocation, classifyGlabInvocation } from "./git.ts";
 import type { InfraVerdict } from "./infra.ts";
@@ -122,33 +123,94 @@ function fromInfraVerdict(verdict: InfraVerdict, requestKey: string): Verdict {
 /** Global options that point git at another repository or ref namespace than the cwd the guard reads config in. */
 const GIT_REPO_REDIRECT_OPTIONS = /^--(git-dir|work-tree|namespace)(=|$)/;
 
-/** Skips git's global options and their values, so the subcommand is the first positional word rather than "-C". */
-function toGitInvocation(invocation: CanonicalInvocation): GitInvocation {
+const wordSet = (words: string): ReadonlySet<string> => new Set(words.split(" "));
+
+/** `-c` keys that only affect output formatting; every other override can make git run a program or move a push target. */
+const GIT_FORMATTING_CONFIG_KEYS = wordSet("core.quotepath color.ui");
+
+/** Global options that take no value and cannot change what runs. */
+const GIT_BOOLEAN_GLOBALS = wordSet(
+	"--no-pager -P --paginate -p --bare --literal-pathspecs --glob-pathspecs --noglob-pathspecs --icase-pathspecs " +
+		"--no-replace-objects --no-optional-locks --no-lazy-fetch",
+);
+
+/** `NAME=value` words a git invocation may carry; any other GIT_* variable can redirect config, hooks or transport. */
+const GIT_ALLOWED_ASSIGNMENTS = wordSet("GIT_PAGER=cat GIT_TERMINAL_PROMPT=0");
+
+/**
+ * Splits git's global options from the subcommand. In strict mode an option outside the known sets marks the invocation
+ * unparsed (it blocks on every branch); glab keeps the lenient skip because its flags are not git's.
+ */
+function toGitInvocation(invocation: CanonicalInvocation, strict = true): GitInvocation {
 	const args = invocation.args;
 	const configOverrides: string[] = [];
+	let unparsed: string | undefined;
 	let i = 0;
 	while (i < args.length && args[i].startsWith("-")) {
 		const flag = args[i];
-		if (flag.startsWith("--config-env=")) {
-			configOverrides.push(flag.slice("--config-env=".length));
+		if (flag === "-c") {
+			const setting = args[i + 1];
+			const key = setting?.split("=")[0].toLowerCase();
+			if (setting === undefined || key === undefined || !GIT_FORMATTING_CONFIG_KEYS.has(key)) {
+				unparsed ??= `overrides git config with -c ${setting ?? ""}`.trim();
+			}
+			if (setting !== undefined) configOverrides.push(setting);
+			i += 2;
+		} else if (flag === "--config-env" || flag.startsWith("--config-env=")) {
+			unparsed ??= "overrides git config with --config-env";
+			configOverrides.push(flag.startsWith("--config-env=") ? flag.slice("--config-env=".length) : (args[i + 1] ?? ""));
+			i += flag === "--config-env" ? 2 : 1;
+		} else if (GIT_REPO_REDIRECT_OPTIONS.test(flag) && flag.includes("=")) {
 			i += 1;
 		} else if (GIT_GLOBAL_VALUE_OPTIONS.has(flag)) {
-			if ((flag === "-c" || flag === "--config-env") && args[i + 1] !== undefined) configOverrides.push(args[i + 1]);
 			i += 2;
 		} else {
-			// Unrecognised or boolean flag: skip only itself, never guessing an arity that over-consumes the subcommand.
+			if (strict && !GIT_BOOLEAN_GLOBALS.has(flag)) unparsed ??= `has the global option "${flag}", which this guard does not understand`;
 			i += 1;
 		}
 	}
-	return { subcommand: args[i] ?? "", args: args.slice(i + 1), configOverrides };
+	return { subcommand: args[i] ?? "", args: args.slice(i + 1), configOverrides, ...(unparsed !== undefined ? { unparsed } : {}) };
+}
+
+/** `git-push` and kin are the git subcommand run as its own executable; classify them as `git <x>`. */
+function asGitSubcommandInvocation(invocation: CanonicalInvocation): CanonicalInvocation | undefined {
+	const match = /^git-(.+)$/.exec(normaliseExecutable(invocation.executable));
+	return match === null ? undefined : { ...invocation, executable: "git", args: [match[1], ...invocation.args] };
+}
+
+const nonFormattingGitAssignment = (invocation: CanonicalInvocation): string | undefined =>
+	(invocation.assignmentWords ?? []).find((w) => /^GIT_/i.test(w) && !GIT_ALLOWED_ASSIGNMENTS.has(w));
+
+const GLOB_CHARS = /[*?[]/;
+const LEADING_WILDCARD = /^[*?[{]/;
+
+/** The shell never matches a dotfile with a leading wildcard, so such a basename is judged by its directory part alone. */
+function classifyGlobArg(canonical: string, facts: PathPolicyFacts): PathVerdict {
+	const slash = Math.max(canonical.lastIndexOf("/"), canonical.lastIndexOf("\\"));
+	const base = canonical.slice(slash + 1);
+	return LEADING_WILDCARD.test(base) ? classifyReadGlob(`${canonical.slice(0, slash + 1)}x`, facts) : classifyReadGlob(canonical, facts);
+}
+
+/** The argument itself, plus the file it names when it is `@file` or `key=@file` (curl, jq and others read the file). */
+function fileOperandsOf(arg: string): string[] {
+	const operands = [arg];
+	if (arg.startsWith("@")) operands.push(arg.slice(1));
+	const at = arg.indexOf("=@");
+	if (at !== -1) operands.push(arg.slice(at + 2));
+	return operands;
 }
 
 /** One invocation's strongest verdict across git/glab, infra and path classification; `sole` means it is the command's only invocation. */
-function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string, sole: boolean): Verdict {
+function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string, sole: boolean): Verdict {
 	let strongest: Verdict = { kind: "allow" };
+	const invocation = asGitSubcommandInvocation(rawInvocation) ?? rawInvocation;
 	const executable = normaliseExecutable(invocation.executable);
 
 	if (executable === "git") {
+		const envWord = nonFormattingGitAssignment(invocation);
+		if (envWord !== undefined) {
+			return { kind: "block", reason: `"${envWord.split("=")[0]}" in the environment of a git command can make git run a program or use other config` };
+		}
 		const branchIn = (dir?: string): string => facts.currentBranchFor(foldDirectories([facts.cwd, dir ?? "."]) ?? facts.cwd);
 		// A subshell's `cd` does not persist, so the session cwd counts too; an unreadable `cd` target counts as protected.
 		const afterCd = invocation.afterCd === "unknown" ? [facts.protectedBranches[0] ?? ""] : invocation.afterCd === "known" ? [branchIn()] : [];
@@ -173,7 +235,7 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 		// glab needs protectedBranches for its mr create rule, not currentBranch.
 		strongest = strongerOf(
 			strongest,
-			fromGitVerdict(classifyGlabInvocation(toGitInvocation(invocation), facts.protectedBranches), requestKey),
+			fromGitVerdict(classifyGlabInvocation(toGitInvocation(invocation, false), facts.protectedBranches), requestKey),
 		);
 	}
 
@@ -183,9 +245,13 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 	// Bash args use classifyPathRead, not Write: write containment would block nearly every absolute path a command mentions.
 	// Args are Word.value-resolved, so an unquoted Windows path through bash may mangle (docs/SAFETY.md known bypasses).
 	for (const arg of invocation.args) {
-		const pathVerdict = classifyPathRead(canonicalOf(arg, facts), pathFacts);
-		if (pathVerdict.kind === "block") {
-			strongest = strongerOf(strongest, { kind: "block", reason: pathVerdict.reason });
+		for (const candidate of fileOperandsOf(arg)) {
+			const canonical = canonicalOf(candidate, facts);
+			const pathVerdict = classifyPathRead(canonical, pathFacts);
+			const globVerdict = GLOB_CHARS.test(candidate) && !candidate.startsWith("-") ? classifyGlobArg(canonical, pathFacts) : pathVerdict;
+			for (const verdict of [pathVerdict, globVerdict]) {
+				if (verdict.kind === "block") strongest = strongerOf(strongest, { kind: "block", reason: verdict.reason });
+			}
 		}
 	}
 
@@ -211,6 +277,10 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	let strongest: Verdict = { kind: "allow" };
 	for (const invocation of shellVerdict.invocations) {
 		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey, shellVerdict.commandCount === 1));
+	}
+	for (const target of shellVerdict.redirectReadTargets) {
+		const verdict = classifyPathRead(canonicalOf(target, facts), pathFactsOf(facts));
+		if (verdict.kind === "block") strongest = strongerOf(strongest, { kind: "block", reason: `input redirect: ${verdict.reason}` });
 	}
 	return strongest;
 }

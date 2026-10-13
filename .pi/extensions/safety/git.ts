@@ -92,6 +92,8 @@ export interface GitInvocation {
 	readonly args: readonly string[];
 	/** `name=value` from git's global `-c`/`--config-env`, which precede the subcommand. */
 	readonly configOverrides?: readonly string[];
+	/** Why the global options before the subcommand could not be understood; such an invocation blocks on every branch. */
+	readonly unparsed?: string;
 }
 
 export interface GitPolicyFacts {
@@ -176,6 +178,77 @@ export const GIT_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 		why: "--check/--stat/--numstat is a dry run -- does not write the tree",
 	},
 ];
+
+/** Every subcommand that may run on any branch; an alias or an unlisted name is not one, because an alias can expand to a push. */
+export const GIT_KNOWN_SUBCOMMANDS: ReadonlySet<string> = new Set(
+	(
+		"add commit checkout switch restore branch merge rebase reset stash tag cherry-pick revert worktree fetch pull clone init " +
+		"diff log show status remote ls-files ls-remote rev-parse blame grep apply am clean mv rm describe shortlog reflog bisect " +
+		"submodule gc cat-file ls-tree rev-list show-ref for-each-ref merge-base config help version push check-ignore symbolic-ref " +
+		"format-patch archive notes diff-tree name-rev count-objects sparse-checkout"
+	).split(" "),
+);
+
+/** Subcommands that hand a program or a remote end the ability to write, whatever their arguments. */
+const GIT_ALWAYS_BLOCKED: ReadonlyMap<string, string> = new Map([
+	["send-pack", "pushes refs without going through the push checks"],
+	["receive-pack", "runs the receiving end of a push"],
+	["upload-pack", "runs a program on behalf of a remote"],
+	["http-push", "pushes refs without going through the push checks"],
+	["remote-ext", "runs an arbitrary command as a remote transport"],
+	["daemon", "serves repositories over the network"],
+]);
+
+const FORMAT_PATCH_SEND_OPTION = /^--(to|cc|bcc|send-email|smtp[\w-]*|in-reply-to)(=|$)/;
+const CONFIG_READ_FLAGS = new Set(["--get", "--get-all", "--get-regexp", "--get-urlmatch", "--list", "-l"]);
+const CONFIG_SCOPE_FLAGS = new Set(["--global", "--local", "--system", "--worktree", "--show-origin", "--show-scope", "--null", "-z", "--name-only"]);
+const CONFIG_DANGEROUS_KEY =
+	/^(alias\..*|core\.(sshcommand|fsmonitor|pager|editor|hookspath|askpass|gitproxy)|credential\..*|include\..*|includeif\..*|url\..*|remote\..*\.(push|url|pushurl|receivepack|uploadpack|proxy)|diff\..*\.(textconv|command)|filter\..*|pager\..*|sequence\.editor|gpg\..*program|sendemail\..*)$/i;
+
+/** Why `git config <args>` is not a plain read, or undefined when it is one. */
+function configWriteReason(args: readonly string[]): string | undefined {
+	const flags = args.filter((a) => a.startsWith("-"));
+	const positionals = args.filter((a) => !a.startsWith("-"));
+	const unknown = flags.find((f) => !CONFIG_SCOPE_FLAGS.has(f) && !CONFIG_READ_FLAGS.has(f));
+	if (unknown !== undefined) return `"${unknown}" is not a read form of git config`;
+	if (flags.some((f) => CONFIG_READ_FLAGS.has(f))) return undefined;
+	if (positionals.length !== 1) return "git config with a value, or without exactly one key, writes configuration";
+	const key = positionals[0];
+	return CONFIG_DANGEROUS_KEY.test(key) ? `"${key}" makes git run programs or rewrites push targets` : undefined;
+}
+
+const positionalsOf = (args: readonly string[]): string[] => args.filter((a) => !a.startsWith("-"));
+
+/** Per-subcommand argument limits for the subcommands admitted only in a restricted form; undefined means the form is allowed. */
+function restrictedFormReason(subcommand: string, args: readonly string[]): string | undefined {
+	switch (subcommand) {
+		case "config":
+			return configWriteReason(args);
+		case "symbolic-ref":
+			return positionalsOf(args).length > 1 || args.some((a) => a === "-d" || a === "--delete" || a === "-m")
+				? "only the read form of symbolic-ref is allowed"
+				: undefined;
+		case "format-patch": {
+			const send = args.find((a) => FORMAT_PATCH_SEND_OPTION.test(a));
+			if (send !== undefined) return `"${send}" sends mail`;
+			const outIndex = args.findIndex((a) => a === "-o" || a === "--output-directory" || a.startsWith("--output-directory="));
+			const dir = outIndex === -1 ? undefined : args[outIndex].includes("=") ? args[outIndex].split("=")[1] : args[outIndex + 1];
+			return dir !== undefined && (/^([A-Za-z]:)?[\\/]/.test(dir) || dir.split(/[\\/]/).includes(".."))
+				? "format-patch may write only inside the project"
+				: undefined;
+		}
+		case "archive":
+			return args.some((a) => a === "--remote" || a.startsWith("--remote=") || a === "--exec" || a.startsWith("--exec="))
+				? "archive --remote and --exec reach another machine or run a program"
+				: undefined;
+		case "notes":
+			return args.length === 0 || args[0] === "list" || args[0] === "show" ? undefined : "only `notes list` and `notes show` are allowed";
+		case "sparse-checkout":
+			return args[0] === "list" ? undefined : "only `sparse-checkout list` is allowed";
+		default:
+			return undefined;
+	}
+}
 
 function isProtected(facts: GitPolicyFacts): boolean {
 	return facts.protectedBranches.some((b) => b.toLowerCase() === facts.currentBranch.toLowerCase());
@@ -417,6 +490,23 @@ function planPush(args: readonly string[], configOverrides: readonly string[], f
 export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolicyFacts): GitVerdict {
 	const display = `git ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
 
+	if (invocation.unparsed !== undefined) {
+		return { kind: "block", reason: `"${display}" ${invocation.unparsed} -- blocked on every branch because git options can turn git into a program runner` };
+	}
+	const alwaysBlocked = GIT_ALWAYS_BLOCKED.get(invocation.subcommand);
+	if (alwaysBlocked !== undefined) return { kind: "block", reason: `"${display}" ${alwaysBlocked} -- blocked on every branch` };
+	if (!GIT_KNOWN_SUBCOMMANDS.has(invocation.subcommand) && invocation.subcommand !== "") {
+		const detail = invocation.subcommand === "subtree" ? "subtree can push" : "an alias or unlisted subcommand may expand to a push";
+		return {
+			kind: "block",
+			reason:
+				`"${display}": ${detail}, so only these subcommands run: ${[...GIT_KNOWN_SUBCOMMANDS].sort().join(", ")} -- ` +
+				"blocked on every branch; spell the real subcommand",
+		};
+	}
+	const restricted = restrictedFormReason(invocation.subcommand, invocation.args);
+	if (restricted !== undefined) return { kind: "block", reason: `"${display}": ${restricted} -- blocked on every branch` };
+
 	const push = invocation.subcommand === "push" ? planPush(invocation.args, invocation.configOverrides ?? [], facts) : undefined;
 	if (push?.kind === "refused") {
 		return {
@@ -467,7 +557,7 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 		kind: "block",
 		reason:
 			`HEAD is "${facts.currentBranch}" (protected) and "${display}" is an unclassified subcommand -- defaults ` +
-			`to block (fail closed, per SAFE-03's posture; add it to the read or write table with a fixture, never ` +
+			`to block (fail closed; add it to the read or write table with a fixture, never ` +
 			`widen the default)`,
 	};
 }
@@ -567,15 +657,4 @@ export function classifyGlabInvocation(invocation: GitInvocation, protectedBranc
 		kind: "block",
 		reason: `"${display}" is an unclassified glab form -- defaults to block (fail closed, same posture as git)`,
 	};
-}
-
-/** `"protected-branch-rejection"` is the server refusing a protected ref (the one control enforced where the harness runs no code); `"other"` exists so the classifier is tested in both directions. */
-export type PushFailureClassification = "protected-branch-rejection" | "other";
-
-/** GitLab's rejection wording, reproduced from the fixture hook; a loose case-insensitive match tolerates differences in the live message (confirm on the work laptop per docs/RUNBOOK.md). */
-const PROTECTED_BRANCH_REJECTION_RE = /not allowed to push code to protected branches/i;
-
-/** Classify a push failure from stderr text; exit codes are non-zero for every rejection so cannot distinguish this one. Pure reader, never runs git. */
-export function classifyPushFailure(stderr: string): PushFailureClassification {
-	return PROTECTED_BRANCH_REJECTION_RE.test(stderr) ? "protected-branch-rejection" : "other";
 }

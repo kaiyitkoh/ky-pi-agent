@@ -174,6 +174,8 @@ export interface CanonicalInvocation {
 	readonly afterCd?: "known" | "unknown";
 	/** Set when `NAME=value` words prefix the command, which can change git's config or repository for this run only. */
 	readonly assignments?: true;
+	/** Every `NAME=value` word before the command, from the statement prefix and from wrapper assignments (`env NAME=value`). */
+	readonly assignmentWords?: readonly string[];
 }
 
 export type ShellVerdict =
@@ -183,6 +185,8 @@ export type ShellVerdict =
 			readonly invocations: readonly CanonicalInvocation[];
 			/** Every distinct `Redirect.operator` in walk order, so callers need no second AST walk. */
 			readonly redirectOperators: readonly string[];
+			/** Targets of input redirects (`<`, `<>`, and `<&` onto a non-descriptor), which read a file as surely as an argument does. */
+			readonly redirectReadTargets: readonly string[];
 			/** Every `Command` node, including assignment-only statements (`HOME=x`) that yield no invocation. */
 			readonly commandCount: number;
 	  };
@@ -210,18 +214,25 @@ function walk(node: unknown, visit: (obj: Record<string, unknown>) => void): voi
 interface ScriptScan {
 	readonly types: Set<string>;
 	readonly redirects: Set<string>;
+	readonly readTargets: string[];
 	readonly commands: Command[];
 	background: boolean;
 }
 
 function scanScript(script: ParsedScript): ScriptScan {
-	const scan: ScriptScan = { types: new Set(), redirects: new Set(), commands: [], background: false };
+	const scan: ScriptScan = { types: new Set(), redirects: new Set(), commands: [], background: false, readTargets: [] };
 	walk(script, (node) => {
 		if (typeof node.type === "string") scan.types.add(node.type);
 		if (node.type === "Statement" && node.background === true) scan.background = true;
 		if (node.type === "Command") scan.commands.push(node as unknown as Command);
 		if (!Array.isArray(node.redirects)) return;
-		for (const r of node.redirects as Record<string, unknown>[]) if (typeof r.operator === "string") scan.redirects.add(r.operator);
+		for (const r of node.redirects as Record<string, unknown>[]) {
+			if (typeof r.operator !== "string") continue;
+			scan.redirects.add(r.operator);
+			const target = (r.target as Word | undefined)?.value;
+			if (target === undefined) continue;
+			if (r.operator === "<" || r.operator === "<>" || (r.operator === "<&" && !/^(\d+|-)$/.test(target))) scan.readTargets.push(target);
+		}
 	});
 	return scan;
 }
@@ -453,6 +464,7 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 		const args = values.slice(resolved.index + 1);
 		const cwdOverride = foldDirectories([...(cd?.dirs ?? []), ...resolved.dirs, ...gitDirectories(executable, args)]);
 		const rawSegment = sourceText.slice(node.pos, node.end);
+		const assignmentWords = [...node.prefix.map((a) => a.text), ...values.slice(0, resolved.index).filter((w) => ASSIGNMENT_WORD.test(w))];
 		const afterCd = cd === undefined ? {} : { afterCd: cd.known ? ("known" as const) : ("unknown" as const) };
 		if (CD_COMMANDS.has(normaliseExecutable(executable))) {
 			// `popd`, a bare `cd`, `cd -`, `cd ~/x` and `cd "$D"` leave the directory unknowable here.
@@ -470,6 +482,7 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 					...(cwdOverride !== undefined ? { cwdOverride } : {}),
 					...afterCd,
 					...(node.prefix.length > 0 ? { assignments: true as const } : {}),
+					...(assignmentWords.length > 0 ? { assignmentWords } : {}),
 				},
 				confident: resolved.confident,
 				expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
@@ -547,5 +560,5 @@ export function canonicalise(command: string): ShellVerdict {
 	if (findShellRunnerDenial(invocations) !== undefined || carriesVerbAcrossSegments(invocations)) return refused("shell-runner", command);
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
 	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
-	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], commandCount: scan.commands.length };
+	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], redirectReadTargets: scan.readTargets, commandCount: scan.commands.length };
 }

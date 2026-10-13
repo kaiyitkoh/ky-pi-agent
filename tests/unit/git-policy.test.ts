@@ -292,3 +292,66 @@ describe("SAFE-04 -- currentBranch is exported with a symbolic-ref oracle and a 
 		expect(typeof currentBranch).toBe("function");
 	});
 });
+
+const BOTH_BRANCHES = ["feat", "main"] as const;
+
+const BLOCKED_EVERYWHERE: readonly string[] = [
+	"send-pack git@x:y.git +HEAD:refs/heads/main",
+	"receive-pack x",
+	"subtree push --prefix d origin main",
+	"config alias.p push",
+	"config --global core.sshCommand x",
+	"config --unset user.name",
+	"p origin main",
+	"push-all origin",
+	"symbolic-ref HEAD refs/heads/main",
+	"symbolic-ref -d HEAD",
+	"archive --remote=x HEAD",
+	"notes add -m x",
+	"sparse-checkout set d",
+	"format-patch --to x@y.z -1",
+	"format-patch -o /tmp/out -1",
+];
+
+describe.each(BOTH_BRANCHES)("subcommand allow-list with HEAD on %s", (branch) => {
+	it.each(BLOCKED_EVERYWHERE)("blocks git %s", (rest) => {
+		expect(classifyGitInvocation(invocation(rest), facts(branch)).kind).toBe("block");
+	});
+
+	it("blocks an invocation whose global options were not understood", () => {
+		const verdict = classifyGitInvocation({ subcommand: "fetch", args: [], unparsed: "overrides git config with -c alias.p=push" }, facts(branch));
+		expect(verdict.kind).toBe("block");
+	});
+});
+
+const ALLOWED_ON_FEATURE: readonly string[] = [
+	"check-ignore x",
+	"symbolic-ref HEAD",
+	"format-patch -1",
+	"archive HEAD -o out.tar",
+	"notes list",
+	"notes show",
+	"diff-tree HEAD",
+	"name-rev HEAD",
+	"count-objects",
+	"sparse-checkout list",
+	"status",
+	"add a",
+	"commit -m x",
+	"checkout -b y",
+	"diff",
+	"log",
+	"config --get user.name",
+	"config --get remote.origin.url",
+	"config user.name",
+];
+
+describe("known subcommands on a feature branch", () => {
+	it.each(ALLOWED_ON_FEATURE)("allows git %s", (rest) => {
+		expect(classifyGitInvocation(invocation(rest), facts("feat")).kind).toBe("allow");
+	});
+
+	it("still asks before a feature-branch push", () => {
+		expect(classifyGitInvocation(invocation("push origin feat:feat"), facts("feat")).kind).toBe("ask");
+	});
+});
