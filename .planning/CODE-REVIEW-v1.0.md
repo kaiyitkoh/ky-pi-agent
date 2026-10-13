@@ -404,6 +404,8 @@ Info items still open:
 
 ## Info
 
+- **Deferred: narrowing the shell guard's pipe rule.** Any code runner on a pipe is refused again (b6dc540, dbac8c5); allowing a piped interpreter with a script file waits for a hardened design (see quick-261013-sit REVIEW.md CR-01..CR-06).
+
 - **I-1 plan-mode read-only allow-list holes** (`plan-mode/read-only.ts`):
   - `rg --pre bash` runs a command.
   - These write files: `tree -o`, `uniq in out`, and curl's `-c`, `-D`, `--trace` and `--libcurl`.
