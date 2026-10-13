@@ -273,18 +273,34 @@ function protectedRefWrite(subcommand: string, args: readonly string[], protecte
 			return named([optionValue(args, ["-b", "-B"])]);
 		case "switch":
 			return named([optionValue(args, ["-c", "-C", "--create", "--force-create"])]);
+		case "worktree":
+			return args[0] === "add" ? named([optionValue(args, ["-b", "-B"])]) : undefined;
+		case "rebase": {
+			// `rebase <upstream> <branch>` switches to <branch> first; with --root the only positional is the branch.
+			const positionals = args.filter((a, i) => !a.startsWith("-") && !REBASE_VALUE_OPTIONS.has(args[i - 1] ?? ""));
+			return named([args.includes("--root") ? positionals[0] : positionals[1]]);
+		}
 		default:
 			return undefined;
 	}
 }
 
-/** The branch a `checkout`/`switch` leaves HEAD on, `"-"` when it cannot be known here, or undefined when HEAD does not move. */
+const REBASE_VALUE_OPTIONS = new Set(["--onto", "-s", "--strategy", "-X", "--strategy-option", "-x", "--exec"]);
+
+/** The branch a `checkout`/`switch`/`worktree add` leaves a HEAD on, `"-"` when it cannot be known here, or undefined when no HEAD moves. */
 export function switchTarget(subcommand: string, args: readonly string[]): string | undefined {
+	if (subcommand === "worktree") {
+		if (args[0] !== "add" || optionValue(args, ["-b", "-B"]) !== undefined) return undefined;
+		return args.slice(1).filter((a, i, rest) => !a.startsWith("-") && rest[i - 1] !== "--reason")[1];
+	}
 	if ((subcommand !== "checkout" && subcommand !== "switch") || args.includes("--")) return undefined;
 	const created = optionValue(args, subcommand === "checkout" ? ["-b", "-B"] : ["-c", "-C", "--create", "--force-create"]);
 	if (created !== undefined) return created;
 	const target = positionalsOf(args)[0];
-	return target === "-" || args.includes("-") ? "-" : target;
+	if (target === "-" || args.includes("-") || target?.includes("@{") === true) return "-";
+	// `--track <remote>/<branch>` creates and checks out the local <branch>.
+	const tracking = args.some((a) => a === "-t" || a === "--track" || a.startsWith("--track="));
+	return tracking && target !== undefined ? target.slice(target.indexOf("/") + 1) : target;
 }
 
 function isProtected(facts: GitPolicyFacts): boolean {

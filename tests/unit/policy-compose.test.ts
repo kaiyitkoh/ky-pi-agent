@@ -670,6 +670,11 @@ const ROWS: readonly Row[] = [
 	{ name: "cd to an unreadable target, then a search with no path -- block", toolName: "bash", input: { command: "cd \"$D\" && rg token" }, expected: "block" },
 	{ name: "cd to an unreadable target, then a redirect -- block", toolName: "bash", input: { command: "cd \"$D\" && npm test > out.log" }, expected: "block" },
 	{ name: "cd to an unreadable target, then a credentials name -- block", toolName: "bash", input: { command: "cd \"$D\" && cp credentials /tmp/c" }, expected: "block" },
+	{ name: "switch --track origin/main, then commit -- block, the switch creates and checks out main", toolName: "bash", input: { command: "git switch --track origin/main && git commit -am x" }, expected: "block" },
+	{ name: "checkout -t origin/main, then commit -- block", toolName: "bash", input: { command: "git checkout -t origin/main && git commit -am x" }, expected: "block" },
+	{ name: "checkout @{-1}, then commit -- block, the previous branch is unknown", toolName: "bash", input: { command: "git checkout @{-1} && git commit -am x" }, expected: "block" },
+	{ name: "worktree add of main, then a commit there -- block", toolName: "bash", input: { command: "git worktree add ../wt main && cd ../wt && git commit -am x" }, expected: "block" },
+	{ name: "checkout -t of a feature branch, then commit -- allow", toolName: "bash", input: { command: "git checkout -t origin/feat2 && git commit -am x" }, expected: "allow" },
 ];
 
 describe("SAFE-03/SAFE-10 -- policy-compose.test.ts: table is non-empty (vacuous-pass guard)", () => {

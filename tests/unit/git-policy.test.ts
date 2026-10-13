@@ -125,6 +125,14 @@ const ROWS: readonly Row[] = [
 	{ command: "git branch feat2 main", rest: "branch feat2 main", kind: "git", currentBranch: "feature/x", expected: "allow", why: "creating a branch from main reads main" },
 	{ command: "git branch -d old", rest: "branch -d old", kind: "git", currentBranch: "feature/x", expected: "allow", why: "deleting an unprotected branch" },
 	{ command: "git fetch origin main", rest: "fetch origin main", kind: "git", currentBranch: "feature/x", expected: "allow", why: "fetching main updates only the remote-tracking ref" },
+	{ command: "git worktree add -B main ../wt feat", rest: "worktree add -B main ../wt feat", kind: "git", currentBranch: "feature/x", expected: "block", why: "-B resets main to feat in a new worktree" },
+	{ command: "git worktree add -B main ../wt feat", rest: "worktree add -B main ../wt feat", kind: "git", currentBranch: "main", expected: "block", why: "the same on main" },
+	{ command: "git worktree add -b main ../wt", rest: "worktree add -b main ../wt", kind: "git", currentBranch: "feature/x", expected: "block", why: "-b names the protected branch" },
+	{ command: "git worktree add -b feat2 ../wt main", rest: "worktree add -b feat2 ../wt main", kind: "git", currentBranch: "feature/x", expected: "allow", why: "a new branch started from main" },
+	{ command: "git rebase feat main", rest: "rebase feat main", kind: "git", currentBranch: "feature/x", expected: "block", why: "rebase switches to main, then rewrites it" },
+	{ command: "git rebase --onto feat HEAD~1 main", rest: "rebase --onto feat HEAD~1 main", kind: "git", currentBranch: "feature/x", expected: "block", why: "the final positional is the branch rebased" },
+	{ command: "git rebase --root main", rest: "rebase --root main", kind: "git", currentBranch: "feature/x", expected: "block", why: "with --root the only positional is the branch" },
+	{ command: "git rebase -s ort feat feat2", rest: "rebase -s ort feat feat2", kind: "git", currentBranch: "feature/x", expected: "allow", why: "an option value is not the branch" },
 	{ command: "git apply --check diff.patch", rest: "apply --check diff.patch", kind: "git", currentBranch: "main", expected: "allow", why: "--check is a dry run -- does not write the tree" },
 
 	// -------------------------------------------------------------------------
