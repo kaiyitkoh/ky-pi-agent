@@ -90,7 +90,7 @@ export function makeBootstrapRepoCopy(prefix: string): BootstrapRepoCopy {
 		recursive: true,
 	});
 	mkdirSync(join(root, ".pi", "lib"), { recursive: true });
-	copyFileSync(join(repoRoot(), ".pi", "lib", "jsonl.ts"), join(root, ".pi", "lib", "jsonl.ts"));
+	for (const lib of ["jsonl.ts", "secret-patterns.ts"]) copyFileSync(join(repoRoot(), ".pi", "lib", lib), join(root, ".pi", "lib", lib));
 
 	// WR-02: `merge_subagent_config` writes `$REPO_ROOT/.pi/scripts/
 	// worktree-setup-hook.mjs` as an ABSOLUTE path into pi-subagents' user-scope
