@@ -10,5 +10,6 @@
     "-builtin:llama.cpp",
     "-builtin:codemode",
     "-builtin:tool-search"
-  ]
+  ],
+  "theme": "ky"
 }
