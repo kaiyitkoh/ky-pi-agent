@@ -7,7 +7,7 @@
  *                    stop /quick, and the paired positive proves a clean run
  *                    arms and reaches the provider.
  *   "unavailable" — the LSP leg's UNAVAILABLE state is visible in a real
- *                    gate report and never sets `blocking`; and — the second
+ *                    gate report and never fails the change; and — the second
  *                    half of this group — RESEARCH Open Question 2
  *                    ("does `pi.getAllTools()` include a registered-but-
  *                    inactive tool?") is answered by OBSERVATION, not by
@@ -22,27 +22,17 @@
  * ---------------------------------------------------------------------------
  * THE EXEC OVERRIDE — WHY EVERY GROUP SETS AND RESTORES IT
  * ---------------------------------------------------------------------------
- * `runQuickGateStage`'s default typecheck/lint legs shell a REAL `npx tsc`/
- * `npx vitest` against `cwd`. Run against a throwaway `gitInit`-only fixture
- * with no `node_modules` at all, a real `npx` would attempt to fetch a
- * package over the network — exactly the "install nothing" rule this
- * project's autonomous-run constraints forbid, and a hang or a flaky CI run
- * besides. `quality/index.ts#setQuickGateExecOverrideForTests` (a
- * `globalThis`-backed seam, the same mechanism `registeredToolNames` itself
- * uses) is set to a deterministic, instant runner in every `it` below and
- * restored to `undefined` in a `finally`, so a thrown assertion never leaks
- * the override into a later, unrelated test file sharing this worker.
+ * The change gate's typecheck and lint legs run the repo-local `tsc` and `eslint` against `cwd`. A throwaway
+ * fixture has neither, so every `it` below installs `quality/index.ts#setQuickGateExecOverrideForTests`
+ * (a `globalThis`-backed seam) with a deterministic, instant runner and restores it in a `finally`, so a thrown
+ * assertion never leaks the override into a later test file sharing this worker.
  *
  * ---------------------------------------------------------------------------
  * THE OFFENDING FIXTURE — WHAT TRIPS THE ERROR-TIER LEG
  * ---------------------------------------------------------------------------
- * `collectQualitySources` (`quality/index.ts`) walks `<cwd>/.pi/extensions/
- * **\/*.ts` fresh off disk. A file carrying a leading comment with a shipped
- * `TODO`/`FIXME`/`XXX`/`HACK` marker trips `rules.ts#ruleShippedTodo`, the
- * simplest of the six QUAL-01 rules to seed deterministically and the only
- * one of the six that ships at ERROR tier unconditionally (`literal-special-
- * case`/`n-plus-one` are WARNING-only and can never alone flip
- * `GateResult.blocking`).
+ * The fixture plants a `.ts` file under `<cwd>/.pi/extensions/` that carries a shipped `TODO` marker, which
+ * `rules.ts#ruleShippedTodo` flags at ERROR tier. It exists before the run and is not part of the run's change,
+ * so it must not stop `/quick`.
  *
  * ---------------------------------------------------------------------------
  * WHY THE "stop" GROUP HAND-BUILDS A `ReviewArtifact`, NOT `validateReview`'s
@@ -64,7 +54,7 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { registeredToolNames, runQuickGateStage, setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
+import { registeredToolNames, runChangeGateStage, setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
 import type { ExecRunner } from "../../.pi/extensions/quality/gates.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
 import { decideWorkflowStop } from "../../.pi/extensions/quality/verdict.ts";
@@ -84,7 +74,7 @@ const DIAGNOSTICS_ENTRY = `${repoRoot()}/.pi/extensions/diagnostics/index.ts`.re
 /** A cost-rated fixture model, matching `quick-workflow.test.ts`'s own shape. */
 const FIXTURE_COST = { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } as const;
 
-/** The always-passing ExecRunner every `it` below installs before touching `runQuickGateStage`/`/quick` — see the module docstring. */
+/** The always-passing ExecRunner every `it` below installs before touching the change gate or `/quick` — see the module docstring. */
 const INSTANT_PASS_EXEC: ExecRunner = () => ({ code: 0, stdout: "", stderr: "" });
 
 /** Build the inline user-scope extension: the REAL safety, workflows, quality and diagnostics extensions, composed — no re-implementation, no shim. */
@@ -127,7 +117,7 @@ function gitInit(cwd: string, branch: string): void {
 	runGit(["commit", "-m", "seed"], cwd);
 }
 
-/** Plant a `.ts` file under `<cwd>/.pi/extensions/` carrying a shipped-TODO comment — the deterministic ERROR-tier trip `collectQualitySources` will pick up. */
+/** Plant a `.ts` file under `<cwd>/.pi/extensions/` carrying a shipped-TODO comment — an ERROR-tier finding that predates the run's change. */
 function seedOffendingSource(cwd: string): void {
 	const dir = join(cwd, ".pi", "extensions", "quality-fixture");
 	mkdirSync(dir, { recursive: true });
@@ -310,27 +300,21 @@ describe("order", () => {
 });
 
 describe("unavailable", () => {
-	it("the LSP leg reports UNAVAILABLE in a real composed session's gate report, and never sets blocking on its own", async () => {
+	it("the LSP leg reports UNAVAILABLE in a real composed session's gate report, and never fails or passes the change", async () => {
 		await withFauxSession({ extensionSource: composite(), tools: ["bash"] }, async ({ cwd }) => {
 			setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC);
 			try {
 				gitInit(cwd, "work");
-				// No offending fixture -- isolates the LSP leg's own state from the
-				// anti-pattern leg's. projectTrusted: true is moot here (WR2-06) --
-				// the installed override always wins over the trust gate, see
-				// quality/index.ts#resolveExec's own docstring -- but true is the
-				// honest value for what this test is actually proving.
-				const result = runQuickGateStage(cwd, true);
+				const base = runGit(["rev-parse", "HEAD"], cwd).trim();
+				writeFileSync(join(cwd, "ok.ts"), "export const ok = 1;\n", "utf-8");
+				const result = runChangeGateStage({ cwd, projectTrusted: true, baseSha: base, changed: ["ok.ts"], baseTypecheckFailed: false });
 
-				expect(result.legs.lsp.status, "the LSP leg must report UNAVAILABLE -- @narumitw/pi-lsp is pinned but not installed (RB-07-02)").toBe(
-					"unavailable",
-				);
-				expect(
-					result.blocking,
-					"an UNAVAILABLE LSP leg alone must never set blocking -- an absent optional check is not a reason to stop /quick",
-				).toBe(false);
-				expect(result.report.length, "the gate report must be non-empty before asserting on its content").toBeGreaterThan(0);
+				expect(result.lsp.status, "the LSP leg is never run by the gate, so it must read UNAVAILABLE").toBe("unavailable");
+				expect(result.failed, "an UNAVAILABLE leg alone must never fail the change").toBe(false);
 				expect(result.report.includes("lsp: UNAVAILABLE"), "the LSP leg's UNAVAILABLE state must be visibly named in the report").toBe(true);
+				expect(result.report.indexOf("typecheck:")).toBeLessThan(result.report.indexOf("lint:"));
+				expect(result.report.indexOf("lint:")).toBeLessThan(result.report.indexOf("lsp:"));
+				expect(result.report.indexOf("lsp:")).toBeLessThan(result.report.indexOf("anti-pattern:"));
 			} finally {
 				setQuickGateExecOverrideForTests(undefined);
 			}
@@ -378,8 +362,8 @@ describe("unavailable", () => {
 			expect(
 				registeredToolNames().includes("consult_advisor"),
 				"quality/index.ts's own production accessor must ALSO still see the deactivated-but-registered tool -- " +
-					"this is what makes probeLspAvailability's own future-tool availability check correct: an installed " +
-					"but currently-deferred tool would still be visible to it",
+					"this is what lets the LSP probe see an installed " +
+					"but currently-deferred tool is still visible to it",
 			).toBe(true);
 		});
 	});

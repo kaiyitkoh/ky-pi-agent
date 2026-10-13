@@ -1,34 +1,7 @@
 /**
- * GATE-01 / QUAL-02 / QUAL-07 — the deterministic gate stage, proved.
- *
- * Four `-t`-matchable groups:
- *
- *   GATE-01 — the three-state table. UNAVAILABLE proved distinct from PASS
- *     on both the LSP leg (missing one tool name vs. both) and the
- *     typecheck leg (a throwing runner), and the load-bearing case: an
- *     UNAVAILABLE leg never sets `GateResult.blocking` but always appears in
- *     `report`, paired with the converse — an ERROR-tier anti-pattern
- *     finding DOES set `blocking`.
- *
- *   QUAL-02 — two separate claims made checkable, not merely asserted:
- *     STRUCTURAL (this module's transitive import graph never reaches the
- *     model tier, resolved the same way `chokepoint-lint.test.ts` resolves
- *     DIAG-03's scanned set) and MEASURED (the anti-pattern legs' real wall
- *     clock against a named, dated budget).
- *
- *   QUAL-07 — `shouldRunDesignReview` fires on named signals or explicit
- *     escalation, and — the requirement's own negative half — never on an
- *     ordinary task. Both sides of the `DESIGN_REVIEW_FILE_SPAN` boundary.
- *
- *   vacuity — the scanned sets used above are non-empty, and `GATE_LEGS`
- *     still has all four legs.
- *
- * Falsification, recorded at the bottom of this file's own history rather
- * than left to prose: (a) `probeLspAvailability` stubbed to always return
- * `pass` turned the UNAVAILABLE cases in GATE-01 red; (b) an UNAVAILABLE leg
- * stubbed to set `blocking = true` turned the load-bearing case red; (c) an
- * import of `../routing/modes.ts` added to `gates.ts` turned the structural
- * QUAL-02 case red. All three restored before this commit.
+ * The deterministic gate legs: the three-state table (a missing check is UNAVAILABLE, never PASS), the
+ * structural claim that gates.ts never reaches the model tier, the measured anti-pattern budget, and the
+ * design-review predicate. The change gate itself is exercised in quality-production-exec.test.ts.
  */
 import { readFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
@@ -42,7 +15,6 @@ import {
 	type ExecRunner,
 	probeLspAvailability,
 	runAntiPatternLeg,
-	runDeterministicGates,
 	runTypecheckLeg,
 	shouldRunDesignReview,
 } from "../../.pi/extensions/quality/gates.ts";
@@ -69,45 +41,19 @@ describe("GATE-01 — per-leg three-state table", () => {
 		expect(result.status === "unavailable" && result.reason).not.toContain("lsp_diagnostics,");
 	});
 
-	it("probeLspAvailability with both tools present is pass", () => {
-		expect(probeLspAvailability(["lsp_diagnostics", "lsp_fix"])).toEqual({ status: "pass" });
+	it("probeLspAvailability with both tools present is still unavailable: registered is not run", () => {
+		const result = probeLspAvailability(["lsp_diagnostics", "lsp_fix"]);
+		expect(result.status).toBe("unavailable");
+		expect(result.reason).toContain("registered but not run");
 	});
 
-	it("an unavailable LSP leg does not set GateResult.blocking, but DOES appear in report — an absent check must be visible, not silent", () => {
-		const exec: ExecRunner = () => ({ code: 0, stdout: "", stderr: "" });
-		const result = runDeterministicGates({
-			sources: [],
-			registeredToolNames: [],
-			cwd: repoRoot(),
-			exec,
-		});
-		expect(result.legs.lsp.status).toBe("unavailable");
-		expect(result.blocking).toBe(false);
-		expect(result.report).toMatch(/lsp: UNAVAILABLE/);
-	});
-
-	it("an ERROR-tier anti-pattern finding DOES set GateResult.blocking (paired with the unavailable case above)", () => {
+	it("an ERROR-tier anti-pattern finding fails the anti-pattern leg; warnings alone do not", () => {
 		const offending: QualitySource = {
 			path: "src/dup.ts",
-			text: [
-				"function catcher(): void {",
-				"\ttry {",
-				"\t\tdoWork();",
-				"\t} catch (err) {",
-				"\t}",
-				"}",
-				"",
-			].join("\n"),
+			text: ["function catcher(): void {", "\ttry {", "\t\tdoWork();", "\t} catch (err) {", "\t}", "}", ""].join("\n"),
 		};
-		const exec: ExecRunner = () => ({ code: 0, stdout: "", stderr: "" });
-		const result = runDeterministicGates({
-			sources: [offending],
-			registeredToolNames: ["lsp_diagnostics", "lsp_fix"],
-			cwd: repoRoot(),
-			exec,
-		});
-		expect(result.legs["anti-pattern"].status).toBe("fail");
-		expect(result.blocking).toBe(true);
+		expect(runAntiPatternLeg([offending]).status).toBe("fail");
+		expect(runAntiPatternLeg([{ path: "src/ok.ts", text: "export const ok = 1;\n" }]).status).toBe("pass");
 	});
 
 	it("typecheck leg: exit 2 with compiler text -> fail carrying the text", () => {
@@ -131,40 +77,6 @@ describe("GATE-01 — per-leg three-state table", () => {
 		expect(result.status).not.toBe("pass");
 	});
 
-	it("leg order: elapsedMsByLeg keys equal GATE_LEGS in order, and a failing typecheck is reported before an anti-pattern finding", () => {
-		const offending: QualitySource = {
-			path: "src/dup.ts",
-			text: [
-				"function catcher(): void {",
-				"\ttry {",
-				"\t\tdoWork();",
-				"\t} catch (err) {",
-				"\t}",
-				"}",
-				"",
-			].join("\n"),
-		};
-		const exec: ExecRunner = (cmd) => {
-			// CR-01: exec is called with the bare command name ("tsc"/"vitest"),
-			// never "npx" -- branch on cmd itself, not an args entry.
-			if (cmd === "tsc") {
-				return { code: 1, stdout: "src/y.ts(1,1): error TS9999: forced failure", stderr: "" };
-			}
-			return { code: 0, stdout: "", stderr: "" };
-		};
-		const result = runDeterministicGates({
-			sources: [offending],
-			registeredToolNames: ["lsp_diagnostics", "lsp_fix"],
-			cwd: repoRoot(),
-			exec,
-		});
-		expect(Object.keys(result.elapsedMsByLeg)).toEqual([...GATE_LEGS]);
-		const typecheckPos = result.report.indexOf("TS9999");
-		const antiPatternPos = result.report.indexOf("swallowed-exception");
-		expect(typecheckPos).toBeGreaterThanOrEqual(0);
-		expect(antiPatternPos).toBeGreaterThanOrEqual(0);
-		expect(typecheckPos).toBeLessThan(antiPatternPos);
-	});
 });
 
 // ---------------------------------------------------------------------------
@@ -237,8 +149,7 @@ describe("QUAL-02 — no model round trip and a measured wall-clock budget", () 
 		const offenders = graph.filter((p) => FORBIDDEN_MODULE_SUFFIXES.some((suffix) => p.endsWith(suffix)));
 		expect(
 			offenders,
-			"gates.ts (directly or transitively) imports a module that reaches the model tier — this is " +
-				"exactly the round trip QUAL-02 forbids for the deterministic gate stage",
+			"gates.ts (directly or transitively) imports a module that reaches the model tier, which the deterministic stage must not do",
 		).toEqual([]);
 	});
 

@@ -51,7 +51,7 @@ export function settleQuickRun(input: QuickSettleInput): void {
 	try {
 		const changed = changedFiles(cwd, base.baseSha, verdict.sha);
 		const gate = runChangeGateStage({ cwd, projectTrusted: input.projectTrusted, baseSha: base.baseSha, changed, baseTypecheckFailed: base.baseTypecheckFailed });
-		if (gate.typecheck.status === "fail" || gate.antiPattern.status === "fail") {
+		if (gate.failed) {
 			const reason = `the deterministic gate fails on the change:\n${gate.report}`;
 			writeEvidenceRow(cwd, { verdict: "reject", reason, baseSha: base.baseSha, headSha: verdict.sha, recordCount: 0, tools: [], failedToolCalls: verdict.failedToolCalls });
 			return input.notify(`quick: ${reason}`, "error");

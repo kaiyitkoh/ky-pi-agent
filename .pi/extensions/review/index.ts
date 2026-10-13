@@ -96,6 +96,7 @@ export default function (pi: ExtensionAPI): void {
 					if (gate.antiPattern.status === "fail") return fail(`review: the deterministic gate fails on the change -- not reviewing:\n${gate.report}`);
 					// No base-tree baseline exists here, so a typecheck failure may predate the change: the user decides.
 					if (gate.typecheck.status === "fail") gateDoubts.push(`the typecheck fails at HEAD:\n${gate.report}`);
+					if (gate.lint.status === "fail") gateDoubts.push(`the lint fails at HEAD:\n${gate.report}`);
 					if (!gate.ranAny) gateDoubts.push(`no deterministic check applies to this change:\n${gate.report}`);
 					gateReport = gate.report;
 				}

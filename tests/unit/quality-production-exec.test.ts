@@ -1,46 +1,15 @@
 /**
- * CR-01 / CR-02 / CR2-01 / WR2-01 -- the deterministic gate stage's
- * PRODUCTION exec runner, proved against REAL subprocesses, not a scripted
- * `ExecRunner`.
- *
- * The code-review's own reproduction: `spawnSync("npx", [...], {shell:false})`
- * throws `ENOENT` on this machine (win32, Node v24.16.0), which degraded
- * BOTH the typecheck and lint legs to `unavailable` -- a leg that is
- * `unavailable` never sets `GateResult.blocking` by design, so a hard
- * TypeScript error or a broken structural lint suite would silently arm a
- * `/quick` run. `quality-gates.test.ts` and `quality-gate-order.test.ts`
- * never catch this class of bug: the former only ever passes a scripted
- * `ExecRunner`, and the latter deliberately overrides it via
- * `setQuickGateExecOverrideForTests` for exactly the opposite reason (never
- * reach a real subprocess against a throwaway fixture). This file is the
- * one place that asserts what actually happens with NEITHER of those safety
- * nets -- the exact shape `runQuickGateStage` runs in for a real user.
- *
- * CR-01's fix: resolve `<cwd>/node_modules/.bin/<name>` (branching `shell`
- * on platform for the Windows `.cmd` case) instead of naming `npx`. A
- * missing binary is an honest `unavailable` naming the path, never a
- * network-fetching `npx`. CR-02's fix (this file's own next `describe`):
- * `LINT_GATE_FILES` (`gates.ts`) is THIS repository's own structural test
- * paths -- in any other `cwd` they do not exist, and vitest would report a
- * false FAIL rather than an honest "this leg does not apply here"; a
- * missing `.test.ts` target is now caught before a subprocess is spawned.
- *
- * CR2-01's fix (`08-REVIEW.md` iteration 2): the CR-01 fix itself reintroduced
- * CR-01's own failure mode -- `spawnSync(bin, args, {shell: true})` with a raw
- * args array is unescaped `cmd.exe` concatenation, and `bin` embeds `cwd`. A
- * `cwd` containing a space or a shell metacharacter (`&`) corrupted the
- * command line and reported a false `fail` full of `cmd.exe` chatter, never an
- * honest `unavailable`. `.pi/lib/win-quote.ts#commandFor` closes this by
- * quoting every argument and folding them into one command string. WR2-01's
- * fix (this file's own last `describe`): `localBin` now walks up to an
- * ancestor `node_modules`, the way the `npx` shim it replaced always did.
+ * The deterministic gate's production exec runner, proved against REAL subprocesses, not a scripted
+ * `ExecRunner`: the pinned local binary is resolved per platform, never `npx`; a missing binary, an
+ * untrusted project or a cwd hazardous to `cmd.exe` degrades to `unavailable`, never to a false FAIL.
+ * `quality-gate-order.test.ts` installs an override for the opposite reason (never reach a subprocess).
  */
-import { mkdirSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { makeTempRepo, repoRoot } from "../helpers/git.ts";
-import { productionExec, runQuickGateStage, setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
+import { commitFile, makeTempRepo, repoRoot } from "../helpers/git.ts";
+import { productionExec, runChangeGateStage, runTypecheckAt, setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
 import { runTypecheckLeg } from "../../.pi/extensions/quality/gates.ts";
 
 afterEach(() => {
@@ -61,33 +30,10 @@ describe("CR-01 -- the real production exec runner genuinely spawns on this plat
 		expect(result.stdout).toMatch(/Version \d+\.\d+\.\d+/);
 	});
 
-	it(
-		"runQuickGateStage(repoRoot()) with NO override installed -- typecheck and lint legs are pass or fail, " +
-			"NEVER unavailable (the exact regression CR-01 fixes)",
-		() => {
-			setQuickGateExecOverrideForTests(undefined); // explicit: proves the PRODUCTION path, not a leaked override
-			// WR2-06: projectTrusted: true -- this IS this repository, genuinely trusted.
-			const result = runQuickGateStage(repoRoot(), true);
-			expect(
-				result.legs.typecheck.status,
-				`typecheck leg is UNAVAILABLE -- ${result.legs.typecheck.status === "unavailable" ? result.legs.typecheck.reason : ""} -- ` +
-					"a real 'tsc' binary is installed in this repository's own node_modules, so this leg must genuinely run",
-			).not.toBe("unavailable");
-			expect(["pass", "fail"]).toContain(result.legs.typecheck.status);
-
-			expect(
-				result.legs.lint.status,
-				`lint leg is UNAVAILABLE -- ${result.legs.lint.status === "unavailable" ? result.legs.lint.reason : ""} -- ` +
-					"a real 'vitest' binary is installed in this repository's own node_modules, so this leg must genuinely run",
-			).not.toBe("unavailable");
-			expect(["pass", "fail"]).toContain(result.legs.lint.status);
-		},
-	);
-
-	it("this repository's own source is clean: typecheck and lint both PASS for real (paired positive, not merely 'not unavailable')", () => {
-		const result = runQuickGateStage(repoRoot(), true); // WR2-06: this repository is genuinely trusted
-		expect(result.legs.typecheck.status, result.legs.typecheck.status === "fail" ? result.legs.typecheck.findings.join("\n") : "").toBe("pass");
-		expect(result.legs.lint.status, result.legs.lint.status === "fail" ? result.legs.lint.findings.join("\n") : "").toBe("pass");
+	it("this repository's own source typechecks for real through the production runner: PASS, never unavailable", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const leg = runTypecheckAt(repoRoot(), true);
+		expect(leg.status, leg.status === "fail" ? leg.findings.join("\n") : leg.status === "unavailable" ? leg.reason : "").toBe("pass");
 	});
 
 	it("productionExec throws naming the missing binary when cwd has no node_modules at all (never falls through to npx)", () => {
@@ -95,28 +41,21 @@ describe("CR-01 -- the real production exec runner genuinely spawns on this plat
 		expect(() => productionExec("tsc", ["--noEmit"], repo)).toThrowError(/tsc is not installed under/);
 	});
 
-	it("runQuickGateStage against a throwaway fixture with no node_modules -- typecheck and lint legs are UNAVAILABLE, naming the missing binary, never FAIL and never a hang", () => {
+	it("a throwaway fixture with a tsconfig but no node_modules: typecheck and lint are UNAVAILABLE naming the missing binary, never FAIL", () => {
 		const repo = makeTempRepo("kypi-cr01-gate-");
-		// WR2-06: projectTrusted: true -- this test isolates CR-01's missing-binary
-		// degradation from WR2-06's separate trust gate (covered by its own describe below).
-		const result = runQuickGateStage(repo, true);
-		expect(result.legs.typecheck).toEqual({
-			status: "unavailable",
-			reason: expect.stringContaining("tsc is not installed under"),
-		});
-		expect(result.legs.lint).toEqual({
-			status: "unavailable",
-			reason: expect.stringContaining("vitest is not installed under"),
-		});
-		// UNAVAILABLE never sets blocking, by GATE-01's own three-state contract
-		// -- restated here because a regression that turned this into `fail`
-		// would ALSO make this specific assertion false, catching either bug.
-		expect(result.blocking).toBe(false);
+		writeFileSync(join(repo, "tsconfig.json"), "{}\n", "utf-8");
+		writeFileSync(join(repo, "eslint.config.js"), "export default [];\n", "utf-8");
+		const base = commitFile(repo, "seed.txt", "seed\n", "seed");
+		writeFileSync(join(repo, "a.ts"), "export const a = 1;\n", "utf-8");
+		const result = runChangeGateStage({ cwd: repo, projectTrusted: true, baseSha: base, changed: ["a.ts"], baseTypecheckFailed: false });
+		expect(result.typecheck).toEqual({ status: "unavailable", reason: expect.stringContaining("tsc is not installed under") });
+		expect(result.lint).toEqual({ status: "unavailable", reason: expect.stringContaining("eslint is not installed under") });
+		expect(result.failed).toBe(false);
 	});
 });
 
-describe("CR-02 -- the lint leg's hardcoded target files degrade honestly in a foreign repository, never a false FAIL", () => {
-	it("productionExec throws naming the missing target file when a .test.ts argument does not exist under cwd, even if the binary IS installed (the LINT_GATE_FILES-in-a-foreign-repo bug)", () => {
+describe("a test-file target absent from cwd degrades honestly, never a false FAIL", () => {
+	it("productionExec throws naming the missing target file when a .test.ts argument does not exist under cwd, even if the binary IS installed", () => {
 		// repoRoot() has a real vitest binary installed, so this isolates the
 		// target-file-existence check from the binary-existence check CR-01
 		// already covers.
@@ -126,16 +65,22 @@ describe("CR-02 -- the lint leg's hardcoded target files degrade honestly in a f
 	});
 });
 
-/** A minimal real-executable stub binary -- `tsc.cmd` on Windows, a `tsc` shell script elsewhere. */
-function stubTsc(repo: string, opts: { exitCode: number; message?: string }): void {
+/** A minimal real-executable stub binary -- `<name>.cmd` on Windows, a shell script elsewhere. `argsFile` receives the argv. */
+function stubBin(repo: string, name: string, opts: { exitCode: number; message?: string; argsFile?: string }): void {
 	const binDir = join(repo, "node_modules", ".bin");
 	mkdirSync(binDir, { recursive: true });
 	const echo = opts.message ? `echo ${opts.message}` : "";
 	if (process.platform === "win32") {
-		writeFileSync(join(binDir, "tsc.cmd"), `@echo off\r\n${echo}\r\nexit /b ${opts.exitCode}\r\n`, { mode: 0o755 });
+		const record = opts.argsFile ? `echo %* > "${opts.argsFile}"\r\n` : "";
+		writeFileSync(join(binDir, `${name}.cmd`), `@echo off\r\n${record}${echo}\r\nexit /b ${opts.exitCode}\r\n`, { mode: 0o755 });
 	} else {
-		writeFileSync(join(binDir, "tsc"), `#!/bin/sh\n${echo}\nexit ${opts.exitCode}\n`, { mode: 0o755 });
+		const record = opts.argsFile ? `echo "$@" > "${opts.argsFile}"\n` : "";
+		writeFileSync(join(binDir, name), `#!/bin/sh\n${record}${echo}\nexit ${opts.exitCode}\n`, { mode: 0o755 });
 	}
+}
+
+function stubTsc(repo: string, opts: { exitCode: number; message?: string }): void {
+	stubBin(repo, "tsc", opts);
 }
 
 describe("CR2-01 -- a cwd containing a space or a shell metacharacter runs the REAL binary, never cmd.exe concatenation noise", () => {
@@ -207,8 +152,7 @@ describe(
 		it(
 			"WR3C-02 -- a '%'-bearing ARGUMENT (not the resolved binary path) is refused the same way -- " +
 				"commandFor folds [bin, ...args] into ONE cmd.exe command line, so args are exactly as exposed to " +
-				"%VAR% expansion as bin is. Currently unreachable via any real caller (LINT_GATE_FILES and " +
-				"['--noEmit'] never contain '%'), so this is a direct call, not a runTypecheckLeg/runLintLeg path",
+				"%VAR% expansion as bin is. No gate caller passes such an argument, so this is a direct call, not a leg path",
 			() => {
 				const repo = makeTempRepo("kypi-wr3c-02-args-pct-");
 				stubTsc(repo, { exitCode: 0 });
@@ -256,25 +200,16 @@ describe("WR2-01 -- localBin walks up to an ancestor node_modules, matching the 
 		expect(result.stdout).toMatch(/Version \d+\.\d+\.\d+/);
 	});
 
-	it("runQuickGateStage from a subdirectory with no node_modules of its own -- the typecheck leg is pass or fail, NEVER unavailable (the exact regression WR2-01 fixes)", () => {
-		// The typecheck leg's exec ("tsc", ["--noEmit"], cwd) never names a
-		// cwd-relative path, so this isolates the binary-resolution fix
-		// (localBin's ancestor walk) from CR-02's SEPARATE cwd-relative
-		// target-file check, which the lint leg is intentionally still subject
-		// to from a non-repo-root cwd -- LINT_GATE_FILES names paths relative
-		// to repoRoot(), so the lint leg legitimately still reports unavailable
-		// from docs/ (naming the missing target files, not a missing binary);
-		// that is CR-02's own documented behaviour, not WR2-01's concern.
-		const subdir = join(repoRoot(), "docs");
-		const result = runQuickGateStage(subdir, true); // WR2-06: this repository's own subdirectory is trusted
-		expect(
-			result.legs.typecheck.status,
-			result.legs.typecheck.status === "unavailable" ? result.legs.typecheck.reason : "",
-		).not.toBe("unavailable");
-		expect(["pass", "fail"]).toContain(result.legs.typecheck.status);
+	it("a tsconfig in an ancestor below the git top level counts: typecheck runs from a subdirectory, never unavailable", () => {
+		const repo = makeTempRepo("kypi-tsconfig-walk-");
+		writeFileSync(join(repo, "tsconfig.json"), "{}\n", "utf-8");
+		stubTsc(repo, { exitCode: 0 });
+		const sub = join(repo, "packages", "app");
+		mkdirSync(sub, { recursive: true });
+		expect(runTypecheckAt(sub, true)).toEqual({ status: "pass" });
 	});
 
-	it("productionExec resolves the 'vitest' binary itself from a subdirectory of repoRoot() -- the lint leg's OWN unavailability from docs/ is CR-02's cwd-relative target-file check, never a missing-binary error", () => {
+	it("productionExec resolves the 'vitest' binary itself from a subdirectory of repoRoot()", () => {
 		const subdir = join(repoRoot(), "docs");
 		// No .test.ts argument here -- isolates binary resolution (WR2-01) from
 		// CR-02's missingTargets check, which only fires when a `.test.ts`
@@ -289,50 +224,134 @@ describe("WR2-01 -- localBin walks up to an ancestor node_modules, matching the 
 	});
 });
 
-describe("WR2-06 -- an untrusted project's cwd never reaches a real spawn, even when a real binary is genuinely installed there", () => {
-	it("runQuickGateStage(<temp repo with a REAL tsc stub installed>, false) -- typecheck and lint legs are UNAVAILABLE naming trust, never pass or fail, even though a real binary genuinely exists at the resolved path", () => {
-		setQuickGateExecOverrideForTests(undefined); // explicit: proves the PRODUCTION path, not a leaked override
-		// A throwaway temp repo, never repoRoot() -- isolates this assertion from
-		// this repository's OWN unrelated deterministic anti-pattern findings
-		// (a pre-existing, accepted residual, orthogonal to WR2-06 entirely) so
-		// `result.blocking` below measures only what this test claims to measure.
-		const repo = makeTempRepo("kypi-wr2-06-untrusted-");
-		stubTsc(repo, { exitCode: 0 }); // a REAL binary genuinely resolvable at node_modules/.bin/tsc(.cmd)
-		const result = runQuickGateStage(repo, false);
-		expect(result.legs.typecheck).toEqual({
-			status: "unavailable",
-			reason: expect.stringContaining("is not trusted"),
-		});
-		expect(result.legs.lint).toEqual({
-			status: "unavailable",
-			reason: expect.stringContaining("is not trusted"),
-		});
-		// UNAVAILABLE never sets blocking, by GATE-01's own three-state contract --
-		// an untrusted project degrades honestly, it does not block /quick outright
-		// (a user who has not yet answered Pi's own trust prompt is not thereby
-		// locked out of the command entirely). No .pi/extensions/ content exists in
-		// this temp repo, so the (untouched, non-exec) anti-pattern leg trivially
-		// passes and the LSP leg is UNAVAILABLE by its own separate contract --
-		// neither sets blocking either, so this genuinely isolates WR2-06's own claim.
-		expect(result.blocking).toBe(false);
-	});
+describe("an untrusted project's cwd never reaches a real spawn, even when a real binary is installed there", () => {
+	function fixture(prefix: string): { repo: string; base: string } {
+		const repo = makeTempRepo(prefix);
+		writeFileSync(join(repo, "tsconfig.json"), "{}\n", "utf-8");
+		writeFileSync(join(repo, "eslint.config.js"), "export default [];\n", "utf-8");
+		stubBin(repo, "tsc", { exitCode: 0 });
+		stubBin(repo, "eslint", { exitCode: 0 });
+		const base = commitFile(repo, "seed.txt", "seed\n", "seed");
+		writeFileSync(join(repo, "a.ts"), "export const a = 1;\n", "utf-8");
+		return { repo, base };
+	}
 
-	it("runQuickGateStage(repoRoot(), true) with the SAME repo -- typecheck and lint legs genuinely run (paired positive: the gate is proved to actually flip on trust, not merely always refuse)", () => {
+	it("untrusted: typecheck and lint are UNAVAILABLE naming trust, never pass or fail", () => {
 		setQuickGateExecOverrideForTests(undefined);
-		const result = runQuickGateStage(repoRoot(), true);
-		expect(result.legs.typecheck.status, result.legs.typecheck.status === "fail" ? result.legs.typecheck.findings.join("\n") : "").toBe("pass");
-		expect(result.legs.lint.status, result.legs.lint.status === "fail" ? result.legs.lint.findings.join("\n") : "").toBe("pass");
+		const { repo, base } = fixture("kypi-untrusted-");
+		const result = runChangeGateStage({ cwd: repo, projectTrusted: false, baseSha: base, changed: ["a.ts"], baseTypecheckFailed: false });
+		expect(result.typecheck).toEqual({ status: "unavailable", reason: expect.stringContaining("is not trusted") });
+		expect(result.lint).toEqual({ status: "unavailable", reason: expect.stringContaining("is not trusted") });
+		expect(result.failed).toBe(false);
 	});
 
-	it("an installed test override wins regardless of projectTrusted -- an override is a scripted stub that never touches disk, so gating it behind trust would be friction with no security benefit", () => {
+	it("paired positive: the same fixture trusted genuinely runs both legs", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = fixture("kypi-trusted-");
+		const result = runChangeGateStage({ cwd: repo, projectTrusted: true, baseSha: base, changed: ["a.ts"], baseTypecheckFailed: false });
+		expect(result.typecheck).toEqual({ status: "pass" });
+		expect(result.lint).toEqual({ status: "pass" });
+	});
+
+	it("an installed test override wins regardless of projectTrusted", () => {
 		const alwaysPass = (): { code: number; stdout: string; stderr: string } => ({ code: 0, stdout: "", stderr: "" });
 		setQuickGateExecOverrideForTests(alwaysPass);
 		try {
-			const untrusted = runQuickGateStage(repoRoot(), false);
-			expect(untrusted.legs.typecheck.status, "an installed override must win even when projectTrusted is false").toBe("pass");
-			expect(untrusted.legs.lint.status).toBe("pass");
+			expect(runTypecheckAt(repoRoot(), false).status, "an installed override must win even when projectTrusted is false").toBe("pass");
 		} finally {
 			setQuickGateExecOverrideForTests(undefined);
 		}
+	});
+});
+
+describe("the change gate's four legs report only what ran", () => {
+	function repoWith(prefix: string, opts: { tsconfig?: boolean; eslintConfig?: boolean }): { repo: string; base: string } {
+		const repo = makeTempRepo(prefix);
+		if (opts.tsconfig) writeFileSync(join(repo, "tsconfig.json"), "{}\n", "utf-8");
+		if (opts.eslintConfig) writeFileSync(join(repo, "eslint.config.js"), "export default [];\n", "utf-8");
+		const base = commitFile(repo, "seed.txt", "seed\n", "seed");
+		writeFileSync(join(repo, "a.ts"), "export const a = 1;\n", "utf-8");
+		return { repo, base };
+	}
+	const gate = (repo: string, base: string, changed = ["a.ts"]) =>
+		runChangeGateStage({ cwd: repo, projectTrusted: true, baseSha: base, changed, baseTypecheckFailed: false });
+
+	it("no tsconfig.json anywhere up to the git top level: typecheck is UNAVAILABLE naming the tsconfig, even with a failing tsc installed", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-notsconfig-", {});
+		stubBin(repo, "tsc", { exitCode: 2, message: "kypi-would-fail" });
+		const result = gate(repo, base);
+		expect(result.typecheck).toEqual({ status: "unavailable", reason: expect.stringContaining("tsconfig") });
+		expect(result.failed).toBe(false);
+	});
+
+	it("control: with a tsconfig the same failing tsc is a FAIL", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-tsconfig-", { tsconfig: true });
+		stubBin(repo, "tsc", { exitCode: 2, message: "kypi-would-fail" });
+		const result = gate(repo, base);
+		expect(result.typecheck.status).toBe("fail");
+		expect(result.failed).toBe(true);
+	});
+
+	it("lint: the repo's own eslint exiting 1 is a FAIL carrying its output; it is invoked with only the changed code file", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-fail-", { eslintConfig: true });
+		const argsFile = join(repo, "eslint-args.txt");
+		stubBin(repo, "eslint", { exitCode: 1, message: "kypi-lint-finding", argsFile });
+		writeFileSync(join(repo, "notes.md"), "x\n", "utf-8");
+		const result = gate(repo, base, ["a.ts", "notes.md", "gone.ts"]);
+		expect(result.lint.status).toBe("fail");
+		expect(result.lint.status === "fail" && result.lint.findings.join("\n")).toContain("kypi-lint-finding");
+		const args = readFileSync(argsFile, "utf-8").trim().split(/\s+/);
+		expect(args.filter((a) => a !== "--")).toEqual(["a.ts"]);
+		expect(result.failed).toBe(true);
+	});
+
+	it("lint: eslint exiting 0 is a PASS", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-pass-", { eslintConfig: true });
+		stubBin(repo, "eslint", { exitCode: 0 });
+		expect(gate(repo, base).lint).toEqual({ status: "pass" });
+	});
+
+	it("lint: an exit code other than 0 or 1 is UNAVAILABLE, not a verdict", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-crash-", { eslintConfig: true });
+		stubBin(repo, "eslint", { exitCode: 2, message: "kypi-config-error" });
+		expect(gate(repo, base).lint).toEqual({ status: "unavailable", reason: expect.stringContaining("exited 2") });
+	});
+
+	it("lint: no ESLint config is UNAVAILABLE and never invokes eslint", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-lint-noconfig-", {});
+		const argsFile = join(repo, "eslint-args.txt");
+		stubBin(repo, "eslint", { exitCode: 1, argsFile });
+		expect(gate(repo, base).lint).toEqual({ status: "unavailable", reason: expect.stringContaining("no ESLint config") });
+		expect(existsSync(argsFile)).toBe(false);
+	});
+
+	it("lsp is UNAVAILABLE and never PASS, with the tools registered or missing", () => {
+		const key = "__kypiQualityRegisteredToolNames";
+		const g = globalThis as Record<string, unknown>;
+		const saved = g[key];
+		const { repo, base } = repoWith("kypi-lsp-", {});
+		try {
+			g[key] = () => ["lsp_diagnostics", "lsp_fix"];
+			expect(gate(repo, base).lsp).toEqual({ status: "unavailable", reason: expect.stringContaining("registered but not run") });
+			g[key] = () => [];
+			expect(gate(repo, base).lsp).toEqual({ status: "unavailable", reason: expect.stringContaining("lsp_diagnostics") });
+		} finally {
+			g[key] = saved;
+		}
+	});
+
+	it("the report lists the four legs in order, and ranAny is false when nothing ran", () => {
+		setQuickGateExecOverrideForTests(undefined);
+		const { repo, base } = repoWith("kypi-report-", {});
+		const result = gate(repo, base, ["notes.md"]);
+		const ids = result.report.split("\n").map((l) => l.split(":")[0]);
+		expect(ids).toEqual(["typecheck", "lint", "lsp", "anti-pattern"]);
+		expect(result.ranAny).toBe(false);
 	});
 });

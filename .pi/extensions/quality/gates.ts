@@ -1,9 +1,8 @@
 /**
- * Deterministic gate stage: typecheck, lint, LSP and anti-pattern legs run before any model review.
+ * Deterministic gate legs (typecheck, lint, LSP, anti-pattern) and the gate-depth table.
  * Each leg is pass, fail or unavailable; unavailable is never a pass. No model access, no tool registration.
- * Why the LSP leg reads live tool names and not settings, and the design-review predicate: docs/QUALITY.md.
+ * The design-review predicate and the LSP decision: docs/QUALITY.md.
  */
-import { addQualityCost } from "../diagnostics/quality-cost.ts";
 import { runAntiPatternRules, type QualitySource } from "./rules.ts";
 
 /** Three arms, not a boolean: "did not run" must not collapse into pass or fail. */
@@ -17,36 +16,27 @@ export const GATE_LEGS = ["typecheck", "lint", "lsp", "anti-pattern"] as const;
 
 export type LegId = (typeof GATE_LEGS)[number];
 
-/**
- * Blocking iff any leg is `fail`. An `unavailable` leg never blocks but must appear in `report`.
- */
-export interface GateResult {
-	readonly legs: Readonly<Record<LegId, LegStatus>>;
-	readonly blocking: boolean;
-	readonly elapsedMsByLeg: Readonly<Record<LegId, number>>;
-	readonly totalMs: number;
-	readonly report: string;
-}
-
 /** Tool names `@narumitw/pi-lsp` registers (`src/pi-lsp.ts`); both must be present. */
 const LSP_TOOL_NAMES = ["lsp_diagnostics", "lsp_fix"] as const;
 
 /**
- * Requires both {@link LSP_TOOL_NAMES} in the live tool list and names the missing ones.
- * Never reads `.pi/settings.json`: it lists what is configured, not what is loaded.
+ * Always unavailable: a command or event context has no `executeTool`, so the gate cannot run `lsp_diagnostics`.
+ * Reads the live tool list, never `.pi/settings.json`, so the reason says whether the tools are loaded.
  */
-export function probeLspAvailability(registeredToolNames: readonly string[]): LegStatus {
+export function probeLspAvailability(registeredToolNames: readonly string[]): Extract<LegStatus, { status: "unavailable" }> {
 	const missing = LSP_TOOL_NAMES.filter((name) => !registeredToolNames.includes(name));
 	if (missing.length > 0) {
 		return {
 			status: "unavailable",
-			reason:
-				`missing tool${missing.length > 1 ? "s" : ""} ${missing.join(", ")} — @narumitw/pi-lsp is pinned in ` +
-				"settings but not installed (RB-07-02); the live check that would exercise it once installed is " +
-				"RB-08-02",
+			reason: `missing tool${missing.length > 1 ? "s" : ""} ${missing.join(", ")}: @narumitw/pi-lsp is not installed here (see docs/RUNBOOK.md)`,
 		};
 	}
-	return { status: "pass" };
+	return {
+		status: "unavailable",
+		reason:
+			"lsp_diagnostics is registered but not run by the gate: only a tool context has executeTool " +
+			"(pi-coding-agent dist/core/extensions/types.d.ts:262-280)",
+	};
 }
 
 /**
@@ -67,7 +57,8 @@ export function runAntiPatternLeg(sources: readonly QualitySource[]): LegStatus 
 /** Injected subprocess runner; a runner that throws degrades its leg to `unavailable`. */
 export type ExecRunner = (cmd: string, args: readonly string[], cwd: string) => { code: number; stdout: string; stderr: string };
 
-function outputLines(result: { stdout: string; stderr: string }): string[] {
+/** Non-empty output lines, trimmed of trailing whitespace. */
+export function outputLines(result: { stdout: string; stderr: string }): string[] {
 	return `${result.stdout}\n${result.stderr}`
 		.split("\n")
 		.map((line) => line.trimEnd())
@@ -93,100 +84,6 @@ export function runTypecheckLeg(cwd: string, exec: ExecRunner): LegStatus {
 		return { status: "fail", findings: outputLines(result) };
 	}
 	return { status: "pass" };
-}
-
-/**
- * The repository's structural vitest suites (the lint equivalent; no ESLint by design,
- * pinning.test.ts "declares no dev dependency beyond the audited pins").
- */
-export const LINT_GATE_FILES = [
-	"tests/unit/chokepoint-lint.test.ts",
-	"tests/unit/contributing-boundary.test.ts",
-	"tests/unit/jsonl-append-only.test.ts",
-	"tests/unit/extension-layout.test.ts",
-	"tests/unit/pinning.test.ts",
-	"tests/unit/gitignore-policy.test.ts",
-	"tests/unit/docs-policy.test.ts",
-	"tests/unit/npmrc-policy.test.ts",
-	"tests/unit/secret-scan.test.ts",
-	"tests/unit/ci-pinning.test.ts",
-	"tests/unit/lf-and-shell.test.ts",
-	"tests/unit/evasion-corpus.test.ts",
-] as const;
-
-/**
- * Runs vitest over {@link LINT_GATE_FILES}; same bare-command rule as {@link runTypecheckLeg}.
- * `exec` throwing -> `unavailable`, which is how a foreign `cwd` degrades (the paths name this repo's tests).
- */
-export function runLintLeg(cwd: string, exec: ExecRunner): LegStatus {
-	let result: { code: number; stdout: string; stderr: string };
-	try {
-		result = exec("vitest", ["run", ...LINT_GATE_FILES], cwd);
-	} catch (err) {
-		return {
-			status: "unavailable",
-			reason: `the structural lint suite could not be run: ${err instanceof Error ? err.message : String(err)}`,
-		};
-	}
-	if (result.code !== 0) {
-		return { status: "fail", findings: outputLines(result) };
-	}
-	return { status: "pass" };
-}
-
-function renderLeg(legId: LegId, leg: LegStatus): string {
-	if (leg.status === "pass") {
-		return `${legId}: PASS`;
-	}
-	if (leg.status === "unavailable") {
-		return `${legId}: UNAVAILABLE (${leg.reason})`;
-	}
-	return `${legId}: FAIL (${leg.findings.length} finding${leg.findings.length === 1 ? "" : "s"})\n` +
-		leg.findings.map((f) => `  - ${f}`).join("\n");
-}
-
-/**
- * Runs all four legs in {@link GATE_LEGS} order (cheapest, most certain signals first).
- * {@link addQualityCost} is called once with the summed total, so a retried leg cannot double-count.
- */
-export function runDeterministicGates(input: {
-	readonly sources: readonly QualitySource[];
-	readonly registeredToolNames: readonly string[];
-	readonly cwd: string;
-	readonly exec: ExecRunner;
-}): GateResult {
-	const elapsedMsByLeg = {} as Record<LegId, number>;
-	const legs = {} as Record<LegId, LegStatus>;
-
-	for (const legId of GATE_LEGS) {
-		const start = process.hrtime.bigint();
-		let result: LegStatus;
-		switch (legId) {
-			case "typecheck":
-				result = runTypecheckLeg(input.cwd, input.exec);
-				break;
-			case "lint":
-				result = runLintLeg(input.cwd, input.exec);
-				break;
-			case "lsp":
-				result = probeLspAvailability(input.registeredToolNames);
-				break;
-			case "anti-pattern":
-				result = runAntiPatternLeg(input.sources);
-				break;
-		}
-		const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
-		elapsedMsByLeg[legId] = elapsedMs;
-		legs[legId] = result;
-	}
-
-	const blocking = GATE_LEGS.some((legId) => legs[legId].status === "fail");
-	const totalMs = GATE_LEGS.reduce((sum, legId) => sum + elapsedMsByLeg[legId], 0);
-	const report = GATE_LEGS.map((legId) => renderLeg(legId, legs[legId])).join("\n");
-
-	addQualityCost({ ms: totalMs });
-
-	return { legs, blocking, elapsedMsByLeg, totalMs, report };
 }
 
 /** File-span threshold at which a diff alone warrants a design-level pass; untuned. */
@@ -215,12 +112,15 @@ export function shouldRunDesignReview(signals: DesignReviewSignals): boolean {
 	);
 }
 
-/** The quality mechanisms, named by the function that implements each. */
+/**
+ * The quality mechanisms, named by the functions that implement each. `production: false` marks a mechanism
+ * that scores fixtures offline and runs in no workflow.
+ */
 export const QUALITY_MECHANISMS = [
-	{ id: "deterministic", implementedBy: "runDeterministicGates (gates.ts)" },
-	{ id: "model-review", implementedBy: "runReview + validateReview (reviewer.ts, review-schema.ts)" },
-	{ id: "refute-or-promote", implementedBy: "runBoundedReviewLoop (verdict.ts)" },
-	{ id: "calibration", implementedBy: "scoreCalibration (calibration.ts)" },
+	{ id: "deterministic", implementedBy: "runChangeGateStage (quality/index.ts)", functions: ["runChangeGateStage"], production: true },
+	{ id: "model-review", implementedBy: "runReview (reviewer.ts)", functions: ["runReview"], production: true },
+	{ id: "refute-or-promote", implementedBy: "runRefuteOrPromote (verdict.ts)", functions: ["runRefuteOrPromote"], production: true },
+	{ id: "calibration", implementedBy: "scoreCalibration (calibration.ts); offline only", functions: ["scoreCalibration"], production: false },
 ] as const;
 
 export type MechanismId = (typeof QUALITY_MECHANISMS)[number]["id"];
@@ -235,19 +135,20 @@ export interface GateDepth {
 	readonly mechanisms: readonly MechanismId[];
 }
 
+const NONE: readonly MechanismId[] = Object.freeze([]);
 const DETERMINISTIC_ONLY: readonly MechanismId[] = Object.freeze(["deterministic"]);
-const ALL_MECHANISMS: readonly MechanismId[] = Object.freeze(QUALITY_MECHANISMS.map((m) => m.id));
+const REVIEW_DEPTH: readonly MechanismId[] = Object.freeze(["deterministic", "model-review", "refute-or-promote"]);
 
 /**
- * Mechanisms by workflow. `quick` runs the deterministic leg only, matching `runQuickGateStage`
- * (quality/index.ts). `Record`, not `Partial`: a missing key is a compile error.
+ * Mechanisms each workflow runs in production. `grill` and `plan` author documents and run no gate.
+ * `Record`, not `Partial`: a missing key is a compile error.
  */
 export const GATE_DEPTH_BY_WORKFLOW: Readonly<Record<WorkflowId, readonly MechanismId[]>> = Object.freeze({
 	quick: DETERMINISTIC_ONLY,
-	grill: ALL_MECHANISMS,
-	plan: ALL_MECHANISMS,
-	execute: ALL_MECHANISMS,
-	review: ALL_MECHANISMS,
+	grill: NONE,
+	plan: NONE,
+	execute: DETERMINISTIC_ONLY,
+	review: REVIEW_DEPTH,
 });
 
 /** Which mechanisms run for `workflow`: a table lookup, never a run. */

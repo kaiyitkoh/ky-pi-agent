@@ -174,7 +174,7 @@ export default function (pi: ExtensionAPI): void {
 			let gateLine = "outside this workflow's gate depth";
 			if (gateDepthFor("execute").mechanisms.includes("deterministic")) {
 				const gate = runChangeGateStage({ cwd, projectTrusted: ctx.isProjectTrusted(), baseSha, changed, baseTypecheckFailed });
-				const failed = [gate.typecheck, gate.antiPattern].flatMap((leg) => (leg.status === "fail" ? [Math.max(1, leg.findings.length)] : []));
+				const failed = [gate.typecheck, gate.lint, gate.antiPattern].flatMap((leg) => (leg.status === "fail" ? [Math.max(1, leg.findings.length)] : []));
 				if (failed.length > 0) return reject(`the deterministic gate fails on the committed change:\n${gate.report}`, failed.reduce((a, b) => a + b, 0));
 				// Awaited only when nothing ran, so an ordinary settle stays synchronous.
 				if (!gate.ranAny && !(await ctx.ui.confirm("Record with no deterministic check?", `No deterministic check applies to ${run.taskId}:\n${gate.report}`))) {

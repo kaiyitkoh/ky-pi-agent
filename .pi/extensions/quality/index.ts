@@ -3,8 +3,8 @@
  * and the live tool list, and registers `consult_advisor`. Rationale and the registration budget: docs/QUALITY.md.
  * Authored in this repo, not vendored; the "vendored" kind in the tool-count registry means in-repo source only.
  */
-import { existsSync, readdirSync, readFileSync } from "node:fs";
-import { dirname, join, relative, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join, resolve } from "node:path";
 import { spawnSync } from "node:child_process";
 
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
@@ -15,8 +15,8 @@ import {
 	consultAdvisorParameters,
 	executeConsultAdvisor,
 } from "./advisor.ts";
-import { type ExecRunner, type GateResult, type LegStatus, runDeterministicGates, runTypecheckLeg } from "./gates.ts";
-import { type QualityFinding, type QualitySource, runAntiPatternRules } from "./rules.ts";
+import { type ExecRunner, type LegStatus, outputLines, probeLspAvailability, runTypecheckLeg } from "./gates.ts";
+import { type QualityFinding, runAntiPatternRules } from "./rules.ts";
 import { commandFor } from "../../lib/win-quote.ts";
 
 const REGISTERED_TOOL_NAMES_KEY = "__kypiQualityRegisteredToolNames";
@@ -25,24 +25,6 @@ const REGISTERED_TOOL_NAMES_KEY = "__kypiQualityRegisteredToolNames";
 export function registeredToolNames(): readonly string[] {
 	const fn = (globalThis as Record<string, unknown>)[REGISTERED_TOOL_NAMES_KEY];
 	return typeof fn === "function" ? (fn as () => readonly string[])() : [];
-}
-
-/** Every `.ts` file under `<cwd>/.pi/extensions/`, read off disk so uncommitted work is checked. */
-function collectQualitySources(cwd: string): QualitySource[] {
-	const root = join(cwd, ".pi", "extensions");
-	const sources: QualitySource[] = [];
-	const walk = (dir: string): void => {
-		if (!existsSync(dir)) return;
-		for (const entry of readdirSync(dir, { withFileTypes: true })) {
-			const full = join(dir, entry.name);
-			if (entry.isDirectory()) walk(full);
-			else if (entry.name.endsWith(".ts")) {
-				sources.push({ path: relative(cwd, full).replace(/\\/g, "/"), text: readFileSync(full, "utf-8") });
-			}
-		}
-	};
-	walk(root);
-	return sources;
 }
 
 /**
@@ -86,11 +68,11 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 				"so this command line cannot be built safely; the leg is unavailable, not failed",
 		);
 	}
-	// LINT_GATE_FILES names this repo's own tests; elsewhere vitest would report a false FAIL, so degrade to unavailable.
+	// A test-file target absent from this cwd would make the runner report a false FAIL, so degrade to unavailable.
 	const missingTargets = args.filter((a) => a.endsWith(".test.ts") && !existsSync(join(cwd, a)));
 	if (missingTargets.length > 0) {
 		throw new Error(
-			`${cmd} target file(s) not found under ${cwd}: ${missingTargets.join(", ")} -- this leg only runs ky-pi-agent's own structural lint suite`,
+			`${cmd} target file(s) not found under ${cwd}: ${missingTargets.join(", ")} -- a leg naming test files only applies where they exist`,
 		);
 	}
 	// `commandFor` quotes every argument on Windows (cwd may hold spaces or `&`); POSIX passes the array through.
@@ -119,7 +101,7 @@ export function setQuickGateExecOverrideForTests(exec: ExecRunner | undefined): 
 }
 
 /**
- * The `ExecRunner` `/quick` uses. A test override always wins (a stub never spawns); otherwise an untrusted
+ * The `ExecRunner` the change gate uses. A test override always wins (a stub never spawns); otherwise an untrusted
  * `cwd` is refused before any spawn, which the legs turn into `unavailable`.
  */
 function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
@@ -130,36 +112,80 @@ function resolveExec(cwd: string, projectTrusted: boolean): ExecRunner {
 	if (!projectTrusted) {
 		return () => {
 			throw new Error(
-				`the project at ${cwd} is not trusted -- the typecheck/lint legs will not execute a binary from this cwd until it is`,
+				`the project at ${cwd} is not trusted -- the typecheck and lint legs will not execute a binary from this cwd until it is`,
 			);
 		};
 	}
 	return productionExec;
 }
 
-/** Runs the deterministic gate stage for real; `projectTrusted` comes from `ctx.isProjectTrusted()`. */
-export function runQuickGateStage(cwd: string, projectTrusted: boolean): GateResult {
-	return runDeterministicGates({
-		sources: collectQualitySources(cwd),
-		registeredToolNames: registeredToolNames(),
-		cwd,
-		exec: resolveExec(cwd, projectTrusted),
-	});
+/** `tsc --noEmit` at `cwd`, alone; unavailable when no tsconfig.json exists from `cwd` up to the git top level. */
+export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus {
+	if (!hasTsconfig(cwd)) {
+		return { status: "unavailable", reason: `no tsconfig.json at or above ${cwd} (up to the git top level), so tsc has no project to check` };
+	}
+	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
 }
 
-/** `tsc --noEmit` at `cwd`, alone. */
-export function runTypecheckAt(cwd: string, projectTrusted: boolean): LegStatus {
-	return runTypecheckLeg(cwd, resolveExec(cwd, projectTrusted));
+function hasTsconfig(cwd: string): boolean {
+	const top = spawnSync("git", ["rev-parse", "--show-toplevel"], { cwd, encoding: "utf-8", shell: false, windowsHide: true });
+	const norm = (p: string): string => (process.platform === "win32" ? resolve(p).toLowerCase() : resolve(p));
+	const stop = top.status === 0 ? norm(top.stdout.trim()) : norm(cwd);
+	let dir = resolve(cwd);
+	for (;;) {
+		if (existsSync(join(dir, "tsconfig.json"))) return true;
+		const parent = dirname(dir);
+		if (norm(dir) === stop || parent === dir) return false;
+		dir = parent;
+	}
+}
+
+const ESLINT_CONFIGS = [
+	"eslint.config.js",
+	"eslint.config.mjs",
+	"eslint.config.cjs",
+	"eslint.config.ts",
+	".eslintrc",
+	".eslintrc.js",
+	".eslintrc.cjs",
+	".eslintrc.json",
+	".eslintrc.yml",
+	".eslintrc.yaml",
+];
+
+const LINT_OUTPUT_MAX_LINES = 40;
+
+/** Runs the target repo's own ESLint on the changed code files; unavailable unless the repo configures it and is trusted. */
+function runLintAt(cwd: string, projectTrusted: boolean, files: readonly string[]): LegStatus {
+	if (files.length === 0) return { status: "unavailable", reason: "no changed TypeScript/JavaScript file for eslint to check" };
+	if (!ESLINT_CONFIGS.some((name) => existsSync(join(cwd, name)))) {
+		return { status: "unavailable", reason: `no ESLint config in ${cwd}, so there is no lint rule set to apply` };
+	}
+	let result: { code: number; stdout: string; stderr: string };
+	try {
+		result = resolveExec(cwd, projectTrusted)("eslint", ["--", ...files], cwd);
+	} catch (err) {
+		return { status: "unavailable", reason: `eslint could not be run: ${err instanceof Error ? err.message : String(err)}` };
+	}
+	const lines = outputLines(result);
+	const bounded = lines.length > LINT_OUTPUT_MAX_LINES ? [...lines.slice(0, LINT_OUTPUT_MAX_LINES), `... ${lines.length - LINT_OUTPUT_MAX_LINES} more line(s)`] : lines;
+	if (result.code === 0) return { status: "pass" };
+	if (result.code === 1) return { status: "fail", findings: bounded };
+	return { status: "unavailable", reason: `eslint exited ${result.code} without a lint verdict: ${bounded.slice(0, 3).join(" | ")}` };
 }
 
 const CODE_FILE = /\.[cm]?[tj]sx?$/;
 
 export interface ChangeGateResult {
 	readonly typecheck: LegStatus;
+	readonly lint: LegStatus;
+	readonly lsp: LegStatus;
 	readonly antiPattern: LegStatus;
+	/** True when any leg failed. */
+	readonly failed: boolean;
 	/** False when every leg was unavailable, so nothing deterministic checked the change. */
 	readonly ranAny: boolean;
-	/** One line per leg. */
+	/** One entry per leg, in gate order. */
 	readonly report: string;
 }
 
@@ -174,8 +200,9 @@ const findingKey = (f: QualityFinding): string => `${f.path}\0${f.ruleId}\0${f.m
 
 /**
  * The deterministic stage for a work repo's change between `baseSha` and the tree on disk: anti-pattern rules on
- * the changed code files, counting only findings `baseSha` did not already have, and `tsc --noEmit` only when a code
- * file changed and the base did not already fail it (a failure there cannot be attributed to the change).
+ * the changed code files, counting only findings `baseSha` did not already have, the repo's own ESLint on those files,
+ * and `tsc --noEmit` only when a code file changed, a tsconfig exists and the base did not already fail it (a failure
+ * there cannot be attributed to the change). The LSP leg is always unavailable.
  */
 export function runChangeGateStage(input: {
 	readonly cwd: string;
@@ -205,11 +232,13 @@ export function runChangeGateStage(input: {
 		: input.baseTypecheckFailed
 			? { status: "unavailable", reason: "tsc already failed on the base tree, so a failure cannot be attributed to this change" }
 			: runTypecheckAt(input.cwd, input.projectTrusted);
-	const legs = [["typecheck", typecheck], ["anti-pattern", antiPattern]] as const;
+	const lint = runLintAt(input.cwd, input.projectTrusted, code);
+	const lsp = probeLspAvailability(registeredToolNames());
+	const legs = [["typecheck", typecheck], ["lint", lint], ["lsp", lsp], ["anti-pattern", antiPattern]] as const;
 	const report = legs
 		.map(([id, leg]) => leg.status === "fail" ? `${id}: FAIL\n${leg.findings.map((f) => `  - ${f}`).join("\n")}` : `${id}: ${leg.status === "pass" ? "PASS" : `UNAVAILABLE (${leg.reason})`}`)
 		.join("\n");
-	return { typecheck, antiPattern, ranAny: legs.some(([, l]) => l.status !== "unavailable"), report };
+	return { typecheck, lint, lsp, antiPattern, failed: legs.some(([, l]) => l.status === "fail"), ranAny: legs.some(([, l]) => l.status !== "unavailable"), report };
 }
 
 export default function (pi: ExtensionAPI): void {
