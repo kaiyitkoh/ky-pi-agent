@@ -346,7 +346,8 @@ describe("WR-11 -- approve_ky_command.execute() denies by default on every non-a
 	/** Seed a real pending approval, then drive approve_ky_command's own execute() against it under the given UI shape. */
 	async function driveApproval(uiShape: {
 		hasUI: boolean;
-		select?: () => Promise<string | undefined>;
+		mode?: string;
+		select?: (title: string, options: string[], opts?: { timeout?: number }) => Promise<string | undefined>;
 	}): Promise<{ threw: boolean; grantExistsAfter: boolean }> {
 		const { pi, tools } = stubPi();
 		safety(pi);
@@ -363,6 +364,7 @@ describe("WR-11 -- approve_ky_command.execute() denies by default on every non-a
 			const fakeCtx = {
 				cwd,
 				hasUI: uiShape.hasUI,
+				mode: uiShape.mode ?? "tui",
 				ui: uiShape.select === undefined ? undefined : { select: uiShape.select },
 			} as unknown as ExtensionContext;
 
@@ -402,6 +404,26 @@ describe("WR-11 -- approve_ky_command.execute() denies by default on every non-a
 				"out is 'approve unless the choice is exactly Deny', which would wrongly approve here",
 		).toBe(true);
 		expect(grantExistsAfter, "no grant must exist when select() returned undefined").toBe(false);
+	});
+
+	it.each(["json", "print"])("hasUI: true in %s mode -- refused without opening the dialog", async (mode) => {
+		let asked = 0;
+		const { threw, grantExistsAfter } = await driveApproval({ hasUI: true, mode, select: async () => (asked++, "Approve") });
+		expect(threw).toBe(true);
+		expect(grantExistsAfter).toBe(false);
+		expect(asked, "a mode that cannot answer a dialog must not be asked one").toBe(0);
+	});
+
+	it.each(["tui", "rpc"])("%s: Approve records the grant, and the dialog carries the confirm timeout", async (mode) => {
+		const timeouts: (number | undefined)[] = [];
+		const { threw, grantExistsAfter } = await driveApproval({
+			hasUI: true,
+			mode,
+			select: async (_t, _o, opts) => (timeouts.push(opts?.timeout), "Approve"),
+		});
+		expect(threw).toBe(false);
+		expect(grantExistsAfter).toBe(true);
+		expect(timeouts).toEqual([300_000]);
 	});
 });
 

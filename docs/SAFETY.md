@@ -206,7 +206,9 @@ Every `git push` resolves to one of three outcomes, checked on any branch:
   `ctx.hasUI` is true and `ctx.mode` is `"tui"` or `"rpc"`, so print, json and
   subagent children fail closed. The confirm waits at most 300000 ms (5
   minutes); a timeout or a cancel refuses. `bg_run` always blocks it (no
-  wrapper to consume a grant).
+  wrapper to consume a grant). The `approve_ky_command` dialog for
+  confirm-gated commands (`terraform apply`) follows the same mode rule and
+  timeout.
 
 How the destination is resolved:
 

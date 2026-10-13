@@ -276,12 +276,13 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 				);
 			}
 
-			// Approve ONLY on an explicit affirmative; undefined (noOpUIContext, pi 1.1.0 runner.js:132) and no UI both refuse.
-			const choice = ctx.hasUI
+			// Approve ONLY on an explicit affirmative; undefined (noOpUIContext, pi 1.1.0 runner.js:132, or a timeout) and no UI refuse.
+			const choice = canConfirm(ctx)
 				? await ctx.ui.select(
 						`Approve this command?\n\n  ${command}\n\nSummary: ${summary}\nBlast radius: ${blast_radius}\n` +
 							`Blocked because: ${reason}`,
 						[APPROVE_CHOICE, DENY_CHOICE],
+						{ timeout: CONFIRM_TIMEOUT_MS },
 					)
 				: undefined;
 
@@ -289,9 +290,9 @@ function registerApprovalTool(pi: ExtensionAPI): void {
 				writeAuditRow(ctx.cwd, {
 					...row,
 					verdict: "block",
-					reason: ctx.hasUI
-						? `user did not select "${APPROVE_CHOICE}"`
-						: "no UI bound -- approval requires an interactive confirmation and none is available",
+					reason: canConfirm(ctx)
+						? `user did not select "${APPROVE_CHOICE}" within ${CONFIRM_TIMEOUT_MS} ms`
+						: `no UI that can answer a dialog (mode "${ctx.mode}") -- approval requires an interactive confirmation`,
 				});
 				throw new Error(`Approval refused for "${command}". It stays blocked.`);
 			}
