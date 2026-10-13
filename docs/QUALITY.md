@@ -171,18 +171,24 @@ predicate over a **post-refutation** review — never the raw reviewer
 output, since handing it raw findings would let a since-withdrawn BLOCKER
 still stop the workflow:
 
-1. `symptomatic` classification stops, regardless of findings.
-2. `workaround` classification stops, quoting `properFix`/`deferralReason`
-   directly in the stop message.
-3. Any BLOCKER surviving refutation stops, naming its `location` and
-   `concreteFailure`.
-4. Otherwise, clear.
+1. Any BLOCKER surviving refutation stops WITHOUT an approval path, naming
+   each `location` and `concreteFailure`, and the classification too when it
+   is not `root-cause`. It comes first so a `symptomatic` or `workaround`
+   label can never turn a surviving BLOCKER into an approvable stop.
+2. `symptomatic` classification stops for approval, even with zero findings.
+3. `workaround` classification stops for approval, quoting
+   `properFix`/`deferralReason` directly in the stop message.
+4. A Partial or Missing requirement verdict stops for approval, naming each
+   requirement.
+5. Otherwise, clear.
 
-A WARNING or NIT never reaches branch (3) — that branch's own filter is
+A WARNING or NIT never reaches branch (1) — that branch's own filter is
 `severity === "BLOCKER"`. What a stop shows the user is never a bare
-boolean: branch (2)'s debt is quoted verbatim, and branch (3) names the
-specific surviving finding, so approval is a decision about a stated fact,
-not a rubber stamp.
+boolean: branch (1) names the specific surviving findings, and branch (3)'s
+debt is quoted verbatim, so an approval is a decision about a stated fact,
+not a rubber stamp. Because a BLOCKER stop is never approvable, the
+"Open the MR anyway?" prompt in `/review` is only ever reached with no
+surviving BLOCKER.
 
 ## 6. Calibration
 

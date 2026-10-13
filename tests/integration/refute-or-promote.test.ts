@@ -443,4 +443,16 @@ describe("decideWorkflowStop -- requirement verdicts", () => {
 		const stop = decideWorkflowStop(reviewWithFindings([blockerFinding()], { verdicts: [verdict("Missing")] }));
 		expect(stop.stop && stop.needsApproval).toBe(false);
 	});
+
+	it.each(["workaround", "symptomatic"] as const)("a %s classification never makes a surviving BLOCKER approvable, and the stop names the BLOCKER", (classification) => {
+		const stop = decideWorkflowStop(
+			reviewWithFindings([blockerFinding()], { classification, properFix: "fix the query", deferralReason: "release cutoff" }),
+		);
+		expect(stop.stop).toBe(true);
+		if (stop.stop) {
+			expect(stop.needsApproval).toBe(false);
+			expect(stop.reason).toContain("src/x.ts:10");
+			expect(stop.reason).toContain(classification);
+		}
+	});
 });

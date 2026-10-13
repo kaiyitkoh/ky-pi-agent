@@ -21,19 +21,29 @@ export type WorkflowStop =
 
 /**
  * First match wins; expects a review already through runRefuteOrPromote.
- *   (1) symptomatic -> stop with needsApproval, even with zero findings (the change's nature is the problem).
- *   (2) workaround -> stop with needsApproval, quoting properFix and deferralReason so the debt is in the message.
- *   (3) any surviving BLOCKER -> stop without approval; after (1) and (2) so a symptomatic fix with no BLOCKER still needs approval.
+ *   (1) any surviving BLOCKER -> stop without approval, first, so no classification can make a BLOCKER approvable.
+ *   (2) symptomatic -> stop with needsApproval, even with zero findings (the change's nature is the problem).
+ *   (3) workaround -> stop with needsApproval, quoting properFix and deferralReason so the debt is in the message.
  *   (4) any Partial or Missing requirement verdict -> stop with needsApproval, naming each requirement.
  *   (5) otherwise no stop; WARNING and NIT never stop.
  */
 export function decideWorkflowStop(review: ReviewArtifact): WorkflowStop {
+	const survivingBlockers = review.findings.filter((finding) => finding.severity === "BLOCKER");
+	if (survivingBlockers.length > 0) {
+		const names = survivingBlockers.map((b) => `${b.location}: ${b.concreteFailure}`).join("; ");
+		const label = review.classification === "root-cause" ? "" : ` (the change is also classified "${review.classification}")`;
+		return {
+			stop: true,
+			needsApproval: false,
+			reason: `${survivingBlockers.length} BLOCKER finding(s) survived refutation -- ${names}${label}`,
+		};
+	}
+
 	if (review.classification === "symptomatic") {
 		return {
 			stop: true,
 			needsApproval: true,
-			reason:
-				`this change is classified "symptomatic" -- ${review.classificationJustification}`,
+			reason: `this change is classified "symptomatic" -- ${review.classificationJustification}`,
 		};
 	}
 
@@ -44,17 +54,6 @@ export function decideWorkflowStop(review: ReviewArtifact): WorkflowStop {
 			reason:
 				`this change is classified "workaround" -- ${review.classificationJustification}. ` +
 				`Proper fix: ${review.properFix ?? ""}. Deferred because: ${review.deferralReason ?? ""}.`,
-		};
-	}
-
-	const survivingBlockers = review.findings.filter((finding) => finding.severity === "BLOCKER");
-	if (survivingBlockers.length > 0) {
-		const names = survivingBlockers.map((b) => `${b.location}: ${b.concreteFailure}`).join("; ");
-		return {
-			stop: true,
-			needsApproval: false,
-			reason:
-				`${survivingBlockers.length} BLOCKER finding(s) survived refutation -- ${names}`,
 		};
 	}
 
