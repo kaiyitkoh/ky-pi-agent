@@ -1,7 +1,12 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
+import { execFileSync } from "node:child_process";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
 import { GIT_STATUS_ARGS } from "../../.pi/extensions/ui/git-probe.ts";
+import { parsePorcelain } from "../../.pi/extensions/ui/statusline.ts";
 import { createHarnessSession, type HarnessHandle, type HarnessSessionOptions } from "../helpers/harness-session.ts";
 import { createRecordingUI } from "../helpers/recording-ui.ts";
 
@@ -88,8 +93,18 @@ describe("headless faux session with a recording UI", () => {
 });
 
 describe("git status probe arguments", () => {
-	it("excludes untracked files so the probe stays cheap in large trees", () => {
-		expect(GIT_STATUS_ARGS).toContain("--untracked-files=no");
+	it("counts a new file the agent created, and an untracked directory once without walking it", () => {
 		expect(GIT_STATUS_ARGS).toContain("--porcelain");
+		const repo = mkdtempSync(join(tmpdir(), "kypi-probe-"));
+		try {
+			execFileSync("git", ["init", "-q", repo]);
+			writeFileSync(join(repo, "new.ts"), "x\n");
+			mkdirSync(join(repo, "build", "deep"), { recursive: true });
+			for (const name of ["a", "b", "c"]) writeFileSync(join(repo, "build", "deep", name), "x\n");
+			const out = execFileSync("git", ["-C", repo, ...GIT_STATUS_ARGS], { encoding: "utf-8" });
+			expect(parsePorcelain(out)).toBe(2);
+		} finally {
+			rmSync(repo, { recursive: true, force: true, maxRetries: 3 });
+		}
 	});
 });
