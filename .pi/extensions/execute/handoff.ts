@@ -30,8 +30,7 @@ export function probeSubagentAvailability(registeredToolNames: readonly string[]
 			status: "unavailable",
 			reason:
 				`missing tool${missing.length > 1 ? "s" : ""} ${missing.join(", ")} — pi-subagents@0.76.1 is pinned in ` +
-				"settings but not installed (RB-07-02); the live check that would exercise a real spawn once " +
-				"installed is RB-09-03",
+				"settings but not installed",
 		};
 	}
 	return { status: "pass" };

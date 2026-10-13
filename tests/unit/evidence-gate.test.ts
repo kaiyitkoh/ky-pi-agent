@@ -85,6 +85,7 @@ interface Row {
 	readonly expected: "accept" | "reject";
 	readonly reasonMustContain: readonly string[];
 	readonly why: string;
+	readonly failedToolCalls?: number;
 }
 
 const ROWS: readonly Row[] = [
@@ -119,11 +120,12 @@ const ROWS: readonly Row[] = [
 		why: "evidence captured at an older commit than HEAD must not satisfy a claim made now",
 	},
 	{
-		name: "R3 -- failed command at the current SHA",
+		name: "R3 -- a failed command at the current SHA is logged, not fatal",
 		records: [record("bash", shaB, true)],
-		expected: "reject",
-		reasonMustContain: ["bash"],
-		why: "a record with isError:true at HEAD, with no passing record, must reject naming the failing tool",
+		expected: "accept",
+		reasonMustContain: [],
+		failedToolCalls: 1,
+		why: "a commit landed with evidence at HEAD; the failed call is counted, and the declared verification is the caller's check",
 	},
 	{
 		name: "A1 -- structured, non-error, at HEAD, and a commit genuinely landed (baseSha !== headSha)",
@@ -133,24 +135,33 @@ const ROWS: readonly Row[] = [
 		why: "the one accepted shape: a non-error tool result captured at the SHA that is still HEAD, with HEAD having actually moved since the run was armed",
 	},
 	{
-		name: "M1 -- no borrowing: stale-but-passing plus fresh-but-failing",
+		name: "M1 -- stale-but-passing plus fresh-but-failing still has evidence at HEAD",
 		records: [record("bash", shaA, false), record("bash", shaB, true)],
-		expected: "reject",
-		reasonMustContain: ["bash"],
-		why: "a passing record from a DIFFERENT sha may not be borrowed to rescue a claim at HEAD -- only records already at headSha are considered for the isError check",
+		expected: "accept",
+		reasonMustContain: [],
+		failedToolCalls: 1,
+		why: "only the presence of a record at HEAD is required; the failure is counted",
 	},
 	{
-		name: "CR-01c (iteration 2, PROBE F) -- a failure at the STALE sha cannot be buried by a later commit's own passing record at headSha",
-		records: [record("bash", shaA, true), record("bash", shaB, false)],
+		name: "D-01 -- exploratory failures before a clean commit: no-match grep, red test, failed edit",
+		records: [
+			record("grep", shaA, true),
+			record("bash", shaA, true),
+			record("edit", shaA, true),
+			record("bash", shaB, false),
+		],
 		baseSha: shaA,
+		expected: "accept",
+		reasonMustContain: [],
+		failedToolCalls: 3,
+		why: "a task passes when it produced a commit and its declared verification passes at the end; intermediate non-zero exits are logged, not fatal",
+	},
+	{
+		name: "D-01 -- failures only at a stale sha and nothing at HEAD still rejects as stale",
+		records: [record("bash", shaA, true)],
 		expected: "reject",
-		reasonMustContain: ["bash"],
-		why:
-			"PROBE F, verbatim: a verification command fails (isError:true, captured at the pre-commit sha), then a " +
-			"commit lands (its own tool_result is a passing record at the new HEAD). Before this branch existed the " +
-			"predicate narrowed to records AT headSha before ever inspecting isError, so the failing record -- sitting " +
-			"at baseSha, not headSha -- was silently discarded and this shape ACCEPTED. The failure must reject " +
-			"regardless of where HEAD ends up.",
+		reasonMustContain: [shaA, shaB],
+		why: "dropping the any-failure branch must not weaken the stale-evidence branch",
 	},
 ];
 
@@ -183,6 +194,7 @@ describe("GATE-07 -- gateCompletion", () => {
 				if (verdict.ok) {
 					expect(verdict.sha).toBe(head);
 					expect(verdict.sha).toBe(shaB);
+					expect(verdict.failedToolCalls).toBe(row.failedToolCalls ?? 0);
 				}
 				return;
 			}
@@ -359,13 +371,10 @@ describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the
 		expect(verdict.ok, `a genuine content change must still accept -- without this, branch (6) would reject everything -- got ${JSON.stringify(verdict)}`).toBe(true);
 	});
 
-	it("ORDER PRESERVED: a run with a FAILED tool result still rejects with the failure reason even when the tree DID change", () => {
-		// Continues from the "real change" commit above -- its tree already
-		// differs from gate01BaseTree, so branch (6) alone would pass this
-		// through; only branch (3), further down the order, may reject it.
+	it("a failed tool result no longer rejects when the tree changed and evidence sits at HEAD; the failure is counted", () => {
 		const changedHeadSha = currentSha(gate01Repo);
 		const changedHeadTree = currentTree(gate01Repo);
-		expect(changedHeadTree, "this run's tree really did change from the base -- otherwise this test cannot tell branch (3) from branch (6)").not.toBe(gate01BaseTree);
+		expect(changedHeadTree).not.toBe(gate01BaseTree);
 
 		const verdict = gateCompletion(
 			[record("bash", changedHeadSha, true)],
@@ -374,10 +383,8 @@ describe("GATE-01 -- gateCompletion branch (6): the tree-comparison close of the
 			changedHeadTree,
 			gate01BaseTree,
 		);
-		expect(verdict.ok, "a failed tool result must still reject even though the tree changed -- branch (3) must not have been displaced by branch (6)").toBe(false);
-		if (!verdict.ok) {
-			expect(verdict.reason, "the rejection must name the failing tool, not the (here, irrelevant) tree ids").toContain("bash");
-		}
+		expect(verdict.ok, JSON.stringify(verdict)).toBe(true);
+		if (verdict.ok) expect(verdict.failedToolCalls).toBe(1);
 	});
 
 	it("currentTree throws on a directory that is not a git repository -- no sentinel, matching currentSha's contract", () => {

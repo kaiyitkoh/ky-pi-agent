@@ -23,7 +23,9 @@ export interface EvidenceRecord {
 }
 
 /** The gate decision: a verdict about a claim, mirroring GuardVerdict. */
-export type EvidenceVerdict = { readonly ok: true; readonly sha: string } | { readonly ok: false; readonly reason: string };
+export type EvidenceVerdict =
+	| { readonly ok: true; readonly sha: string; readonly failedToolCalls: number }
+	| { readonly ok: false; readonly reason: string };
 
 /** Build a record from a captured tool result; only `command`/`path` of the input is copied, so file bodies never reach it. */
 export function recordFromToolResult(input: {
@@ -45,15 +47,9 @@ export function recordFromToolResult(input: {
 }
 
 /**
- * The pure predicate; first match wins and BRANCH ORDER IS BINDING:
- *   (1) no record -> reject; transcript text is not evidence.
- *   (2) HEAD never moved -> reject: every record is trivially "at HEAD", so none can support a claim.
- *   (6) HEAD moved but its tree equals the tree at arm time -> reject (empty commit). Numbered (6) because callers and docs use that label.
- *       It sits after (2) and before (3) so a recorded failure outranks it.
- *   (3) any record has isError -> reject, naming the failing tools. Before (4) so a later commit cannot age out a failure.
- *   (4) no record at HEAD -> reject as stale.
- *   (5) otherwise accept, carrying headSha.
- * Cannot prove the diff contains the claimed work, so callers must not describe ACCEPT as an endorsement (docs/WORKFLOWS.md section 4).
+ * The pure predicate; first match wins and the order is binding: no record, unreadable HEAD, HEAD unmoved, empty commit (tree unchanged), no record at HEAD.
+ * A run passes when a commit landed with a changed tree and evidence exists at HEAD; failed intermediate tool calls are counted and
+ * logged, not fatal. The declared verification is checked by the caller. ACCEPT never endorses the diff's content.
  */
 export function gateCompletion(
 	records: readonly EvidenceRecord[],
@@ -71,6 +67,10 @@ export function gateCompletion(
 		};
 	}
 
+	if (headSha === "" || headTree === "") {
+		return { ok: false, reason: "HEAD could not be read when the run settled, so no commit can be attributed to it" };
+	}
+
 	if (headSha === baseSha) {
 		return {
 			ok: false,
@@ -80,25 +80,13 @@ export function gateCompletion(
 		};
 	}
 
-	// (6) HEAD moved but its tree is byte-identical to the one at arm time: an empty commit.
+	// HEAD moved but its tree is byte-identical to the one at arm time: an empty commit.
 	if (headTree === baseTree) {
 		return {
 			ok: false,
 			reason:
 				`HEAD moved to ${headSha} but its tree (${headTree}) is byte-identical to the tree recorded at arm ` +
 				`time (${baseTree}) -- the commit contains no change and cannot support a completion claim`,
-		};
-	}
-
-	// (3) Any failure in the run rejects, before the headSha narrowing; every record in a run belongs to one task.
-	const failing = records.filter((r) => r.isError);
-	if (failing.length > 0) {
-		const failingTools = Array.from(new Set(failing.map((r) => r.toolName))).join(", ");
-		return {
-			ok: false,
-			reason:
-				`a tool result in this run failed (${failingTools}) -- a completion claim cannot be supported by a ` +
-				"run that contains a recorded failure, even if a commit landed afterwards",
 		};
 	}
 
@@ -113,7 +101,7 @@ export function gateCompletion(
 		};
 	}
 
-	return { ok: true, sha: headSha };
+	return { ok: true, sha: headSha, failedToolCalls: records.filter((r) => r.isError).length };
 }
 
 // Run state: one globalThis-keyed slot, because two jiti module instances in one process is a measured bug (see routing/modes.ts).
@@ -122,7 +110,7 @@ const RUN_STATE_KEY = "__kypiQuickRun";
 interface RunState {
 	readonly cwd: string;
 	readonly baseSha: string;
-	/** The tree HEAD pointed at when armed; fed to branch (6). */
+	/** The tree HEAD pointed at when armed; used to detect an empty commit. */
 	readonly baseTree: string;
 	readonly records: EvidenceRecord[];
 }
@@ -147,7 +135,7 @@ export function recordToolResult(record: EvidenceRecord): void {
 	state.records.push(record);
 }
 
-/** Push a synthetic failing record so a throwing capture rejects at branch (3) instead of vanishing. No-op when unarmed. */
+/** Push a synthetic failing record so a throwing capture is counted instead of vanishing. No-op when unarmed. */
 export function recordCaptureFailure(toolName: string): void {
 	const state = runSlot();
 	if (state !== undefined) state.records.push({ ts: Date.now(), toolName: `${toolName} (capture failed)`, command: "", isError: true, sha: "" });
@@ -163,6 +151,11 @@ export function armedCwd(): string | undefined {
 	return runSlot()?.cwd;
 }
 
+/** Drop the armed run without a verdict or an evidence row, for a run the user aborted. */
+export function disarmRun(): void {
+	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = undefined;
+}
+
 /** Compute the verdict for the armed run, write one evidence row, disarm. Returns `undefined` when unarmed. */
 export function endRun(headSha: string, headTree: string): EvidenceVerdict | undefined {
 	const state = runSlot();
@@ -172,10 +165,11 @@ export function endRun(headSha: string, headTree: string): EvidenceVerdict | und
 	const verdict = gateCompletion(state.records, headSha, state.baseSha, headTree, state.baseTree);
 	writeEvidenceRow(state.cwd, {
 		verdict: verdict.ok ? "accept" : "reject",
-		// States what was checked (HEAD moved, no failure), not an endorsement.
+		// States what was checked, not an endorsement.
 		reason: verdict.ok
-			? `HEAD moved to ${headSha} with no failed tool result recorded during this run -- whether a commit was created, and whether it contains the work, are both unverified`
+			? `HEAD moved to ${headSha} with a changed tree; ${verdict.failedToolCalls} failed tool call(s) logged -- whether the commit contains the work is unverified`
 			: verdict.reason,
+		failedToolCalls: verdict.ok ? verdict.failedToolCalls : state.records.filter((r) => r.isError).length,
 		baseSha: state.baseSha,
 		headSha,
 		recordCount: state.records.length,
@@ -195,6 +189,7 @@ export interface EvidenceRowInput {
 	readonly headSha: string;
 	readonly recordCount: number;
 	readonly tools: readonly string[];
+	readonly failedToolCalls?: number;
 	/** Injected clock, for deterministic tests. Defaults to `Date.now()`. */
 	readonly ts?: number;
 }
@@ -214,6 +209,7 @@ export function writeEvidenceRow(cwd: string, input: EvidenceRowInput): string |
 		headSha: input.headSha,
 		recordCount: input.recordCount,
 		tools: input.tools,
+		failedToolCalls: input.failedToolCalls ?? 0,
 	};
 	try {
 		return appendJsonl(cwd, EVIDENCE_LOG_BASE, row, { rotateBytes: EVIDENCE_ROTATE_BYTES });
