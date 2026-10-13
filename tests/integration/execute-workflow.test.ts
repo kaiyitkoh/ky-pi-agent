@@ -355,10 +355,25 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(h.notes.at(-1)?.text).toContain("not approved");
 	});
 
-	it("a changed TypeScript file still runs the typecheck leg", async () => {
+	it("a changed TypeScript file in a repo without a tsconfig reports the typecheck leg UNAVAILABLE", async () => {
 		const h = harness();
 		setQuickGateExecOverrideForTests(() => ({ code: 0, stdout: "", stderr: "" }));
 		try {
+			await h.command(SLUG);
+			commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+			verify(h);
+			await h.fire("agent_settled", { aborted: false });
+		} finally {
+			setQuickGateExecOverrideForTests(undefined);
+		}
+		expect(readFileSync(progressFile(h), "utf-8")).toContain("typecheck: UNAVAILABLE (no tsconfig.json");
+	});
+
+	it("a changed TypeScript file still runs the typecheck leg when a tsconfig exists", async () => {
+		const h = harness();
+		setQuickGateExecOverrideForTests(() => ({ code: 0, stdout: "", stderr: "" }));
+		try {
+			commitIn(h.repo, "tsconfig.json", "{}\n");
 			await h.command(SLUG);
 			commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
 			verify(h);

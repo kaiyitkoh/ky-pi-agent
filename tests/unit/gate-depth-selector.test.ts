@@ -1,157 +1,130 @@
 /**
- * QUAL-08 — gate depth scales with the workflow, proved in BOTH directions.
+ * The gate-depth table lists only mechanisms each workflow's command module actually imports.
  *
- * "Gate depth scales with the work" is a PURE, MACHINE-CHECKABLE SELECTOR
- * (`gateDepthFor`, `.pi/extensions/quality/gates.ts`), never prose in a
- * prompt and never a branch inside `/quick`. A one-directional assertion
- * ("the full workflow runs everything") is satisfied by a selector that
- * always returns everything -- every mechanism-set assertion below uses
- * EQUALITY, never `toContain`, except direction two's individually-named
- * negative assertions.
- *
- * Falsification, recorded verbatim rather than left to prose (all three
- * restored before this commit -- see 09-12-SUMMARY.md for the exact RED
- * messages):
- *   (a) inverting the table (`quick` -> all four, ceremonial -> deterministic
- *       only) turned BOTH direction one and direction three red;
- *   (b) giving `quick` a second mechanism turned direction two red, naming
- *       the leaked mechanism;
- *   (c) adding a fifth, invented mechanism id to one workflow's row turned
- *       direction four red.
+ * `gateDepthFor` is a pure lookup, so a table entry proves nothing by itself: the behavioural check is that the
+ * function implementing every listed mechanism is imported by the workflow's own command module (or the settle
+ * module it hands off to). A mechanism added to a workflow that never calls it makes `unbackedEntries` non-empty.
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
 import {
 	GATE_DEPTH_BY_WORKFLOW,
-	GATE_LEGS,
 	QUALITY_MECHANISMS,
 	WORKFLOW_IDS,
 	gateDepthFor,
 	type MechanismId,
 	type WorkflowId,
 } from "../../.pi/extensions/quality/gates.ts";
-import { runQuickGateStage } from "../../.pi/extensions/quality/index.ts";
+import { repoRoot } from "../helpers/git.ts";
 
-const ALL_FOUR: readonly MechanismId[] = QUALITY_MECHANISMS.map((m) => m.id);
-const CEREMONIAL_WORKFLOWS: readonly WorkflowId[] = ["grill", "plan", "execute", "review"];
+const COMMAND_MODULES: Readonly<Record<WorkflowId, readonly string[]>> = {
+	quick: [".pi/extensions/workflows/index.ts", ".pi/extensions/workflows/settle.ts"],
+	grill: [".pi/extensions/grill/index.ts"],
+	plan: [".pi/extensions/plan-ceremony/index.ts"],
+	execute: [".pi/extensions/execute/index.ts"],
+	review: [".pi/extensions/review/index.ts"],
+};
 
-describe("vacuity", () => {
-	it("QUALITY_MECHANISMS has exactly four entries", () => {
-		expect(QUALITY_MECHANISMS.length).toBe(4);
-	});
+function stripComments(text: string): string {
+	return text.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+}
 
-	it("WORKFLOW_IDS has exactly five entries", () => {
-		expect(WORKFLOW_IDS.length).toBe(5);
-	});
-});
-
-describe("DIRECTION ONE -- /quick is deterministic-only, by equality", () => {
-	it('gateDepthFor("quick").mechanisms EQUALS ["deterministic"] exactly', () => {
-		// toEqual, not toContain -- a containment check is satisfied by a
-		// selector that returns all four, which is exactly the constant this
-		// requirement forbids.
-		expect(gateDepthFor("quick").mechanisms).toEqual(["deterministic"]);
-	});
-});
-
-describe("DIRECTION TWO -- /quick does NOT leak any ceremonial mechanism", () => {
-	const mechanisms = gateDepthFor("quick").mechanisms;
-
-	it("does not contain model-review", () => {
-		expect(mechanisms).not.toContain("model-review");
-	});
-
-	it("does not contain refute-or-promote", () => {
-		expect(mechanisms).not.toContain("refute-or-promote");
-	});
-
-	it("does not contain calibration", () => {
-		expect(mechanisms).not.toContain("calibration");
-	});
-});
-
-describe("DIRECTION THREE -- every ceremonial workflow runs all four, by equality", () => {
-	it.each(CEREMONIAL_WORKFLOWS)("gateDepthFor(%s).mechanisms EQUALS QUALITY_MECHANISMS' full id list", (workflow) => {
-		expect(gateDepthFor(workflow).mechanisms).toEqual(ALL_FOUR);
-	});
-});
-
-describe("DIRECTION FOUR -- the union over all workflows equals QUALITY_MECHANISMS, no invented ids", () => {
-	it("the union of every workflow's mechanism set equals QUALITY_MECHANISMS' id list", () => {
-		const union = new Set<MechanismId>();
-		for (const workflow of WORKFLOW_IDS) {
-			for (const id of gateDepthFor(workflow).mechanisms) union.add(id);
+/** Value names (not `type` imports) brought in by static `import { ... } from "..."` statements. */
+function importedNames(text: string): Set<string> {
+	const names = new Set<string>();
+	const re = /import\s*\{([^}]*)\}\s*from\s*["'][^"']+["']/g;
+	for (const match of stripComments(text).matchAll(re)) {
+		for (const part of (match[1] ?? "").split(",")) {
+			const trimmed = part.trim();
+			if (trimmed === "" || /^type\s/.test(trimmed)) continue;
+			names.add(trimmed.split(/\s+as\s+/)[0]?.trim() ?? trimmed);
 		}
-		expect([...union].sort()).toEqual([...ALL_FOUR].sort());
-	});
+	}
+	return names;
+}
 
-	it("no workflow's mechanism set contains an id outside QUALITY_MECHANISMS", () => {
-		const known = new Set<string>(ALL_FOUR);
-		for (const workflow of WORKFLOW_IDS) {
-			for (const id of gateDepthFor(workflow).mechanisms) {
-				expect(known.has(id), `${workflow} names unknown mechanism id ${id}`).toBe(true);
+function importsOf(workflow: WorkflowId): Set<string> {
+	const all = new Set<string>();
+	for (const file of COMMAND_MODULES[workflow]) {
+		for (const name of importedNames(readFileSync(join(repoRoot(), file), "utf-8"))) all.add(name);
+	}
+	return all;
+}
+
+function functionsOf(mechanism: MechanismId): readonly string[] {
+	const entry = QUALITY_MECHANISMS.find((m) => m.id === mechanism);
+	if (entry === undefined) throw new Error(`unknown mechanism ${mechanism}`);
+	return entry.functions;
+}
+
+/** Table entries whose implementing function is not imported by the workflow's command module(s). */
+function unbackedEntries(table: Readonly<Record<WorkflowId, readonly MechanismId[]>>): string[] {
+	const unbacked: string[] = [];
+	for (const workflow of WORKFLOW_IDS) {
+		const imported = importsOf(workflow);
+		for (const mechanism of table[workflow]) {
+			for (const fn of functionsOf(mechanism)) {
+				if (!imported.has(fn)) unbacked.push(`${workflow}:${mechanism} (${fn})`);
 			}
 		}
-	});
-});
+	}
+	return unbacked;
+}
 
-describe("EXHAUSTIVENESS -- every WorkflowId is a GATE_DEPTH_BY_WORKFLOW key and vice versa", () => {
-	it("every declared WorkflowId has a row", () => {
-		for (const workflow of WORKFLOW_IDS) {
-			expect(Object.prototype.hasOwnProperty.call(GATE_DEPTH_BY_WORKFLOW, workflow), `missing row for ${workflow}`).toBe(true);
-		}
-	});
-
-	it("every row's key is a declared WorkflowId -- runtime check, since tsc --noEmit does not run in the vitest job", () => {
-		const declared = new Set<string>(WORKFLOW_IDS);
-		for (const key of Object.keys(GATE_DEPTH_BY_WORKFLOW)) {
-			expect(declared.has(key), `GATE_DEPTH_BY_WORKFLOW has an undeclared key ${key}`).toBe(true);
-		}
-	});
-});
-
-describe("AGREEMENT WITH SHIPPED BEHAVIOUR -- gateDepthFor(\"quick\") matches what runQuickGateStage actually runs", () => {
-	it("GATE_LEGS' four legs are all deterministic-class -- runQuickGateStage never reaches a reviewer, refutation or calibration leg", () => {
-		// Structural check only: GATE_LEGS (the legs runQuickGateStage's callee,
-		// runDeterministicGates, actually iterates) is the typecheck/lint/lsp/
-		// anti-pattern set -- none of those names is model-review,
-		// refute-or-promote or calibration. A stronger binding (asserting on a
-		// live runQuickGateStage() call) would require a trusted cwd with real
-		// node_modules and is exercised elsewhere (quick-workflow.test.ts,
-		// quality-gate-order.test.ts); fabricating that here would not add
-		// honest evidence over this structural check.
-		expect([...GATE_LEGS].sort()).toEqual(["anti-pattern", "lint", "lsp", "typecheck"].sort());
-	});
-
-	it("runQuickGateStage's own GateResult shape carries no reviewer/refutation/calibration field", () => {
-		// GateResult (gates.ts) is { legs, blocking, elapsedMsByLeg, totalMs,
-		// report } -- runQuickGateStage (quality/index.ts) returns exactly that
-		// shape, never a superset carrying a review/refutation/calibration key.
-		expect(typeof runQuickGateStage).toBe("function");
-		const source = runQuickGateStage.toString();
-		expect(source).not.toMatch(/runReview|validateReview|runBoundedReviewLoop|scoreCalibration/);
-	});
-});
-
-describe("PURITY -- gateDepthFor makes no I/O, no model call, and its tables are frozen", () => {
-	it("calling gateDepthFor twice for the same workflow returns equal results", () => {
-		expect(gateDepthFor("quick")).toEqual(gateDepthFor("quick"));
-		expect(gateDepthFor("review")).toEqual(gateDepthFor("review"));
-	});
-
-	it("the returned mechanisms array is frozen -- mutating it throws rather than silently succeeding", () => {
-		const result = gateDepthFor("quick");
-		const mutable = result.mechanisms as MechanismId[];
-		expect(() => mutable.push("calibration")).toThrow();
-		// A subsequent call is unaffected either way -- the throw above proves
-		// it structurally, this proves it behaviourally.
+describe("the table is the production truth", () => {
+	it("lists exactly the mechanisms each workflow runs", () => {
 		expect(gateDepthFor("quick").mechanisms).toEqual(["deterministic"]);
+		expect(gateDepthFor("execute").mechanisms).toEqual(["deterministic"]);
+		expect(gateDepthFor("grill").mechanisms).toEqual([]);
+		expect(gateDepthFor("plan").mechanisms).toEqual([]);
+		expect(gateDepthFor("review").mechanisms).toEqual(["deterministic", "model-review", "refute-or-promote"]);
 	});
 
-	it("GATE_DEPTH_BY_WORKFLOW itself is frozen -- reassigning a row throws", () => {
-		const table = GATE_DEPTH_BY_WORKFLOW as Record<WorkflowId, readonly MechanismId[]>;
+	it("lists calibration for no workflow, and marks it offline-only", () => {
+		for (const workflow of WORKFLOW_IDS) expect(gateDepthFor(workflow).mechanisms).not.toContain("calibration");
+		expect(QUALITY_MECHANISMS.find((m) => m.id === "calibration")?.production).toBe(false);
+	});
+
+	it("credits refute-or-promote to the function the review command calls", () => {
+		expect(QUALITY_MECHANISMS.find((m) => m.id === "refute-or-promote")?.functions).toEqual(["runRefuteOrPromote"]);
+	});
+});
+
+describe("every listed mechanism is backed by the workflow's command module", () => {
+	it("no table entry is unbacked", () => {
+		expect(unbackedEntries(GATE_DEPTH_BY_WORKFLOW)).toEqual([]);
+	});
+
+	it("self-check: a mechanism the command never imports is detected", () => {
+		const table = { ...GATE_DEPTH_BY_WORKFLOW, quick: ["deterministic", "model-review"] } as Record<WorkflowId, readonly MechanismId[]>;
+		expect(unbackedEntries(table)).toEqual(["quick:model-review (runReview)"]);
+	});
+
+	it("self-check: a workflow with no gate cannot claim the deterministic stage", () => {
+		const table = { ...GATE_DEPTH_BY_WORKFLOW, grill: ["deterministic"] } as Record<WorkflowId, readonly MechanismId[]>;
+		expect(unbackedEntries(table)).toEqual(["grill:deterministic (runChangeGateStage)"]);
+	});
+});
+
+describe("exhaustiveness and purity", () => {
+	it("every WorkflowId has a row and every row is a WorkflowId", () => {
+		expect(Object.keys(GATE_DEPTH_BY_WORKFLOW).sort()).toEqual([...WORKFLOW_IDS].sort());
+	});
+
+	it("every listed mechanism id is a known mechanism", () => {
+		const known = new Set<string>(QUALITY_MECHANISMS.map((m) => m.id));
+		for (const workflow of WORKFLOW_IDS) {
+			for (const id of gateDepthFor(workflow).mechanisms) expect(known.has(id), `${workflow} names unknown mechanism ${id}`).toBe(true);
+		}
+	});
+
+	it("the table and its rows are frozen", () => {
+		expect(() => (gateDepthFor("quick").mechanisms as MechanismId[]).push("calibration")).toThrow();
 		expect(() => {
-			table.quick = [...ALL_FOUR];
+			(GATE_DEPTH_BY_WORKFLOW as Record<WorkflowId, readonly MechanismId[]>).quick = [];
 		}).toThrow();
 	});
 });

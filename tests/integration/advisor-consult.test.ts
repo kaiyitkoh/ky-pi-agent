@@ -496,3 +496,45 @@ describe("GATE-09 — the advisor consult through executeConsultAdvisor", () => 
 		).toBeUndefined();
 	});
 });
+
+describe("the advisor consult feeds the real context size to the capability guard", () => {
+	it("a context larger than the advisor model's window is refused naming the window, and no call is made", async () => {
+		setMode("cheap");
+		setEscalated(false);
+		takeQualityCost();
+		const advisor = ROLE_MAP.cheap.advisor.candidates[0];
+		if (advisor === undefined) throw new Error("ROLE_MAP.cheap.advisor has no candidates");
+
+		const handle = await createFauxSession({});
+		try {
+			let callCount = 0;
+			const faux = fauxProvider({
+				provider: advisor.provider,
+				api: "openai-completions",
+				models: [{ id: advisor.id, reasoning: true, input: ["text"], contextWindow: 1000, cost: { input: 1, output: 2, cacheRead: 0.1, cacheWrite: 1.5 } }],
+			});
+			faux.setResponses([
+				() => {
+					callCount += 1;
+					return fauxAssistantMessage("never", { stopReason: "stop" });
+				},
+			]);
+			handle.modelRuntime.registerNativeProvider(faux.provider);
+			await handle.modelRuntime.setRuntimeApiKey(advisor.provider, "kypi-fixture-not-a-real-key");
+			await waitForConfiguredAuth(handle.modelRuntime, advisor.provider);
+
+			const ctx = handle.session.extensionRunner.createCommandContext();
+			await expect(executeConsultAdvisor(ctx, { question: "q", context: "x".repeat(8000) })).rejects.toThrow(/1000-token context window/);
+			expect(callCount).toBe(0);
+			expect(peekQualityCost()).toBeUndefined();
+
+			await expect(executeConsultAdvisor(ctx, { question: "q", context: "small" })).resolves.toBe("never");
+			expect(callCount).toBe(1);
+		} finally {
+			setMode("cheap");
+			setEscalated(false);
+			takeQualityCost();
+			await handle.dispose();
+		}
+	}, 30_000);
+});
