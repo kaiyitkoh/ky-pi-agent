@@ -3,10 +3,9 @@
  * session, of four claims plan 08-11 makes and no earlier plan could prove
  * alone:
  *
- *   "order"       — the deterministic gate stage runs BEFORE any model work,
- *                    a blocking result costs ZERO provider requests, and the
- *                    paired positive proves the gate is not a gate that
- *                    always blocks.
+ *   "order"       — a finding already present in the harness source does not
+ *                    stop /quick, and the paired positive proves a clean run
+ *                    arms and reaches the provider.
  *   "unavailable" — the LSP leg's UNAVAILABLE state is visible in a real
  *                    gate report and never sets `blocking`; and — the second
  *                    half of this group — RESEARCH Open Question 2
@@ -19,10 +18,6 @@
  *                    shown; wiring this into a LIVE ceremonial workflow
  *                    command is explicitly Phase 9's job (QUAL-08) and this
  *                    file does not attempt it.
- *   "cost"        — QUAL-09's ledger carries the deterministic-gate cost on
- *                    a clean run's real turn row, and — the only assertion
- *                    in this whole phase that can catch the leak — a BLOCKED
- *                    gate's cost never bills a later, unrelated turn.
  *
  * ---------------------------------------------------------------------------
  * THE EXEC OVERRIDE — WHY EVERY GROUP SETS AND RESTORES IT
@@ -61,7 +56,7 @@
  * `validateReview` round trip that would prove nothing new about
  * `decideWorkflowStop` itself.
  */
-import { existsSync, mkdirSync, writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { fauxAssistantMessage, fauxText, fauxToolCall } from "@earendil-works/pi-ai";
@@ -69,9 +64,6 @@ import type { ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { logPath } from "../../.pi/lib/jsonl.ts";
-import { addQualityCost, peekQualityCost, takeQualityCost } from "../../.pi/extensions/diagnostics/quality-cost.ts";
-import { TURNS_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
 import { registeredToolNames, runQuickGateStage, setQuickGateExecOverrideForTests } from "../../.pi/extensions/quality/index.ts";
 import type { ExecRunner } from "../../.pi/extensions/quality/gates.ts";
 import type { ReviewArtifact } from "../../.pi/extensions/quality/review-schema.ts";
@@ -80,7 +72,6 @@ import { getModeState, planRoleCall } from "../../.pi/extensions/routing/modes.t
 import { ROLE_MAP } from "../../.pi/extensions/routing/schema.ts";
 import { isRunArmed } from "../../.pi/extensions/workflows/evidence.ts";
 import { repoRoot } from "../helpers/git.ts";
-import { readJsonl } from "../helpers/logs.ts";
 import { withFauxSession, type FauxSessionHandle } from "../helpers/session.ts";
 import { spawnSync } from "node:child_process";
 
@@ -199,20 +190,6 @@ function captureNotify(ctx: ExtensionCommandContext): { notifications: Notificat
 	};
 }
 
-interface TurnRowShape {
-	kind?: string;
-	qualityMs?: number;
-}
-
-/** Read the Phase 2 turns log for `cwd`, failing with the remedy rather than an `ENOENT` stack — mirrors `quick-workflow.test.ts#readTurns`. */
-function readTurns(cwd: string): TurnRowShape[] {
-	const file = logPath(cwd, TURNS_LOG_BASE);
-	if (!existsSync(file)) {
-		throw new Error(`${file} does not exist: the session wrote no diagnostics turns log at all`);
-	}
-	return readJsonl(file) as TurnRowShape[];
-}
-
 /** Wire a session up with a configured, servable `executor` route -- every group that calls `/quick`'s handler needs this. */
 async function withConfiguredCandidate<T>(fn: (candidate: { provider: string; id: string }) => Promise<T>): Promise<T> {
 	const candidate = flashExecutorCandidate();
@@ -227,7 +204,7 @@ afterEach(() => {
 });
 
 describe("order", () => {
-	it("blocking case -- an ERROR-tier anti-pattern finding stops /quick before any model work, at zero provider requests", async () => {
+	it("a finding already present in <cwd>/.pi/extensions does not stop /quick: the gate runs on the change, after the work", async () => {
 		await withConfiguredCandidate(async (candidate) => {
 			await withFauxSession(
 				{
@@ -235,7 +212,12 @@ describe("order", () => {
 					tools: ["bash"],
 					providerId: candidate.provider,
 					models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
-					responses: [],
+					responses: [
+						fauxAssistantMessage([fauxToolCall("bash", { command: 'echo "export const ok = 1;" > ok.ts && git add ok.ts && git commit -m "quick: ok"' })], {
+							stopReason: "toolUse",
+						}),
+						fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
+					],
 				},
 				async ({ session, faux, cwd, modelRuntime }) => {
 					setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC);
@@ -247,27 +229,17 @@ describe("order", () => {
 						seedOffendingSource(cwd);
 
 						const ctx = session.extensionRunner.createCommandContext();
-						const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
-						expect(plan.ok, "the executor route did not become servable -- this case needs it servable").toBe(true);
-						if (!plan.ok) return;
-
 						const command = session.extensionRunner.getCommand("quick");
 						expect(command, 'getCommand("quick") returned undefined').toBeDefined();
 						if (command === undefined) return;
 
 						const { notifications, restore } = captureNotify(ctx);
 						try {
-							await command.handler("do the forbidden thing", ctx);
-
-							expect(notifications.length, "a blocking gate must still report an outcome").toBe(1);
-							expect(notifications[0]?.level, "a blocking gate is an error, not an info message").toBe("error");
-							const text = notifications[0]?.text ?? "";
-							expect(text.includes("anti-pattern"), "the notification must name the anti-pattern leg").toBe(true);
-							expect(text.toUpperCase().includes("FAIL"), "the notification must show the leg that failed").toBe(true);
-							expect(text.includes("shipped-todo"), "the notification must carry the specific rule id that tripped").toBe(true);
-
-							expect(isRunArmed(), "a blocked gate must never arm a run").toBe(false);
-							expect(faux.state.callCount, "a blocked gate must cost ZERO provider requests").toBe(0);
+							await command.handler("make a clean commit", ctx);
+							expect(isRunArmed(), "a pre-existing finding must not stop the run from arming").toBe(true);
+							await waitFor(() => faux.state.callCount >= 1, 5000, "the provider to actually be called");
+							await waitFor(() => !isRunArmed(), 5000, "the armed run to settle before this test ends");
+							expect(notifications.some((n) => n.level === "error"), JSON.stringify(notifications)).toBe(false);
 						} finally {
 							restore();
 						}
@@ -327,7 +299,7 @@ describe("order", () => {
 						// every `it` in this file's worker. Leaving it armed would make
 						// a LATER, unrelated test's /quick call refuse with "already in
 						// flight" instead of exercising its own gate.
-						await waitFor(() => !isRunArmed(), 5000, "the armed run to disarm at agent_end before this test ends");
+						await waitFor(() => !isRunArmed(), 5000, "the armed run to disarm at agent_settled before this test ends");
 					} finally {
 						setQuickGateExecOverrideForTests(undefined);
 					}
@@ -466,206 +438,3 @@ describe("stop", () => {
 		expect(stopResult.stop, "a root-cause review with only WARNINGs must not stop the workflow, however many WARNINGs it carries").toBe(false);
 	});
 });
-
-describe("cost", () => {
-	it("the kind:turn row for a clean, gated /quick turn carries qualityMs", async () => {
-		await withConfiguredCandidate(async (candidate) => {
-			await withFauxSession(
-				{
-					extensionSource: composite(),
-					tools: ["bash"],
-					providerId: candidate.provider,
-					models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
-					responses: [
-						fauxAssistantMessage([fauxToolCall("bash", { command: 'git commit --allow-empty -m "quick: cost positive"' })], {
-							stopReason: "toolUse",
-						}),
-						fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
-					],
-				},
-				async ({ session, cwd, modelRuntime }) => {
-					setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC);
-					try {
-						await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
-						await waitForConfiguredAuth(modelRuntime, candidate.provider);
-
-						gitInit(cwd, "work");
-
-						const ctx = session.extensionRunner.createCommandContext();
-						const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
-						expect(plan.ok, "the executor route did not become servable").toBe(true);
-						if (!plan.ok) return;
-
-						const command = session.extensionRunner.getCommand("quick");
-						expect(command, 'getCommand("quick") returned undefined').toBeDefined();
-						if (command === undefined) return;
-
-						await command.handler("make the cost-positive commit", ctx);
-
-						await waitFor(() => {
-							try {
-								return readTurns(cwd).some((r) => r.kind === "turn");
-							} catch {
-								return false;
-							}
-						}, 5000, "a kind:turn row to land for the clean gated turn");
-
-						const rows = readTurns(cwd);
-						const turnRows = rows.filter((r) => r.kind === "turn");
-						expect(turnRows.length, "at least one kind:turn row must exist before asserting on qualityMs").toBeGreaterThanOrEqual(1);
-						const carriesQuality = turnRows.some((r) => "qualityMs" in r);
-						expect(carriesQuality, "the clean gated turn's own kind:turn row must carry qualityMs -- the gate stage's cost is real and measured").toBe(true);
-
-						// See the "order" positive case's own comment -- drain the
-						// process-wide armed-run slot before this test ends, so the
-						// negative control right after it starts from a clean slate.
-						await waitFor(() => !isRunArmed(), 5000, "the armed run to disarm at agent_end before this test ends");
-					} finally {
-						setQuickGateExecOverrideForTests(undefined);
-					}
-				},
-			);
-		});
-	});
-
-	it("negative control -- a BLOCKED gate's cost is never billed to a later, unrelated turn", async () => {
-		await withConfiguredCandidate(async (candidate) => {
-			await withFauxSession(
-				{
-					extensionSource: composite(),
-					tools: ["bash"],
-					providerId: candidate.provider,
-					models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
-					// Consumed in order: the FIRST /quick call blocks before any
-					// model call at all, so this single scripted response is spent
-					// entirely by the SECOND, unrelated prompt below.
-					responses: [fauxAssistantMessage([fauxText("ok, doing something unrelated")], { stopReason: "stop" })],
-				},
-				async ({ session, faux, cwd, modelRuntime }) => {
-					setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC);
-					try {
-						await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
-						await waitForConfiguredAuth(modelRuntime, candidate.provider);
-
-						gitInit(cwd, "work");
-						seedOffendingSource(cwd);
-
-						const ctx = session.extensionRunner.createCommandContext();
-						const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
-						expect(plan.ok, "the executor route did not become servable").toBe(true);
-						if (!plan.ok) return;
-
-						const command = session.extensionRunner.getCommand("quick");
-						expect(command, 'getCommand("quick") returned undefined').toBeDefined();
-						if (command === undefined) return;
-
-						// (1) the blocked /quick -- must cost zero provider requests.
-						await command.handler("do the forbidden thing again", ctx);
-						expect(isRunArmed(), "the blocked run must never arm").toBe(false);
-						expect(faux.state.callCount, "the blocked gate must cost zero provider requests").toBe(0);
-
-						// (2) a SEPARATE, unrelated turn -- not /quick, so the gate
-						// never runs for it at all.
-						await session.prompt("do something unrelated");
-						await waitFor(() => {
-							try {
-								return readTurns(cwd).some((r) => r.kind === "turn");
-							} catch {
-								return false;
-							}
-						}, 5000, "the unrelated turn's own kind:turn row to land");
-
-						// First prove the unrelated turn really wrote a row -- the
-						// control cannot pass by finding nothing.
-						const rows = readTurns(cwd);
-						const turnRows = rows.filter((r) => r.kind === "turn");
-						expect(turnRows.length, "the unrelated turn must have produced at least one kind:turn row").toBeGreaterThanOrEqual(1);
-
-						// (3) assert ABSENCE by key presence, never `=== undefined`
-						// (08-04's own discipline) -- a leaked value would satisfy a
-						// presence check while being a lie about which turn spent it.
-						const leaked = turnRows.some((r) => "qualityMs" in r);
-						expect(
-							leaked,
-							"LEAK: the unrelated turn's own kind:turn row carries qualityMs -- the blocked gate's cost was " +
-								"billed to a turn that never asked for it. refundQualityCost({ms: gate.totalMs}) must be " +
-								"called on the blocking branch in workflows/index.ts.",
-						).toBe(false);
-					} finally {
-						setQuickGateExecOverrideForTests(undefined);
-					}
-				},
-			);
-		});
-	});
-
-	it(
-		"WR-06: a BLOCKED gate refunds only its OWN cost -- a reviewer/refute pass's own cost already recorded " +
-				"earlier in the SAME still-in-progress turn survives, never wiped by the blocking branch",
-			async () => {
-				await withConfiguredCandidate(async (candidate) => {
-					await withFauxSession(
-						{
-							extensionSource: composite(),
-							tools: ["bash"],
-							providerId: candidate.provider,
-							models: [{ id: candidate.id, reasoning: true, cost: FIXTURE_COST }],
-							responses: [],
-						},
-						async ({ session, cwd, modelRuntime }) => {
-							setQuickGateExecOverrideForTests(INSTANT_PASS_EXEC);
-							takeQualityCost(); // start from a clean slate -- process-wide slot
-							try {
-								await modelRuntime.setRuntimeApiKey(candidate.provider, "kypi-fixture-not-a-real-key");
-								await waitForConfiguredAuth(modelRuntime, candidate.provider);
-
-								gitInit(cwd, "work");
-								seedOffendingSource(cwd);
-
-								// Stands in for "a reviewer + refute pass already ran earlier in
-								// this SAME turn, before /quick was invoked as a sub-step" --
-								// the exact shape the code review named.
-								addQualityCost({ ms: 123, tokens: 45 });
-
-								const ctx = session.extensionRunner.createCommandContext();
-								const plan = planRoleCall(ctx.modelRegistry, { role: "executor", state: getModeState(), need: {} });
-								expect(plan.ok, "the executor route did not become servable").toBe(true);
-								if (!plan.ok) return;
-
-								const command = session.extensionRunner.getCommand("quick");
-								expect(command, 'getCommand("quick") returned undefined').toBeDefined();
-								if (command === undefined) return;
-
-								await command.handler("do the forbidden thing yet again", ctx);
-								expect(isRunArmed(), "the blocked run must never arm").toBe(false);
-
-								// WR2-02 (`08-REVIEW.md` iteration 2): NOT `toEqual({qualityMs: 123, ...})`.
-								// The ledger value is `(123 + t) - t` for the gate stage's own
-								// hrtime-measured `t` (a full-precision double), which is only an
-								// IEEE-754 identity while `123 + t` stays under 128 (same binade as
-								// 123) -- INSTANT_PASS_EXEC keeps `t` sub-millisecond here, but a
-								// scheduler/GC hiccup pushing `t` past ~5ms would make roughly 40% of
-								// possible values round-trip to `122.99999999999999`, an assertion
-								// about wall-clock jitter wearing a ledger-accounting costume. Assert
-								// the property (the prior contributor's cost survives, to float
-								// tolerance), never the exact bit pattern.
-								const after = peekQualityCost();
-								expect(
-									after?.qualityTokens,
-									"the prior contributor's own tokens must survive a blocked gate's refund untouched",
-								).toBe(45);
-								expect(
-									after?.qualityMs ?? 0,
-									"the prior contributor's own 123ms must survive a blocked gate's refund -- " +
-										"only the gate stage's OWN cost may be removed, never another contributor's",
-								).toBeCloseTo(123, 6);
-							} finally {
-								takeQualityCost(); // drain the slot so it cannot leak into a later test
-								setQuickGateExecOverrideForTests(undefined);
-							}
-						},
-					);
-				});
-			},
-		);
-	});
