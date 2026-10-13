@@ -302,13 +302,12 @@ describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' o
 	// (pi-subagents src/extension/config.ts:90-92) and found the real key
 	// path is a DEDICATED global file, <agentDir>/extensions/subagent/config.json.
 	// The wiring therefore lives in bin/bootstrap.sh's merge_subagent_config(),
-	// not in .pi/settings.json's own packages[] array. See 07-09-SUMMARY.md's
-	// Task 1 section for the full citation trail.
-	const bootstrapPath = join(repoRoot(), "bin", "bootstrap.sh");
-	const bootstrapSource = readFileSync(bootstrapPath, "utf-8");
+	// not in .pi/settings.json's own packages[] array.
+	const bootstrapSource = readFileSync(join(repoRoot(), "bin", "bootstrap.sh"), "utf-8");
+	const stepsSource = readFileSync(join(repoRoot(), "bin", "bootstrap.mjs"), "utf-8");
 
-	it("bin/bootstrap.sh is tracked", () => {
-		expect(trackedFiles("bin/bootstrap.sh")).toEqual(["bin/bootstrap.sh"]);
+	it("bin/bootstrap.sh and its JSON steps are tracked", () => {
+		expect(trackedFiles("bin")).toEqual(expect.arrayContaining(["bin/bootstrap.mjs", "bin/bootstrap.sh"]));
 	});
 
 	it("bin/bootstrap.sh defines merge_subagent_config()", () => {
@@ -322,8 +321,8 @@ describe("EXT-02/EXT-08 -- the worktree setup hook is wired into pi-subagents' o
 	});
 
 	it("the wired hook path resolves to a real, tracked file", () => {
-		const hookRef = /KYPI_WORKTREE_HOOK="\$REPO_ROOT\/([^"]+)"/.exec(bootstrapSource);
-		expect(hookRef, "KYPI_WORKTREE_HOOK assignment not found in bin/bootstrap.sh").not.toBeNull();
+		const hookRef = /hookPath = slashes\(`\$\{ROOT\}\/([^`]+)`\)/.exec(stepsSource);
+		expect(hookRef, "hookPath assignment not found in bin/bootstrap.mjs").not.toBeNull();
 		const relativeHookPath = hookRef![1]!;
 		expect(relativeHookPath).toBe(".pi/scripts/worktree-setup-hook.mjs");
 		expect(trackedFiles(relativeHookPath)).toEqual([relativeHookPath]);

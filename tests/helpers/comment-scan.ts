@@ -140,6 +140,7 @@ export function authoredFiles(): string[] {
 /** Scripts and config outside the extension tree; checked for IDs and history, not for comment ratio. */
 export const AUTHORED_SCRIPT_ROOTS: readonly string[] = [
 	"bin/*.sh",
+	"bin/*.mjs",
 	"scripts/*.sh",
 	"scripts/*.mjs",
 	"scripts/*.ts",

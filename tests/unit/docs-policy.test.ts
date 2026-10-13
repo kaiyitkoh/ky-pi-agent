@@ -746,10 +746,10 @@ describe("Group B — the runbook is structurally complete", () => {
 		).toBeGreaterThan(0);
 
 		// THE BEHAVIOUR HALF, read out of the script rather than trusted.
-		const bootstrap = readFileSync(join(ROOT, "bin", "bootstrap.sh"), "utf-8");
+		const bootstrap = readFileSync(join(ROOT, "bin", "bootstrap.mjs"), "utf-8");
 		expect(
 			bootstrap,
-			"bin/bootstrap.sh no longer withholds template entries that still carry a " +
+			"bin/bootstrap.mjs no longer withholds template entries that still carry a " +
 				"REPLACE_WITH_ placeholder. That was the CR-01 fix: a stored env.AWS_PROFILE beats " +
 				"the ambient one in Pi's own chain, so installing the placeholder silently breaks a " +
 				"laptop where `export AWS_PROFILE=…` already worked. If this was reverted " +
