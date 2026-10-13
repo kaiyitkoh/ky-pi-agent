@@ -931,7 +931,8 @@ describe("install docs describe what bootstrap now does, not manual workarounds"
 	const startHere = runbook.slice(runbook.indexOf("## Work laptop: start here"), runbook.indexOf("### 6. Bedrock"));
 	const codeLines = (text: string): string[] =>
 		[...text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].flatMap((m) => (m[1] ?? "").split("\n").map((l) => l.trim()));
-	const pathB = README.slice(README.indexOf("**Path B"), README.indexOf("## Commands and modes"));
+	const pathBStart = README.indexOf("**Path B");
+	const pathB = README.slice(pathBStart, README.indexOf("\n## ", pathBStart));
 
 	it("neither tells the reader to run npm ci or to hand-write the harness package entry", () => {
 		expect(startHere.length).toBeGreaterThan(0);

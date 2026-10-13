@@ -273,3 +273,10 @@ describe("BOOT-08.4 -- package sources carry a ref", () => {
 		}
 	});
 });
+
+describe("vitest worker cap", () => {
+	it("keeps maxWorkers at 2, so a full run cannot peg the development machine", async () => {
+		const { default: config } = (await import("../../vitest.config.ts")) as { default: { test?: { maxWorkers?: unknown } } };
+		expect(config.test?.maxWorkers).toBe(2);
+	});
+});

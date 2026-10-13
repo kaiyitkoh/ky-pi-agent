@@ -269,7 +269,9 @@ describe("comment discipline", () => {
 		const bySub = new Map<string, Row>();
 		for (const [f, r] of rows) bySub.set(subsystemOf(f), add(bySub.get(subsystemOf(f)) ?? zero, r));
 		for (const [name, r] of [...bySub].sort()) console.info(`COMMENT_RATIO subsystem=${name} ${fmt(r)}`);
-		console.info(`COMMENT_RATIO total=authored ${fmt(rows.reduce((a, [, r]) => add(a, r), zero))}`);
+		const authored = rows.reduce((a, [, r]) => add(a, r), zero);
+		console.info(`COMMENT_RATIO total=authored ${fmt(authored)}`);
+		expect(ratio(authored), `authored comment ratio ${fmt(authored)} is above the 35% ceiling`).toBeLessThanOrEqual(0.35);
 		const nonBg = trackedFiles(".pi/extensions").filter(
 			(p) => p.endsWith(".ts") && !p.startsWith(".pi/extensions/background-tasks/"),
 		);

@@ -1469,11 +1469,11 @@ a real `git push` against a real local bare repository with a `pre-receive`
 hook that reproduces GitLab's rejection wording; asserts the push is rejected
 with that text on stderr; asserts a push to a non-protected branch against the
 identical hook SUCCEEDS (the paired control that rules out "this hook rejects
-everything"); and drives the harness's own `classifyPushFailure()` classifier
+everything"); and drives the test's own rejection classifier
 in both directions — a real protected-branch rejection and a real
 non-fast-forward rejection, produced by genuinely diverging two clones — and
-asserts they classify differently. It proves the harness reads and classifies
-a server-side rejection correctly. It proves nothing at all about whether
+asserts they classify differently. It proves a server-side rejection is visible
+and distinguishable on stderr. It proves nothing at all about whether
 GitLab is actually configured on the work laptop, which is this entry.
 
 ### RB-04-02 — SAFE-04: a feature-branch push asks in the TUI and refuses headless
@@ -2034,9 +2034,9 @@ substituted.
 **Status:** OUTSTANDING
 
 **Why this cannot be done here.** Two separate claims, bundled into one
-entry because both are blocked by the identical fact. `.pi/agents/reviewer.md`
-(plan 08-07) ships deliberately unwired — no `AGENT_NAME_BY_ROLE` mapping —
-because the reviewer is dispatched via `runSingleShotRole` (`call-model`
+entry because both are blocked by the identical fact. The reviewer has no agent
+definition (the former `.pi/agents/reviewer.md` shadowed pi-subagents'
+builtin `reviewer` and was removed) because it is dispatched via `runSingleShotRole` (`call-model`
 mechanism), not a real `pi-subagents` spawn; wiring it up is `pi-subagents`
 work this machine cannot exercise, since the package has never been
 installed (Correction 2, `RB-07-02`, OUTSTANDING). Separately,
@@ -2056,9 +2056,8 @@ a live model credential.
 
 **Procedure, on the work laptop, after `RB-07-02`:**
 
-1. Wire `.pi/agents/reviewer.md` into `AGENT_NAME_BY_ROLE` (retiring
-   `tests/unit/subagent-agents-config.test.ts`'s `UNROUTED_AGENT_ALLOWLIST`
-   entry this phase added for it) and spawn it as a real subagent on a small
+1. Add a reviewer agent under `.pi/agents/` with a name that does not shadow
+   pi-subagents' builtin `reviewer`, map it in `AGENT_NAME_BY_ROLE`, and spawn it as a real subagent on a small
    real diff, confirming it receives the six-element contract
    `quality/reviewer.ts#buildReviewerContext` assembles and returns a
    `submit_review` tool call `quality/review-schema.ts#validateReview`
