@@ -4,13 +4,13 @@ milestone: v1.0
 milestone_name: "Gap Closure: audit + deep review fixes"
 status: executing
 stopped_at: Completed 09-12-PLAN.md
-last_updated: "2026-10-13T07:24:03.662Z"
+last_updated: "2026-10-13T07:42:29.639Z"
 last_activity: 2026-10-13
 progress:
   total_phases: 2
   completed_phases: 0
   total_plans: 10
-  completed_plans: 7
+  completed_plans: 8
   percent: 0
 ---
 
@@ -26,14 +26,14 @@ See: .planning/PROJECT.md (updated 2026-08-13)
 ## Current Position
 
 Phase: 12.1 (v1.0 Gap Closure) — EXECUTING
-Plan: 8 of 10
+Plan: 9 of 10
 Status: Ready to execute
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
 Last activity: 2026-10-13
 
-Progress: [███████░░░] 70%
+Progress: [████████░░] 80%
 
 **Read that 100% carefully — it is the most misleading number in this file.**
 The denominator is *plans written so far* — Phase 1's 10, Phase 2's 11,
@@ -177,6 +177,7 @@ credentials can do has been done".
 | Phase 09 P15 | 25min | 3 tasks | 6 files |
 | Phase 10 P05 | 25m | 2 tasks | 2 files |
 | Phase 11 P06 | 10min | 2 tasks | 4 files |
+| Phase 12.1 P08 | 75min | 3 tasks | 24 files |
 
 ## Accumulated Context
 
@@ -475,6 +476,7 @@ Recent decisions affecting current work:
 - [Phase 08.1]: 08.1-05: pi-background-tasks@2.6.9 vendored process-only at .pi/extensions/background-tasks/ (not vendor/); npm pin removed
 - [Phase 11]: 11-06: wire check exits 64 on usage errors, 2 on missing logs; truncation noted but non-failing
 - [Phase 12.1]: Plan 01: implement profile floor rose 2344 to 4179 tokens because questionnaire and bg_* are default-active
+- [Phase 12.1]: 12.1-08: agentScanDirs lives in settings.json subagents key; only stub plus git package is a hard check-only failure
 
 ### Pending Todos
 
@@ -533,7 +535,7 @@ Everything the user cares about is already captured in PROJECT.md (Key Decisions
 
 ## Session Continuity
 
-Last session: 2026-10-13T07:24:03.653Z
+Last session: 2026-10-13T07:42:25.090Z
 Stopped at: Completed 09-12-PLAN.md
 Resume file: None
 
