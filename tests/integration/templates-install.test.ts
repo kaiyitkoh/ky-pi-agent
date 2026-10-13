@@ -42,7 +42,7 @@
  * about the template, never about a provider.
  */
 import { spawnSync } from "node:child_process";
-import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -1155,12 +1155,25 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 	];
 	const DISABLES = ["-builtin:mcp", "-builtin:llama.cpp", "-builtin:codemode", "-builtin:tool-search"];
 
+	const stubFile = (agentDir: string): string => join(agentDir, "extensions", "ky-safety", "index.ts");
+
+	/** A stub of the shape a full run writes: an import of the copy's guard inside a try/catch. */
+	function seedStub(agentDir: string, repoCopy: BootstrapRepoCopy, failClosed = true): void {
+		const target = join(repoCopy.root, ".pi", "extensions", "safety", "index.ts").replace(/\\/g, "/");
+		const load = `const mod = await import("${target}");\nawait mod.default(pi);`;
+		const body = failClosed ? `try {\n${load}\n} catch (error) {\npi.on("tool_call", () => ({ block: true }));\n}` : load;
+		mkdirSync(join(agentDir, "extensions", "ky-safety"), { recursive: true });
+		writeFileSync(stubFile(agentDir), `export default async function (pi) {\n${body}\n}\n`, "utf-8");
+	}
+
 	function runMode(
 		args: string[],
 		agentDir: string,
 		repoCopy: BootstrapRepoCopy,
 		extraEnv: Record<string, string> = { KYPI_SKIP_INSTALL: "1" },
+		seed = true,
 	): Run & { piLog: string } {
+		if (seed && args[0] === "--global-setup" && !existsSync(stubFile(agentDir))) seedStub(agentDir, repoCopy);
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "npm.log").replace(/\\/g, "/");
 		const piLog = join(logDir, "pi.log").replace(/\\/g, "/");
@@ -1255,14 +1268,44 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 	it("case 4 -- global setup touches no credential, model, env or safety-stub file", () => {
 		const agentDir = tempDir("kypi-agentdir-");
 		const repoCopy = bootstrapRepoCopy();
+		seedStub(agentDir, repoCopy);
+		const stubBefore = readFileSync(stubFile(agentDir), "utf-8");
 
 		const run = runMode(["--global-setup"], agentDir, repoCopy);
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 
 		expect(existsSync(join(agentDir, "auth.json"))).toBe(false);
 		expect(existsSync(join(agentDir, "models.json"))).toBe(false);
-		expect(existsSync(join(agentDir, "extensions"))).toBe(false);
+		expect(readFileSync(stubFile(agentDir), "utf-8")).toBe(stubBefore);
 		expect(existsSync(repoCopy.envExample)).toBe(false);
+	}, TIMEOUT_MS);
+
+	it.each([
+		["no stub and no git package", false],
+		["a stub without the fail-closed catch", true],
+	])("case 4b -- %s: global setup refuses before installing anything", (_name, legacy) => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		if (legacy) seedStub(agentDir, repoCopy, false);
+
+		const run = runMode(["--global-setup"], agentDir, repoCopy, {}, false);
+
+		expect(run.status).not.toBe(0);
+		expect(run.stderr).toContain("without the safety guard");
+		expect(run.piLog).not.toContain("pi install");
+		expect(existsSync(join(agentDir, "settings.json"))).toBe(false);
+	}, TIMEOUT_MS);
+
+	it("case 4c -- the git package alone is a delivery path", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		const settings = { packages: ["git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0"] };
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify(settings), "utf-8");
+
+		const run = runMode(["--global-setup"], agentDir, repoCopy, { KYPI_SKIP_INSTALL: "1" }, false);
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain("delivered by the user-level git package");
 	}, TIMEOUT_MS);
 
 	it("case 5 -- without KYPI_SKIP_INSTALL it runs pi install once per pin, after the hardening assertions", () => {

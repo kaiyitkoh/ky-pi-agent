@@ -16,9 +16,10 @@
 #
 # Modes
 #   (no args)           full run: probe, verify, harden, install, configure
-#   --global-setup      hardening assertions, user settings merge, theme, agent
-#                       scan dir and the pinned composed packages; touches no
-#                       credential, model, env or safety-stub file
+#   --global-setup      hardening assertions, the safety delivery check, user
+#                       settings merge, theme, agent scan dir and the pinned
+#                       composed packages; touches no credential, model, env
+#                       or safety-stub file
 #   --check-only        every probe and repo-side assertion, mutates nothing,
 #                       needs network for the published-pin preflight
 #   --assert-hardening  the ignore-scripts assertions only; offline-safe
@@ -954,6 +955,33 @@ if (git.length === 0 && local.length === 0) { console.log("  one delivery path (
 '
 }
 
+# --global-setup puts subagents and web access in every repository, so it first
+# requires the guard to reach every repository too: a current fail-closed stub,
+# or a user-level git package of this repo, and never both.
+require_safety_delivery() {
+	report_delivery_paths
+	KYPI_RD_SETTINGS="$PI_AGENT_DIR/settings.json" KYPI_RD_STUB="$PI_AGENT_DIR/extensions/ky-safety/index.ts" node -e '
+const fs = require("node:fs");
+const stub = process.env.KYPI_RD_STUB;
+let packages = [];
+try { packages = JSON.parse(fs.readFileSync(process.env.KYPI_RD_SETTINGS, "utf8")).packages || []; } catch (e) { packages = []; }
+const sources = packages.map((p) => (typeof p === "string" ? p : (p && p.source) || ""));
+if (sources.some((s) => /github\.com[\/:]kaiyitkoh\/ky-pi-agent(\.git)?(@|\/|$)/i.test(s))) {
+  console.log("  safety guard delivered by the user-level git package");
+  process.exit(0);
+}
+const text = fs.existsSync(stub) ? fs.readFileSync(stub, "utf8") : "";
+const m = text.match(/await import\("([^"]+)"\)/);
+if (!m || !fs.existsSync(m[1]) || !text.includes("catch (error)")) {
+  console.error("FATAL: --global-setup would install subagents and web access in every repository without the safety guard.");
+  console.error("       " + stub + (text === "" ? " is absent" : " is not a current, fail-closed stub pointing at an existing guard") + ".");
+  console.error("       Remedy: run bin/bootstrap.sh with no arguments first, then re-run --global-setup.");
+  process.exit(1);
+}
+console.log("  safety guard delivered by " + stub + " -> " + m[1]);
+'
+}
+
 # The --check-only counterpart of merge_subagent_config. The hook path is
 # absolute and user scope, so a moved or deleted clone breaks worktree spawns in
 # every repo on the machine; absent config is a WARN, a dangling path is fatal.
@@ -1014,9 +1042,11 @@ Modes:
                       the safety extension at user scope and wires the worktree
                       setup hook into pi-subagents' own config file. Safe to
                       re-run: every step is idempotent.
-  --global-setup      Asserts the ignore-scripts scopes, then merges user
-                      settings, installs the theme and installs the pinned
-                      composed packages. Touches no credential, model, env or
+  --global-setup      Asserts the ignore-scripts scopes and that the safety
+                      guard reaches every repo (a current stub from a full
+                      run, or the git package), then merges user settings,
+                      installs the theme and installs the pinned composed
+                      packages. Touches no credential, model, env or
                       safety-stub file.
   --check-only        Every probe and every repo-side assertion; mutates
                       nothing. Exits 0 on a clean CI runner. Deterministic
@@ -1087,6 +1117,8 @@ run_global_setup() {
 	printf 'Hardening assertions (ignore-scripts) - must all pass before any install:\n'
 	assert_repo_scopes
 	assert_user_scope
+	printf 'Safety delivery path - must hold before anything is installed machine-wide:\n'
+	require_safety_delivery
 	printf 'Configuration:\n'
 	merge_settings
 	install_theme
@@ -1118,6 +1150,8 @@ run_full() {
 	write_env_template
 	merge_models_json
 	merge_auth_json
+	printf 'Safety delivery path:\n'
+	report_delivery_paths
 	install_safety_extension
 	merge_subagent_config
 	printf 'Composed packages:\n'

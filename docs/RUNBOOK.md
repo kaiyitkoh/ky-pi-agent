@@ -1903,7 +1903,7 @@ Loading the packages in a live session in another repository is RB-12-05 and sta
 
 **Procedure.**
 
-1. `sh bin/bootstrap.sh --global-setup` from the checkout, then `sh bin/bootstrap.sh --check-only`.
+1. `sh bin/bootstrap.sh` (the full run, which writes the safety stub), then `sh bin/bootstrap.sh --global-setup` from the checkout, then `sh bin/bootstrap.sh --check-only`.
 2. Start `pi` in a work repo outside this checkout and confirm the four composed packages load.
 3. `/theme` lists and selects `ky`.
 4. The `subagent` tool lists `planner` and `executor-handoff`.

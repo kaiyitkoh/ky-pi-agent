@@ -47,7 +47,8 @@ exact pins, the `ky` theme, and this checkout's `.pi/agents` as a subagent scan
 directory, so the harness is available in every repository. It merges rather
 than overwrites: your own packages, extensions, theme and `kyPiAgent` keys
 survive, and a different pinned version of one of ours is refused.
-`sh bin/bootstrap.sh --global-setup` runs only that part.
+`sh bin/bootstrap.sh --global-setup` runs only that part, and refuses unless a
+full run has already installed the safety stub (or the git package is configured).
 
 Do one or the other, **not both**. The bootstrap installs a user-scope safety
 stub that loads this checkout's guard; a git package carries its own copy, and

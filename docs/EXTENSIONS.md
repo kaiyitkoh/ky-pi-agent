@@ -739,7 +739,7 @@ already-outstanding `RB-07-01` end-to-end smoke ritual.
 
 ## Global install (every repo)
 
-`sh bin/bootstrap.sh --global-setup` (also part of a full run) merges into `<agent-dir>/settings.json`, additively:
+`sh bin/bootstrap.sh --global-setup` (also part of a full run) merges into `<agent-dir>/settings.json`, additively. It first refuses, before installing anything, unless the safety guard also reaches every repository: a current fail-closed stub written by a full run, or a user-level git package of this repo, never both:
 
 - `packages`: the four composed packages at the exact pins in `.pi/settings.json`. A different pinned version of one of them already in user settings is refused, naming both versions.
 - `extensions`: the four `-builtin:` disables (`mcp`, `llama.cpp`, `codemode`, `tool-search`).

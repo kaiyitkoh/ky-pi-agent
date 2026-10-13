@@ -340,7 +340,9 @@ and settings are blocked: `<project>/.pi/agents/**`, `<project>/.agents/**`,
 
 The guard must reach a machine by exactly one route: the bootstrap stub on the
 owner machine, or the git package for anyone else, never both (see README
-"Install"). Two copies loading in one process is accepted below only as an
+"Install"). `--global-setup` refuses before installing anything machine-wide
+unless one of the two is in place, and the full run checks for two before it
+writes the stub. Two copies loading in one process is accepted below only as an
 unintended state, not a supported one. A failing `tool_call` handler blocks the
 tool in Pi 1.1.0 (`docs/extensions.md`, "Errors and cleanup"), so a crash in
 this guard fails closed.
