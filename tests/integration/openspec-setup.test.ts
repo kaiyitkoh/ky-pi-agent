@@ -17,7 +17,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join, relative } from "node:path";
+import { basename, delimiter, dirname, join } from "node:path";
 
 import { afterEach, beforeAll, describe, expect, it } from "vitest";
 
@@ -395,8 +395,9 @@ describe("scripts/openspec-setup.sh", () => {
 	it("refuses a .. path through a missing directory that climbs into the repository", () => {
 		const fake = makeFake();
 		const name = ".kypi-ospec-dotdot-agent-" + process.pid;
-		const climb = relative(fake.cwd, repoRoot()).replace(/\\/g, "/");
-		const env = { ...fake.env, PI_CODING_AGENT_DIR: `${fake.cwd.replace(/\\/g, "/")}/missing/../${climb}/${name}` };
+		// Climbs from the repository's parent: the temp dir may be on another drive, where no relative climb exists.
+		const parent = dirname(repoRoot()).replace(/\\/g, "/");
+		const env = { ...fake.env, PI_CODING_AGENT_DIR: `${parent}/kypi-missing-${process.pid}/../${basename(repoRoot())}/${name}` };
 		try {
 			const r = run(fake, [], env);
 			expect(r.status, r.stderr).toBe(2);

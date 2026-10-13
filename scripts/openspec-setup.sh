@@ -86,6 +86,8 @@ resolve_physical() {
 		rp_dir=$(dirname "$rp_dir")
 	done
 	rp_abs=$(CDPATH='' cd -- "$rp_dir" && pwd -P) || return 1
+	# From / the join would start //, which matches no repository path.
+	[ "$rp_abs" = / ] && rp_abs=
 	printf '%s%s\n' "$rp_abs" "$rp_rest"
 }
 
