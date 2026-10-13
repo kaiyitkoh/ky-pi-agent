@@ -715,39 +715,64 @@ const STDIN_ALIAS = /^(-|\/dev\/stdin|\/dev\/fd\/\d+|\/proc\/[^/]+\/fd\/\d+|php:
 // Python imports these from the working directory or sys.path without naming them on the command line.
 const PYTHON_IMPORTABLE = /\.(py|pyc|pyd|so|pth)$/;
 
-// Variables that make an interpreter load code before or instead of its script.
-const STARTUP_VARIABLE = /\b(BASH_ENV|NODE_OPTIONS|RUBYOPT|PERL5OPT|PERL5DB|PERL5LIB|PYTHONINSPECT|PYTHONSTARTUP|PHP_INI_SCAN_DIR)\b/;
-const NODE_OPTIONS_BENIGN = /\bNODE_OPTIONS=(["']?)(--(max-old-space-size|max-semi-space-size|stack-size)=\d+ ?)+\1(?=[\s;&|]|$)/g;
+// Variables that inject code or options into an interpreter; search-path variables only choose among existing files, as opaque as the script.
+const STARTUP_VARIABLE = /^(BASH_ENV|NODE_OPTIONS|RUBYOPT|PERL5OPT|PERL5DB|PYTHONINSPECT|PYTHONSTARTUP|PHP_INI_SCAN_DIR|LD_PRELOAD|DYLD_INSERT_LIBRARIES|JAVA_TOOL_OPTIONS)$/i;
+const NODE_OPTIONS_BENIGN = /^(--(max-old-space-size|max-semi-space-size|stack-size)=\d+\s*)+$/;
+
+// Builtins whose arguments name or set a variable.
+const VARIABLE_BUILTINS = wordSet("export declare typeset readonly local read printf mapfile readarray getopts");
 
 const baseOf = (path: string): string => path.replace(/\\/g, "/").replace(/\/+$/, "").split("/").pop()?.toLowerCase() ?? "";
 
 // The word itself, an `--opt=value` value and an attached short-option value (`-rfile`), any of which can name a file.
 const optionValues = (arg: string): string[] => [arg, ...(arg.includes("=") ? [arg.slice(arg.indexOf("=") + 1)] : []), ...(/^-[A-Za-z]./.test(arg) ? [arg.slice(2)] : [])];
 
-// A written basename inside a word, as a whole name: `require "w.pl"` matches w.pl, `new.pl` does not.
-const mentionsName = (word: string, name: string): boolean => new RegExp(`(^|[^\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w.])`).test(word.toLowerCase());
+// Best-effort: a written basename inside a word as a whole name (`require "w.pl"` matches w.pl, `new.pl` does not); a computed name is not seen.
+const mentionsName = (word: string, name: string): boolean => new RegExp(`(^|[^\\w.-])${name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}($|[^\\w.-])`).test(word.toLowerCase());
 
-// The program file awk (-f, gawk -E) or sed (-f) reads its script from.
+const PROGRAM_FILE_GRAMMAR: ReadonlyMap<string, { readonly program: string; readonly valued: string; readonly long: readonly string[] }> = new Map([
+	...["awk", "gawk", "mawk", "nawk"].map((n) => [n, { program: "fEil", valued: "fEilvFW", long: ["--file", "--exec", "--include", "--load"] }] as const),
+	["sed", { program: "f", valued: "fel", long: ["--file"] }],
+]);
+
+// Program files awk (-f, gawk -E, -i, -l) or sed (-f) reads, from clustered short options and long-option prefixes alike.
 function programFiles(inv: Pick<CanonicalInvocation, "executable" | "args">): string[] {
-	const executable = normaliseExecutable(inv.executable);
-	const names = /^[gmn]?awk$/.test(executable) ? ["-f", "--file", "-E", "--exec"] : executable === "sed" ? ["-f", "--file"] : [];
-	return inv.args.flatMap((a, i) => {
-		const name = names.find((n) => a === n || a.startsWith(n.startsWith("--") ? `${n}=` : n));
-		if (name === undefined) return [];
-		return a === name ? [inv.args[i + 1] ?? "-"] : [a.slice(name.length + (name.startsWith("--") ? 1 : 0))];
-	});
+	const grammar = PROGRAM_FILE_GRAMMAR.get(normaliseExecutable(inv.executable));
+	if (grammar === undefined) return [];
+	const files: string[] = [];
+	for (let i = 0; i < inv.args.length; i += 1) {
+		const a = inv.args[i];
+		if (a === "--") break;
+		if (a.startsWith("--")) {
+			if (longOptionIn(a, grammar.long)) files.push(a.includes("=") ? a.slice(a.indexOf("=") + 1) : (inv.args[(i += 1)] ?? "-"));
+			continue;
+		}
+		if (!/^-./.test(a)) continue;
+		for (let k = 1; k < a.length; k += 1) {
+			if (!grammar.valued.includes(a[k])) continue;
+			const value = k < a.length - 1 ? a.slice(k + 1) : (inv.args[(i += 1)] ?? "-");
+			if (grammar.program.includes(a[k])) files.push(value);
+			break;
+		}
+	}
+	return files;
 }
+
+const DELETERS = wordSet("rm rmdir shred");
+
+// A privilege wrapper with no command left (`sudo -s`, `sudo -i`) starts a shell that reads stdin.
+const privilegeShell = (inv: CanonicalInvocation): boolean => inv.executable === "" && inv.wrappers.some((w) => w === "sudo" || w === "doas");
 
 // Compared by basename because a `cd` may sit between the write and the run.
 function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: ScriptScan): boolean {
-	const writtenPaths = [...scan.writeTargets, ...extracted.flatMap((e) => writeOperands(e.invocation))];
-	const written = new Set(writtenPaths.map(baseOf));
+	const creates = extracted.filter((e) => !DELETERS.has(normaliseExecutable(e.invocation.executable)));
+	const writtenPaths = [...scan.writeTargets, ...creates.flatMap((e) => writeOperands(e.invocation))].filter((p) => !/^(\/dev\/|nul$)/i.test(p));
+	const written = new Set(writtenPaths.map(baseOf).filter((b) => b !== ""));
 	const isWritten = (path: string): boolean => written.has(baseOf(path));
-	const mentionable = writtenPaths.filter((p) => !/^(\/dev\/|nul$)/i.test(p)).map(baseOf).filter((b) => b !== "");
-	const runners = extracted.filter((e) => runsCode(e.invocation));
-	// `exec 0<f` and a bare `< f` rebind stdin for every later command.
-	const stdinRebinds = scan.commands.filter((c) => c.name === undefined || c.name.value === "exec").flatMap((c) => redirectFiles(c.redirects).reads);
-	if (runners.length > 0 && [...scan.compoundReads, ...stdinRebinds].some(isWritten)) return true;
+	const isRunner = (inv: CanonicalInvocation): boolean => runsCode(inv) || privilegeShell(inv);
+	// `exec 0<f` rebinds stdin for every later command.
+	const stdinRebinds = extracted.filter((e) => e.invocation.wrappers.includes("exec")).flatMap((e) => redirectFiles(e.node.redirects).reads);
+	if (extracted.some((e) => isRunner(e.invocation)) && [...scan.compoundReads, ...stdinRebinds].some(isWritten)) return true;
 	const writesPythonCode = [...written].some((b) => PYTHON_IMPORTABLE.test(b));
 	return extracted.some(({ invocation, node }) => {
 		const executable = normaliseExecutable(invocation.executable);
@@ -755,10 +780,11 @@ function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: Sc
 		if ([...sourced, ...(/[/\\]/.test(invocation.executable) ? [invocation.executable] : [])].some(isWritten)) return true;
 		const wrapped = wrappedCommands(invocation) ?? [];
 		if ([invocation, ...wrapped].flatMap(programFiles).some((f) => STDIN_ALIAS.test(f) || isWritten(f))) return true;
-		if (wrapped.filter(runsCode).some((w) => w.args.some(isWritten))) return true;
-		// A wrapper with no command left (`sudo -s`, `sudo -i`) starts a shell that reads stdin.
-		if (executable === "" && invocation.wrappers.length > 0 && scan.piped.has(node)) return true;
-		if (!runsCode(invocation)) return false;
+		const wrappedRunners = wrapped.filter(runsCode);
+		if (wrappedRunners.some((w) => w.args.some(isWritten))) return true;
+		// find -exec and fd -x fill `{}` with found names, which can be a file this command wrote.
+		if (written.size > 0 && wrappedRunners.some((w) => w.args.some((a) => a.includes("{")))) return true;
+		if (!isRunner(invocation)) return false;
 		if (writesPythonCode && (PYTHON_RUNNER.test(executable) || RUN_SUBCOMMAND_RUNNERS.has(executable))) return true;
 		const perlModules = /^perl[\d.]*$/.test(executable)
 			? invocation.args.flatMap((a) => (/^-[Mm]./.test(a) ? [`${a.slice(2).split("=")[0].replace(/::/g, "/")}.pm`] : []))
@@ -766,13 +792,25 @@ function runsGeneratedScript(extracted: readonly ExtractedInvocation[], scan: Sc
 		const values = invocation.args.flatMap(optionValues);
 		const stdinFiles = node.redirects.filter((r) => r.operator === "<" || r.operator === "<>").flatMap((r) => r.target?.value ?? []);
 		if (scan.piped.has(node) || values.some((v) => STDIN_ALIAS.test(v))) return true;
-		return [...values, ...perlModules, ...stdinFiles].some(isWritten) || invocation.args.some((a) => mentionable.some((b) => mentionsName(a, b)));
+		return [...values, ...perlModules, ...stdinFiles].some(isWritten) || invocation.args.some((a) => [...written].some((b) => mentionsName(a, b)));
 	});
 }
 
-// A startup variable set or named anywhere in a command that runs code; a heap-size NODE_OPTIONS stays allowed.
-const setsStartupVariable = (command: string, invocations: readonly CanonicalInvocation[]): boolean =>
-	invocations.some((inv) => runsCode(inv) || (wrappedCommands(inv) ?? []).some(runsCode)) && STARTUP_VARIABLE.test(command.replace(NODE_OPTIONS_BENIGN, ""));
+// A startup variable assigned, exported or read into anywhere in the command, whatever runs; a heap-size NODE_OPTIONS stays allowed.
+function setsStartupVariable(extracted: readonly ExtractedInvocation[], scan: ScriptScan): boolean {
+	const words = [
+		...extracted.flatMap((e) => e.invocation.assignmentWords ?? []),
+		...scan.commands.filter((c) => c.name === undefined).flatMap((c) => c.prefix.map((a) => a.text)),
+		...extracted.filter((e) => VARIABLE_BUILTINS.has(normaliseExecutable(e.invocation.executable))).flatMap((e) => e.invocation.args),
+	];
+	return words.some((word) => {
+		const at = word.indexOf("=");
+		const name = at === -1 ? word : word.slice(0, at);
+		if (!STARTUP_VARIABLE.test(name)) return false;
+		const value = word.slice(at + 1).replace(/^["']|["']$/g, "");
+		return !(at !== -1 && name.toUpperCase() === "NODE_OPTIONS" && NODE_OPTIONS_BENIGN.test(value));
+	});
+}
 
 /** A command xargs, find -exec, fd -x or parallel runs over its input names. */
 export interface WrappedCommand {
@@ -850,7 +888,10 @@ const REPLACE_OPTION = /^(-[0oprtx]*[Ii]|--replace)/;
 // xargs and parallel turn their input into the runner's arguments, so only a fixed script operand keeps the code visible.
 const inputPicksCode = (outer: CanonicalInvocation, w: WrappedCommand): boolean => {
 	const first = w.args[0] === "-m" && PYTHON_RUNNER.test(normaliseExecutable(w.executable)) ? w.args[1] : w.args[0];
-	return first === undefined || first.startsWith("-") || w.args.some((a) => a.includes("{")) || outer.args.some((a) => REPLACE_OPTION.test(a));
+	// Only the wrapper's own options precede the runner's first occurrence; an option value equal to it follows its option.
+	const at = outer.args.indexOf(w.executable);
+	const options = at === -1 ? outer.args : outer.args.slice(0, at);
+	return first === undefined || first.startsWith("-") || w.args.some((a) => a.includes("{")) || options.some((a) => REPLACE_OPTION.test(a));
 };
 
 // A wrapped command is refused when it is itself a wrapper, or a code runner whose inline code would receive the input names.
@@ -989,7 +1030,7 @@ export function canonicalise(command: string): ShellVerdict {
 	if (wrappedCause !== undefined) return refused(wrappedCause, command);
 	if (firstCommandString(invocations) !== undefined) return refused("command-string-program", command);
 	if (invocations.some(inlineCodeEffect)) return refused("inline-code-effect", command);
-	if (runsGeneratedScript(extracted, scan) || setsStartupVariable(command, invocations)) return refused("generated-script", command);
+	if (runsGeneratedScript(extracted, scan) || setsStartupVariable(extracted, scan)) return refused("generated-script", command);
 	// An unresolved wrapper is refused when a guarded verb or a code runner could be behind it, or it reads a pipe; `env -x ls` stays ok.
 	const hidesRunner = (e: ExtractedInvocation): boolean =>
 		mentionsGuardedVerb(segmentTexts(e.invocation)) || scan.piped.has(e.node) || [e.invocation.executable, ...e.invocation.args].some((w) => isCodeRunner(normaliseExecutable(w)));

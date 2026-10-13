@@ -53,7 +53,8 @@ docstring for the structural argument). Concretely, it catches:
   `graalpy`, `micropython`, and `sqlite3`, `psql`, `mysql`, `ed`, `dc`, whose
   input language runs shell commands) is refused whatever its arguments when
   its stdin is a pipe, and so is a privilege wrapper with no command
-  (`sudo -s`, `sudo -i`). The pipe rule is deliberately strict: a narrower
+  (`sudo -s`, `sudo -i`), also when its stdin is redirected from a file the
+  same command writes. The pipe rule is deliberately strict: a narrower
   rule that allowed a piped interpreter with a script file or harmless inline
   code was reverted after review found it bypassable (option parsing after
   `-c`, repeated `-e`, startup variables, option values, unlisted
@@ -63,25 +64,39 @@ docstring for the structural argument). Concretely, it catches:
   is a stdin alias (`-`, `/dev/stdin`, `/dev/fd/N`, `/proc/<pid>/fd/N`,
   `php://stdin`); a code runner whose argument, option value, perl `-M`
   module, or input redirect names a file the same command writes, or whose
-  inline code mentions that file by name (`echo ... > p; sh p`,
+  inline code mentions that file by name (best-effort: a name the code
+  computes is not seen) (`echo ... > p; sh p`,
   `tee p && sh p`, `cp p.sh q; sh q`, `node --require=p.js`,
   `perl -e 'require "p.pl"'`); a Python runner (`python*`, `pytest`, or one
   under `uv run`) in a command that writes any `.py`, `.pyc`, `.pyd`, `.so`
   or `.pth` file, because imports, `conftest.py` and `sitecustomize.py` load
-  it unnamed; `exec 0<f` or a bare `< f` on a written file before a code
-  runner; an `awk`/`sed` program file (`-f`, `gawk -E`) that is a stdin alias
-  or written by the same command; and any code runner in a command that sets
-  or names `BASH_ENV`, `NODE_OPTIONS`, `RUBYOPT`, `PERL5OPT`, `PERL5DB`,
-  `PERL5LIB`, `PYTHONINSPECT`, `PYTHONSTARTUP` or `PHP_INI_SCAN_DIR` (a
-  heap-size-only `NODE_OPTIONS=--max-old-space-size=N` stays allowed). A file
-  run by path (`./x.sh`) or sourced (`source x.sh`) after the same command
-  wrote it is refused too. Files are matched by basename, because a `cd` may
+  it unnamed; `exec 0<f` (also behind `builtin` or `command`) on a written
+  file before a code runner; a `find -exec`/`fd -x` code runner given a `{}`
+  placeholder in a command that writes any file; an `awk`/`sed` program file
+  (`-f`, also inside an option cluster such as `-nf` or as a `--file` prefix,
+  and gawk `-E`, `-i`, `-l`) that is a stdin alias or written by the same
+  command; and any command, whatever it runs, that assigns, exports or reads
+  into `BASH_ENV`, `NODE_OPTIONS`, `RUBYOPT`, `PERL5OPT`, `PERL5DB`,
+  `PYTHONINSPECT`, `PYTHONSTARTUP`, `PHP_INI_SCAN_DIR`, `LD_PRELOAD`,
+  `DYLD_INSERT_LIBRARIES` or `JAVA_TOOL_OPTIONS`, matched case-insensitively
+  because Windows environment names ignore case (`npm`, `make` and test
+  runners start interpreters too; a heap-size-only
+  `NODE_OPTIONS=--max-old-space-size=N` stays allowed, and a mere mention such
+  as `grep NODE_OPTIONS` does not count). Search-path variables (`PYTHONPATH`,
+  `NODE_PATH`, `RUBYLIB`, `PERL5LIB`) are not listed: they only choose among
+  files that already exist, which are as opaque as the script itself. A
+  deletion (`rm`, `rmdir`, `shred`) and a device such as `/dev/null` do not
+  count as written files. A file run by path (`./x.sh`) or sourced
+  (`source x.sh`) after the same command wrote it is refused too. Files are matched by basename, because a `cd` may
   sit between. So `echo 'git push ...' | sh`, `| bash /dev/stdin`,
   `| sh -c sh`, `curl ... | sh` and `base64 -d | sh` all block. Known false
   positives: `cat data.json | python script.py`,
-  `curl ... | python -m json.tool` and `python gen.py > out.py` are refused;
-  pass the data as a file argument, redirect it from a file
-  (`python solve.py < input.txt`), or use `jq`. The runner list is a deny-list
+  `curl ... | python -m json.tool`, `python gen.py > out.py`, an edit then a
+  test in one command (`sed -i ... app.py && pytest`), a data file written and
+  read in one command (`echo data > in.txt && python solve.py in.txt`) and
+  `find -exec python {}` after any write are refused; split them into two
+  tool calls, redirect data from a file (`python solve.py < input.txt`), or
+  use `jq`. The runner list is a deny-list
   with known gaps. A script written by an earlier, separate tool call stays
   opaque (EV-166).
 - **Programs that take a command string** (cause `command-string-program`)
