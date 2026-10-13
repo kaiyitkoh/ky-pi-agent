@@ -60,7 +60,7 @@ function sessionIdOf(ctx: ExtensionContext): string | undefined {
 
 /** Paths of the loaded `subagent` tool; empty when Pi cannot list tools. */
 function subagentSourcePaths(pi: ExtensionAPI): string[] {
-	// NEVER THROWS: a missing listing only falls back to the npm install roots.
+	// NEVER THROWS: no listing means no path, and registration then fails closed.
 	try {
 		return pi.getAllTools().filter((t) => t.name === "subagent").map((t) => t.sourceInfo.path);
 	} catch {

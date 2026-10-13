@@ -449,6 +449,13 @@ Every `pi-subagents` child loads this guard. On `session_start` the safety entry
 file is registered as the required child extension `ky-safety` with
 `requireForAllRunners: true`, so a child gets it whatever the agent's own
 `extensions` list says, and external-CLI runners are rejected by `pi-subagents`.
+The registry is found from the loaded `subagent` tool's own source path
+(`getAllTools()` `sourceInfo.path`, walked up to the package named
+`pi-subagents`). It is never guessed from an npm install root: the registry is
+per module instance, so another installed copy would not guard these children.
+If that package cannot be determined (no `subagent` tool listed, a synthetic
+path, or a vendored copy under another package name), registration fails and
+launches are refused with that reason.
 A `subagent` launch is blocked unless that registration succeeded for the
 current session id; `session_shutdown` disposes it. Management actions need a
 confirm and are refused with no UI; only these read-only actions run without

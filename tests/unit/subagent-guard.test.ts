@@ -276,12 +276,36 @@ describe("resolveRequiredChildModule", () => {
 
 	it("walks up from a nested source path to the pi-subagents package", () => {
 		const { root, entry } = fakePackage("pi-subagents", true);
-		expect(resolveRequiredChildModule([entry], root)).toBe(join(root, "src", "api", "required-child-extensions.js"));
+		expect(resolveRequiredChildModule([entry])).toBe(join(root, "src", "api", "required-child-extensions.js"));
 	});
 
 	it("skips a package.json named anything else", () => {
-		const { root, entry } = fakePackage("something-else", true);
-		expect(resolveRequiredChildModule([entry], root)).toBeUndefined();
+		const { entry } = fakePackage("something-else", true);
+		expect(resolveRequiredChildModule([entry])).toBeUndefined();
+	});
+
+	it("never guesses an npm install root: no loaded tool, or a synthetic path, resolves nothing", () => {
+		expect(resolveRequiredChildModule([])).toBeUndefined();
+		expect(resolveRequiredChildModule(["<sdk:subagent>", "builtin:subagent"])).toBeUndefined();
+	});
+
+	it("a loaded tool whose package cannot be determined refuses launches with the reason, even when another copy is installed", async () => {
+		setRequiredChildLoaderForTests(undefined);
+		const { entry } = fakePackage("vendored-subagents", true);
+		const other = fakePackage("pi-subagents", true);
+		const npm = join(other.root, ".pi", "npm", "node_modules", "pi-subagents", "src", "api");
+		mkdirSync(npm, { recursive: true });
+		writeFileSync(join(npm, "required-child-extensions.js"), "");
+		const result = await registerChildGuard(SESSION, "/abs/index.ts", other.root, [entry]);
+		expect(result.ok).toBe(false);
+		expect(!result.ok && result.reason).toContain("is not inside a pi-subagents package");
+		expect(isChildGuardRegistered(SESSION)).toBe(false);
+	});
+
+	it("no loaded subagent tool fails closed with its own reason", async () => {
+		setRequiredChildLoaderForTests(undefined);
+		const result = await registerChildGuard(SESSION, "/abs/index.ts", "/work", []);
+		expect(!result.ok && result.reason).toContain("no loaded subagent tool");
 	});
 
 	it("registration fails and a launch stays refused when nothing resolves", async () => {
