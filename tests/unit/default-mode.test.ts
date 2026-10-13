@@ -1,11 +1,8 @@
-/** A fresh session or /new starts in the default mode and applies its executor unless a model was chosen explicitly. */
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+/** A fresh session or /new starts in the default mode and applies its executor unless a model flag was passed. */
+import { describe, expect, it } from "vitest";
 
-import { afterEach, describe, expect, it } from "vitest";
-
-import { freshSessionPlan, savedDefaultModel, type FreshSessionInput } from "../../.pi/extensions/routing/modes.ts";
+import { freshSessionPlan, type FreshSessionInput } from "../../.pi/extensions/routing/modes.ts";
+import * as modes from "../../.pi/extensions/routing/modes.ts";
 
 const base: FreshSessionInput = {
 	reason: "startup",
@@ -13,7 +10,6 @@ const base: FreshSessionInput = {
 	hasMessages: false,
 	isChild: false,
 	argv: ["node", "pi"],
-	settings: {},
 };
 const plan = (over: Partial<FreshSessionInput>) => freshSessionPlan({ ...base, ...over });
 
@@ -39,43 +35,20 @@ describe("freshSessionPlan", () => {
 		expect(plan({ isChild: true })).toEqual({ reset: true, applyExecutor: false });
 	});
 
-	it.each([["--model"], ["--provider"], ["--models"]])("%s on the command line is an explicit choice", (flag) => {
+	it.each([["--model"], ["--provider"], ["--models"]])("%s on the command line opts out, with no notice to show", (flag) => {
 		for (const argv of [["pi", flag, "x"], ["pi", `${flag}=x`]]) {
-			const p = plan({ argv });
-			expect(p).toMatchObject({ reset: true, applyExecutor: false });
-			expect(p.explicit).toBe(flag);
-		}
-	});
-
-	it("a saved default model or provider is an explicit choice that names its source", () => {
-		for (const settings of [{ defaultModel: "m" }, { defaultProvider: "p" }]) {
-			const p = plan({ settings });
-			expect(p).toMatchObject({ reset: true, applyExecutor: false });
-			expect(p.explicit).toContain("settings");
+			expect(plan({ argv })).toEqual({ reset: true, applyExecutor: false });
 		}
 	});
 
 	it("does not mistake a longer flag for a model flag", () => {
 		expect(plan({ argv: ["pi", "--model-thinking"] }).applyExecutor).toBe(true);
 	});
-});
 
-describe("savedDefaultModel", () => {
-	let root: string | undefined;
-	afterEach(() => {
-		if (root !== undefined) rmSync(root, { recursive: true, force: true });
-		root = undefined;
-	});
-
-	it("reads either settings file and ignores missing ones", () => {
-		root = mkdtempSync(join(tmpdir(), "ky-default-model-"));
-		const agentDir = join(root, "agent");
-		const project = join(root, "project");
-		mkdirSync(agentDir, { recursive: true });
-		mkdirSync(join(project, ".pi"), { recursive: true });
-		expect(savedDefaultModel(project, agentDir)).toEqual({ defaultModel: undefined, defaultProvider: undefined });
-		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ defaultProvider: "deepseek" }));
-		writeFileSync(join(project, ".pi", "settings.json"), JSON.stringify({ defaultModel: "deepseek-flash" }));
-		expect(savedDefaultModel(project, agentDir)).toEqual({ defaultModel: "deepseek-flash", defaultProvider: "deepseek" });
+	it("takes no settings input: a defaultModel Pi saved on /login cannot opt out", () => {
+		expect(Object.keys(base).sort()).toEqual(["argv", "hasMessages", "hasModeEntry", "isChild", "reason"]);
+		expect("savedDefaultModel" in modes).toBe(false);
+		const withSaved = { ...base, settings: { defaultModel: "m", defaultProvider: "p" } } as FreshSessionInput;
+		expect(freshSessionPlan(withSaved)).toEqual({ reset: true, applyExecutor: true });
 	});
 });

@@ -307,11 +307,12 @@ the mode command would write (the same picker), says which model subagents run
 and that re-running the mode command re-pins it.
 
 A fresh session and `/new` start in the default mode, unescalated, and apply
-its executor, unless a model was chosen explicitly: `--model`, `--provider` or
-`--models` on the command line, or a saved `defaultModel` or `defaultProvider`
-in the user or project settings. In that case the chosen model is kept, a
-notice names the source, and `/cheap` applies the default route. The switch is
-never persisted.
+its executor, unless `--model`, `--provider` or `--models` was passed on the
+command line. In that case the chosen model is kept without a notice, and
+`/cheap` applies the default route. A saved `defaultModel` or
+`defaultProvider` does not opt out: Pi writes them on every `/login` and from
+the model picker, so they record the last model used, not a choice for this
+session. Settings files are not read for this. The switch is never persisted.
 
 The file is still shared: when two sessions are in different modes, the last
 writer's models apply to both until one switches again or a new session

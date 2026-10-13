@@ -16,7 +16,7 @@ import { appendJsonl, ESCALATION_LOG_BASE } from "../../lib/jsonl.ts";
 import { agentOverridesFor, plannerPinHeld, readAgentOverride, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { deriveNeed, guardRoute } from "./guard.ts";
 import { registerBgLoader } from "./loader.ts";
-import { freshSessionPlan, getModeState, pickConfiguredCandidate, resolveRoute, savedDefaultModel, setEscalated, setMode, type ModeState } from "./modes.ts";
+import { freshSessionPlan, getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
 import { AGENT_NAME_BY_ROLE, DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
@@ -279,7 +279,7 @@ export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
 }
 
 /** Puts the default mode's executor on a fresh session; any refusal leaves the model alone and says why once. NEVER THROWS. */
-async function applyDefaultExecutor(pi: ExtensionAPI, ctx: ExtensionContext, explicit: string | undefined): Promise<void> {
+async function applyDefaultExecutor(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
 	const notify = (text: string): void => {
 		if (ctx.hasUI) ctx.ui.notify(text, "warning");
 	};
@@ -288,7 +288,6 @@ async function applyDefaultExecutor(pi: ExtensionAPI, ctx: ExtensionContext, exp
 		if (!candidate.ok) return notify(`default mode ${DEFAULT_MODE}: executor not applied: ${candidate.reason}`);
 		const { model } = candidate;
 		if (ctx.model?.provider === model.provider && ctx.model?.id === model.id) return;
-		if (explicit !== undefined) return notify(`executor chosen by ${explicit}; /${DEFAULT_MODE} applies the ${DEFAULT_MODE} route`);
 		const verdict = guardRoute(model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
 		if (!verdict.ok) return notify(`default mode ${DEFAULT_MODE}: executor not applied: ${verdict.reason}`);
 		if (!(await pi.setModel(model))) notify(`default mode ${DEFAULT_MODE}: executor not applied: setModel returned false for ${model.provider}/${model.id}`);
@@ -411,7 +410,6 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 				hasMessages: branch.some((entry) => entry.type === "message"),
 				isChild: isSubagentChild(),
 				argv: process.argv,
-				settings: savedDefaultModel(ctx.cwd),
 			});
 			// A process outlives /new, so mode state from the previous session must not carry over.
 			if (plan.reset) {
@@ -426,7 +424,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 				const pins = agentOverridesFor({ mode: getModeState().mode }, { ...testOverrides?.agentOverridesFor, registry: ctx.modelRegistry });
 				if (pins.ok) writeAgentOverrides(pins.overrides);
 			}
-			if (plan.reset && (plan.applyExecutor || plan.explicit !== undefined)) applying = applyDefaultExecutor(pi, ctx, plan.explicit);
+			if (plan.reset && plan.applyExecutor) applying = applyDefaultExecutor(pi, ctx);
 			const flag = pi.getFlag("ky-profile");
 			if (typeof flag === "string" && resolveProfile(flag) !== flag && ctx.hasUI) ctx.ui.notify(`unknown --ky-profile "${flag}"; using ${DEFAULT_PROFILE}`, "warning");
 			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
