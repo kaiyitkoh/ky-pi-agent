@@ -212,16 +212,42 @@ function isWithinRoot(target: string, root: string): boolean {
 	return r.parts.every((part, i) => part.toLowerCase() === t.parts[i].toLowerCase());
 }
 
-/** `.env`, `.env.local`, `.env.production` block; `.env.example` and `.env.template` are a deliberate carve-out, since blocking documentation trains the user to disable the guard. */
+/** `.env`, `.env.local`, `.env.production` block in any letter case; `.env.example` and `.env.template` are a deliberate carve-out, since blocking documentation trains the user to disable the guard. */
 function isDotEnvFile(basename: string): boolean {
-	if (basename === ".env") {
+	const lower = basename.toLowerCase();
+	if (lower === ".env") {
 		return true;
 	}
-	if (!basename.startsWith(".env.")) {
+	if (!lower.startsWith(".env.")) {
 		return false;
 	}
-	const suffix = basename.slice(".env.".length).toLowerCase();
+	const suffix = lower.slice(".env.".length);
 	return suffix !== "example" && suffix !== "template";
+}
+
+/** NTFS resolves `name:stream` and `name::$DATA` to `name`, so the final segment is matched without its stream suffix. */
+function stripStreamSuffix(canonicalPath: string): string {
+	const { root, parts } = rootedSegmentsOf(canonicalPath);
+	if (parts.length === 0) {
+		return canonicalPath;
+	}
+	const last = parts[parts.length - 1];
+	const colon = last.indexOf(":");
+	if (colon === -1) {
+		return canonicalPath;
+	}
+	return joinRootAndParts(root, [...parts.slice(0, -1), last.slice(0, colon)]);
+}
+
+/** Windows short-name alias shape (`DOTENV~1.LOC`): it names a long file the policy tables cannot see. */
+const SHORT_NAME_ALIAS = /^[^~.]{1,6}~\d{1,6}(\.[^.]{0,3})?$/i;
+
+function homePath(facts: PathPolicyFacts, ...segments: string[]): string {
+	return [facts.home.replace(/[/\\]+$/, ""), ...segments].join("/");
+}
+
+function projectPath(facts: PathPolicyFacts, ...segments: string[]): string {
+	return [facts.projectRoot.replace(/[/\\]+$/, ""), ...segments].join("/");
 }
 
 function parentDirOf(canonicalPath: string): string {
@@ -232,7 +258,7 @@ function parentDirOf(canonicalPath: string): string {
 /** The git-dir subdirectory holding the harness's signed /execute ledger and key. */
 export const HARNESS_LEDGER_SEGMENT = "kypi-ledger";
 
-/** Read classes that must never reach the model: `.env`-family, `~/.aws/{credentials,config}`, kubeconfig, Terraform state, the harness ledger. Each has a paired negative in path-policy.test.ts. */
+/** Read classes that must never reach the model: `.env`-family, AWS/SSH/git/docker/Pi credentials, kubeconfig, Terraform state, the harness ledger. Each has a paired negative in path-policy.test.ts. */
 export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 	{
 		id: "dotenv",
@@ -265,6 +291,36 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 			return base.endsWith(".tfstate") || base.endsWith(".tfstate.backup");
 		},
 		reason: (path) => `"${path}" is Terraform state, which holds plaintext secrets in its resource attributes`,
+	},
+	{
+		id: "short-name-alias",
+		match: (path) => SHORT_NAME_ALIAS.test(basenameOf(path)),
+		reason: (path) => `"${path}" looks like a Windows 8.3 short name, which can alias a protected file; use the long file name`,
+	},
+	{
+		id: "home-aws",
+		match: (path, facts) => isWithinRoot(path, homePath(facts, ".aws")),
+		reason: (path) => `"${path}" is under ~/.aws, which holds credentials and SSO/CLI token caches`,
+	},
+	{
+		id: "home-ssh",
+		match: (path, facts) => isWithinRoot(path, homePath(facts, ".ssh")),
+		reason: (path) => `"${path}" is under ~/.ssh, which holds private keys`,
+	},
+	{
+		id: "git-credentials",
+		match: (path, facts) => sameCanonicalPath(path, homePath(facts, ".git-credentials")),
+		reason: (path) => `"${path}" is the git credential store`,
+	},
+	{
+		id: "docker-config",
+		match: (path, facts) => sameCanonicalPath(path, homePath(facts, ".docker", "config.json")),
+		reason: (path) => `"${path}" is the Docker client config, which can hold registry credentials`,
+	},
+	{
+		id: "pi-auth",
+		match: (path, facts) => sameCanonicalPath(path, homePath(facts, ".pi", "agent", "auth.json")),
+		reason: (path) => `"${path}" is Pi's credential store`,
 	},
 	{
 		id: "harness-ledger",
@@ -336,6 +392,21 @@ export const DETONATION_TARGETS: readonly PathPattern[] = [
 		reason: (path) => `"${path}" is a GitHub Actions workflow — it runs on the next push/PR event, on GitHub's infrastructure`,
 	},
 	{
+		id: "agent-definitions",
+		match: (path, facts) =>
+			isWithinRoot(path, projectPath(facts, ".pi", "agents")) ||
+			isWithinRoot(path, projectPath(facts, ".agents")) ||
+			isWithinRoot(path, homePath(facts, ".pi", "agent", "agents")),
+		reason: (path) => `"${path}" is a subagent definition; agent definitions are edited by a human outside Pi`,
+	},
+	{
+		id: "pi-settings",
+		match: (path, facts) =>
+			sameCanonicalPath(path, homePath(facts, ".pi", "agent", "settings.json")) ||
+			sameCanonicalPath(path, projectPath(facts, ".pi", "settings.json")),
+		reason: (path) => `"${path}" is a Pi settings file that points at agent definitions; it is edited by a human outside Pi`,
+	},
+	{
 		id: "gitlab-ci",
 		match: (path) => basenameOf(path).toLowerCase() === ".gitlab-ci.yml",
 		reason: (path) => `"${path}" is the GitLab CI pipeline definition — it runs on the next push, and this project's "main" auto-deploys`,
@@ -344,9 +415,98 @@ export const DETONATION_TARGETS: readonly PathPattern[] = [
 
 /** Block the sensitive read classes; allow their benign neighbours (`.env.example`, `src/config.ts`). */
 export function classifyPathRead(canonicalPath: string, facts: PathPolicyFacts): PathVerdict {
+	const target = stripStreamSuffix(canonicalPath);
 	for (const pattern of SENSITIVE_READ_PATTERNS) {
-		if (pattern.match(canonicalPath, facts)) {
+		if (pattern.match(target, facts)) {
 			return { kind: "block", reason: pattern.reason(canonicalPath) };
+		}
+	}
+	return { kind: "allow" };
+}
+
+/** Names a glob is probed against; a basename glob that can match any of them is treated as a secret read. */
+export const SENSITIVE_NAME_PROBES: readonly string[] = [
+	".env",
+	".env.local",
+	".env.production",
+	"credentials",
+	"id_rsa",
+	"id_ed25519",
+	".git-credentials",
+	"auth.json",
+	"terraform.tfstate",
+];
+
+const GLOB_META = /[*?[{]/;
+const SENSITIVE_DIR_NAMES: readonly string[] = [".aws", ".kube", ".ssh", ".gnupg"];
+
+/** Compile one glob segment (`*`, `?`, `[..]`, `{a,b}`) to a case-insensitive anchored regex. */
+function globSegmentRegex(segment: string): RegExp {
+	let out = "";
+	let braceDepth = 0;
+	for (let i = 0; i < segment.length; i += 1) {
+		const ch = segment[i];
+		if (ch === "*") {
+			out += "[^/]*";
+		} else if (ch === "?") {
+			out += "[^/]";
+		} else if (ch === "[") {
+			const close = segment.indexOf("]", i + 2);
+			if (close === -1) {
+				out += "\\[";
+			} else {
+				const body = segment.slice(i + 1, close);
+				out += `[${body.startsWith("!") ? `^${body.slice(1)}` : body}]`;
+				i = close;
+			}
+		} else if (ch === "{") {
+			braceDepth += 1;
+			out += "(?:";
+		} else if (ch === "}" && braceDepth > 0) {
+			braceDepth -= 1;
+			out += ")";
+		} else if (ch === "," && braceDepth > 0) {
+			out += "|";
+		} else {
+			out += ch.replace(/[.+^$()|\\\]{}]/g, "\\$&");
+		}
+	}
+	out += ")".repeat(braceDepth);
+	try {
+		return new RegExp(`^(?:${out})$`, "i");
+	} catch {
+		// An uncompilable class matches everything so the caller fails closed.
+		return /^/;
+	}
+}
+
+/**
+ * Block a glob that can reach a sensitive read: a literal directory prefix inside a sensitive root, a wildcard
+ * directory under home that can match one, or a basename glob that can match a probe name.
+ * A glob without metacharacters is classified as a literal path.
+ */
+export function classifyReadGlob(canonicalGlob: string, facts: PathPolicyFacts): PathVerdict {
+	if (!GLOB_META.test(canonicalGlob)) {
+		return classifyPathRead(canonicalGlob, facts);
+	}
+	const { root, parts } = rootedSegmentsOf(canonicalGlob);
+	const firstMeta = parts.findIndex((part) => GLOB_META.test(part));
+	const prefix = joinRootAndParts(root, parts.slice(0, firstMeta));
+	if (isSensitiveSearchRoot(prefix, facts)) {
+		return { kind: "block", reason: `"${canonicalGlob}" expands inside a directory that holds credentials` };
+	}
+	if (firstMeta < parts.length - 1 && sameCanonicalPath(prefix, facts.home)) {
+		const re = globSegmentRegex(parts[firstMeta]);
+		if (SENSITIVE_DIR_NAMES.some((name) => re.test(name))) {
+			return { kind: "block", reason: `"${canonicalGlob}" has a wildcard directory that can match a credentials directory` };
+		}
+	}
+	const base = parts[parts.length - 1];
+	if (GLOB_META.test(base)) {
+		const re = globSegmentRegex(base);
+		const hit = SENSITIVE_NAME_PROBES.find((name) => re.test(name));
+		if (hit !== undefined) {
+			return { kind: "block", reason: `"${canonicalGlob}" can match "${hit}", a secrets file` };
 		}
 	}
 	return { kind: "allow" };
@@ -362,7 +522,7 @@ const SENSITIVE_SEARCH_ROOT_SEGMENTS = new Set([".aws", ".kube", ".ssh", ".gnupg
  * - the root is at or below `$HOME` and a segment is in {@link SENSITIVE_SEARCH_ROOT_SEGMENTS}
  *   (anchored to home: an unanchored match blocked `tests/fixtures/.ssh/` and `node_modules/x/.aws/`);
  * - the root is `$HOME` or an ancestor of it, which reaches every secret directory.
- * Not covered, published in docs/SAFETY.md: a `kubeconfigEnv` outside `$HOME` and wildcard globs (`.env*`).
+ * Not covered, published in docs/SAFETY.md: a `kubeconfigEnv` outside `$HOME`.
  */
 export function isSensitiveSearchRoot(canonicalPath: string, facts: PathPolicyFacts): boolean {
 	const { parts } = rootedSegmentsOf(canonicalPath);
@@ -373,7 +533,8 @@ export function isSensitiveSearchRoot(canonicalPath: string, facts: PathPolicyFa
 }
 
 /** Detonation targets block regardless of project containment, then out-of-root writes block. No allowed-outside root exists; add one explicitly rather than default open. */
-export function classifyPathWrite(canonicalPath: string, facts: PathPolicyFacts): PathVerdict {
+export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFacts): PathVerdict {
+	const canonicalPath = stripStreamSuffix(rawCanonicalPath);
 	for (const target of DETONATION_TARGETS) {
 		if (target.match(canonicalPath, facts)) {
 			return { kind: "block", reason: target.reason(canonicalPath) };

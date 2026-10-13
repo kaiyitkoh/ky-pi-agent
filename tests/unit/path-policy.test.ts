@@ -24,6 +24,7 @@ import {
 	canonicalisePathArg,
 	classifyPathRead,
 	classifyPathWrite,
+	classifyReadGlob,
 	DETONATION_TARGETS,
 	SENSITIVE_READ_PATTERNS,
 	type PathPolicyFacts,
@@ -223,6 +224,22 @@ const READ_TABLE: readonly ReadRow[] = [
 	{ label: "the harness ledger key", rawText: ".git/kypi-ledger/key", expected: "block", patternId: "harness-ledger" },
 	{ label: "a harness ledger file", rawText: ".git/kypi-ledger/s1.jsonl", expected: "block", patternId: "harness-ledger" },
 	{ label: "a file merely named after the ledger", rawText: "docs/kypi-ledger.md", expected: "allow" },
+	{ label: "upper-case .ENV", rawText: ".ENV", expected: "block", patternId: "dotenv" },
+	{ label: "mixed-case .Env.Local", rawText: ".Env.Local", expected: "block", patternId: "dotenv" },
+	{ label: ".ENV.EXAMPLE keeps the carve-out", rawText: ".ENV.EXAMPLE", expected: "allow" },
+	{ label: "~/.aws/sso/cache token", rawText: "~/.aws/sso/cache/a.json", expected: "block", patternId: "home-aws" },
+	{ label: "~/.aws/cli/cache token", rawText: "~/.aws/cli/cache/b.json", expected: "block", patternId: "home-aws" },
+	{ label: "~/.ssh/id_ed25519", rawText: "~/.ssh/id_ed25519", expected: "block", patternId: "home-ssh" },
+	{ label: "~/.git-credentials", rawText: "~/.git-credentials", expected: "block", patternId: "git-credentials" },
+	{ label: "~/.docker/config.json", rawText: "~/.docker/config.json", expected: "block", patternId: "docker-config" },
+	{ label: "~/.pi/agent/auth.json", rawText: "~/.pi/agent/auth.json", expected: "block", patternId: "pi-auth" },
+	{ label: "a .ssh directory inside the project", rawText: "tests/fixtures/.ssh/x", expected: "allow" },
+	{ label: "docs/aws.md", rawText: "docs/aws.md", expected: "allow" },
+	{ label: ".env:$DATA stream suffix", rawText: ".env:$DATA", expected: "block", patternId: "dotenv" },
+	{ label: ".env::$DATA stream suffix", rawText: ".env::$DATA", expected: "block", patternId: "dotenv" },
+	{ label: "8.3 alias ENV~1", rawText: "ENV~1", expected: "block", patternId: "short-name-alias" },
+	{ label: "8.3 alias DOTENV~2.LOC", rawText: "DOTENV~2.LOC", expected: "block", patternId: "short-name-alias" },
+	{ label: "notes~draft.md is not an 8.3 alias", rawText: "notes~draft.md", expected: "allow" },
 	// Paired negatives -- the false positives that matter (04-CONTEXT.md `<specifics>`).
 	{ label: ".env.example (deliberate carve-out)", rawText: ".env.example", expected: "allow" },
 	{ label: ".env.template (deliberate carve-out)", rawText: ".env.template", expected: "allow" },
@@ -314,6 +331,11 @@ const WRITE_TABLE: readonly WriteRow[] = [
 		rawText: "../outside/file.txt",
 		expected: "block",
 	},
+	{ label: "project agent definitions", rawText: ".pi/agents/x.md", expected: "block", targetId: "agent-definitions" },
+	{ label: "project .agents directory", rawText: ".agents/y.md", expected: "block", targetId: "agent-definitions" },
+	{ label: "user agent definitions", rawText: "~/.pi/agent/agents/z.md", expected: "block", targetId: "agent-definitions" },
+	{ label: "user Pi settings", rawText: "~/.pi/agent/settings.json", expected: "block", targetId: "pi-settings" },
+	{ label: "project Pi settings", rawText: ".pi/settings.json", expected: "block", targetId: "pi-settings" },
 	// Paired negatives -- the false positives that matter.
 	{ label: "docs/workflows.md (contains 'workflows' but not under .github/)", rawText: "docs/workflows.md", expected: "allow" },
 	{ label: "docs/hooks/README.md (contains 'hooks' but not under .git/)", rawText: "docs/hooks/README.md", expected: "allow" },
@@ -459,5 +481,22 @@ describe("WR-10 -- classifyPathWrite's detonation reason distinguishes the speci
 			"a genuinely backslash-native home/project-root pair, once correctly canonicalised, must not " +
 				"over-block an ordinary in-project write -- the false-positive half of the same property",
 		).toBe("allow");
+	});
+});
+
+describe("classifyReadGlob", () => {
+	const glob = (raw: string) => classifyReadGlob(canonicalisePathArg(arg(raw), ctx()), READ_FACTS).kind;
+
+	it.each([".en?", ".env*", "~/.aws/cred*", "~/.ssh/*", "~/.aw*/credentials", ".env.{local,prod}", ".[e]nv"])("blocks %s", (raw) => {
+		expect(glob(raw)).toBe("block");
+	});
+
+	it.each(["*.md", "src/*.ts", "docs/**/*.md"])("allows %s", (raw) => {
+		expect(glob(raw)).toBe("allow");
+	});
+
+	it("falls back to the literal path classifier when there is no metacharacter", () => {
+		expect(glob(".env")).toBe("block");
+		expect(glob("README.md")).toBe("allow");
 	});
 });
