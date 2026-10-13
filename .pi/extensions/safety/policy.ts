@@ -12,9 +12,13 @@ import { classifyGitInvocation, classifyGlabInvocation } from "./git.ts";
 import type { InfraVerdict } from "./infra.ts";
 import { classifyInfraInvocation } from "./infra.ts";
 
-/** `confirm` carries the requestKey the approval store keys its grant on; protected-branch writes and sensitive reads never confirm because approval cannot undo them. */
+/**
+ * `confirm` goes through the approve-tool protocol; `ask` (a feature-branch push) is put to the human directly by the hook.
+ * Both carry the requestKey a grant is keyed on; protected-branch writes and sensitive reads never ask because approval cannot undo them.
+ */
 export type Verdict =
 	| { readonly kind: "allow" }
+	| { readonly kind: "ask"; readonly reason: string; readonly requestKey: string; readonly prompt: string }
 	| { readonly kind: "confirm"; readonly reason: string; readonly requestKey: string }
 	| { readonly kind: "block"; readonly reason: string };
 
@@ -26,13 +30,24 @@ export interface PolicyFacts {
 	/** Lazy: called only for an invocation whose executable is literally git. */
 	readonly currentBranchFor: (cwd: string) => string;
 	readonly protectedBranches: readonly string[];
+	/** Destinations a push may never reach; defaults to `protectedBranches`. */
+	readonly pushProtectedBranches?: readonly string[];
+	/** Lazy `git config --get-all` in a directory; absent means config is unknown and config-derived push destinations block. */
+	readonly gitConfigFor?: (cwd: string, key: string) => readonly string[];
 	readonly kubeconfigEnv?: string;
 }
 
-const VERDICT_RANK: Record<Verdict["kind"], number> = { allow: 0, confirm: 1, block: 2 };
+const VERDICT_RANK: Record<Verdict["kind"], number> = { allow: 0, ask: 1, confirm: 2, block: 3 };
 
-/** b replaces a only when strictly stronger: a block is never downgraded by a later allow or confirm. */
+/** b replaces a only when strictly stronger: a block is never downgraded. One grant cannot carry both an ask and a confirm, so together they block. */
 function strongerOf(a: Verdict, b: Verdict): Verdict {
+	const kinds = new Set([a.kind, b.kind]);
+	if (kinds.has("ask") && kinds.has("confirm")) {
+		return { kind: "block", reason: "a git push that needs confirmation is combined with a command that needs approval -- run them separately" };
+	}
+	if (a.kind === "ask" && b.kind === "ask") {
+		return { kind: "block", reason: `two git pushes in one command cannot share one confirmation -- run them separately (${a.reason}; ${b.reason})` };
+	}
 	return VERDICT_RANK[b.kind] > VERDICT_RANK[a.kind] ? b : a;
 }
 
@@ -77,8 +92,9 @@ const pathFactsOf = (facts: PolicyFacts): PathPolicyFacts => ({
 const canonicalOf = (text: string, facts: PolicyFacts): string =>
 	canonicalisePathArg({ text, value: text }, { cwd: facts.cwd, home: facts.home });
 
-function fromGitVerdict(verdict: GitVerdict): Verdict {
+function fromGitVerdict(verdict: GitVerdict, requestKey: string): Verdict {
 	// No approval path for a git/glab block.
+	if (verdict.kind === "ask") return { kind: "ask", reason: verdict.reason, requestKey, prompt: verdict.prompt };
 	return verdict.kind === "allow" ? { kind: "allow" } : { kind: "block", reason: verdict.reason };
 }
 
@@ -99,6 +115,9 @@ function fromInfraVerdict(verdict: InfraVerdict, requestKey: string): Verdict {
 		}
 	}
 }
+
+/** Global options that point git at another repository or ref namespace than the cwd the guard reads config in. */
+const GIT_REPO_REDIRECT_OPTIONS = /^--(git-dir|work-tree|namespace)(=|$)/;
 
 /** Skips git's global options and their values, so the subcommand is the first positional word rather than "-C". */
 function toGitInvocation(invocation: CanonicalInvocation): GitInvocation {
@@ -121,8 +140,8 @@ function toGitInvocation(invocation: CanonicalInvocation): GitInvocation {
 	return { subcommand: args[i] ?? "", args: args.slice(i + 1), configOverrides };
 }
 
-/** One invocation's strongest verdict across git/glab, infra and path classification. */
-function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string): Verdict {
+/** One invocation's strongest verdict across git/glab, infra and path classification; `sole` means it is the command's only invocation. */
+function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts, requestKey: string, sole: boolean): Verdict {
 	let strongest: Verdict = { kind: "allow" };
 	const executable = normaliseExecutable(invocation.executable);
 
@@ -131,16 +150,26 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 		// A subshell's `cd` does not persist, so the session cwd counts too; an unreadable `cd` target counts as protected.
 		const afterCd = invocation.afterCd === "unknown" ? [facts.protectedBranches[0] ?? ""] : invocation.afterCd === "known" ? [branchIn()] : [];
 		const branches = [branchIn(invocation.cwdOverride), ...afterCd];
+		const gitDir = foldDirectories([facts.cwd, invocation.cwdOverride ?? "."]) ?? facts.cwd;
+		const gitConfigFor = facts.gitConfigFor;
 		const gitFacts: GitPolicyFacts = {
 			currentBranch: branches.find((b) => facts.protectedBranches.includes(b)) ?? branches[0],
 			protectedBranches: facts.protectedBranches,
+			pushProtectedBranches: facts.pushProtectedBranches,
+			...(gitConfigFor !== undefined ? { readConfig: (key: string) => gitConfigFor(gitDir, key) } : {}),
+			configTrusted:
+				sole &&
+				invocation.wrappers.length === 0 &&
+				invocation.assignments !== true &&
+				invocation.afterCd === undefined &&
+				!invocation.args.some((a) => GIT_REPO_REDIRECT_OPTIONS.test(a)),
 		};
-		strongest = strongerOf(strongest, fromGitVerdict(classifyGitInvocation(toGitInvocation(invocation), gitFacts)));
+		strongest = strongerOf(strongest, fromGitVerdict(classifyGitInvocation(toGitInvocation(invocation), gitFacts), requestKey));
 	} else if (executable === "glab") {
 		// glab needs protectedBranches for its mr create rule, not currentBranch.
 		strongest = strongerOf(
 			strongest,
-			fromGitVerdict(classifyGlabInvocation(toGitInvocation(invocation), facts.protectedBranches)),
+			fromGitVerdict(classifyGlabInvocation(toGitInvocation(invocation), facts.protectedBranches), requestKey),
 		);
 	}
 
@@ -177,7 +206,7 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 
 	let strongest: Verdict = { kind: "allow" };
 	for (const invocation of shellVerdict.invocations) {
-		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey));
+		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey, shellVerdict.invocations.length === 1));
 	}
 	return strongest;
 }

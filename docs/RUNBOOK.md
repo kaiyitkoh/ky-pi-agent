@@ -860,6 +860,7 @@ the two is reported as `INCONSISTENT`, which is never an acceptable status.
 | ID | Check | Status |
 |----|-------|--------|
 | RB-04-01 | SAFE-01 — a push to a protected GitLab branch is rejected server-side | OUTSTANDING |
+| RB-04-02 | SAFE-04 — a feature-branch push asks in the TUI and refuses headless | OUTSTANDING |
 
 ### RB-04-01 — SAFE-01: a push to a protected GitLab branch is rejected server-side
 
@@ -910,6 +911,31 @@ non-fast-forward rejection, produced by genuinely diverging two clones — and
 asserts they classify differently. It proves the harness reads and classifies
 a server-side rejection correctly. It proves nothing at all about whether
 GitLab is actually configured on the work laptop, which is this entry.
+
+### RB-04-02 — SAFE-04: a feature-branch push asks in the TUI and refuses headless
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs a real Pi TUI driving a model that
+issues the push, and a remote to push to. The tests stub `ctx.ui.confirm`.
+
+**Procedure, on the work laptop.** In `<work-repo>`, on a throwaway branch
+`rb-04-02` with one commit:
+
+1. In an interactive `pi` session, ask the model to run `git push -u origin rb-04-02`.
+2. Check the dialog shows that exact command, `Remote: origin` and `Branch: rb-04-02`; choose No.
+3. Ask again and choose Yes; then ask it to run `git push origin rb-04-02:staging`.
+4. Run `pi -p "run: git push -u origin rb-04-02"` (print mode).
+5. Delete the remote branch by hand: `git push origin --delete rb-04-02`.
+
+**Expected output.** Step 2 blocks with "the user declined it"; step 3's first
+push succeeds after Yes, its second blocks with no dialog; step 4 blocks with
+"no interactive UI to confirm it".
+
+**Offline proxy:** `tests/unit/push-confirm.test.ts` drives the real
+`tool_call` hook and bash wrapper against a temp repository with a stubbed
+`ctx.ui.confirm`, in both directions. It proves nothing about the real TUI
+dialog rendering.
 
 ---
 

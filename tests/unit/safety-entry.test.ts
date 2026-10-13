@@ -212,12 +212,13 @@ describe("the safety extension's source order matches its own documented guarant
 		).toBeGreaterThan(1000);
 	});
 
-	it("contains no ctx.ui.confirm( call anywhere outside a comment", () => {
+	it("calls ctx.ui.confirm( exactly once in code, only for a feature-branch push and only in the TUI", () => {
 		expect(
 			(codeOnly.match(/ctx\.ui\.confirm\(/g) ?? []).length,
-			"CONTEXT.md decision 4 / RESEARCH Pattern 4: the confirmation protocol is " +
-				"block -> approval-tool -> re-issue, never an inline ctx.ui.confirm() dialog",
-		).toBe(0);
+			"infra confirmations go block -> approval-tool -> re-issue; the one inline dialog is the git push ask",
+		).toBe(1);
+		const askBranch = codeOnly.slice(codeOnly.indexOf('if (verdict.kind === "ask") {'), codeOnly.indexOf("ctx.ui.confirm("));
+		expect(askBranch, "the dialog must sit behind the hasUI && tui gate").toContain('!ctx.hasUI || ctx.mode !== "tui"');
 	});
 
 	it("calls ctx.ui.select( exactly once in code, inside approve_ky_command's own execute()", () => {

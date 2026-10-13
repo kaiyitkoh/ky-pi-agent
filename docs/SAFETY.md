@@ -74,20 +74,8 @@ docstring for the structural argument). Concretely, it catches:
   stay allowed — a named allow-case, never merely "absent from the deny list".
   A leading git GLOBAL option before the subcommand (`git -C /repo status`,
   `git --no-pager log`) is skipped correctly rather than misread as an
-  unclassified subcommand. `git push` ALSO blocks independently of `HEAD`
-  unless every refspec is an explicit `src:dst` with a non-protected
-  destination (`git push origin feat:feat`). It blocks when a destination
-  names a protected branch (`git push origin HEAD:main`, the forced `+main`
-  and `+refs/heads/main` spellings, and `heads/main`, which git expands on
-  the remote), when the destination is empty (`:`, `+:`), a wildcard
-  (`refs/heads/*:refs/heads/*`) or `HEAD`, when it pushes every branch
-  (`--all`, `--branches`, `--mirror`), when it names no refspec or only a
-  bare source (`git push`, `git push origin`, `git push origin feat`, all of
-  which take the destination from `remote.<r>.push` or `push.default`), and
-  when a global `-c`/`--config-env` overrides `push.*`, `remote.*` or
-  `branch.*`. `--delete <name>` is the one bare-name form allowed, for a
-  non-protected name. Config written earlier with `git config` cannot
-  redirect an explicit `src:dst`, so the rule does not read it.
+  unclassified subcommand. `git push` has its own
+  policy, independent of `HEAD` (see "git push: block, ask, refuse" below).
   `glab mr merge` blocks unconditionally on every branch, because in this
   project's work repo an MR merge *is* the deploy trigger. `glab mr create`
   (plan 09-04, FLOW-08) is a conditional allow, independent of `HEAD` but
@@ -149,6 +137,59 @@ docstring for the structural argument). Concretely, it catches:
   `event.input` after the hook already approved a call is still caught by the
   wrapper re-evaluating the params that actually reach execution
   (`tests/integration/double-enforcement.test.ts`).
+
+### git push: block, ask, refuse
+
+Every `git push` resolves to one of three outcomes, checked on any branch:
+
+- **Block** (no approval path): a destination of `main`, `master` or
+  `staging` (`PUSH_PROTECTED_BRANCHES` in `safety/index.ts`, compared
+  case-insensitively, with `refs/heads/` and `heads/` stripped); any force
+  (`--force`, `-f` alone or clustered, `--force-with-lease`,
+  `--force-if-includes`, a `+refspec`); every-ref forms (`--all`,
+  `--branches`, `--mirror`, `--tags`, `--prune`, `tag <name>`); an empty,
+  wildcard or `HEAD` destination (`:`, `refs/heads/*:refs/heads/*`,
+  `feat:HEAD`); deleting a protected branch (`--delete staging`, `:main`);
+  a GitLab push option that merges server-side
+  (`merge_request.merge_when_pipeline_succeeds`, `auto_merge`); submodule
+  recursion (`--recurse-submodules=on-demand`, or `push.recurseSubmodules` /
+  `submodule.recurse` in config, unless `--no-recurse-submodules`); a global
+  `-c`/`--config-env` touching `push.*`, `remote.*`, `branch.*` or
+  `submodule.*`; an unrecognised flag; and every push while `HEAD` itself is
+  protected.
+- **Ask**: a push whose destination resolves to a non-protected branch. The
+  `tool_call` hook calls `ctx.ui.confirm` with the exact command, the
+  resolved remote and branch, and how it was resolved. Approve records a
+  one-shot grant the bash wrapper consumes; deny blocks.
+- **Refuse when nobody can be asked**: an `ask` blocks unless
+  `ctx.hasUI` is true and `ctx.mode` is `"tui"`, so print, json, rpc and
+  subagent children fail closed. `bg_run` always blocks it (no wrapper to
+  consume a grant).
+
+How the destination is resolved:
+
+- `git push origin feat:feat` (explicit `src:dst`) needs no config.
+- `git push origin feat` / `git push origin HEAD` follow git's own mapping
+  (`builtin/push.c` `set_refspecs`): a configured `remote.<r>.push` blocks,
+  `push.default=upstream` maps to `branch.<src>.merge`, otherwise the same
+  name.
+- `git push`, `git push -u`, `git push origin` read `branch.<b>.pushRemote`,
+  `remote.pushDefault`, `branch.<b>.remote` and `push.default`: `current`
+  pushes `HEAD`; `upstream` pushes to `branch.<b>.merge`; `simple` checks
+  both `HEAD` and a differently named upstream; `matching`, `nothing`, an
+  unknown value, a configured `remote.<r>.push` and a detached `HEAD` block.
+
+Config and `HEAD` are read before the command runs, so a config-derived
+destination is trusted only when the push is the command's only invocation,
+with no `NAME=value` prefix, no wrapper (`env`, `sudo`, ...), no earlier
+`cd`, and no `--git-dir`/`--work-tree`/`--namespace`. Otherwise
+`git config push.default upstream && git push origin feat` or
+`git checkout main && git push` could change the answer after it was read;
+those block and ask for an explicit `src:dst`. Two pushes in one command, or
+a push combined with an approval-protocol command (`terraform apply`), block:
+one grant cannot cover both. Residual: config changed by a concurrent
+process between the read and the push is not seen; GitLab's server-side
+protection still refuses a protected branch.
 
 ## What this guard does not register (WR-09)
 
@@ -214,7 +255,7 @@ Verified against pi 1.1.0 source. These controls live in `registerToolCallHook` 
 
 - **Nested calls are guarded.** A call issued through `ctx.executeTool` (the mechanism `codemode` uses) goes through the same `tool_call` hook and the wrapped tools (`agent-session.js:326-343`, `:388-416`; `codemode/execute.js:399`). Audit rows for nested calls carry `parentToolCallId` (ids are `<parent>/<n>`). Proven in `tests/integration/new-tool-paths.test.ts`.
 - **Deny list (fail closed, audited, even on malformed input):** `powershell` (unbash cannot parse PowerShell; `types.d.ts:922-925`; it must never be added to `defaultTools`), `codemode` (`extensions/codemode/tool.js:31`), `tool_search` (`extensions/tool-search/tool.js:11`), the MCP resource tools `list_mcp_resources` / `list_mcp_resource_templates` / `read_mcp_resource` (`extensions/mcp/resources.js`), anything starting `mcp__` (`extensions/mcp/tools.js:46`), and the pi-background-tasks@2.6.9 tools outside its `process` feature (`bg_run_pi_attested`, `bg_delegate`, `delegate_read_artifact`, `fusion_*`), which take prompts or argv the guard cannot classify.
-- **`bg_run` is classified as `bash`** with the same command through the same `evaluate()` path (audited as tool `bg_run`). A missing or non-string command blocks. A `confirm` verdict BLOCKS for `bg_run`: the approve-and-reissue protocol consumes grants in the bash wrapper, which `bg_run` does not have. `bg_run` has no cwd parameter. `bg_status`, `bg_logs`, `bg_kill` carry only task ids and need no mapping.
+- **`bg_run` is classified as `bash`** with the same command through the same `evaluate()` path (audited as tool `bg_run`). A missing or non-string command blocks. A `confirm` or `ask` verdict BLOCKS for `bg_run`: the approve-and-reissue protocol consumes grants in the bash wrapper, which `bg_run` does not have. `bg_run` has no cwd parameter. `bg_status`, `bg_logs`, `bg_kill` carry only task ids and need no mapping.
 - **bg_run enforcement (08.1 review fixes).** One policy, `guardBgRun`, runs at the hook AND inside the vendored `bg_run` `execute()` (local patch, PROVENANCE deviation 8). It blocks `isAgent` other than `false` (a child `pi` may start without this guard), and blocks whenever the effective background shell is not bash/POSIX: the vendored policy now defaults to Git Bash on Windows (PROVENANCE deviation 7), so the executed shell is the parsed shell; `PI_BG_SHELL=cmd` makes `bg_run` fail closed.
 - **`lsp_fix` and other extension tools stay outside the deny table (WR-03, accepted).** `@narumitw/pi-lsp` applies edits through its own file writes, which neither the hook nor a wrapper sees, so path-detonation rules do not cover it. This is the EV-42 class, not new; a name-based deny would only cover tools we already know, and enumerating future tools is the maintenance tax the project avoids. Mitigations: lsp_fix is not in the default active tool set, and `.git/hooks`-style payloads still need a later command that the guard sees.
 - **Audit redaction (WR-04).** `writeAuditRow` redacts obvious credential shapes (AWS key ids, `sk-`/`ghp_`/`glpat-` tokens, `Bearer` values, `token=`/`password:`-style pairs) from `command` and `reason`, and denied tools without a `command` string log only their input key names. Best effort, not a guarantee.

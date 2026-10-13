@@ -10,10 +10,10 @@ import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earen
 import { createBashTool, createEditTool, createReadTool, createWriteTool } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
-import { approve, consume, createPending, markHookDeferred, peek, validate } from "./approvals.ts";
+import { approve, consume, createPending, grantConfirmed, markHookDeferred, peek, validate } from "./approvals.ts";
 import { pruneAuditLogs, writeAuditRow } from "./audit.ts";
 import type { AuditVerdict } from "./schema.ts";
-import { currentBranch } from "./git.ts";
+import { currentBranch, gitConfigValues } from "./git.ts";
 import { canonicalisePathArg } from "./paths.ts";
 import { evaluate, type PolicyFacts, type Verdict } from "./policy.ts";
 
@@ -28,6 +28,9 @@ export const APPROVAL_AUDIT_EVENT = "safety.approve_ky_command";
 
 /** Forwarded to git.ts#classifyGitInvocation; compared case-insensitively there. */
 export const PROTECTED_BRANCHES: readonly string[] = ["main", "master"];
+
+/** A push may never reach these; a commit on staging is not refused, only pushing to it. */
+export const PUSH_PROTECTED_BRANCHES: readonly string[] = [...PROTECTED_BRANCHES, "staging"];
 
 const APPROVE_CHOICE = "Approve";
 const DENY_CHOICE = "Deny";
@@ -50,6 +53,8 @@ function buildFacts(ctx: ExtensionContext): PolicyFacts {
 		// Lazy: only invoked for an invocation whose executable is literally "git".
 		currentBranchFor: (cwd: string) => currentBranch(cwd),
 		protectedBranches: PROTECTED_BRANCHES,
+		pushProtectedBranches: PUSH_PROTECTED_BRANCHES,
+		gitConfigFor: (dir: string, key: string) => gitConfigValues(dir, key),
 		kubeconfigEnv: process.env.KUBECONFIG,
 	};
 }
@@ -133,7 +138,7 @@ export function guardBgRun(input: unknown, ctx: ExtensionContext): Verdict {
 		return { kind: "block", reason: `bg_run is blocked: ${shellProblem} (fail closed)` };
 	}
 	const v = classifyAtWrapper("bash", { command: rec.command }, ctx);
-	if (v.kind === "confirm") {
+	if (v.kind === "confirm" || v.kind === "ask") {
 		return { kind: "block", reason: `${v.reason} -- bg_run cannot use the approval protocol; run it through bash instead` };
 	}
 	return v;
@@ -149,7 +154,7 @@ function wrapperOutcome(toolName: string, command: string, ctx: ExtensionContext
 		writeAuditRow(ctx.cwd, { ...row, verdict: "allow", reason: "wrapper: re-evaluated the params that actually reached execution and allowed" });
 		return;
 	}
-	if (verdict.kind === "confirm" && consume(verdict.requestKey)) {
+	if ((verdict.kind === "confirm" || verdict.kind === "ask") && consume(verdict.requestKey)) {
 		writeAuditRow(ctx.cwd, { ...row, verdict: "allow", reason: `wrapper: one-shot approval grant consumed -- ${verdict.reason}` });
 		return;
 	}
@@ -358,6 +363,29 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 
 		if (verdict.kind === "allow") {
 			audit(toolName, command, "allow", "hook: allowed");
+			return undefined;
+		}
+
+		if (verdict.kind === "ask") {
+			if (peek(verdict.requestKey) && markHookDeferred(verdict.requestKey, event.toolCallId)) {
+				audit(toolName, command, "allow", `hook: a confirmation grant is present for this exact push -- deferring to the wrapper -- ${verdict.reason}`);
+				return undefined;
+			}
+			// Only the interactive TUI can ask; rpc, json, print and subagent children refuse (fail closed).
+			if (!ctx.hasUI || ctx.mode !== "tui") {
+				const reason = `${verdict.reason} -- no interactive UI to confirm it (mode "${ctx.mode}"), so it is refused`;
+				audit(toolName, command, "block", reason);
+				return { block: true, reason };
+			}
+			const approved = await ctx.ui.confirm("Allow this git push?", verdict.prompt);
+			if (approved !== true) {
+				const reason = `${verdict.reason} -- the user declined it`;
+				audit(toolName, command, "block", reason);
+				return { block: true, reason };
+			}
+			grantConfirmed(verdict.requestKey, command, verdict.reason);
+			markHookDeferred(verdict.requestKey, event.toolCallId);
+			audit(toolName, command, "allow", `hook: confirmed by the user -- ${verdict.reason}`);
 			return undefined;
 		}
 

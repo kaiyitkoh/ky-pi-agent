@@ -164,6 +164,8 @@ export interface CanonicalInvocation {
 	readonly cwdOverride?: string;
 	/** Set when a `cd`/`pushd`/`popd` ran earlier in the script; `"unknown"` when its target is not a literal directory. */
 	readonly afterCd?: "known" | "unknown";
+	/** Set when `NAME=value` words prefix the command, which can change git's config or repository for this run only. */
+	readonly assignments?: true;
 }
 
 export type ShellVerdict =
@@ -419,7 +421,15 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 		}
 		return [
 			{
-				invocation: { executable, args, wrappers: resolved.wrappers, rawSegment, ...(cwdOverride !== undefined ? { cwdOverride } : {}), ...afterCd },
+				invocation: {
+					executable,
+					args,
+					wrappers: resolved.wrappers,
+					rawSegment,
+					...(cwdOverride !== undefined ? { cwdOverride } : {}),
+					...afterCd,
+					...(node.prefix.length > 0 ? { assignments: true as const } : {}),
+				},
 				confident: resolved.confident,
 				expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
 			},

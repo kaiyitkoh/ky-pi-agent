@@ -97,7 +97,7 @@ const PHASE_THREE_IDS = ["RB-03-01", "RB-03-02", "RB-03-03", "RB-03-04", "RB-03-
  * and that proof is not this check, which is exactly why the array exists
  * rather than a `[x]` in a requirements file.
  */
-const PHASE_FOUR_IDS = ["RB-04-01"] as const;
+const PHASE_FOUR_IDS = ["RB-04-01", "RB-04-02"] as const;
 
 /**
  * The Phase 5 entry this file governs.
@@ -463,6 +463,7 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		"git push origin main",
 		"git reset --hard HEAD~1",
 	],
+	"RB-04-02": [`pi -p "run: git push -u origin rb-04-02"`, "git push origin --delete rb-04-02"],
 
 	// PHASE 5 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phases 3-4.
 	// The credential/id exports are pinned whole because a placeholder-only

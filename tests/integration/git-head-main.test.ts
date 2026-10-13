@@ -132,9 +132,9 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 		const verdict = classifyGitInvocation({ subcommand: "push", args: ["origin", "HEAD:feature/x"] }, facts(branch));
 		expect(
 			verdict.kind,
-			"the SAME push invocation that blocked on main must now allow -- the rule is about the checked-out " +
-				"branch, not about the word \"main\" appearing anywhere",
-		).toBe("allow");
+			"the SAME push invocation that blocked on main must now ask instead of block -- the rule is about the " +
+				"checked-out branch, not about the word \"main\" appearing anywhere",
+		).toBe("ask");
 	});
 
 	it("case 3 — detached HEAD reports the distinct DETACHED_HEAD sentinel, and the classifier treats it as not-protected", () => {
@@ -155,8 +155,8 @@ describe("SAFE-04 — currentBranch, proven against real disposable checkouts", 
 		expect(branch.length, "must not be the empty-string failure mode this module's docstring warns against").toBeGreaterThan(0);
 
 		const verdict = classifyGitInvocation({ subcommand: "push", args: ["origin", "HEAD:feature/x"] }, facts(branch));
-		expect(verdict.kind, "DETACHED_HEAD can never equal a configured protected branch name -- must allow").toBe(
-			"allow",
+		expect(verdict.kind, "DETACHED_HEAD can never equal a configured protected branch name -- must ask, not block").toBe(
+			"ask",
 		);
 	});
 

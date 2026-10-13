@@ -54,7 +54,7 @@ interface Row {
 	readonly rest: string;
 	readonly kind: "git" | "glab";
 	readonly currentBranch: string;
-	readonly expected: "allow" | "block";
+	readonly expected: "allow" | "ask" | "block";
 	readonly why: string;
 }
 
@@ -99,7 +99,7 @@ const ROWS: readonly Row[] = [
 	// -------------------------------------------------------------------------
 	// The paired flip -- same write, non-protected branch
 	// -------------------------------------------------------------------------
-	{ command: "git push origin feature/x:feature/x", rest: "push origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "allow", why: "the rule is about the CHECKED-OUT branch, not about the word \"main\" appearing anywhere" },
+	{ command: "git push origin feature/x:feature/x", rest: "push origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "ask", why: "the rule is about the CHECKED-OUT branch, not about the word \"main\" appearing anywhere" },
 	{ command: "git commit --amend", rest: "commit --amend", kind: "git", currentBranch: "feature/x", expected: "allow", why: "same write, non-protected branch" },
 	{ command: "git reset --hard", rest: "reset --hard", kind: "git", currentBranch: "feature/x", expected: "allow", why: "same write, non-protected branch" },
 
@@ -136,25 +136,25 @@ const ROWS: readonly Row[] = [
 	{ command: "git push --mirror origin", rest: "push --mirror origin", kind: "git", currentBranch: "feature/x", expected: "block", why: "--mirror pushes every ref, protected ones included" },
 	{ command: "git push --all --force origin", rest: "push --all --force origin", kind: "git", currentBranch: "feature/x", expected: "block", why: "--all pushes every branch, protected ones included" },
 	{ command: "git push --branches origin", rest: "push --branches origin", kind: "git", currentBranch: "feature/x", expected: "block", why: "--branches is the newer spelling of --all" },
-	{ command: "git push origin +feature/x:feature/x", rest: "push origin +feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "allow", why: "force-pushing a non-protected branch stays allowed" },
+	{ command: "git push origin +feature/x:feature/x", rest: "push origin +feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "block", why: "force-pushing is refused on every branch, protected or not" },
 	{
 		command: "git push origin feature/x:feature/x",
 		rest: "push origin feature/x:feature/x",
 		kind: "git",
 		currentBranch: "feature/x",
-		expected: "allow",
-		why: "the paired negative -- a push whose destination is NOT a protected branch, from a non-protected HEAD, must still be allowed, so the rule cannot degenerate into \"any push is blocked\"",
+		expected: "ask",
+		why: "the paired negative -- a push whose destination is NOT a protected branch, from a non-protected HEAD, asks rather than blocks, so the rule cannot degenerate into \"any push is blocked\"",
 	},
-	{ command: "git push -u origin HEAD:refs/heads/feature/x", rest: "push -u origin HEAD:refs/heads/feature/x", kind: "git", currentBranch: "feature/x", expected: "allow", why: "explicit full-ref destination that is not protected" },
-	{ command: "git push -o ci.skip origin feature/x:feature/x", rest: "push -o ci.skip origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "allow", why: "-o consumes its value, so the remote and refspec are still found" },
-	{ command: "git push --repo origin feature/x:feature/x", rest: "push --repo origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "allow", why: "--repo names the remote, so every positional is a refspec" },
-	{ command: "git push origin --delete feature/old", rest: "push origin --delete feature/old", kind: "git", currentBranch: "feature/x", expected: "allow", why: "--delete names the destination directly, and it is not protected" },
+	{ command: "git push -u origin HEAD:refs/heads/feature/x", rest: "push -u origin HEAD:refs/heads/feature/x", kind: "git", currentBranch: "feature/x", expected: "ask", why: "explicit full-ref destination that is not protected" },
+	{ command: "git push -o ci.skip origin feature/x:feature/x", rest: "push -o ci.skip origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "ask", why: "-o consumes its value, so the remote and refspec are still found" },
+	{ command: "git push --repo origin feature/x:feature/x", rest: "push --repo origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "ask", why: "--repo names the remote, so every positional is a refspec" },
+	{ command: "git push origin --delete feature/old", rest: "push origin --delete feature/old", kind: "git", currentBranch: "feature/x", expected: "ask", why: "--delete names the destination directly, and it is not protected" },
 	{ command: "git push origin --delete main", rest: "push origin --delete main", kind: "git", currentBranch: "feature/x", expected: "block", why: "deleting a protected branch" },
 	{ command: "git push -o -d origin feature/x", rest: "push -o -d origin feature/x", kind: "git", currentBranch: "feature/x", expected: "block", why: "-d is -o's value, not a delete, so the bare source still takes its destination from config (confirmed against a bare remote)" },
 	{ command: "git push --push-option --delete origin feature/x", rest: "push --push-option --delete origin feature/x", kind: "git", currentBranch: "feature/x", expected: "block", why: "--delete consumed as --push-option's value" },
 	{ command: "git push --exec -d origin feature/x", rest: "push --exec -d origin feature/x", kind: "git", currentBranch: "feature/x", expected: "block", why: "-d consumed as --exec's value" },
 	{ command: "git push --receive-pack --delete origin feature/x", rest: "push --receive-pack --delete origin feature/x", kind: "git", currentBranch: "feature/x", expected: "block", why: "--delete consumed as --receive-pack's value" },
-	{ command: "git push -o ci.skip origin -d feature/old", rest: "push -o ci.skip origin -d feature/old", kind: "git", currentBranch: "feature/x", expected: "allow", why: "a -d that is not a flag value still deletes the named non-protected branch" },
+	{ command: "git push -o ci.skip origin -d feature/old", rest: "push -o ci.skip origin -d feature/old", kind: "git", currentBranch: "feature/x", expected: "ask", why: "a -d that is not a flag value still deletes the named non-protected branch" },
 	{ command: "git push origin :main", rest: "push origin :main", kind: "git", currentBranch: "feature/x", expected: "block", why: "empty-source refspec deletes the protected destination" },
 	{ command: "git push", rest: "push", kind: "git", currentBranch: "feature/x", expected: "block", why: "a bare push takes its destination from remote.<r>.push / push.default, which argv cannot show" },
 	{ command: "git push origin", rest: "push origin", kind: "git", currentBranch: "feature/x", expected: "block", why: "remote but no refspec: destination comes from config" },
@@ -239,12 +239,12 @@ describe("git push with config overrides", () => {
 		},
 	);
 
-	it("an unrelated -c override does not block", () => {
+	it("an unrelated -c override does not block, so the push asks", () => {
 		const verdict = classifyGitInvocation(
 			{ subcommand: "push", args: ["origin", "feature/x:feature/x"], configOverrides: ["core.quotePath=false"] },
 			facts("feature/x"),
 		);
-		expect(verdict.kind).toBe("allow");
+		expect(verdict.kind).toBe("ask");
 	});
 });
 

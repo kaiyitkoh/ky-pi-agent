@@ -206,10 +206,10 @@ const ROWS: readonly Row[] = [
 		expected: "block",
 	},
 	{
-		name: "git push origin feature/x:feature/x on a feature branch -- allowed",
+		name: "git push origin feature/x:feature/x on a feature branch -- asks for confirmation",
 		toolName: "bash",
 		input: { command: "git push origin feature/x:feature/x" },
-		expected: "allow",
+		expected: "ask",
 	},
 	{
 		name: "cat of the harness ledger key through bash -- blocked like any sensitive read",
@@ -547,9 +547,9 @@ describe("openspec rows reach the infra arm", () => {
 });
 
 describe("SAFE-03/SAFE-10 -- every Verdict.kind is reachable by at least one row", () => {
-	it("produces allow, confirm and block across the fixture table", () => {
+	it("produces allow, ask, confirm and block across the fixture table", () => {
 		const observed = new Set(ROWS.map((r) => r.expected));
-		expect([...observed].sort()).toEqual(["allow", "block", "confirm"]);
+		expect([...observed].sort()).toEqual(["allow", "ask", "block", "confirm"]);
 	});
 });
 
