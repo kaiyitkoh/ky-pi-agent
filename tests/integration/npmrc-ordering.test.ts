@@ -40,28 +40,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
-import { repoRoot } from "../helpers/git.ts";
+import { bootstrapNpmStub, type BootstrapRepoCopy, makeBootstrapRepoCopy, runBootstrap } from "../helpers/bootstrap-repo.ts";
 import { scratchDirs } from "../helpers/scratch.ts";
 import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
-
-/**
- * Forward slashes: Git Bash `sh` will not accept a backslash path argument.
- *
- * Only ever used for `--assert-hardening` below (cases 1/2): that mode never
- * calls `write_env_template`, so it never writes `$REPO_ROOT/.env.example`
- * and is safe to run against the real repo directly. Case 3's full run uses
- * its own throwaway `REPO_ROOT` copy instead -- see `bootstrapRepoCopy`.
- */
-const BOOTSTRAP = join(repoRoot(), "bin", "bootstrap.sh").replace(/\\/g, "/");
-
-const TIMEOUT_MS = 120_000;
-
-interface Run {
-	stdout: string;
-	stderr: string;
-	status: number | null;
-}
 
 const scratch = scratchDirs();
 const tempDir = scratch.make;
@@ -79,7 +60,7 @@ function bootstrapRepoCopy(): BootstrapRepoCopy {
 }
 
 /**
- * Run the real script as a subprocess.
+ * BootstrapRun the real script as a subprocess.
  *
  * `sh` takes an args array with `shell: false` -- it is a genuine executable on
  * both platforms (Git Bash ships `sh.exe`), unlike the `.cmd` shims that force
@@ -97,68 +78,6 @@ function shPassesToChildren(key: string): boolean {
 		windowsHide: true,
 	});
 	return (r.stdout ?? "").toLowerCase().split("\n").some((l) => l.startsWith(`${key.toLowerCase()}=`));
-}
-
-function runBootstrap(
-	args: string[],
-	opts: { agentDir: string; env?: Record<string, string>; repoCopy?: BootstrapRepoCopy },
-): Run {
-	const env: Record<string, string> = {
-		...(opts.env ?? (process.env as Record<string, string>)),
-		PI_CODING_AGENT_DIR: opts.agentDir,
-	};
-
-	const script = opts.repoCopy?.bootstrapSh ?? BOOTSTRAP;
-	const cwd = opts.repoCopy?.root ?? repoRoot();
-
-	const result = spawnSync("sh", [script, ...args], {
-		cwd,
-		env,
-		encoding: "utf-8",
-		timeout: TIMEOUT_MS,
-		windowsHide: true,
-	});
-
-	if (result.error) {
-		throw new Error(
-			`failed to run \`sh ${script} ${args.join(" ")}\`: ${result.error.message}`,
-		);
-	}
-	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
-}
-
-/**
- * A stub `npm` that answers each question the script actually asks.
- *
- * Modelled on the real argv shapes documented in RESEARCH 1.1: Pi's two install
- * paths are `npm install --omit=dev` (git source, cwd = clone) and
- * `npm install <spec> --prefix <root> --legacy-peer-deps` (npm source), and the
- * bootstrap's own install is `npm install -g --ignore-scripts <pkg>@<ver>`.
- * Every one of those matches `^npm install`, which is what the ordering
- * assertion keys on.
- *
- * A single static stdout would have to answer `true` to `npm view … version`
- * too, which is not a version -- the stub would then be "passing" the version
- * gate on a token no registry would ever return.
- */
-function npmStub(logTo: string): StubSpec {
-	return {
-		exitCode: 0,
-		logTo,
-		match: [
-			// The control being asserted. Answering `true` here is what lets the
-			// run proceed as far as the install step at all.
-			{ when: ["config", "get", "ignore-scripts"], stdout: "true\n" },
-			// `npm view <pkg>@<ver> version --json` -> a JSON string literal.
-			{ when: ["view"], stdout: '"1.1.0"\n' },
-			// `npm ls -g --depth=0 --json` -> an empty tree, so the pin does not
-			// match and `install_pi` genuinely proceeds. If this answered with the
-			// pinned version installed, the script would correctly no-op and the
-			// log would contain no install line at all.
-			{ when: ["ls", "-g"], stdout: '{"dependencies":{}}\n' },
-			// Anything else -- notably `install -g` -- exits 0 silently.
-		],
-	};
 }
 
 /** `pi` is stubbed too: it must never really run, and if it ever does it is logged. */
@@ -191,7 +110,7 @@ function piStub(logTo: string): StubSpec {
  * The reason neither was caught is that the only coverage was incidental --
  * `case 1` below happens to run under vitest, which happens to export
  * `NPM_CONFIG_IGNORE_SCRIPTS`. That is a property of the launcher, not an
- * assertion. Run the suite from a runner that does not export those keys and
+ * assertion. BootstrapRun the suite from a runner that does not export those keys and
  * the guard silently evaporates. Hence this table: one row per poison shape,
  * asserted explicitly.
  *
@@ -251,7 +170,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 		},
 	];
 
-	for (const { key, why, strippable } of POISON) {
+	for (const { key, why } of POISON) {
 		it(`refuses to certify an empty npm root when ${key} is set (${why})`, () => {
 			const run = runBootstrap(["--assert-hardening"], {
 				agentDir: tempDir("kypi-agentdir-"),
@@ -268,7 +187,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 				run.stdout,
 				"a refusal must never also print the all-clear",
 			).not.toContain("All npm scopes are hardened");
-		}, TIMEOUT_MS);
+		});
 	}
 
 	for (const { key, why } of POISON.filter((p) => p.strippable)) {
@@ -289,7 +208,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 					`happen.\nstdout:\n${run.stdout}\nstderr:\n${run.stderr}`,
 			).toBe(0);
 			expect(run.stdout).toContain("All npm scopes are hardened");
-		}, TIMEOUT_MS);
+		});
 	}
 
 	for (const { key, why } of POISON.filter((p) => !p.strippable)) {
@@ -324,7 +243,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 				"the refusal must name the offending variable, or it is unactionable",
 			).toContain(key.toLowerCase());
 			expect(run.stdout).not.toContain("All npm scopes are hardened");
-		}, TIMEOUT_MS);
+		});
 	}
 
 	it("passes on a hardened root with no poison at all (the baseline is live)", () => {
@@ -334,7 +253,7 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 		const run = runBootstrap(["--assert-hardening"], { agentDir: hardenedAgentDir() });
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain("All npm scopes are hardened");
-	}, TIMEOUT_MS);
+	});
 });
 
 describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any install", () => {
@@ -353,7 +272,7 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 			run.stderr,
 			"the refusal must name the control, or the operator cannot act on it",
 		).toContain("ignore-scripts");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 2 -- `--assert-hardening` passes once the control is written", () => {
 		// The paired positive. Without it, case 1 would be satisfied by a script
@@ -370,7 +289,7 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 		const after = runBootstrap(["--assert-hardening"], { agentDir });
 		expect(after.status, `stderr:\n${after.stderr}`).toBe(0);
 		expect(after.stdout).toContain("ignore-scripts=true");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 3 -- the recorded invocation order puts the assertion before every install", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -382,7 +301,7 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 		// `scratch` cleanup, no restore needed.
 		const repoCopy = bootstrapRepoCopy();
 
-		const run = withStubBin({ npm: npmStub(log), pi: piStub(log) }, (env) => {
+		const run = withStubBin({ npm: bootstrapNpmStub(log), pi: piStub(log) }, (env) => {
 			// PRE-FLIGHT GUARD, not decoration. This case is the only one that
 			// lets the script reach `install_pi` for real, so if the stub were
 			// not the `npm` on PATH the script would run
@@ -448,5 +367,5 @@ describe("BOOT-01 (ordering) -- the ignore-scripts assertion precedes any instal
 			lines.some((l) => l.startsWith("npm config get ignore-scripts --prefix")),
 			`a --prefix-scoped assertion must be among them; log was:\n${lines.join("\n")}`,
 		).toBe(true);
-	}, TIMEOUT_MS);
+	});
 });

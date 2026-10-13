@@ -32,30 +32,10 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
+import { bootstrapNpmStub, type BootstrapRepoCopy, type BootstrapRun, makeBootstrapRepoCopy, runBootstrap } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { scratchDirs } from "../helpers/scratch.ts";
-import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
-
-/**
- * Forward slashes: Git Bash `sh` will not accept a backslash path argument.
- *
- * Only ever used for a `--check-only` run below (cases 1/2/3): `run_check_only`
- * (bin/bootstrap.sh's own dispatcher) never calls `write_env_template`, so it
- * never writes `$REPO_ROOT/.env.example` and is safe to run against the real
- * repo directly. Case 4's full run uses its own throwaway `REPO_ROOT` copy
- * instead -- see `bootstrapRepoCopy` below.
- */
-const BOOTSTRAP = join(repoRoot(), "bin", "bootstrap.sh").replace(/\\/g, "/");
-
-/** The real registry round-trip in `--check-only` dominates; npm is slow to start. */
-const TIMEOUT_MS = 120_000;
-
-interface Run {
-	stdout: string;
-	stderr: string;
-	status: number | null;
-}
+import { withStubBin } from "../helpers/stub-bin.ts";
 
 const scratch = scratchDirs();
 const tempDir = scratch.make;
@@ -70,52 +50,6 @@ function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
 	scratch.track(copy.root);
 	return copy;
-}
-
-/**
- * Run the real script as a subprocess, exactly as a user or CI would.
- *
- * `sh` is spawned with an args array and `shell: false`: it resolves through
- * PATH as a genuine executable on both platforms (Git Bash ships `sh.exe`),
- * unlike the `.cmd` shims that force `shell: true` for `npm` and `pi` -- see
- * the CVE-2024-27980 note in `tests/helpers/stub-bin.ts`.
- *
- * `repoCopy`, when given, redirects `SCRIPT_DIR/..` (and the subprocess
- * `cwd`) at a throwaway copy instead of the real repo -- see
- * `bootstrapRepoCopy`.
- */
-function runBootstrap(
-	args: string[],
-	opts: {
-		agentDir: string;
-		env?: Record<string, string>;
-		extraEnv?: Record<string, string>;
-		repoCopy?: BootstrapRepoCopy;
-	},
-): Run {
-	const env: Record<string, string> = {
-		...(opts.env ?? (process.env as Record<string, string>)),
-		PI_CODING_AGENT_DIR: opts.agentDir,
-		...(opts.extraEnv ?? {}),
-	};
-
-	const script = opts.repoCopy?.bootstrapSh ?? BOOTSTRAP;
-	const cwd = opts.repoCopy?.root ?? repoRoot();
-
-	const result = spawnSync("sh", [script, ...args], {
-		cwd,
-		env,
-		encoding: "utf-8",
-		timeout: TIMEOUT_MS,
-		windowsHide: true,
-	});
-
-	if (result.error) {
-		throw new Error(
-			`failed to run \`sh ${script} ${args.join(" ")}\`: ${result.error.message}`,
-		);
-	}
-	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
 }
 
 /** Sorted relative paths of everything under `dir`, directories marked with a trailing slash. */
@@ -147,28 +81,6 @@ function gitStatus(): string {
 	return result.stdout ?? "";
 }
 
-/**
- * A stub `npm` that answers each of the four questions the script actually
- * asks, rather than answering one thing to all of them.
- *
- * Present in case 4 for one reason only: a full run reaches `install_pi`, and
- * no test may run `npm install -g` against the developer's real global prefix.
- * `KYPI_SKIP_INSTALL=1` is set as well -- two independent guards, because the
- * cost of either failing alone is mutating machine state this suite promised
- * not to touch. [threat T-01-07]
- */
-function npmStub(logTo: string): StubSpec {
-	return {
-		exitCode: 0,
-		logTo,
-		match: [
-			{ when: ["config", "get", "ignore-scripts"], stdout: "true\n" },
-			{ when: ["view"], stdout: '"1.1.0"\n' },
-			{ when: ["ls", "-g"], stdout: '{"dependencies":{}}\n' },
-		],
-	};
-}
-
 describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 	afterEach(scratch.cleanup);
 
@@ -190,7 +102,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		// above, on a machine with no `glab`, is exactly the proof of.
 		expect(run.stdout, "the probe table must render the requirement class").toContain("optional");
 		expect(run.stdout).toContain("required");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 2 -- two consecutive `--check-only` runs are byte-identical", () => {
 		// ONE agent dir for both runs, deliberately. The script correctly echoes
@@ -220,7 +132,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(first.stdout, "no clock time may appear in check-only output").not.toMatch(
 			/\d{1,2}:\d{2}:\d{2}/,
 		);
-	}, TIMEOUT_MS);
+	});
 
 	it("case 3 -- `--check-only` mutates nothing, in the agent dir or the repo", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -246,7 +158,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 			gitStatus(),
 			"--check-only must not write .env.example, settings or any other repo file",
 		).toBe(repoBefore);
-	}, TIMEOUT_MS);
+	});
 
 	it("case 4 -- a full run repeated changes nothing: settings.json and .env.example are byte-identical", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -259,7 +171,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		const repoCopy = bootstrapRepoCopy();
 
 		const { first, second, envAfterFirst, envAfterSecond } = withStubBin(
-			{ npm: npmStub(log) },
+			{ npm: bootstrapNpmStub(log) },
 			(env) => {
 				const opts = {
 					agentDir,
@@ -311,7 +223,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(envAfterSecond, ".env.example must be byte-identical across two runs").toBe(
 			envAfterFirst,
 		);
-	}, TIMEOUT_MS);
+	});
 
 	function writeUserSettings(agentDir: string, packages: unknown[]): void {
 		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages }, null, 2), "utf-8");
@@ -328,10 +240,10 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		);
 	}
 
-	function checkOnlyStubbed(agentDir: string): Run {
+	function checkOnlyStubbed(agentDir: string): BootstrapRun {
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "npm.log").replace(/\\/g, "/");
-		return withStubBin({ npm: npmStub(log) }, (env) =>
+		return withStubBin({ npm: bootstrapNpmStub(log) }, (env) =>
 			runBootstrap(["--check-only"], { agentDir, env }),
 		);
 	}
@@ -345,7 +257,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 
 		expect(run.status).toBe(1);
 		expect(run.stderr).toContain("one delivery path");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 6 -- a git ky-pi-agent package without the stub warns about the double load and exits 0", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -355,7 +267,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toMatch(/WARN user-level package git:github\.com\/kaiyitkoh\/ky-pi-agent@v1\.0\.0 .*double-loads/);
-	}, TIMEOUT_MS);
+	});
 
 	it("case 7 -- an unfiltered local package of this checkout warns that it also loads the guard", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -367,7 +279,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain("also loads the safety extension; the second copy skips registering");
 		expect(run.stdout).not.toContain("WARN harness package not configured");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 7b -- the filtered harness entry bootstrap writes is reported as the harness package, without a warning", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -380,7 +292,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain(`harness package ${source} (safety extension filtered out)`);
 		expect(run.stdout).not.toMatch(/WARN (user-level|harness)/);
-	}, TIMEOUT_MS);
+	});
 
 	it("case 7d -- a git package beside the local harness entry fails, stub or not", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -394,7 +306,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 
 		expect(run.status).toBe(1);
 		expect(run.stderr).toContain("both load the harness");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 7e -- the filtered harness entry with no stub fails: the harness would run unguarded", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -405,7 +317,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 
 		expect(run.status).toBe(1);
 		expect(run.stderr).toContain("without the guard");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 7c -- no harness entry is reported, since the commands then load only inside this checkout", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -416,7 +328,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain("WARN harness package not configured");
-	}, TIMEOUT_MS);
+	});
 
 	it("case 9 -- a dependency the checkout lacks is reported, and nothing is installed", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -429,14 +341,14 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "npm.log").replace(/\\/g, "/");
 
-		const run = withStubBin({ npm: npmStub(log) }, (env) => runBootstrap(["--check-only"], { agentDir, env, repoCopy }));
+		const run = withStubBin({ npm: bootstrapNpmStub(log) }, (env) => runBootstrap(["--check-only"], { agentDir, env, repoCopy }));
 
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain("WARN kypi-absent-fixture@1.0.0 is not installed");
 		expect(run.stdout).toMatch(/WARN unbash@0\.0\.1 is installed at \d/);
 		expect(readFileSync(log, "utf-8")).not.toContain("npm ci");
 		expect(listRecursive(agentDir)).toEqual([]);
-	}, TIMEOUT_MS);
+	});
 
 	it("case 8 -- unrelated user packages produce the single-path line and no warning", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -448,5 +360,5 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain("one delivery path (no user-level package loads this checkout)");
 		expect(run.stdout).not.toContain("double-loads");
-	}, TIMEOUT_MS);
+	});
 });

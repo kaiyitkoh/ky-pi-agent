@@ -42,9 +42,9 @@ import { join } from "node:path";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
+import { bootstrapNpmStub, type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { scratchDirs } from "../helpers/scratch.ts";
-import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
+import { withStubBin } from "../helpers/stub-bin.ts";
 
 const TIMEOUT_MS = 120_000;
 
@@ -68,24 +68,11 @@ function bootstrapRepoCopy(): BootstrapRepoCopy {
 	return copy;
 }
 
-/** Answers each of the four questions the script actually asks -- see templates-install.test.ts. */
-function npmStub(logTo: string): StubSpec {
-	return {
-		exitCode: 0,
-		logTo,
-		match: [
-			{ when: ["config", "get", "ignore-scripts"], stdout: "true\n" },
-			{ when: ["view"], stdout: '"0.84.1"\n' },
-			{ when: ["ls", "-g"], stdout: '{"dependencies":{}}\n' },
-		],
-	};
-}
-
 function runBootstrap(agentDir: string, args: string[], repoCopy: BootstrapRepoCopy): Run {
 	const logDir = tempDir("kypi-log-");
 	const log = join(logDir, "npm.log").replace(/\\/g, "/");
 
-	return withStubBin({ npm: npmStub(log) }, (env) => {
+	return withStubBin({ npm: bootstrapNpmStub(log, "0.84.1") }, (env) => {
 		const result = spawnSync("sh", [repoCopy.bootstrapSh, ...args], {
 			cwd: repoCopy.root,
 			env: {

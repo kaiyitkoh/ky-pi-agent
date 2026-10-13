@@ -29,31 +29,12 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, it } from "vitest";
 
-import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
+import { bootstrapNpmStub, type BootstrapRepoCopy, makeBootstrapRepoCopy, runBootstrap } from "../helpers/bootstrap-repo.ts";
 import { repoRoot } from "../helpers/git.ts";
 import { scratchDirs } from "../helpers/scratch.ts";
-import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
+import { withStubBin } from "../helpers/stub-bin.ts";
 
-/**
- * Forward slashes: Git Bash `sh` will not accept a backslash path argument.
- *
- * Only ever used for a `--check-only` run below (cases 4/5): `run_check_only`
- * (bin/bootstrap.sh's own dispatcher) never calls `write_env_template`, so it
- * never writes `$REPO_ROOT/.env.example` and is safe to run against the real
- * repo directly. Every FULL run (empty `args`, cases 1/2/6/7) uses its own
- * throwaway `REPO_ROOT` copy instead -- see `bootstrapRepoCopy` below.
- */
-const BOOTSTRAP = join(repoRoot(), "bin", "bootstrap.sh").replace(/\\/g, "/");
-
-/** The real registry round-trip in a full/`--check-only` run dominates; npm is slow to start. */
 const TIMEOUT_MS = 120_000;
-
-interface Run {
-	stdout: string;
-	stderr: string;
-	status: number | null;
-}
-
 const scratch = scratchDirs();
 const tempDir = scratch.make;
 
@@ -70,62 +51,6 @@ function bootstrapRepoCopy(): BootstrapRepoCopy {
 	const copy = makeBootstrapRepoCopy("kypi-bootstrap-repo-");
 	scratch.track(copy.root);
 	return copy;
-}
-
-/**
- * Run the real script as a subprocess, exactly as `bootstrap-check-only.test.ts`
- * does. `repoCopy`, when given, redirects `SCRIPT_DIR/..` (and the subprocess
- * `cwd`) at a throwaway copy instead of the real repo -- see
- * `bootstrapRepoCopy`.
- */
-function runBootstrap(
-	args: string[],
-	opts: {
-		agentDir: string;
-		env?: Record<string, string>;
-		extraEnv?: Record<string, string>;
-		repoCopy?: BootstrapRepoCopy;
-	},
-): Run {
-	const env: Record<string, string> = {
-		...(opts.env ?? (process.env as Record<string, string>)),
-		PI_CODING_AGENT_DIR: opts.agentDir,
-		...(opts.extraEnv ?? {}),
-	};
-
-	const script = opts.repoCopy?.bootstrapSh ?? BOOTSTRAP;
-	const cwd = opts.repoCopy?.root ?? repoRoot();
-
-	const result = spawnSync("sh", [script, ...args], {
-		cwd,
-		env,
-		encoding: "utf-8",
-		timeout: TIMEOUT_MS,
-		windowsHide: true,
-	});
-
-	if (result.error) {
-		throw new Error(`failed to run \`sh ${script} ${args.join(" ")}\`: ${result.error.message}`);
-	}
-	return { stdout: result.stdout ?? "", stderr: result.stderr ?? "", status: result.status };
-}
-
-/**
- * A stub `npm` answering the four questions a full run asks. Mirrors
- * `bootstrap-check-only.test.ts`'s own `npmStub` -- duplicated rather than
- * imported because that file does not export it, and this suite's own
- * `npm log` assertions (below) need the exact same shape.
- */
-function npmStub(logTo: string): StubSpec {
-	return {
-		exitCode: 0,
-		logTo,
-		match: [
-			{ when: ["config", "get", "ignore-scripts"], stdout: "true\n" },
-			{ when: ["view"], stdout: '"1.1.0"\n' },
-			{ when: ["ls", "-g"], stdout: '{"dependencies":{}}\n' },
-		],
-	};
 }
 
 function stubPath(agentDir: string): string {
@@ -159,7 +84,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 		const log = join(logDir, "npm.log").replace(/\\/g, "/");
 		const repoCopy = bootstrapRepoCopy();
 
-		const run = withStubBin({ npm: npmStub(log) }, (env) =>
+		const run = withStubBin({ npm: bootstrapNpmStub(log) }, (env) =>
 			runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
 		);
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
@@ -184,7 +109,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 			existsSync(specifier),
 			`the specifier ${specifier} must resolve to an existing file on disk`,
 		).toBe(true);
-	}, TIMEOUT_MS);
+	});
 
 	it("case 2 -- a second run is a no-op: byte-identical content and an unchanged mtime", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -193,7 +118,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 		const stub = stubPath(agentDir);
 		const repoCopy = bootstrapRepoCopy();
 
-		withStubBin({ npm: npmStub(log) }, (env) => {
+		withStubBin({ npm: bootstrapNpmStub(log) }, (env) => {
 			const opts = { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy };
 
 			const first = runBootstrap([], opts);
@@ -222,7 +147,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 
 			return undefined;
 		});
-	}, TIMEOUT_MS);
+	});
 
 	it("case 4 -- `--check-only` on a stub-free agent dir exits 0 and creates no file", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -239,7 +164,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 			existsSync(stubPath(agentDir)),
 			"--check-only must never create the stub it reports on",
 		).toBe(false);
-	}, TIMEOUT_MS);
+	});
 
 	it("case 5 -- `--check-only` on a stub pointing at a missing target exits non-zero", () => {
 		const agentDir = tempDir("kypi-agentdir-");
@@ -266,7 +191,7 @@ describe("SAFE-11 -- bin/bootstrap.sh installs the safety extension at user scop
 				"and must fail --check-only rather than be silently reported as fine",
 		).not.toBe(0);
 		expect(run.stderr).toMatch(/does not exist/);
-	}, TIMEOUT_MS);
+	});
 });
 
 /**
@@ -356,7 +281,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 		].join("\n");
 	}
 
-	/** Run the driver as a real child process with `cwd` set, and parse its stdout as the registered tool-name array. */
+	/** BootstrapRun the driver as a real child process with `cwd` set, and parse its stdout as the registered tool-name array. */
 	function runDriverAt(cwd: string, stubSpecifier: string): string[] {
 		const driverPath = join(tempDir("kypi-cr06-driver-"), "driver.mjs");
 		writeFileSync(driverPath, driverSource(stubSpecifier), "utf-8");
@@ -383,7 +308,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 			const cwdWithoutCopy = tempDir("kypi-cwd-no-copy-");
 			const repoCopy = bootstrapRepoCopy();
 
-			const run = withStubBin({ npm: npmStub(log) }, (env) =>
+			const run = withStubBin({ npm: bootstrapNpmStub(log) }, (env) =>
 				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
 			);
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
@@ -428,7 +353,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 			writeFileSync(join(cwdWithCopy, ".pi", "extensions", "safety", "index.ts"), "export default function () {}\n", "utf-8");
 			const repoCopy = bootstrapRepoCopy();
 
-			const run = withStubBin({ npm: npmStub(log) }, (env) =>
+			const run = withStubBin({ npm: bootstrapNpmStub(log) }, (env) =>
 				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
 			);
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
@@ -612,7 +537,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 			writeFileSync(join(cwdWithCopy, ".pi", "extensions", "safety", "index.ts"), "export default function () {}\n", "utf-8");
 			const repoCopy = bootstrapRepoCopy();
 
-			const run = withStubBin({ npm: npmStub(log) }, (env) =>
+			const run = withStubBin({ npm: bootstrapNpmStub(log) }, (env) =>
 				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
 			);
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
@@ -657,7 +582,7 @@ describe("CR-09 -- the generated stub registers unconditionally, regardless of a
 			const log = join(logDir, "npm.log").replace(/\\/g, "/");
 			const repoCopy = bootstrapRepoCopy();
 
-			const run = withStubBin({ npm: npmStub(log) }, (env) =>
+			const run = withStubBin({ npm: bootstrapNpmStub(log) }, (env) =>
 				runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }),
 			);
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
@@ -740,7 +665,7 @@ describe("the generated stub fails closed when the safety extension throws", () 
 			const agentDir = tempDir("kypi-agentdir-");
 			const log = join(tempDir("kypi-log-"), "npm.log").replace(/\\/g, "/");
 			const repoCopy = bootstrapRepoCopy();
-			const run = withStubBin({ npm: npmStub(log) }, (env) => runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }));
+			const run = withStubBin({ npm: bootstrapNpmStub(log) }, (env) => runBootstrap([], { agentDir, env, extraEnv: { KYPI_SKIP_INSTALL: "1" }, repoCopy }));
 			expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 			writeFileSync(join(repoCopy.root, ".pi", "extensions", "safety", "index.ts"), broken, "utf-8");
 

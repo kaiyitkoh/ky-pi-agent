@@ -51,11 +51,11 @@ import {
 	BEDROCK_PROVIDER_ID,
 	TEMPLATE_SENTINEL_PREFIX,
 } from "../../.pi/extensions/providers/schema.ts";
-import { type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
+import { bootstrapNpmStub, type BootstrapRepoCopy, makeBootstrapRepoCopy } from "../helpers/bootstrap-repo.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
 import { withModelsConfig } from "../helpers/models.ts";
 import { scratchDirs } from "../helpers/scratch.ts";
-import { type StubSpec, withStubBin } from "../helpers/stub-bin.ts";
+import { withStubBin } from "../helpers/stub-bin.ts";
 
 /** npm is stubbed, so no registry round-trip; node startup still dominates. */
 const TIMEOUT_MS = 120_000;
@@ -90,25 +90,6 @@ function bootstrapRepoCopy(): BootstrapRepoCopy {
 }
 
 /**
- * A stub `npm` answering each of the four questions the script actually asks.
- *
- * Copied from `bootstrap-check-only.test.ts:141-151`, including the reason:
- * answering one thing to all four would make the stub a caricature, and the
- * version gate would then be "passing" on a token that is not a version.
- */
-function npmStub(logTo: string): StubSpec {
-	return {
-		exitCode: 0,
-		logTo,
-		match: [
-			{ when: ["config", "get", "ignore-scripts"], stdout: "true\n" },
-			{ when: ["view"], stdout: '"0.84.1"\n' },
-			{ when: ["ls", "-g"], stdout: '{"dependencies":{}}\n' },
-		],
-	};
-}
-
-/**
  * Run the real script as a subprocess, exactly as a user or CI would.
  *
  * `sh` is spawned with an args array and `shell: false`: it resolves through
@@ -130,7 +111,7 @@ function runFullBootstrap(
 	const logDir = tempDir("kypi-log-");
 	const log = join(logDir, "npm.log").replace(/\\/g, "/");
 
-	return withStubBin({ npm: npmStub(log) }, (env) => {
+	return withStubBin({ npm: bootstrapNpmStub(log, "0.84.1") }, (env) => {
 		const result = spawnSync("sh", [repoCopy.bootstrapSh], {
 			cwd: repoCopy.root,
 			env: {
@@ -1174,7 +1155,7 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 		const logDir = tempDir("kypi-log-");
 		const log = join(logDir, "npm.log").replace(/\\/g, "/");
 		const piLog = join(logDir, "pi.log").replace(/\\/g, "/");
-		return withStubBin({ npm: npmStub(log), pi: { exitCode: 0, logTo: piLog } }, (env) => {
+		return withStubBin({ npm: bootstrapNpmStub(log, "0.84.1"), pi: { exitCode: 0, logTo: piLog } }, (env) => {
 			const result = spawnSync("sh", [repoCopy.bootstrapSh, ...args], {
 				cwd: repoCopy.root,
 				env: { ...env, PI_CODING_AGENT_DIR: agentDir, KYPI_DASHSCOPE_BASE_URL: "", ...extraEnv },
