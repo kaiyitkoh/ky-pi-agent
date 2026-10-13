@@ -37,6 +37,7 @@ metrics:
   tasks: 3
   files: 3
   completed: 2026-08-13
+requirements-completed: [PROV-01, PROV-08]
 ---
 
 # Phase 3 Plan 01: Wave 0 Provider Test Seams Summary

@@ -35,6 +35,7 @@ metrics:
   tasks: 3
   files: 3
   completed: 2026-08-13
+requirements-completed: [DIAG-07]
 ---
 
 # Phase 2 Plan 02: Layout Gate + Redactor Summary

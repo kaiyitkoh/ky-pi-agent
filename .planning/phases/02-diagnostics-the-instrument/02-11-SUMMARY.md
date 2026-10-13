@@ -46,6 +46,7 @@ metrics:
   tasks: 3
   files: 3
   completed: 2026-08-13
+requirements-completed: [DIAG-02, DIAG-04, DIAG-07]
 ---
 
 # Phase 2 Plan 11: The Runbook Section and the JSONL Contract Summary

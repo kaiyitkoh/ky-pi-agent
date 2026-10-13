@@ -639,7 +639,7 @@ These are open at roadmap time and must not be planned as settled.
 
 ## Verification Split
 
-Eight of 107 requirements need live credentials the development machine does not have. Everything else is verifiable offline with `fauxProvider()`, `SessionManager.inMemory()`, and `--mode rpc` for dialog tests.
+Thirteen of 122 requirements need live credentials the development machine does not have. Everything else is verifiable offline with `fauxProvider()`, `SessionManager.inMemory()`, and `--mode rpc` for dialog tests.
 
 | Phase | [RUNBOOK] requirements |
 |-------|------------------------|
@@ -647,7 +647,7 @@ Eight of 107 requirements need live credentials the development machine does not
 | 3 — Providers | PROV-03, PROV-04, PROV-07, PROV-10 |
 | 4 — Safety | SAFE-01 |
 | 5 — Routing | ROUTE-11 |
-| 8 — Quality Gates | GATE-10 (main-loop half only) |
+| 8 — Quality Gates | GATE-01 (the LSP leg), GATE-02, GATE-08, GATE-10 (main-loop half) |
 | 10 — Context Budget | CTX-05 |
 
 A phase containing a [RUNBOOK] requirement is not complete until the runbook entry exists **and** the user has executed it. `docs/RUNBOOK.md` is a Phase 3 deliverable (PROV-09) that later phases append to.
@@ -655,7 +655,7 @@ A phase containing a [RUNBOOK] requirement is not complete until the runbook ent
 ## Progress
 
 **Execution Order:**
-Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 9 → 10 → 11
+Phases execute in numeric order: 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8 → 8.1 → 8.2 → 9 → 10 → 11 → 12 → 12.1 → 13
 
 Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) and is parallel-safe with both; it is sequenced at 4 because execution is sequential (`parallelization: false`) and the deployment risk exists from the first real session.
 
@@ -664,14 +664,19 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 1. Bootstrap, Packaging & Supply Chain | 10/10 | Complete   | 2026-08-13 |
 | 2. Diagnostics — The Instrument | 11/11 | Complete   | 2026-08-13 |
 | 3. Providers & Credentials | 11/11 | Plans complete — 5 live checks OUTSTANDING | 2026-08-14 |
-| 4. Safety & Deployment Guardrails | 0/TBD | Not started | - |
-| 5. Routing & Capability Guards | 0/TBD | Not started | - |
+| 4. Safety & Deployment Guardrails | 12/12 | Complete | 2026-08-14 |
+| 5. Routing & Capability Guards | 12/12 | Complete | 2026-08-14 |
 | 6. Walking Skeleton — `/quick` & Evidence Gate | 4/4 | Complete   | 2026-08-14 |
 | 7. Composed Extensions, Pinned & Reviewed | 13/13 | Complete   | 2026-08-15 |
-| 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
+| 8. Quality Gates & Engineering Quality | 13/13 | Complete | 2026-08-15 |
 | 9. Ceremonial Workflows | 17/17 | Complete    | 2026-10-12 |
-| 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
+| 10. Context Budget & Progressive Disclosure | 7/7 | Complete | 2026-10-12 |
+| 8.1. Pi 1.x Upgrade & Install Health | 7/7 | Complete | 2026-10-12 |
+| 8.2. Comment Discipline | 13/13 | Complete | 2026-10-12 |
 | 11. Terminal UI | 7/7 | Complete    | 2026-10-13 |
+| 12. OpenSpec Opt-in Skill | 4/4 | Complete — 4 live checks OUTSTANDING | 2026-10-13 |
+| 12.1. v1.0 Gap Closure | 10/10 | Complete pending verification | 2026-10-13 |
+| 13. Orca Desktop Front-end | 0/0 | Awaiting discussion | - |
 
 ### Phase 12: OpenSpec Opt-in Skill
 

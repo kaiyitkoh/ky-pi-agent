@@ -34,6 +34,7 @@ metrics:
   tasks: 3
   files: 4
   completed: 2026-08-13
+requirements-completed: [DIAG-02, DIAG-04, DIAG-06, DIAG-07, DIAG-08]
 ---
 
 # Phase 2 Plan 01: Wave 0 Test Helpers Summary

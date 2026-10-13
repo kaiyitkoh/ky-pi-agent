@@ -39,6 +39,7 @@ metrics:
   tasks: 2
   files: 3
   completed: 2026-08-13
+requirements-completed: [DIAG-04]
 ---
 
 # Phase 2 Plan 06: The Turn Row Summary

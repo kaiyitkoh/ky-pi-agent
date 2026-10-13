@@ -41,6 +41,7 @@ metrics:
   tasks: 3
   files: 5
   completed: 2026-08-13
+requirements-completed: [PROV-01]
 ---
 
 # Phase 3 Plan 02: Configuration Templates and the Filename Guard Summary

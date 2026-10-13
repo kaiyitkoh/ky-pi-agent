@@ -16,7 +16,7 @@
 ### Bootstrap & Supply Chain
 
 - [x] **BOOT-01**: A **project-scoped** `.npmrc` in the repo sets `ignore-scripts=true`, asserted by the bootstrap script before its first `pi install` — `pi install` executes npm lifecycle scripts with no `--ignore-scripts` on any code path. Deliberately **not** global: `ignore-scripts` in `~/.npmrc` breaks packages with legitimate native builds machine-wide. The tradeoff is that a `pi install` run from another directory is unprotected; README and the runbook must state this, including the setup step when installing on macOS or any second machine.
-- [~] **BOOT-02**: User can install the harness on a clean machine with `pi install https://github.com/kaiyitkoh/ky-pi-agent` — *offline half complete (local clone + `npm install --omit=dev`, `tests/integration/load-paths.test.ts` case 2); the real-URL install on a clean profile is `RB-01-02`, **OUTSTANDING***
+- [~] **BOOT-02**: User can install the harness on a clean machine with `pi install https://github.com/kaiyitkoh/ky-pi-agent` — *offline half complete (local clone + `npm install --omit=dev`, `tests/integration/load-paths.test.ts` case 2); the real-URL install on a clean profile is `RB-01-02`, **OUTSTANDING*** — *global install is done by `bin/bootstrap.sh` with exact pins (12.1-08); `RB-12-05`, **OUTSTANDING***
 - [x] **BOOT-03**: User can bootstrap a cold machine with `bin/bootstrap.sh` — installs Pi, verifies `bash`/`git`/`aws`/`glab`/`gh` presence, writes the env-var template, makes idempotent marked-region edits
 - [x] **BOOT-04**: Bootstrap fails loudly with an actionable message if the pinned Pi version has been unpublished from npm (versions below 0.74.0 are already gone)
 - [~] **BOOT-05**: `cd ky-pi-agent && pi` loads the harness from `.pi/` so the repo dogfoods itself, with `/reload` working — *`.pi/` dogfood load and the structural hot-reload precondition are proven offline; live `/reload` in a TTY is `RB-01-03`, **OUTSTANDING***
@@ -28,11 +28,11 @@
 
 ### Diagnostics
 
-- [ ] **DIAG-01**: Every provider request and response is captured via `before_provider_request` / `after_provider_response` / `before_provider_headers`, showing the exact JSON on the wire **[FAUX]** + **[RUNBOOK]**
+- [~] **DIAG-01**: Every provider request and response is captured via `before_provider_request` / `after_provider_response` / `before_provider_headers`, showing the exact JSON on the wire **[FAUX]** + **[RUNBOOK]** — *the capture, redaction and wire dump are proven offline; one real turn per provider is `RB-02-01`, **OUTSTANDING***
 - [x] **DIAG-02**: All model invocations route through a single exported `callModel()` chokepoint — provider hooks wire only into the main agent's `streamFn`, so a direct `modelRegistry.complete()` is invisible to the inspector **[FAUX]**
 - [x] **DIAG-03**: A lint or test fails the build if `modelRegistry.complete` is called outside `diagnostics/` **[FAUX]**
 - [x] **DIAG-04**: Every turn appends a JSONL record — model, provider, tokens, cost, latency, cache-read ratio, outcome (no reasoning-token column for Bedrock; it reports none) **[FAUX]**
-- [ ] **DIAG-05**: A detector identifies prose tool calls — `finish_reason:"stop"` with `tool_calls:null` and a function name in `content` — logs `event: prose_tool_call`, and retries rather than treating the turn as complete **[FAUX]** + **[RUNBOOK]**
+- [~] **DIAG-05**: A detector identifies prose tool calls — `finish_reason:"stop"` with `tool_calls:null` and a function name in `content` — logs `event: prose_tool_call`, and retries rather than treating the turn as complete **[FAUX]** + **[RUNBOOK]** — *the detector and its retry are proven offline; firing on real DeepSeek V4 Flash traffic is `RB-02-03`, **OUTSTANDING***
 - [x] **DIAG-06**: `/budget` reports system-prompt tokens, tool-schema tokens, context-file tokens, skills-index tokens, and `cacheRead` vs `input` **[FAUX]**
 - [x] **DIAG-07**: Captured payloads are redacted at capture time and written only to gitignored paths — a wire inspector is by construction a credential-logging tool feeding a public repo **[FAUX]**
 - [x] **DIAG-08**: Diagnostic logs rotate rather than growing unbounded **[FAUX]**
@@ -58,16 +58,16 @@
 - [x] **SAFE-04**: Writes are blocked when `HEAD == main`, while read-only operations against main (`fetch`, `rebase`, `diff`, `log`, `worktree add -b feat main`) remain allowed **[FAUX]**
 - [x] **SAFE-05**: `glab mr merge` is blocked — in the user's work repo, the MR merge is the deploy trigger **[FAUX]**
 - [x] **SAFE-06**: Reads of `.env`, `~/.aws/credentials`, kubeconfig, and `*.tfstate` are blocked — tfstate holds plaintext secrets that would enter model context **[FAUX]**
-- [x] **SAFE-07**: `terraform apply|destroy|import`, mutating `aws` CLI calls, and `kubectl delete` require explicit confirmation **[FAUX]**
+- [x] **SAFE-07**: `terraform apply|destroy|import`, mutating `aws` CLI calls, and `kubectl delete` require explicit confirmation **[FAUX]** — *classification is fail-closed: a non-literal command name, a command-text builtin or an unknown git subcommand is refused rather than allowed (12.1-02)*
 - [x] **SAFE-08**: File writes and deletes outside the project directory are blocked **[FAUX]**
 - [x] **SAFE-09**: Enforcement happens **twice** — at the `tool_call` hook and inside a wrapped `bash` tool — because later hooks can mutate `event.input` after approval and Pi performs no re-validation **[FAUX]**
-- [x] **SAFE-10**: Confirmation uses block → approval-tool → re-issue, not an inline `confirm()`, and is **deny-by-default**; a CI test asserts the deny under `--mode json` where `noOpUIContext.confirm` returns `false` **[FAUX]**
-- [x] **SAFE-11**: Safety extensions install at **user scope** — project-scoped extensions don't load in subagents, which spawn headless and therefore never grant trust **[FAUX]**
+- [x] **SAFE-10**: Confirmation is **deny-by-default** and has two shapes. A feature-branch push asks inline with `ctx.ui.confirm` in `tui` or in `rpc` (when `ctx.hasUI`) with a 5-minute timeout, and is refused in `json`, `print` and subagent children. An infra command that needs confirmation is blocked first; the model then calls `approve_ky_command` and re-issues it. A CI test asserts the deny under `--mode json` where `noOpUIContext.confirm` returns `false` **[FAUX]**
+- [x] **SAFE-11**: Safety extensions install at **user scope** — project-scoped extensions don't load in subagents, which spawn headless and therefore never grant trust **[FAUX]** — *every subagent child loads the guard as a required child extension regardless of its `extensions` value, and subagent management needs `ctx.ui.confirm` (12.1-01)*
 - [x] **SAFE-12**: The blocked-command test passes **inside a spawned subagent**, not only in the interactive session **[FAUX]**
 - [x] **SAFE-13**: The non-bash surface is guarded — `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.gitconfig`, CI workflow files **[FAUX]**
-- [x] **SAFE-14**: Every allow and every block is written to an audit JSONL **[FAUX]**
+- [x] **SAFE-14**: Every allow and every block is written to an audit JSONL **[FAUX]** — *a confirmed or refused push and an opened MR each write an audit row (12.1-01, 12.1-06)*
 - [x] **SAFE-15**: A documented table lists known bypasses the guard does not catch — an honest limits statement, not a claim of completeness
-- [ ] **SAFE-16**: `gh` is left unauthenticated on the work laptop and this is stated in the runbook — `/share` cannot be blocked by any extension, and aborting on `gh auth status` is the only control
+- [~] **SAFE-16**: `gh` is left unauthenticated on the work laptop and this is stated in the runbook — `/share` cannot be blocked by any extension, and aborting on `gh auth status` is the only control — *the classifier is shipped and `RB-01-01` is written; running `gh auth logout` on the work laptop is `RB-01-01`, **OUTSTANDING***
 - [x] **SAFE-17**: At least 30 evasion attempts are tested, each either blocked or explicitly documented as out of scope **[FAUX]**
 
 ### Routing
@@ -77,20 +77,20 @@
 - [x] **ROUTE-03**: `/escalate` pulls a stronger model for one invocation, and the elevated state is visible and sticky until cleared **[FAUX]**
 - [x] **ROUTE-04**: Single-shot roles (review, advisor, vision, summarise) run through `callModel()` → `ctx.modelRegistry.complete()` with per-call reasoning effort, not by mutating session state **[FAUX]** — *the pure plan/dispatch pipeline (`resolveRoute`, `pickConfiguredCandidate`, `planRoleCall`, `runSingleShotRole`) was proven at the unit level in plan 05-04 (`tests/unit/routing-dispatch.test.ts`); the `[FAUX]` session-level proof — `tests/integration/single-shot-roles.test.ts` (plan 05-08) driving `runSingleShotRole` against a real faux session and reading back the wire/turns records — proves the nested-row identity, no-session-mutation, per-call-reasoning-effort-on-the-wire (both directions) and zero-cost-guard-refusal properties*
 - [x] **ROUTE-05**: Roles needing a tool loop run as subagents **[FAUX]**
-- [x] **ROUTE-06**: Capability guards hard-block impossible routes: image → text-only model; oversized context → small-window model **[FAUX]**
-- [x] **ROUTE-07**: A capability guard hard-blocks Bedrock non-Claude models with thinking enabled — `buildAdditionalModelRequestFields` silently drops it while the UI still offers the setting **[FAUX]**
-- [x] **ROUTE-08**: A capability guard hard-blocks Bedrock DeepSeek R1 as an executor — it supports no tool calling at all **[FAUX]**
+- [x] **ROUTE-06**: Capability guards hard-block impossible routes: image → text-only model; oversized context → small-window model **[FAUX]** — *enforced in production on `model_select` (a violating switch is reverted) and on `input`, not only at planning time (12.1-03)*
+- [x] **ROUTE-07**: A capability guard hard-blocks Bedrock non-Claude models with thinking enabled — `buildAdditionalModelRequestFields` silently drops it while the UI still offers the setting **[FAUX]** — *same enforcement path as ROUTE-06, including `/model` (12.1-03)*
+- [x] **ROUTE-08**: A capability guard hard-blocks Bedrock DeepSeek R1 as an executor — it supports no tool calling at all **[FAUX]** — *same enforcement path as ROUTE-06, including `/model` (12.1-03)*
 - [x] **ROUTE-09**: Mode selection persists across restarts via `pi.appendEntry`, costing zero context tokens **[FAUX]**
 - [x] **ROUTE-10**: Every mode switch produces a wire dump proving the intended model was actually used **[FAUX]**
 - [~] **ROUTE-11**: Qoder is available as a delegate tool that hands off a whole task and folds the result back — explicitly a foreign agent that bypasses the harness's tools, safety hooks, and wire inspector, and documented as such **[RUNBOOK]** — *the delegate tool is built and registered (`.pi/extensions/qoder/{client,index}.ts`, plan 05-03): a pure config refusal, a tolerant incremental SSE parser and the three-step Cloud Agents HTTP sequence, proven offline against a real `127.0.0.1` HTTP+SSE loopback fixture (`tests/unit/qoder-client.test.ts`, `tests/integration/qoder-delegate.test.ts`, plans 05-03/05-06) with no PAT and no network egress on this machine, and documented as a foreign agent in both the tool's own description and `docs/ROUTING.md` §6 (plan 05-12). Whether a real PAT against a real `agent_id`/`environment_id` actually reaches `api.qoder.com` and folds a result back is `RB-05-01`, appended to `docs/RUNBOOK.md` (plan 05-12), and stays **OUTSTANDING***
 
 ### Composed Extensions
 
-- [~] **EXT-01**: Subagents support per-agent model, system prompt, tool restriction, and thinking level — *the structural proof is complete offline: `.pi/agents/planner.md` ships no `model:`/`fallbackModels:` key so Phase 5's `agentOverrides` is not silently defeated (`07-04-SUMMARY.md`), and ten `file:line` citations against the real pinned `pi-subagents@0.49.0` tarball back the model/system-prompt/tool-restriction/thinking-level claims (`docs/EXTENSIONS.md`'s Subagent capability evidence table, `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed and no subagent has ever actually spawned on this machine — that live proof is `RB-07-01`, **OUTSTANDING***
-- [x] **EXT-02**: Parallel subagents run in isolated git worktrees, verified to **build**, not merely check out — untracked files like `.env` and `node_modules` do not travel to a new worktree — *this is this repository's own worktree-setup hook, proven directly by `tests/integration/worktree-build.test.ts` without needing `pi-subagents` installed*
-- [~] **EXT-03**: Subagents can run in the background without blocking the session — *the concrete mechanism is cited end to end against the real pinned tarball — the `async` parameter, the unconditional `subagent_wait` registration, and the detached-child-process dispatch through to a real `pi --mode json -p` process (`docs/EXTENSIONS.md`'s Subagent capability evidence table, findings 1–3; `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed, so no background run has ever actually executed — `RB-07-01`, **OUTSTANDING***
-- [~] **EXT-04**: A running subagent can be steered mid-run without killing it — *the `steer` action, the file-based control-inbox shape distinct from `interrupt`/`stop`/`timeout`, and `deliverSteerRequest`'s running-step gate are cited against the real pinned tarball (`docs/EXTENSIONS.md`'s Subagent capability evidence table, findings 4–6; `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed, so no subagent has ever actually been steered — `RB-07-01`, **OUTSTANDING***
-- [~] **EXT-05**: Plan mode, todo tracking, background bash, LSP diagnostics, structured user questions, web lookup, session search, and loop detection are available — *four capabilities (plan mode, todo tracking, structured user questions, loop detection) are vendored, live in this session right now, and mechanically bound to their tracked source (`tests/unit/extension-composition.test.ts`). The other four (background bash, LSP diagnostics, web lookup, session search) are pinned npm specs in `.pi/settings.json` that have **never been installed** — plan 07-10's install gate was found NOT SATISFIED (its own pre-authorisation ground that this machine holds no credentials is false), so none of the four has ever ridden on a real request or been "available" in an actual session. Installing and reconciling them is `RB-07-02`, **OUTSTANDING***
+- [~] **EXT-01**: Subagents support per-agent model, system prompt, tool restriction, and thinking level — *the structural proof is complete offline: `.pi/agents/planner.md` ships no `model:`/`fallbackModels:` key so Phase 5's `agentOverrides` is not silently defeated (`07-04-SUMMARY.md`), and ten `file:line` citations against the real pinned `pi-subagents@0.49.0` tarball back the model/system-prompt/tool-restriction/thinking-level claims (`docs/EXTENSIONS.md`'s Subagent capability evidence table, `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed and no subagent has ever actually spawned on this machine — that live proof is `RB-07-01`, **OUTSTANDING*** — *global install through bootstrap with exact pins (12.1-08); the live check in another repo is `RB-12-05`, **OUTSTANDING***
+- [x] **EXT-02**: Parallel subagents run in isolated git worktrees, verified to **build**, not merely check out — untracked files like `.env` and `node_modules` do not travel to a new worktree — *this is this repository's own worktree-setup hook, proven directly by `tests/integration/worktree-build.test.ts` without needing `pi-subagents` installed* — *agent definitions are declared in `package.json` (12.1-08)*
+- [~] **EXT-03**: Subagents can run in the background without blocking the session — *the concrete mechanism is cited end to end against the real pinned tarball — the `async` parameter, the unconditional `subagent_wait` registration, and the detached-child-process dispatch through to a real `pi --mode json -p` process (`docs/EXTENSIONS.md`'s Subagent capability evidence table, findings 1–3; `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed, so no background run has ever actually executed — `RB-07-01`, **OUTSTANDING*** — *see `RB-12-05`*
+- [~] **EXT-04**: A running subagent can be steered mid-run without killing it — *the `steer` action, the file-based control-inbox shape distinct from `interrupt`/`stop`/`timeout`, and `deliverSteerRequest`'s running-step gate are cited against the real pinned tarball (`docs/EXTENSIONS.md`'s Subagent capability evidence table, findings 4–6; `tests/unit/subagent-capabilities.test.ts`). No package has ever been installed, so no subagent has ever actually been steered — `RB-07-01`, **OUTSTANDING*** — *see `RB-12-05`*
+- [~] **EXT-05**: Plan mode, todo tracking, background bash, LSP diagnostics, structured user questions, web lookup, session search, and loop detection are available — *four capabilities (plan mode, todo tracking, structured user questions, loop detection) are vendored, live in this session right now, and mechanically bound to their tracked source (`tests/unit/extension-composition.test.ts`). The other four (background bash, LSP diagnostics, web lookup, session search) are pinned npm specs in `.pi/settings.json` that have **never been installed** — plan 07-10's install gate was found NOT SATISFIED (its own pre-authorisation ground that this machine holds no credentials is false), so none of the four has ever ridden on a real request or been "available" in an actual session. Installing and reconciling them is `RB-07-02`, **OUTSTANDING*** — *the packages load from user-level Pi settings in every repo (12.1-08); live check `RB-12-05`*
 - [x] **EXT-06**: Pi's own bundled examples are preferred over third-party packages wherever they cover the need — *a decision fact, not an install-dependent one; enforced by `tests/unit/extension-composition.test.ts`'s EXT-06 regression guard (no vendored capability's npm alternative may appear in `packages[]`)*
 - [x] **EXT-07**: File checkpointing restores the working tree, with Pi's bundled `git-checkpoint.ts` as the fallback if no third-party option proves sound — *vendored, not install-dependent*
 - [x] **EXT-08**: Every pin is re-verified at planning time rather than inherited from research — the ecosystem ships 13–16 releases/month — *re-verified independently in plans 07-01, 07-10 and 07-11, not install-dependent*
@@ -99,7 +99,7 @@
 
 ### Quality Gates
 
-- [~] **GATE-01**: Deterministic gates — typecheck, lint, LSP diagnostics — run and feed errors back **before** any model review **[FAUX]** — *typecheck, lint and the QUAL-01 anti-pattern legs run for real inside `/quick` (plan 08-11); the LSP leg's `probeLspAvailability` mechanism is proven offline in both states, but `@narumitw/pi-lsp` has never been installed on this machine, so this leg has only ever reported `UNAVAILABLE`, never `FAIL` against a real language server. `RB-08-02`, **OUTSTANDING***
+- [~] **GATE-01**: Deterministic gates — typecheck, lint, LSP diagnostics — run and feed errors back **before** any model review **[FAUX]** — *typecheck, lint and the QUAL-01 anti-pattern legs run on the change in `/quick`, `/execute` and `/review` (12.1-04, 12.1-05); the LSP leg is `UNAVAILABLE` by a Pi API limit (a command context has no `executeTool`, Pi 1.1.0 `types.d.ts:262-280`), so it cannot run from the gate at all. The live half is `RB-08-02`, **OUTSTANDING***
 - [~] **GATE-02**: A fresh-context reviewer subagent receives the full contract: diff, every touched file in full, test and typecheck output, SPEC requirements, files-touched union, and the import graph **[FAUX]** — *`buildReviewerContext`'s six-element contract is proven to reach a captured outgoing request intact and redacted (`tests/integration/reviewer-contract.test.ts`, plan 08-07). `.pi/agents/reviewer.md` ships deliberately unwired — the reviewer is dispatched via `runSingleShotRole`, not a real `pi-subagents` spawn — because the package has never been installed. `RB-08-03`, **OUTSTANDING***
 - [x] **GATE-03**: Review output gives a per-requirement verdict (Implemented / Partial / Missing) with file:line evidence **[FAUX]**
 - [x] **GATE-04**: Review output includes a mandatory "checked and cleared" section, so silence is structurally impossible **[FAUX]**
@@ -120,8 +120,8 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [x] **QUAL-04**: The reviewer classifies every change as **root-cause / symptomatic / workaround** with written justification, as extra structure on the review pass already being paid for — not an extra call **[FAUX]**
 - [x] **QUAL-05**: Any change classified symptomatic or workaround stops the workflow and requires the user's explicit approval before it can ship **[FAUX]**
 - [x] **QUAL-06**: An approved workaround is recorded in the MR body with what the proper fix would be and why it was deferred, so the debt is visible rather than silent **[FAUX]**
-- [x] **QUAL-07**: A design-level review pass covering algorithmic complexity, scalability, and abstraction fit fires **conditionally** — on signals (diff spans many files, a loop wraps a query, a data model or public interface changes) or on explicit `/escalate` — never on every task **[FAUX]**
-- [x] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]** — *closed by the gate-depth table `GATE_DEPTH_BY_WORKFLOW` (`quality/gates.ts`, plan 09-12), wired into `/execute` (09-13) and `/review` (09-15); `/quick` runs the deterministic leg only. `/review` runs deterministic, model-review and refute-or-promote; calibration is listed in the table but not run on a live diff*
+- [x] **QUAL-07**: A design-level review pass covering algorithmic complexity, scalability, and abstraction fit fires **conditionally** — on signals (diff spans many files, a loop wraps a query, a data model or public interface changes) or on explicit `/escalate` — never on every task **[FAUX]** — *the design pass is wired into `/review` and fires on signals (file span of 8 or more, a query in a loop, a schema or migration path, an added or removed export, or escalation); REVIEW.md always carries a Design review section (12.1-06)*
+- [x] **QUAL-08**: Gate depth scales with the workflow: `/quick` runs deterministic rules only; the full workflow runs all four mechanisms **[FAUX]** — *closed by the gate-depth table `GATE_DEPTH_BY_WORKFLOW` (`quality/gates.ts`, plan 09-12), wired into `/execute` (09-13) and `/review` (09-15); `/quick` runs the deterministic leg only. `/review` runs deterministic, model-review and refute-or-promote; calibration is listed in the table but not run on a live diff* — *`/quick` gates the change at settle (`agent_settled`, `base..HEAD`, in the target repo); the gate-depth table in `docs/WORKFLOWS.md` and `docs/QUALITY.md` lists only what each workflow runs (12.1-04, 12.1-05)*
 - [x] **QUAL-09**: The wall-clock and token cost added by the quality layer is recorded per turn in the JSONL, so the correctness/latency balance is a measured number and can be tuned rather than guessed **[FAUX]** — *the ledger mechanism (plan 08-04) is exercised by real producers — the deterministic gate stage, the reviewer, the refute pass, the advisor consult — each calling `addQualityCost` exactly once per pass; plan 08-11 proves a real, live-session `/quick` turn's own `kind:"turn"` JSONL row carries `qualityMs`, read off disk rather than an in-memory peek, with a paired negative control proving a blocked gate's cost is never billed to a later, unrelated turn*
 
 ### Workflows
@@ -134,7 +134,7 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 - [x] **FLOW-06**: `/plan` produces PLAN.md with tasks in the form `T### [P] [R#] verb <explicit path> + verification command`, plus a requirement-coverage matrix — *MACHINE-CHECKABLE half only (plan 09-09): `TASK_LINE_PATTERN`/`parseTaskLine`/`parsePlanTasks` and `validatePlan`'s 7 numbered branches enforce the task-line shape and both-directions requirement coverage (falsifications (a)/(b) confirmed each coverage direction independently load-bearing). Wiring into `/plan`'s write path closed in plan 09-10 (`writePlanIfGated`)*
 - [x] **FLOW-07**: `/execute` appends to PROGRESS.md with pasted real command output, and commits atomically — *`/execute` appends PROGRESS.md only after the unmodified `gateCompletion` accepts and `driftAbort` allows every git-reported path; the entry is real captured output bound to a harness-read SHA (plan 09-13)*
 - [~] **FLOW-08**: `/review` produces REVIEW.md and opens an MR targeting **staging, never main** — *PARTIAL. Proved offline (plans 09-14/09-15): the REVIEW.md renderer with computed Scope Drift, and `openMr`, which classifies the glab argv before executing and always names an explicit `staging` target, against a stubbed glab. Not proved: no MR has been opened, no feature has shipped end to end, and the `--description-file` flag is unverified against a real glab. Outstanding: `RB-09-01` (end-to-end feature on the work laptop) and `RB-09-02` (real `glab mr create --target-branch staging`)*
-- [~] **FLOW-09**: Subagents receive self-contained handoff packets, so delegation costs negative tokens in the parent — *PARTIAL. The pure packet builder and the `UNAVAILABLE` probe are proved offline (plans 09-11/09-13). `pi-subagents` has never spawned. The offline token delta is an estimate (`Math.ceil(chars / 4)`, not a tokenizer): packet 134 vs parent 581 tokens, delta -447, i.e. negative for that one fixture; the tests assert the arithmetic, never the sign. Outstanding: `RB-09-03` (real spawn and the measured live delta)*
+- [~] **FLOW-09**: Subagents receive self-contained handoff packets, so delegation costs negative tokens in the parent — *PARTIAL. The pure packet builder and the `UNAVAILABLE` probe are proved offline (plans 09-11/09-13). `pi-subagents` has never spawned. The offline token delta is an estimate (`Math.ceil(chars / 4)`, not a tokenizer): packet 134 vs parent 581 tokens, delta -447, i.e. negative for that one fixture; the tests assert the arithmetic, never the sign. Outstanding: `RB-09-03` (real spawn and the measured live delta)* — *required child guard and `RB-12-05` apply to real spawns*
 - [x] **FLOW-10**: The total artifact set is SPEC, PLAN, REVIEW plus a PROGRESS append — no document that no downstream consumer reads — *`tests/unit/artifact-count.test.ts` drives the four real write paths and requires the `.pi/work` set to equal `ARTIFACT_FILES` exactly, each with a named consumer (plan 09-16)*
 - [x] **FLOW-11**: Every workflow has a CI-enforced line budget
 
@@ -149,19 +149,35 @@ The harness must produce root-cause fixes that scale, not symptom patches. Exhor
 
 ### Terminal UI
 
-- [x] **UI-01**: A custom theme ships, conforming to Pi's theme schema — *Proved by `tests/unit/ui-theme.test.ts`; visual check `RB-11-01`*
-- [x] **UI-02**: A statusline shows model, provider, context remaining, session cost, git branch, and changed files — rendered in TUI chrome, never in the system prompt — *Proved by `tests/unit/ui-statusline.test.ts` + `tests/integration/ui-chrome.test.ts`; visual check `RB-11-01`*
-- [x] **UI-03**: A custom startup header ships — *Proved by `tests/integration/ui-chrome.test.ts`; visual check `RB-11-01`*
+- [~] **UI-01**: A custom theme ships, conforming to Pi's theme schema — *Proved by `tests/unit/ui-theme.test.ts`; visual check `RB-11-01`*
+- [~] **UI-02**: A statusline shows model, provider, context remaining, session cost, git branch, and changed files — rendered in TUI chrome, never in the system prompt — *Proved by `tests/unit/ui-statusline.test.ts` + `tests/integration/ui-chrome.test.ts`; visual check `RB-11-01`*
+- [~] **UI-03**: A custom startup header ships — *Proved by `tests/integration/ui-chrome.test.ts`; visual check `RB-11-01`*
 - [~] **UI-04**: A live widget shows running subagents and their status — *PARTIAL. Offline stub proof in `tests/integration/ui-chrome.test.ts` (event shapes from pi-subagents source, never executed). Not proved: a real run. Outstanding: `RB-11-02`*
 - [~] **UI-05**: No UI element introduces a system-prompt cache invalidation, verified by watching `cacheRead` stay non-trivial — *PARTIAL. Offline proof in `tests/integration/ui-prompt-stability.test.ts`. Not proved: a live `cacheRead` ratio. Outstanding: `RB-11-03`*
 
 ### Comment Discipline
 
 - [x] **CMT-01**: Root `AGENTS.md` carries the code-comment rules (15 lines or fewer) plus cross-agent conventions, and `CLAUDE.md` begins with `@AGENTS.md`
-- [ ] **CMT-02**: The harness delivers the same rules to every project Pi runs in, with no manual step and a stable cache prefix
+- [~] **CMT-02**: The harness delivers the same rules to every project Pi runs in, with no manual step and a stable cache prefix — *delivery is proven offline in a faux session; the live check in another project is `RB-08-04`, **OUTSTANDING***
 - [x] **CMT-03**: A vitest check fails on plan, requirement, review or phase IDs inside comments of tracked authored `.pi/extensions/**/*.ts` (vendored files exempt)
 - [x] **CMT-04**: The same check reports per-file and total comment ratio
 - [x] **CMT-05**: A cleanup pass brings the authored comment ratio to 35% or less with no behaviour change, keeping safety invariants and Pi-source facts
+
+### Pi 1.x Upgrade
+
+- [x] **UPG-01**: The Pi family is pinned to 1.1.0; `typebox` and `vitest` match Pi's pins; the TypeScript decision is verified; global `pi` is 1.1.0 and `piPinned` is recorded **[FAUX]**
+- [x] **UPG-02**: The faux helper and provider-context tests use `TranscriptContext`; diagnostics, harness, routing and safety are re-verified against 1.1.0 types; stale 0.84.1 citations are updated **[FAUX]**
+- [x] **UPG-03**: The safety guard covers the `powershell` tool and codemode nested calls, or they are disabled with a test proving it **[FAUX]**
+- [x] **UPG-04**: Composed extensions are re-pinned after source review; `pi-background-tasks` is vendored and peer-patched; vendored extensions are checked against 1.1.0
+- [x] **UPG-05**: `vitest.config.ts` sets `maxWorkers: 2`; `tsc --noEmit` and the full suite pass at phase verification
+- [x] **UPG-06**: The supply-chain posture change (shrinkwrap removed in Pi 1.0.1) is documented with its mitigation, and 1.x feature notes are recorded for Phases 10 and 11
+
+### OpenSpec Opt-in
+
+- [~] **OSPEC-1**: The `@fission-ai/openspec` CLI is pinned to an exact reviewed version with telemetry, update check and auto-config off — *the pin and the env opt-outs are proven offline; install on the work laptop and macOS is `RB-12-01` and the telemetry egress check under a network capture is `RB-12-03`, **OUTSTANDING***
+- [~] **OSPEC-2**: The official skills are installed at user level with `disable-model-invocation: true` and none live in the repo's `.pi/`, so they add no per-turn prompt cost — *the zero-cost proof is offline; a live session expanding `/skill:openspec-explore` is `RB-12-02`, **OUTSTANDING***
+- [x] **OSPEC-3**: The safety guard classifies `openspec` calls correctly (read-only and archive allow, mutators and unknown verbs confirm) and `openspec/` stays out of the repository **[FAUX]**
+- [~] **OSPEC-4**: Install and upgrade are documented in the bootstrap and runbook, and the `openspec-pi` wrapper is evaluated and rejected — *the upgrade drill at the next version bump is `RB-12-04`, **OUTSTANDING***
 
 ---
 
@@ -233,6 +249,10 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | 9 | Ceremonial Workflows |
 | 10 | Context Budget & Progressive Disclosure |
 | 11 | Terminal UI |
+| 08.1 | Pi 1.x Upgrade & Install Health |
+| 08.2 | Comment Discipline |
+| 12 | OpenSpec Opt-in Skill |
+| 12.1 | v1.0 Gap Closure (re-satisfies existing requirements, no new IDs) |
 
 | Requirement | Phase | Status |
 |-------------|-------|--------|
@@ -246,11 +266,11 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | BOOT-08 | Phase 1 | Complete |
 | BOOT-09 | Phase 1 | Complete |
 | BOOT-10 | Phase 1 | Complete |
-| DIAG-01 | Phase 2 | Pending |
+| DIAG-01 | Phase 2 | Partial — offline proof complete; the live wire dump is `RB-02-01`, **OUTSTANDING**. Not complete |
 | DIAG-02 | Phase 2 | Complete |
 | DIAG-03 | Phase 2 | Complete |
 | DIAG-04 | Phase 2 | Complete |
-| DIAG-05 | Phase 2 | Pending |
+| DIAG-05 | Phase 2 | Partial — offline proof complete; the live firing is `RB-02-03`, **OUTSTANDING**. Not complete |
 | DIAG-06 | Phase 2 | Complete |
 | DIAG-07 | Phase 2 | Complete |
 | DIAG-08 | Phase 2 | Complete |
@@ -262,7 +282,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | PROV-06 | Phase 3 | Partial — the cross-provider invariant and the `COST_UNVERIFIED` allowlist are complete and enforced in both directions; the real cap and per-token price are `RB-03-05`, **OUTSTANDING**. Not complete |
 | PROV-07 | Phase 3 | Partial — the experiment is written, executable and unit-proven with a pre-committed threshold; it has never been run, which is `RB-03-04`, **OUTSTANDING**. Not complete |
 | PROV-08 | Phase 3 | Complete |
-| PROV-09 | Phase 3 | Complete — `docs/RUNBOOK.md` carries eleven entries across Phases 1–3, all `OUTSTANDING` and machine-enforced as such by `tests/unit/docs-policy.test.ts` in both the summary table and the detail subsection |
+| PROV-09 | Phase 3 | Complete — `docs/RUNBOOK.md` carries eleven entries across Phases 1–3, each recorded as not yet executed, and machine-enforced as such by `tests/unit/docs-policy.test.ts` in both the summary table and the detail subsection |
 | PROV-10 | Phase 3 | Partial — `reasoning_content` on the replayed assistant message is proven on real bytes with a paired negative; the second turn's 200 is `RB-03-02`, **OUTSTANDING**. Not complete |
 | SAFE-01 | Phase 4 | Partial — the offline proxy (`tests/integration/gitlab-push-protection.test.ts`, plan 04-12) is shipped and green: a real push to a real local bare repo with a rejecting `pre-receive` hook is refused, the paired non-protected push succeeds, and `classifyPushFailure()` classifies a protected rejection and an ordinary non-fast-forward rejection differently. Whether GitLab is actually configured on the work laptop is `RB-04-01`, **OUTSTANDING**. Not complete |
 | SAFE-02 | Phase 4 | Complete — plans 04-01, 04-03 |
@@ -273,13 +293,13 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | SAFE-07 | Phase 4 | Complete — plan 04-06 |
 | SAFE-08 | Phase 4 | Complete — plan 04-04 |
 | SAFE-09 | Phase 4 | Complete — plan 04-08 |
-| SAFE-10 | Phase 4 | Complete — plans 04-07, 04-08, 04-09 |
+| SAFE-10 | Phase 4 | Complete — plans 04-07, 04-08, 04-09; push confirm in rpc and the subagent management confirm re-satisfied by 12.1-01 |
 | SAFE-11 | Phase 4 | Complete — plans 04-01, 04-09 |
 | SAFE-12 | Phase 4 | Complete — plan 04-10 |
 | SAFE-13 | Phase 4 | Complete — plan 04-04 |
 | SAFE-14 | Phase 4 | Complete — plans 04-02, 04-08, 04-10 |
 | SAFE-15 | Phase 4 | Complete — plan 04-11 |
-| SAFE-16 | Phase 1 | Pending — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING — `gh auth logout` has not been run on the work laptop. Not completable from this machine |
+| SAFE-16 | Phase 1 | Partial — second clause DONE (runbook entry `RB-01-01` written in 01-10, classifier shipped in 01-07); first clause OUTSTANDING (`gh auth logout` has not been run on the work laptop). Not completable from this machine |
 | SAFE-17 | Phase 4 | Complete — plan 04-11 |
 | ROUTE-01 | Phase 5 | Complete |
 | ROUTE-02 | Phase 5 | Complete |
@@ -302,7 +322,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | EXT-08 | Phase 7 | Complete — re-verified independently in plans 07-01, 07-10 and 07-11, not install-dependent |
 | EXT-09 | Phase 7 | Partial — the composed ritual is documented as a single sequence in `docs/RUNBOOK.md`'s `RB-07-01` (plan 07-13), citing existing Phase 2/3 entries for two of its four legs and naming the exact steps for the other two; running it is `RB-07-01`, **OUTSTANDING**. Not complete |
 | EXT-10 | Phase 7 | Complete — not install-dependent; `pi-loop-police`'s missing LICENSE re-verified three times independently (plan 07-06) |
-| GATE-01 | Phase 8 | Partial — typecheck, lint and the QUAL-01 anti-pattern legs are wired into a real `/quick` (plan 08-11); the LSP leg's mechanism is proven offline in both states, but `@narumitw/pi-lsp` has never been installed, so it has only ever reported `UNAVAILABLE`. `RB-08-02`, **OUTSTANDING**. Not complete |
+| GATE-01 | Phase 8 | Partial — typecheck, lint and anti-pattern legs run on the change; the LSP leg is UNAVAILABLE by a Pi API limit (12.1-05). Live half `RB-08-02`, **OUTSTANDING**. Not complete |
 | GATE-02 | Phase 8 | Partial — the six-element reviewer context contract reaches a captured outgoing request intact and redacted (`tests/integration/reviewer-contract.test.ts`, plan 08-07); `.pi/agents/reviewer.md` ships deliberately unwired because the reviewer dispatches via `runSingleShotRole`, never a real `pi-subagents` spawn (never installed). `RB-08-03`, **OUTSTANDING**. Not complete |
 | GATE-03 | Phase 8 | Complete |
 | GATE-04 | Phase 8 | Complete |
@@ -338,25 +358,35 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | CTX-04 | Phase 10 | Complete |
 | CTX-05 | Phase 10 | Partial — offline proof only; not complete until `RB-10-01` runs |
 | CTX-06 | Phase 10 | Partial — local extensions measured; not complete until `RB-10-03` measures the four uninstalled packages |
-| UI-01 | Phase 11 | Complete — visual check `RB-11-01` outstanding |
-| UI-02 | Phase 11 | Complete — visual check `RB-11-01` outstanding |
-| UI-03 | Phase 11 | Complete — visual check `RB-11-01` outstanding |
+| UI-01 | Phase 11 | Partial — proven offline; the visual check is `RB-11-01`, **OUTSTANDING**. Not complete |
+| UI-02 | Phase 11 | Partial — proven offline; the visual check is `RB-11-01`, **OUTSTANDING**. Not complete |
+| UI-03 | Phase 11 | Partial — proven offline; the visual check is `RB-11-01`, **OUTSTANDING**. Not complete |
 | UI-04 | Phase 11 | Partial — offline stub proof only; not complete until `RB-11-02` runs |
 | UI-05 | Phase 11 | Partial — offline proof only; not complete until `RB-11-03` runs |
 | CMT-01 | Phase 08.2 | Complete |
-| CMT-02 | Phase 08.2 | Complete offline - faux-session delivery proven by tests/unit/comment-rules-delivery.test.ts; live check RB-08-04, OUTSTANDING |
+| CMT-02 | Phase 08.2 | Partial — faux-session delivery proven by `tests/unit/comment-rules-delivery.test.ts`; live check `RB-08-04`, **OUTSTANDING**. Not complete |
 | CMT-03 | Phase 08.2 | Complete |
 | CMT-04 | Phase 08.2 | Complete |
 | CMT-05 | Phase 08.2 | Complete |
+| UPG-01 | Phase 08.1 | Complete |
+| UPG-02 | Phase 08.1 | Complete |
+| UPG-03 | Phase 08.1 | Complete |
+| UPG-04 | Phase 08.1 | Complete |
+| UPG-05 | Phase 08.1 | Complete |
+| UPG-06 | Phase 08.1 | Complete |
+| OSPEC-1 | Phase 12 | Partial — pin and env opt-outs proven offline; `RB-12-01` and `RB-12-03`, **OUTSTANDING**. Not complete |
+| OSPEC-2 | Phase 12 | Partial — zero-cost proof offline; `RB-12-02`, **OUTSTANDING**. Not complete |
+| OSPEC-3 | Phase 12 | Complete |
+| OSPEC-4 | Phase 12 | Partial — documented; the upgrade drill is `RB-12-04`, **OUTSTANDING**. Not complete |
 
 **Coverage:**
-- v1 requirements: **107 total** — corrected from 105. The earlier count predated the QUAL-01…09 Engineering Quality group. Counted by category: BOOT 10 · DIAG 8 · PROV 10 · SAFE 17 · ROUTE 11 · EXT 10 · GATE 10 · QUAL 9 · FLOW 11 · CTX 6 · UI 5.
-- CMT-01..05 were inserted 2026-10-13 for Phase 08.2 (Comment Discipline); the 107 figure above predates them.
-- Mapped to phases: **107**
+- v1 requirements: **122 total** — 107 from Phases 1-11, plus UPG 6 (Phase 08.1), CMT 5 (Phase 08.2) and OSPEC 4 (Phase 12). Counted by category: BOOT 10 · DIAG 8 · PROV 10 · SAFE 17 · ROUTE 11 · EXT 10 · GATE 10 · QUAL 9 · FLOW 11 · CTX 6 · UI 5 · UPG 6 · CMT 5 · OSPEC 4.
+- Phase 12.1 introduces no new IDs; it re-satisfies existing ones.
+- Mapped to phases: **122**
 - Unmapped: **0** ✓
 - Duplicates: **0** ✓ — every requirement maps to exactly one phase
 
-**Per-phase counts:** P1: 11 · P2: 8 · P3: 10 · P4: 16 · P5: 11 · P6: 3 · P7: 10 · P8: 16 · P9: 11 · P10: 6 · P11: 5 = 107
+**Per-phase counts:** P1: 11 · P2: 8 · P3: 10 · P4: 16 · P5: 11 · P6: 3 · P7: 10 · P8: 16 · P9: 11 · P10: 6 · P11: 5 · P08.1: 6 · P08.2: 5 · P12: 4 = 122
 
 **Placement notes where a requirement crosses a category boundary:**
 
@@ -371,7 +401,7 @@ Populated during roadmap creation. Full phase definitions in `.planning/ROADMAP.
 | QUAL-08 (gate depth scales) | Phase 9 | The `/quick`-vs-full split is a workflow property; it can only be expressed once both workflows exist. |
 | QUAL-09 (quality-layer cost per turn) | Phase 8 | It extends the Phase 2 JSONL schema, but the number is unfillable until the quality layer exists. |
 
-**[RUNBOOK] distribution (13 of 107):** Phase 2 — DIAG-01, DIAG-05 · Phase 3 — PROV-03, PROV-04, PROV-07, PROV-10 · Phase 4 — SAFE-01 · Phase 5 — ROUTE-11 · Phase 8 — GATE-01 (the LSP leg), GATE-02 (the reviewer subagent spawn), GATE-08 (the live calibration run), GATE-10 (main-loop half) · Phase 10 — CTX-05. Corrected from "8" to "13" by plan 08-13's reconciliation — the prior count predated this phase's own honest accounting of GATE-01/02/08's live-blocked halves and undercounted even the pre-existing nine.
+**[RUNBOOK] distribution (13 of 122 carry the tag; 36 requirements are `[~]` today because a named live check has not run):** Phase 2 — DIAG-01, DIAG-05 · Phase 3 — PROV-03, PROV-04, PROV-07, PROV-10 · Phase 4 — SAFE-01 · Phase 5 — ROUTE-11 · Phase 8 — GATE-01 (the LSP leg), GATE-02 (the reviewer subagent spawn), GATE-08 (the live calibration run), GATE-10 (main-loop half) · Phase 10 — CTX-05. Corrected from "8" to "13" by plan 08-13's reconciliation — the prior count predated this phase's own honest accounting of GATE-01/02/08's live-blocked halves and undercounted even the pre-existing nine.
 
 *Note: GATE-10 and DIAG-01/05 carry both [FAUX] and [RUNBOOK] tags — the offline half is verifiable on the dev machine, the live half is not.*
 

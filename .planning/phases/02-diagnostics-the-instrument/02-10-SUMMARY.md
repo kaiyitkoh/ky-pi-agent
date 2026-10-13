@@ -45,6 +45,7 @@ metrics:
   tasks: 3
   files: 6
   completed: 2026-08-13
+requirements-completed: [DIAG-06]
 ---
 
 # Phase 2 Plan 10: `/budget` Summary

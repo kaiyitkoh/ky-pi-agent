@@ -37,6 +37,7 @@ metrics:
   tasks: 2
   files: 2
   completed: 2026-08-13
+requirements-completed: [PROV-01]
 ---
 
 # Phase 3 Plan 06: The Template Installer Summary

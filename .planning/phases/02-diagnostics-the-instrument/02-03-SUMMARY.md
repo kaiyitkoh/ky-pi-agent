@@ -48,6 +48,7 @@ metrics:
   tasks: 3
   files: 7
   completed: 2026-08-13
+requirements-completed: [DIAG-07, DIAG-08]
 ---
 
 # Phase 2 Plan 03: The Log Substrate Summary

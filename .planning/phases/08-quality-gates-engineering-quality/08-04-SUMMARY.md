@@ -40,6 +40,7 @@ decisions:
 metrics:
   duration: "~10m (commit-to-commit; c394e25 at 11:24 to 2c01aa5 at 11:32)"
   completed: 2026-08-15
+requirements-completed: [QUAL-09]
 ---
 
 # Phase 8 Plan 4: Quality-Cost Ledger Summary

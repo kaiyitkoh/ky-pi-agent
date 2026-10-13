@@ -32,6 +32,7 @@ metrics:
   tasks: 2
   files: 1
   completed: 2026-08-13
+requirements-completed: [PROV-02]
 ---
 
 # Phase 3 Plan 07: PROV-02 as a Mechanical Gate Summary

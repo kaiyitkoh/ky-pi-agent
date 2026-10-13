@@ -45,6 +45,7 @@ metrics:
   tasks: 3
   files: 4
   completed: 2026-08-13
+requirements-completed: [DIAG-02, DIAG-03]
 ---
 
 # Phase 2 Plan 07: The Chokepoint Summary

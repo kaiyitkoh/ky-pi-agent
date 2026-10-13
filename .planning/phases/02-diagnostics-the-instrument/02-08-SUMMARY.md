@@ -48,6 +48,7 @@ metrics:
   tasks: 2
   files: 5
   completed: 2026-08-13
+requirements-completed: [DIAG-04]
 ---
 
 # Phase 2 Plan 08: The Per-Turn Row Summary
