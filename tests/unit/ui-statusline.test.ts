@@ -8,6 +8,7 @@ import {
   type Fg,
 } from "../../.pi/extensions/ui/statusline.ts";
 import { createAgentTracker } from "../../.pi/extensions/ui/agents.ts";
+import { createGitProbe, GIT_STATUS_ARGS, type ProbeResult } from "../../.pi/extensions/ui/git-probe.ts";
 
 const id: Fg = (_c, s) => s;
 const tag: Fg = (c, s) => `<${c}>${s}`;
@@ -153,5 +154,133 @@ describe("agent tracker", () => {
     t.onToolStart("subagent", "c1");
     t.reset();
     expect(t.running()).toBe(0);
+  });
+});
+
+describe("git probe", () => {
+  function setup(minIntervalMs?: number) {
+    let clock = 1000;
+    const calls: Array<{ args: readonly string[]; resolve: (r: ProbeResult) => void; reject: (e: unknown) => void }> = [];
+    const scheduled: Array<{ fn: () => void; ms: number; cancelled: boolean }> = [];
+    const results: Array<number | undefined> = [];
+    const probe = createGitProbe({
+      exec: (args) =>
+        new Promise<ProbeResult>((resolve, reject) => {
+          calls.push({ args, resolve, reject });
+        }),
+      onResult: (c) => results.push(c),
+      now: () => clock,
+      schedule: (fn, ms) => {
+        const entry = { fn, ms, cancelled: false };
+        scheduled.push(entry);
+        return () => {
+          entry.cancelled = true;
+        };
+      },
+      minIntervalMs,
+    });
+    const tick = async () => {
+      for (let i = 0; i < 5; i++) await Promise.resolve();
+    };
+    return { probe, calls, scheduled, results, advance: (ms: number) => (clock += ms), tick };
+  }
+
+  it("runs the fixed argv and reports the count", async () => {
+    const h = setup();
+    h.probe.trigger();
+    expect(h.calls).toHaveLength(1);
+    expect(h.calls[0].args).toEqual(GIT_STATUS_ARGS);
+    h.calls[0].resolve({ stdout: " M a\n", code: 0 });
+    await h.tick();
+    expect(h.results).toEqual([1]);
+  });
+
+  it("collapses triggers during a run into one trailing run", async () => {
+    const h = setup(0);
+    h.probe.trigger();
+    h.probe.trigger();
+    h.probe.trigger();
+    h.probe.trigger();
+    expect(h.calls).toHaveLength(1);
+    h.calls[0].resolve({ stdout: "", code: 0 });
+    await h.tick();
+    expect(h.calls).toHaveLength(2);
+    h.calls[1].resolve({ stdout: "", code: 0 });
+    await h.tick();
+    expect(h.calls).toHaveLength(2);
+  });
+
+  it("rate-limits with a single scheduled run at the remaining delay", async () => {
+    const h = setup(2000);
+    h.probe.trigger();
+    h.calls[0].resolve({ stdout: "", code: 0 });
+    await h.tick();
+    h.advance(500);
+    h.probe.trigger();
+    h.probe.trigger();
+    expect(h.calls).toHaveLength(1);
+    expect(h.scheduled).toHaveLength(1);
+    expect(h.scheduled[0].ms).toBe(1500);
+    h.advance(1500);
+    h.scheduled[0].fn();
+    expect(h.calls).toHaveLength(2);
+  });
+
+  it("backs off to four times the last duration", async () => {
+    const h = setup(2000);
+    h.probe.trigger();
+    h.advance(1000);
+    h.calls[0].resolve({ stdout: "", code: 0 });
+    await h.tick();
+    h.probe.trigger();
+    expect(h.calls).toHaveLength(1);
+    expect(h.scheduled[0].ms).toBe(3000);
+  });
+
+  it("stops after exit 128 until reset", async () => {
+    const h = setup(0);
+    h.probe.trigger();
+    h.calls[0].resolve({ stdout: "", code: 128 });
+    await h.tick();
+    expect(h.results).toEqual([undefined]);
+    h.probe.trigger();
+    expect(h.calls).toHaveLength(1);
+    h.probe.reset();
+    h.probe.trigger();
+    expect(h.calls).toHaveLength(2);
+  });
+
+  it("reports undefined on failure without throwing", async () => {
+    const h = setup(0);
+    h.probe.trigger();
+    h.calls[0].resolve({ stdout: " M a\n", code: 1 });
+    await h.tick();
+    h.probe.trigger();
+    h.calls[1].resolve({ stdout: " M a\n", code: 0, killed: true });
+    await h.tick();
+    h.probe.trigger();
+    h.calls[2].reject(new Error("boom"));
+    await h.tick();
+    expect(h.results).toEqual([undefined, undefined, undefined]);
+  });
+
+  it("drops the result of a run that reset superseded", async () => {
+    const h = setup(0);
+    h.probe.trigger();
+    h.probe.reset();
+    h.calls[0].resolve({ stdout: " M a\n", code: 0 });
+    await h.tick();
+    expect(h.results).toEqual([]);
+  });
+
+  it("dispose cancels a scheduled run", async () => {
+    const h = setup(2000);
+    h.probe.trigger();
+    h.calls[0].resolve({ stdout: "", code: 0 });
+    await h.tick();
+    h.probe.trigger();
+    expect(h.scheduled).toHaveLength(1);
+    h.probe.dispose();
+    expect(h.scheduled[0].cancelled).toBe(true);
   });
 });
