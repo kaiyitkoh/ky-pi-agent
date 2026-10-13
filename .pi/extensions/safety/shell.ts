@@ -267,7 +267,7 @@ export interface CanonicalInvocation {
 	readonly wrappers: readonly string[];
 	/** The raw source slice for this one command segment — what {@link GUARDED_VERB_PATTERN} tests against. */
 	readonly rawSegment: string;
-	/** `git -C`/`--git-dir` wins (the only value a `HEAD == main` oracle can trust), else an `env -C` directory. */
+	/** `git -C`/`--git-dir` wins (the only value a `HEAD == main` oracle can trust), else an `env -C` or `sudo -D` directory. */
 	readonly cwdOverride?: string;
 }
 
@@ -628,7 +628,7 @@ function resolveWrappers(values: readonly string[]): ResolvedWrappers {
 		}
 		const optionsStart = runner !== undefined ? runner.subcommandIndex + 1 : i + 1;
 		const consumed = consumeWrapperOptions(values, optionsStart, grammar, (option, value) => {
-			if (verb === "env" && (option === "-C" || option === "--chdir")) {
+			if ((verb === "env" && option === "-C") || (verb === "sudo" && option === "-D") || option === "--chdir") {
 				cwdOverride = value;
 			}
 		});

@@ -238,6 +238,14 @@ const WRAPPER_TABLE: readonly WrapperRow[] = [
 		why: "pnpm's dlx subcommand runs a package binary, so it resolves like npx",
 	},
 	{
+		label: "sudo -D directory override",
+		cmd: "sudo -D /other git commit -m x",
+		expectedExecutable: "git",
+		expectedWrappers: ["sudo"],
+		expectedCwdOverride: "/other",
+		why: "sudo -D runs the command in another directory, so the branch oracle must read that repository",
+	},
+	{
 		label: "npm global option before exec",
 		cmd: "npm --yes exec openspec update",
 		expectedExecutable: "openspec",

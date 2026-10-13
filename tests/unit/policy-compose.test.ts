@@ -375,6 +375,20 @@ const ROWS: readonly Row[] = [
 	},
 	{ name: "sudo -- terraform apply -- confirm", toolName: "bash", input: { command: "sudo -- terraform apply" }, expected: "confirm" },
 	{
+		name: "sudo -D into a repo on protected main -- block, even from a feature-branch cwd",
+		toolName: "bash",
+		input: { command: "sudo -D /other git commit -m x" },
+		facts: { currentBranchFor: (dir: string) => (dir === "/other" ? "main" : "feature/x") },
+		expected: "block",
+	},
+	{
+		name: "sudo --chdir= into a repo on protected main -- block",
+		toolName: "bash",
+		input: { command: "sudo --chdir=/other git commit -m x" },
+		facts: { currentBranchFor: (dir: string) => (dir === "/other" ? "main" : "feature/x") },
+		expected: "block",
+	},
+	{
 		name: "env with an unknown option before git push -- unresolved-wrapper block",
 		toolName: "bash",
 		input: { command: "env --frobnicate git push" },
