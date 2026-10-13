@@ -53,35 +53,43 @@ they travel with it.
 git clone https://github.com/kaiyitkoh/ky-pi-agent
 cd ky-pi-agent
 sh bin/bootstrap.sh
-npm ci --ignore-scripts
 sh bin/bootstrap.sh --global-setup
 sh bin/bootstrap.sh --check-only
+pi list
 ```
 
-`npm ci` is required: the guard imports `unbash` from the checkout, and
-without it every tool call is blocked. Bootstrap alone puts only the guard, the
-composed packages, the agents and the theme into other repositories; the
-harness commands (`/mode`, `/quick`, `/plan`, ...) need the checkout added as a
-filtered user package, which is step 5 of the runbook's start-here section.
-
-The full run hardens every npm scope, installs Pi 1.1.0, the four composed
-packages at exact pins, the `ky` theme, the `models.json`/`auth.json` templates
-and a user-scope safety stub that loads this checkout's guard and blocks every
-tool call if the guard fails to load. It also registers this checkout's
-`.pi/agents` as a subagent scan directory, so the harness works in every
-repository. It merges rather than overwrites: your own packages, extensions,
-theme and `kyPiAgent` keys survive, and a different pinned version of one of
-ours is refused. `--global-setup` re-runs only the settings merge and refuses
-unless a full run has installed the safety stub (or the git package is
-configured). `sh bin/bootstrap.sh --help` lists every mode.
+The full run hardens every npm scope, then installs this checkout's own
+dependencies with `npm ci --ignore-scripts` from the lockfile (the guard
+imports `unbash` from the checkout; without the dependencies Pi exits at
+start in every repository), Pi 1.1.0, the four composed packages at exact pins,
+the `ky` theme, the `models.json`/`auth.json` templates and a user-scope safety
+stub that loads this checkout's guard and blocks every tool call if the guard
+fails to load. Once the stub exists it adds this checkout as a user-level
+package with its safety extension filtered out
+(`"extensions": ["!.pi/extensions/safety/**"]`), so the harness commands
+(`/mode`, `/quick`, `/plan`, `/review`, ...) load in every repository and
+`pi list` shows `<checkout path> (filtered)` (set `kyPiAgent.harnessPackage`
+to `false` to opt out), and registers this checkout's `.pi/agents` as a
+subagent scan directory. It merges rather than overwrites: your own packages,
+extensions, theme and `kyPiAgent` keys survive, and a different pinned version of one of
+ours is refused; an entry you already have for this checkout is kept as you
+configured it. `--global-setup` re-runs the dependency check and the settings
+merge and refuses unless a full run has installed the safety stub (or the git
+package is configured). `--check-only` changes nothing: it reports missing
+dependencies and a missing harness entry as `WARN` lines. `sh bin/bootstrap.sh --help` lists every mode.
 
 Do one or the other, **not both**. The stub loads this checkout's guard; a git
 package carries its own copy, and two copies can diverge.
-`sh bin/bootstrap.sh --check-only` fails when both are configured. Separately,
-a user-level copy of the harness plus a *trusted* project load of this checkout
-loads the safety extension twice, and Pi refuses to start
-(`Tool "bash" conflicts with ...`). So never trust the checkout as a project
-once the harness is installed for your user.
+`sh bin/bootstrap.sh --check-only` fails when both are configured, and when a
+git package sits beside the local harness entry: that is two copies of the
+whole harness, and Pi refuses to start on their conflicting tools. Trusting
+this checkout as a project is harmless: the package entry already names its
+extensions, so Pi does not load them again, and should the guard load twice
+anyway, the second copy finds the first on Pi's event bus, registers no tool
+(two registrations of `bash` would make Pi exit with
+`Tool "bash" conflicts with ...`) and adds only a second blocking `tool_call`
+hook. Trusting another clone or worktree of this repository is not: its
+extensions come from a second path and conflict.
 
 ## Commands and modes
 

@@ -107,6 +107,9 @@ export function makeBootstrapRepoCopy(prefix: string): BootstrapRepoCopy {
 	mkdirSync(join(root, ".pi", "themes"), { recursive: true });
 	copyFileSync(join(repoRoot(), ".pi", "themes", "ky.json"), join(root, ".pi", "themes", "ky.json"));
 
+	// The checkout-dependency step reads the manifest; node_modules resolves from this repo, an ancestor.
+	for (const name of ["package.json", "package-lock.json"]) copyFileSync(join(repoRoot(), name), join(root, name));
+
 	mkdirSync(join(root, ".pi", "scripts"), { recursive: true });
 	copyFileSync(
 		join(repoRoot(), ".pi", "scripts", "worktree-setup-hook.mjs"),

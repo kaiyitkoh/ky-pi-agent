@@ -1511,3 +1511,32 @@ describe("Group F — docs/WORKFLOWS.md agrees with the workflow code tables, in
 		}
 	});
 });
+
+describe("install docs describe what bootstrap now does, not manual workarounds", () => {
+	const runbook = readFileSync(RUNBOOK_PATH, "utf-8");
+	const startHere = runbook.slice(runbook.indexOf("## Work laptop: start here"), runbook.indexOf("### 6. Bedrock"));
+	const codeLines = (text: string): string[] =>
+		[...text.matchAll(/```[^\n]*\n([\s\S]*?)```/g)].flatMap((m) => (m[1] ?? "").split("\n").map((l) => l.trim()));
+	const pathB = README.slice(README.indexOf("**Path B"), README.indexOf("## Commands and modes"));
+
+	it("neither tells the reader to run npm ci or to hand-write the harness package entry", () => {
+		expect(startHere.length).toBeGreaterThan(0);
+		for (const [name, text] of [["runbook start-here", startHere], ["README Path B", pathB]] as const) {
+			expect(codeLines(text), `${name}: bootstrap runs npm ci itself`).not.toContain("npm ci --ignore-scripts");
+			expect(text, `${name}: bootstrap writes the filtered package entry itself`).not.toContain("pwd -W");
+		}
+	});
+
+	it("both keep the verify commands and the filter they can see in pi list", () => {
+		for (const text of [startHere, pathB]) {
+			expect(codeLines(text)).toEqual(expect.arrayContaining(["sh bin/bootstrap.sh --check-only", "pi list"]));
+			expect(text).toContain("!.pi/extensions/safety/**");
+			expect(text).toContain("(filtered)");
+		}
+		expect(codeLines(startHere)).toContain("sh bin/bootstrap.sh --assert-hardening");
+	});
+
+	it("neither warns against trusting the checkout, which is now harmless", () => {
+		for (const text of [startHere, README]) expect(text).not.toMatch(/never trust the (ky-pi-agent )?checkout/i);
+	});
+});

@@ -77,9 +77,9 @@ read -rs -p 'DashScope API key: ' k && printf 'export DASHSCOPE_API_KEY=%s\n' "$
   it the harness uses the shared host
   `https://dashscope-intl.aliyuncs.com/compatible-mode/v1`. If your key belongs
   to a workspace-dedicated endpoint, export it **before** bootstrap and keep it
-  in `~/.bashrc`, because every bootstrap run rewrites
-  `providers.dashscope` in `models.json` and an unset variable puts the shared
-  host back:
+  in `~/.bashrc`. Every bootstrap run rewrites `providers.dashscope` in
+  `models.json`; a run with the variable unset keeps the https endpoint already
+  installed (and says so), so only setting the variable changes the host:
 
   ```
   echo 'export KYPI_DASHSCOPE_BASE_URL="https://<workspace-id>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1"' >> ~/.bashrc
@@ -123,7 +123,7 @@ Notes:
   does not read `~/.bashrc`. If you must, set the same variables in the Windows
   user environment (Settings, "Edit environment variables for your account").
 
-### 4. Clone, install dependencies, bootstrap
+### 4. Clone and bootstrap
 
 Pick the checkout's final location first. The safety stub, the subagent scan
 directory, the worktree hook and the harness package (step 5) all point at its
@@ -135,7 +135,6 @@ git clone https://github.com/kaiyitkoh/ky-pi-agent
 cd ky-pi-agent
 git checkout v1.0.1
 sh bin/bootstrap.sh
-npm ci --ignore-scripts
 sh bin/bootstrap.sh --global-setup
 sh bin/bootstrap.sh --check-only
 sh bin/bootstrap.sh --assert-hardening
@@ -147,71 +146,73 @@ What each line does, and what it must print:
 - `git checkout v1.0.1` pins the release (today `main` is the same commit).
   Skip it to track `main`.
 - `sh bin/bootstrap.sh` (the full run) hardens every npm scope Pi can reach,
-  installs Pi 1.1.0 globally, merges `~/.pi/agent/settings.json` (the four
-  composed packages at exact pins, four `-builtin:` disables, theme `ky`, this
-  checkout's `.pi/agents` as a subagent scan directory), writes
-  `~/.pi/agent/themes/ky.json`, merges `providers.dashscope` and the
-  `apac.` Sonnet 4.5 model into `~/.pi/agent/models.json`, adds the `dashscope`
-  and `deepseek` entries to `~/.pi/agent/auth.json`, writes the fail-closed
-  safety stub `~/.pi/agent/extensions/ky-safety/index.ts`, wires the worktree
-  hook into `~/.pi/agent/extensions/subagent/config.json`, and runs
-  `pi install` for the four packages. It ends with `Bootstrap complete.` One
-  line is expected and is not a failure:
+  then runs `npm ci --ignore-scripts` in the checkout (the lockfile's exact
+  tree, under the checkout's `.npmrc`; skipped when every dependency in
+  `package.json` is already at its pin), installs Pi 1.1.0 globally, merges
+  `~/.pi/agent/settings.json` (the four composed packages at exact pins, this
+  checkout as the harness package with its safety extension filtered out, four
+  `-builtin:` disables, theme `ky`, this checkout's `.pi/agents` as a subagent
+  scan directory), writes `~/.pi/agent/themes/ky.json`, merges
+  `providers.dashscope` and the `apac.` Sonnet 4.5 model into
+  `~/.pi/agent/models.json`, adds the `dashscope` and `deepseek` entries to
+  `~/.pi/agent/auth.json`, writes the fail-closed safety stub
+  `~/.pi/agent/extensions/ky-safety/index.ts`, wires the worktree hook into
+  `~/.pi/agent/extensions/subagent/config.json`, and runs `pi install` for the
+  four packages. It ends with `Bootstrap complete.` One line is expected and is
+  not a failure:
   `auth.json entries NOT installed (still hold a REPLACE_WITH_ placeholder): amazon-bedrock`
   (step 6 adds that entry). Existing files are merged, never overwritten; an
-  invalid JSON file is refused, not rewritten.
-- `npm ci --ignore-scripts` installs this checkout's own dependencies
-  (`unbash`, `typescript`, the test tools). **Required**: the guard imports
-  `unbash` from this checkout, and without it the stub blocks every tool call
-  with `Cannot find module 'unbash'`.
-- `--global-setup` re-asserts the hardening and the safety delivery path and
-  re-merges settings; after a full run it changes nothing and ends
-  `Global setup complete.`
-- `--check-only` changes nothing and needs network. Expected: exit 0, the stub
-  line ends `(target exists)`, the delivery-path line reads
-  `one delivery path (no user-level package loads this checkout)` (after step 5
-  it is a `WARN user-level package ... loads this checkout` line instead, which
-  is expected), and it ends `check-only complete.`
+  invalid JSON file is refused, not rewritten. A line
+  `providers.dashscope keeps its installed non-default endpoint` means the
+  variable is unset in this shell and the endpoint already installed was kept.
+- `--global-setup` re-asserts the hardening and the safety delivery path,
+  checks the dependencies and re-merges settings; after a full run it changes
+  nothing and ends `Global setup complete.`
+- `--check-only` changes nothing and needs network. Expected: exit 0, the
+  dependency line reads `every dependency in package.json is installed at its pin`,
+  the stub line ends `(target exists)`, the delivery-path lines read
+  `harness package <checkout path> (safety extension filtered out)` and
+  `one delivery path (no git package of this repo)`, and it ends
+  `check-only complete.` A `WARN` on the dependency line means Pi would exit
+  at start in every repository (`Failed to load extension ... Cannot find module`)
+  and the stub would block every tool call: re-run the full bootstrap.
 - `--assert-hardening` ends `All npm scopes are hardened.`
 - `pi --version` prints `1.1.0`.
 
 Use this path or the git package (README, Install), never both.
 
-### 5. Load the harness in every repository
+### 5. Check the harness loads in every repository
 
-Bootstrap puts only the safety guard, the four composed packages, the subagent
-definitions and the theme into other repositories. The harness itself
+The full run (and `--global-setup`) adds this checkout to
+`~/.pi/agent/settings.json` as a user-level package, so the harness itself
 (`/mode`, `/cheap`, `/quick`, `/grill`, `/plan`, `/execute`, `/review`,
-`/budget`, diagnostics, quality gates, the header and statusline) loads only
-when this checkout is also a user-level package. Add it **with the safety
-extension filtered out**, because the stub already loads the guard and Pi
-refuses to start when two extensions register the same tools
-(`Tool "bash" conflicts with ...`). `pi install <path>` cannot add a filter, so
-run this from the checkout:
+`/budget`, diagnostics, quality gates, the header and statusline) loads in
+every repository, not only inside the checkout. The entry is
+`{ "source": "<checkout path>", "extensions": ["!.pi/extensions/safety/**"] }`:
+the stub already loads the guard, so the package leaves it out, and bootstrap
+writes the entry only after the stub. It adds the entry only when none for this
+checkout exists, keeps any entry you already have for it as you configured it,
+and adds none when a git package of this repository delivers the harness (both
+together make Pi exit, so `--check-only` fails on them). To keep the harness
+out of other repositories, remove the entry and set
+`"harnessPackage": false` inside `"kyPiAgent"` in the same file; bootstrap
+then leaves it out. Verify:
 
 ```
-node -e '
-const fs = require("fs"), path = require("path"), os = require("os");
-const file = path.join(process.env.PI_CODING_AGENT_DIR || path.join(os.homedir(), ".pi", "agent"), "settings.json");
-const s = JSON.parse(fs.readFileSync(file, "utf8"));
-const src = process.argv[1];
-s.packages = (s.packages || []).filter((p) => (typeof p === "string" ? p : p.source) !== src);
-s.packages.push({ source: src, extensions: ["!.pi/extensions/safety/**"] });
-fs.writeFileSync(file, JSON.stringify(s, null, 2) + "\n");
-console.log("added " + src + " to " + file);
-' "$(pwd -W)"
 pi list
 ```
 
-Expected: `added <checkout path> to <settings path>`, and `pi list` shows the
-four `npm:` packages plus `<checkout path> (filtered)`. Bootstrap keeps this
-entry on every later run.
+Expected: the four `npm:` packages plus `<checkout path> (filtered)`.
 
-**Never trust the ky-pi-agent checkout as a project.** If you start `pi`
-inside the checkout and it asks whether to trust the project, answer no: the
-package above already loads the harness from it, and trusting it loads
-`.pi/extensions/safety` a second time, so Pi exits with the tool-conflict
-error. Work repositories have no `.pi/extensions` and never ask.
+Trusting this checkout as a project is harmless. The package entry already
+names this checkout's `.pi/extensions`, so Pi keeps those, safety filtered out,
+and does not load them again from the project. Should the guard load a second
+time anyway (an entry without the filter), that copy finds the first on Pi's
+event bus, registers no tool (so there is no `Tool "bash" conflicts with ...`
+exit) and keeps only a second blocking `tool_call` hook. Do **not** trust
+another clone or worktree of ky-pi-agent while the package is installed: its
+harness extensions come from a second path and Pi exits on their conflicting
+tools. Work repositories have no `.pi/extensions` and never ask.
 
 ### 6. Bedrock through AWS SSO (optional)
 
@@ -338,6 +339,7 @@ node -e 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); consol
 | `safety.protectedBranches` | `[]` | Extra branches that block commits and pushes. |
 | `safety.pushProtectedBranches` | `[]` | Extra branches that block pushes only. |
 | `theme` | `"ky"` | Set by bootstrap only when you had none. |
+| `kyPiAgent.harnessPackage` | unset | `false` keeps bootstrap from adding the harness package (step 5). |
 | `kyPiAgent.bootstrapVersion`, `hardenedNpmRoot`, `piPinned` | written by bootstrap | Do not edit. |
 
 `main`, `master` and `staging` are built in and cannot be removed. The two
@@ -380,7 +382,7 @@ Install and load:
    `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.1`,
    then `PI_CODING_AGENT_DIR=/tmp/pi-clean-check pi --list-models` shows
    `ky-harness-selftest`.
-6. RB-01-03 `/reload`: in this checkout (untrusted, step 5), edit
+6. RB-01-03 `/reload`: in this checkout, edit
    `SELFTEST_MODEL_ID` in `.pi/extensions/harness/index.ts`, run `/reload`; the
    new id appears.
 
@@ -460,7 +462,6 @@ Over time:
 
 ```
 git pull --ff-only
-npm ci --ignore-scripts
 sh bin/bootstrap.sh
 sh bin/bootstrap.sh --check-only
 pi --version
@@ -511,9 +512,9 @@ left behind with no checkout blocks every tool call, by design.
 |---|---|---|
 | `EBUSY` or `EPERM` during bootstrap, `npm install -g` or `pi install` | A running Pi (a `node.exe`) holds the files | Quit every Pi session (check Task Manager for `node.exe`), re-run the same command. |
 | Every tool call blocked: `ky-safety: the safety extension at <path> is missing` | The checkout was moved or deleted | Re-run step 4 from the checkout's current location, then step 5. |
-| Every tool call blocked: `... failed to load (Cannot find module 'unbash' ...)` | `npm ci` was not run in the checkout | `npm ci --ignore-scripts` in the checkout, restart Pi. |
-| Pi exits at start: `Tool "bash" conflicts with ...` | The guard loads twice: the checkout was trusted as a project, the step 5 entry lacks its filter, or a git package of this repo is installed beside the stub | Answer no to trust in the checkout; re-run the step 5 command; `pi remove` the git package. |
-| `/mode` or `/quick` is an unknown command in a work repo | Step 5 was skipped | Run step 5. |
+| Pi exits at start with `Failed to load extension ... Cannot find module`, or every tool call blocked: `... failed to load (Cannot find module 'unbash' ...)` | The checkout's dependencies are missing (`--check-only` prints a `WARN` on its dependency line) | `sh bin/bootstrap.sh` (it runs `npm ci`), restart Pi. |
+| Pi exits at start: `Tool "<name>" conflicts with ...` | Two copies of the harness: a git package of this repo beside this checkout, or a checkout from before the guard skipped its second load | `pi remove` the git package; or update the checkout and re-run `sh bin/bootstrap.sh`. |
+| `/mode` or `/quick` is an unknown command in a work repo | No harness package entry (`--check-only` prints `WARN harness package not configured`) | `sh bin/bootstrap.sh --global-setup`, then step 5. |
 | `default mode cheap: executor not applied: ...` | No DeepSeek or DashScope key in this shell | Step 3, then a new Git Bash window. |
 | `pi auth check --provider <p>` prints `not_ready` | The variable is unset in this shell, or no entry | `echo "${DEEPSEEK_API_KEY:+set}"` in a new window; for Bedrock, step 6.6. |
 | `AWS SSO credentials are expired or missing. Run: aws sso login --profile <name>` | The SSO session expired | Run that command; restart Pi if the next turn still fails. |
@@ -522,7 +523,7 @@ left behind with no checkout blocks every tool call, by design.
 | Bedrock `AccessDeniedException` | Model access not granted, or the role lacks the invoke permissions | Step 6.3; ask the AWS admin. |
 | Bedrock works in one shell, not another | A stale `export AWS_PROFILE` (the stored entry wins only when present), or a renamed profile | Remove the export from `~/.bashrc`; re-run step 6.6 with the current name. |
 | The Sonnet 4.5 `apac.` id is missing from `pi --list-models` | `models.json` predates the template entry | `sh bin/bootstrap.sh`. |
-| DashScope 401, or "model does not exist" | Key from another region or workspace, or the endpoint reverted to the shared host after a bootstrap run without `KYPI_DASHSCOPE_BASE_URL` | Check the key's region and workspace; keep the variable in `~/.bashrc` and re-run bootstrap. |
+| DashScope 401, or "model does not exist" | Key from another region or workspace, or the installed endpoint is the shared host while the key belongs to a workspace-dedicated one | Check the key's region and workspace; export `KYPI_DASHSCOPE_BASE_URL` (step 3) and re-run bootstrap. |
 | Bootstrap: `FATAL: npm configuration is being overridden by environment variables` | Run through `npm run`/`npx`, or an `npm_config_*` export | A new Git Bash window; remove the export. |
 | Bootstrap: `FATAL: ... already pins ... but this checkout pins ...` | A pin moved between versions | `pi remove` the old spec, re-run (step 10). |
 | Bootstrap: `FATAL: pinned Pi version ... is no longer published` | Upstream unpublished the pin | Follow the fallback the message prints. |

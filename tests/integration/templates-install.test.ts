@@ -681,6 +681,22 @@ describe("PROV-01 / PROV-04 -- the templates reach the agent directory", () => {
 		).toContain("https://dashscope-intl.aliyuncs.com/compatible-mode/v1");
 	}, TIMEOUT_MS);
 
+	it("case 5a -- an unset KYPI_DASHSCOPE_BASE_URL keeps an installed https endpoint and does not print it", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const dedicated = "https://127.0.0.1:9/compatible-mode/v1";
+		expect(runFullBootstrap(agentDir, { KYPI_DASHSCOPE_BASE_URL: dedicated }).status).toBe(0);
+
+		const rerun = runFullBootstrap(agentDir);
+		expect(rerun.status, `stderr:\n${rerun.stderr}`).toBe(0);
+		expect(rerun.stdout).toContain("keeps its installed non-default endpoint");
+		expect(rerun.stderr + rerun.stdout).not.toContain("127.0.0.1");
+		expect((installedProviders(agentDir)[DASHSCOPE] as { baseUrl?: string }).baseUrl).toBe(dedicated);
+
+		const shared = "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+		expect(runFullBootstrap(agentDir, { KYPI_DASHSCOPE_BASE_URL: shared }).status).toBe(0);
+		expect((installedProviders(agentDir)[DASHSCOPE] as { baseUrl?: string }).baseUrl).toBe(shared);
+	}, TIMEOUT_MS);
+
 	it.each([
 		[
 			"http",
@@ -1157,6 +1173,12 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 
 	const stubFile = (agentDir: string): string => join(agentDir, "extensions", "ky-safety", "index.ts");
 
+	/** The user-level entry that loads this checkout's harness without a second guard. */
+	const harnessEntry = (repoCopy: BootstrapRepoCopy) => ({
+		source: repoCopy.root.replace(/\\/g, "/"),
+		extensions: ["!.pi/extensions/safety/**"],
+	});
+
 	/** A stub of the shape a full run writes: an import of the copy's guard inside a try/catch. */
 	function seedStub(agentDir: string, repoCopy: BootstrapRepoCopy, failClosed = true): void {
 		const target = join(repoCopy.root, ".pi", "extensions", "safety", "index.ts").replace(/\\/g, "/");
@@ -1209,7 +1231,7 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 		expectReachedTheScript(run);
 
 		const settings = settingsOf(agentDir);
-		expect(settings.packages).toEqual(PINS);
+		expect(settings.packages).toEqual([...PINS, harnessEntry(repoCopy)]);
 		expect(settings.extensions).toEqual(DISABLES);
 		expect(settings.theme).toBe("ky");
 		expect(settings.subagents).toEqual({
@@ -1240,7 +1262,7 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 		expect(first.status, `stderr:\n${first.stderr}`).toBe(0);
 		const afterFirst = readFileSync(join(agentDir, "settings.json"), "utf-8");
 		const settings = JSON.parse(afterFirst) as Record<string, unknown>;
-		expect(settings.packages).toEqual(["npm:foo@1.0.0", ...PINS]);
+		expect(settings.packages).toEqual(["npm:foo@1.0.0", ...PINS, harnessEntry(repoCopy)]);
 		expect(settings.extensions).toEqual(["./mine.ts", ...DISABLES]);
 		expect(settings.theme).toBe("dark");
 		expect(settings.kyPiAgent).toMatchObject({ bedrockProfilePrefix: "us.", bootstrapVersion: "1" });
@@ -1306,6 +1328,81 @@ describe("global setup -- user settings, theme, agent scan dir and the pinned pa
 
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
 		expect(run.stdout).toContain("delivered by the user-level git package");
+		expect(run.stdout).toContain("harness package not added");
+		expect((settingsOf(agentDir).packages as unknown[]).filter((p) => typeof p === "object")).toEqual([]);
+	}, TIMEOUT_MS);
+
+	it("case 4e -- an entry the user already has for this checkout is left exactly as configured", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		const mine = { source: `${repoCopy.root.replace(/\\/g, "/")}/`, skills: [] };
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ packages: [mine] }), "utf-8");
+
+		const run = runMode(["--global-setup"], agentDir, repoCopy);
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(settingsOf(agentDir).packages).toEqual([mine, ...PINS]);
+		expect(run.stdout).toContain("left as configured");
+	}, TIMEOUT_MS);
+
+	it("case 4e2 -- kyPiAgent.harnessPackage false keeps the entry out, and our own entry is reported current", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		writeFileSync(join(agentDir, "settings.json"), JSON.stringify({ kyPiAgent: { harnessPackage: false } }), "utf-8");
+		const optedOut = runMode(["--global-setup"], agentDir, repoCopy);
+		expect(optedOut.status, `stderr:\n${optedOut.stderr}`).toBe(0);
+		expect(optedOut.stdout).toContain("kyPiAgent.harnessPackage is false");
+		expect(settingsOf(agentDir).packages).toEqual(PINS);
+
+		const other = tempDir("kypi-agentdir-");
+		runMode(["--global-setup"], other, repoCopy);
+		const second = runMode(["--global-setup"], other, repoCopy);
+		expect(second.stdout).toContain(`harness package ${harnessEntry(repoCopy).source} already current - unchanged`);
+	}, TIMEOUT_MS);
+
+	it("case 4e3 -- a full run that stops before the stub leaves no harness entry that filters the guard out", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		writeFileSync(join(agentDir, "models.json"), "{ not json", "utf-8");
+
+		const run = runFullBootstrap(agentDir);
+
+		expect(run.status).not.toBe(0);
+		expect(existsSync(stubFile(agentDir))).toBe(false);
+		const packages = (settingsOf(agentDir).packages ?? []) as unknown[];
+		expect(packages.filter((p) => typeof p === "object")).toEqual([]);
+	}, TIMEOUT_MS);
+
+	it("case 4f -- dependencies missing from the checkout are installed with npm ci after the hardening assertions", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		const manifestFile = join(repoCopy.root, "package.json");
+		const manifest = JSON.parse(readFileSync(manifestFile, "utf-8")) as { dependencies: Record<string, string> };
+		manifest.dependencies["kypi-absent-fixture"] = "1.0.0";
+		writeFileSync(manifestFile, JSON.stringify(manifest), "utf-8");
+
+		const run = runMode([], agentDir, repoCopy, {});
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain("kypi-absent-fixture@1.0.0 is not installed");
+		const lines = run.log.split("\n");
+		const ci = lines.indexOf("npm ci --ignore-scripts");
+		expect(ci, run.log).toBeGreaterThan(lines.findIndex((l) => l.startsWith("npm config get ignore-scripts")));
+		expect(ci).toBeLessThan(lines.findIndex((l) => l.startsWith("npm install -g")));
+	}, TIMEOUT_MS);
+
+	it("case 4g -- dependencies already at their pins are not reinstalled, and KYPI_SKIP_INSTALL skips the step", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+
+		const current = runMode(["--global-setup"], agentDir, repoCopy, {});
+		expect(current.status, `stderr:\n${current.stderr}`).toBe(0);
+		expect(current.stdout).toContain("installed at its pin - no action");
+		expect(current.log).not.toContain("npm ci");
+
+		const skipped = runMode(["--global-setup"], agentDir, repoCopy);
+		expect(skipped.status, `stderr:\n${skipped.stderr}`).toBe(0);
+		expect(skipped.stdout).toContain("skipped: KYPI_SKIP_INSTALL=1");
+		expect(skipped.log).not.toContain("npm ci");
 	}, TIMEOUT_MS);
 
 	it("case 4d -- a full run refuses a configured git package before it writes the stub", () => {

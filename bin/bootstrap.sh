@@ -16,8 +16,9 @@
 #
 # Modes
 #   (no args)           full run: probe, verify, harden, install, configure
-#   --global-setup      hardening assertions, the safety delivery check, user
-#                       settings merge, theme, agent scan dir and the pinned
+#   --global-setup      hardening assertions, the safety delivery check, the
+#                       checkout's npm ci, user settings merge (harness package
+#                       included), theme, agent scan dir and the pinned
 #                       composed packages; touches no credential, model, env
 #                       or safety-stub file
 #   --check-only        every probe and repo-side assertion, mutates nothing,
@@ -328,6 +329,90 @@ report_user_scope() {
 }
 
 # ---------------------------------------------------------------------------
+# The checkout's own dependencies
+# ---------------------------------------------------------------------------
+# The stub imports this checkout's guard, which imports unbash from here; with
+# no node_modules every tool call is blocked. Each direct dependency is looked
+# up the way Node resolves it (ancestor node_modules) and judged against its
+# exact pin. Prints one line per problem; exit 0 current, 3 not, other failure.
+checkout_deps_problems() {
+	KYPI_DEPS_ROOT="$REPO_ROOT" node -e '
+const fs = require("node:fs");
+const path = require("node:path");
+const root = process.env.KYPI_DEPS_ROOT;
+const manifestFile = path.join(root, "package.json");
+let manifest;
+try { manifest = JSON.parse(fs.readFileSync(manifestFile, "utf8")); } catch (e) {
+  console.log("FATAL: " + manifestFile + " is unreadable (" + e.message + ")");
+  process.exit(2);
+}
+const wanted = Object.assign({}, manifest.devDependencies, manifest.dependencies);
+const installedVersion = (name) => {
+  for (let dir = root; ; dir = path.dirname(dir)) {
+    const file = path.join(dir, "node_modules", name, "package.json");
+    if (fs.existsSync(file)) {
+      try { return JSON.parse(fs.readFileSync(file, "utf8")).version; } catch (e) { return "unreadable"; }
+    }
+    if (path.dirname(dir) === dir) { return undefined; }
+  }
+};
+let bad = 0;
+for (const name of Object.keys(wanted).sort()) {
+  const got = installedVersion(name);
+  if (got === wanted[name]) { continue; }
+  bad += 1;
+  console.log(name + "@" + wanted[name] + (got === undefined ? " is not installed" : " is installed at " + got));
+}
+process.exit(bad === 0 ? 0 : 3);
+'
+}
+
+# npm ci rather than npm install: the lockfile is the reviewed tree, and the
+# repo .npmrc (ignore-scripts, asserted above) applies because cwd is the root.
+install_checkout_deps() {
+	if [ "${KYPI_SKIP_INSTALL:-0}" = "1" ]; then
+		printf '  skipped: KYPI_SKIP_INSTALL=1\n'
+		return 0
+	fi
+	_problems=$(checkout_deps_problems) && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then
+		printf '  every dependency in package.json is installed at its pin - no action\n'
+		return 0
+	fi
+	if [ "$_rc" -ne 3 ]; then
+		printf '%s\n' "$_problems" >&2
+		exit 1
+	fi
+	printf '%s\n' "$_problems" | sed 's/^/  /'
+	printf '  npm ci deletes node_modules first: close every Pi session, or a held file\n'
+	printf '  leaves it half-deleted and Pi cannot start in any repository\n'
+	printf '  npm ci --ignore-scripts (in %s) ...\n' "$REPO_ROOT"
+	if ! (cd "$REPO_ROOT" && npm ci --ignore-scripts); then
+		printf 'FATAL: npm ci failed in %s.\n' "$REPO_ROOT" >&2
+		printf '       On Windows, close every Pi session first: Pi holds files open (EBUSY/EPERM).\n' >&2
+		printf '       Until a re-run succeeds, Pi cannot load the harness. Re-run: sh bin/bootstrap.sh\n' >&2
+		exit 1
+	fi
+}
+
+# The --check-only counterpart: absent or off-pin is reported, never installed.
+report_checkout_deps() {
+	_problems=$(checkout_deps_problems) && _rc=0 || _rc=$?
+	if [ "$_rc" -eq 0 ]; then
+		printf '  every dependency in package.json is installed at its pin\n'
+		return 0
+	fi
+	if [ "$_rc" -ne 3 ]; then
+		printf '%s\n' "$_problems" >&2
+		exit 1
+	fi
+	printf '%s\n' "$_problems" | sed 's/^/  WARN /'
+	printf '       the stub blocks every tool call and the harness package fails to load,\n'
+	printf '       so Pi exits at start in every repository\n'
+	printf '       remedy: run bin/bootstrap.sh with no arguments to apply\n'
+}
+
+# ---------------------------------------------------------------------------
 # Install and configure
 # ---------------------------------------------------------------------------
 
@@ -460,6 +545,61 @@ if (JSON.stringify(obj) === before) {
 writeAtomic(p, JSON.stringify(obj, null, 2) + "\n");
 console.log("  settings.json kyPiAgent key merged");
 for (const a of added) { console.log("  settings.json added " + a); }
+'
+}
+
+# This checkout as a user-level package carries the harness commands into every
+# repo. The stub already loads the guard, so the entry filters it out (pi 1.1.0
+# core/package-manager.js applyPatterns: a leading ! excludes); hence it is only
+# ever written once the stub exists. Skipped when a git package of this repo
+# delivers the harness, when an entry for this checkout already exists (it is the
+# user one), or when kyPiAgent.harnessPackage is false.
+merge_harness_package() {
+	ensure_agent_dir
+	KYPI_SETTINGS="$PI_AGENT_DIR/settings.json" \
+		KYPI_STUB="$PI_AGENT_DIR/extensions/ky-safety/index.ts" \
+		KYPI_CHECKOUT="$REPO_ROOT" \
+		node -e "$KYPI_ATOMIC_JS"'
+const fs = require("node:fs");
+const path = require("node:path");
+const p = process.env.KYPI_SETTINGS;
+let obj = {};
+if (fs.existsSync(p)) {
+  try { obj = JSON.parse(fs.readFileSync(p, "utf8").trim() || "{}"); } catch (e) {
+    console.error("FATAL: " + p + " is not valid JSON (" + e.message + "). Refusing to touch it.");
+    process.exit(1);
+  }
+}
+if (obj === null || typeof obj !== "object" || Array.isArray(obj) || (obj.packages !== undefined && !Array.isArray(obj.packages))) {
+  console.error("FATAL: " + p + " is not a JSON object with a packages array. Refusing to touch it.");
+  process.exit(1);
+}
+const packages = obj.packages === undefined ? [] : obj.packages;
+const sourceOf = (entry) => (typeof entry === "string" ? entry : entry && typeof entry.source === "string" ? entry.source : "");
+const checkout = process.env.KYPI_CHECKOUT.replace(/\\/g, "/").replace(/\/+$/, "");
+const norm = (s) => s.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
+const isThisRepoGit = (s) => /github\.com[\/:]kaiyitkoh\/ky-pi-agent(\.git)?(@|\/|$)/i.test(s);
+const isThisCheckout = (s) => s !== "" && !/^(npm|git|github|https?|ssh|builtin):/i.test(s) &&
+  norm(path.resolve(path.dirname(p), s.replace(/^local:/i, ""))) === norm(checkout);
+const gitPackage = packages.map(sourceOf).find(isThisRepoGit);
+const ownEntry = packages.find((entry) => isThisCheckout(sourceOf(entry)));
+const ours = { source: checkout, extensions: ["!.pi/extensions/safety/**"] };
+const own = obj.kyPiAgent;
+if (own !== null && typeof own === "object" && own.harnessPackage === false) {
+  console.log("  settings.json harness package not added: kyPiAgent.harnessPackage is false");
+} else if (gitPackage !== undefined) {
+  console.log("  settings.json harness package not added: " + gitPackage + " already loads the harness");
+} else if (ownEntry !== undefined) {
+  const current = JSON.stringify(ownEntry) === JSON.stringify(ours);
+  console.log("  settings.json harness package " + sourceOf(ownEntry) + (current ? " already current - unchanged" : " present - left as configured"));
+} else if (!fs.existsSync(process.env.KYPI_STUB)) {
+  console.log("  settings.json harness package not added: no safety stub, and the entry leaves the guard out");
+} else {
+  packages.push(ours);
+  obj.packages = packages;
+  writeAtomic(p, JSON.stringify(obj, null, 2) + "\n");
+  console.log("  settings.json added harness package " + checkout + " (safety extension filtered out)");
+}
 '
 }
 
@@ -657,6 +797,20 @@ if (providers !== undefined && (providers === null || typeof providers !== "obje
 }
 const outProviders = providers === undefined ? {} : providers;
 let changed = false;
+
+// An unset variable keeps an https endpoint already installed, so a rerun from a
+// shell without it never moves the key to another host. The host is not printed:
+// a workspace-dedicated one names the workspace id.
+const previous = outProviders.dashscope;
+if (!override && previous && typeof previous === "object" && typeof previous.baseUrl === "string" &&
+    previous.baseUrl !== next.baseUrl) {
+  if (previous.baseUrl.toLowerCase().startsWith("https://")) {
+    next.baseUrl = previous.baseUrl;
+    console.log("  models.json providers.dashscope keeps its installed non-default endpoint (KYPI_DASHSCOPE_BASE_URL is unset)");
+  } else {
+    console.error("WARN: providers.dashscope.baseUrl in " + dst + " is not https, so it is reset to " + next.baseUrl + ".");
+  }
+}
 
 if (JSON.stringify(outProviders.dashscope) === JSON.stringify(next)) {
   console.log("  models.json providers.dashscope already current - unchanged");
@@ -906,8 +1060,10 @@ console.log("  " + stub + " -> " + m[1] + " (target exists)");
 }
 
 # Exactly one safety delivery path per machine. The stub plus a git package of
-# this repo is two diverging copies and fails. A user-level git or local package
-# resolving to this checkout only warns: it double-loads inside this repo.
+# this repo is two diverging copies and fails. A git package only warns: its
+# harness copy conflicts with a trusted load of this checkout. A local package of
+# this checkout is the harness entry merge_settings writes; unfiltered, its guard
+# copy is a second load, which the guard detects and skips.
 # KYPI_DP_WILL_WRITE_STUB=1 counts the stub the caller is about to write.
 report_delivery_paths() {
 	_dp_settings="$PI_AGENT_DIR/settings.json"
@@ -926,19 +1082,42 @@ try { obj = JSON.parse(fs.readFileSync(file, "utf8")); } catch (e) {
   process.exit(1);
 }
 const list = obj && Array.isArray(obj.packages) ? obj.packages : [];
-const sources = list.map((e) => (typeof e === "string" ? e : e && typeof e.source === "string" ? e.source : ""));
+const sourceOf = (e) => (typeof e === "string" ? e : e && typeof e.source === "string" ? e.source : "");
+const sources = list.map(sourceOf);
 const norm = (s) => s.replace(/\\/g, "/").replace(/\/+$/, "").toLowerCase();
 const repo = norm(process.env.KYPI_DP_REPO);
 const gitRepo = /github\.com[\/:]kaiyitkoh\/ky-pi-agent(\.git)?(@|\/|$)/i;
 const git = sources.filter((s) => gitRepo.test(s));
-const local = sources.filter((s) => {
-  if (/^(npm|git|https?|ssh):/i.test(s) || gitRepo.test(s) || s === "") { return false; }
+const local = list.filter((e) => {
+  const s = sourceOf(e);
+  if (/^(npm|git|github|https?|ssh|builtin):/i.test(s) || gitRepo.test(s) || s === "") { return false; }
   const bare = s.replace(/^local:/i, "");
   return norm(path.resolve(path.dirname(file), bare)) === repo;
 });
+const filtersGuard = (e) => {
+  if (e === null || typeof e !== "object" || !Array.isArray(e.extensions)) { return false; }
+  const about = (x, lead) => typeof x === "string" && x.startsWith(lead) && x.includes(".pi/extensions/safety");
+  if (e.extensions.length === 0) { return true; }
+  const excluded = e.extensions.some((x) => about(x, "!")) ||
+    e.extensions.some((x) => typeof x === "string" && /^-(\.\/)?\.pi\/extensions\/safety\/index\.ts$/.test(x));
+  return excluded && !e.extensions.some((x) => about(x, "+"));
+};
 const stub = fs.existsSync(process.env.KYPI_DP_STUB) || process.env.KYPI_DP_WILL_WRITE_STUB === "1";
-for (const s of git.concat(local)) {
+for (const s of git) {
   console.log("  WARN user-level package " + s + " loads this checkout, so it double-loads inside this repo");
+}
+for (const e of local) {
+  if (filtersGuard(e)) {
+    console.log("  harness package " + sourceOf(e) + " (safety extension filtered out)");
+  } else {
+    console.log("  WARN user-level package " + sourceOf(e) + " also loads the safety extension; the second copy skips registering");
+  }
+}
+if (git.length > 0 && local.length > 0) {
+  console.error("FATAL: the git package " + git[0] + " and the local package " + sourceOf(local[0]) + " both load the harness.");
+  console.error("       Pi exits at start in every repository on their conflicting tools. Keep one: remove the");
+  console.error("       local entry from " + file + " to use the git package, or remove the git package.");
+  process.exit(1);
 }
 if (git.length > 0 && stub) {
   console.error("FATAL: one delivery path only: the user-scope safety stub and the git package " + git[0] + " are both configured.");
@@ -946,7 +1125,20 @@ if (git.length > 0 && stub) {
   console.error("       or the git package (pi install), never both. Remove one and re-run.");
   process.exit(1);
 }
-if (git.length === 0 && local.length === 0) { console.log("  one delivery path (no user-level package loads this checkout)"); }
+const unguarded = local.filter(filtersGuard);
+if (unguarded.length > 0 && !stub && git.length === 0) {
+  console.error("FATAL: the harness package " + sourceOf(unguarded[0]) + " filters the safety extension out, and no");
+  console.error("       safety stub loads it instead, so the harness runs in every repository without the guard.");
+  console.error("       Remedy: run bin/bootstrap.sh with no arguments to write the stub.");
+  process.exit(1);
+}
+if (git.length === 0 && local.length === 0) {
+  console.log("  one delivery path (no user-level package loads this checkout)");
+  console.log("  WARN harness package not configured: /mode, /quick, /plan and /review load only inside this checkout");
+  console.log("       remedy: run bin/bootstrap.sh with no arguments to apply");
+} else if (git.length === 0) {
+  console.log("  one delivery path (no git package of this repo)");
+}
 '
 }
 
@@ -1030,19 +1222,24 @@ Usage: sh bin/bootstrap.sh [MODE]
 Modes:
   (no arguments)      Full run. Probes tools, verifies the pinned Pi version is
                       still published, hardens and VERIFIES every npm scope,
-                      then installs Pi, merges user settings (composed packages,
-                      builtin disables, theme, agent scan dir), installs the ky
+                      then installs this checkout's own dependencies (npm ci
+                      from the lockfile), installs Pi, merges user settings
+                      (composed packages, builtin disables, theme, agent scan
+                      dir), installs the ky
                       theme and the composed packages, writes .env.example,
                       installs the models.json / auth.json templates, installs
-                      the safety extension at user scope and wires the worktree
+                      the safety extension at user scope, then adds this
+                      checkout as the harness package with the safety
+                      extension filtered out, and wires the worktree
                       setup hook into pi-subagents' own config file. Safe to
                       re-run: every step is idempotent.
   --global-setup      Asserts the ignore-scripts scopes and that the safety
                       guard reaches every repo (a current stub from a full
-                      run, or the git package), then merges user settings,
-                      installs the theme and installs the pinned composed
-                      packages. Touches no credential, model, env or
-                      safety-stub file.
+                      run, or the git package), then installs this checkout's
+                      dependencies, merges user settings, installs the theme
+                      and installs the pinned composed packages, then adds
+                      the harness package. Touches no credential, model, env
+                      or safety-stub file.
   --check-only        Every probe and every repo-side assertion; mutates
                       nothing. Exits 0 on a clean CI runner. Deterministic
                       output, so two consecutive runs are byte-identical.
@@ -1059,14 +1256,16 @@ Environment:
                        Defaults to \$HOME/.pi/agent. Redirect it to point every
                        user-scope path at a temp directory.
   KYPI_PI_PINNED       Override the pinned Pi version (default ${PI_PINNED}).
-  KYPI_SKIP_INSTALL    Set to 1 to skip every npm and pi install step.
+  KYPI_SKIP_INSTALL    Set to 1 to skip every npm and pi install step,
+                       npm ci in this checkout included.
   KYPI_DASHSCOPE_BASE_URL
                        DashScope endpoint written into the installed models.json.
                        Set it to the workspace-dedicated regional form - a host
                        whose first label is your own workspace id - so that id
                        lives only in ~/.pi/agent/models.json and never in this
-                       public repo. Unset uses the shared international host the
-                       template carries. RB-03-01 in docs/RUNBOOK.md is the entry
+                       public repo. Unset keeps an https endpoint already
+                       installed, else uses the shared international host
+                       the template carries. RB-03-01 in docs/RUNBOOK.md is the entry
                        that tells you when to set it.
 EOF
 }
@@ -1095,6 +1294,8 @@ run_check_only() {
 	printf 'Hardening assertions (ignore-scripts):\n'
 	assert_repo_scopes
 	report_user_scope
+	printf 'Checkout dependencies:\n'
+	report_checkout_deps
 	printf 'Safety extension (user scope):\n'
 	report_safety_extension
 	printf 'Safety delivery path:\n'
@@ -1114,8 +1315,11 @@ run_global_setup() {
 	assert_user_scope
 	printf 'Safety delivery path - must hold before anything is installed machine-wide:\n'
 	require_safety_delivery
+	printf 'Checkout dependencies:\n'
+	install_checkout_deps
 	printf 'Configuration:\n'
 	merge_settings
+	merge_harness_package
 	install_theme
 	printf 'Composed packages:\n'
 	install_composed_packages
@@ -1123,7 +1327,7 @@ run_global_setup() {
 }
 
 # Every hardening assertion, and the write that makes the user scope pass one,
-# precedes install_pi and install_composed_packages. Do not reorder: an install
+# precedes install_checkout_deps, install_pi and install_composed_packages. Do not reorder: an install
 # that already ran lifecycle scripts cannot be retroactively protected.
 run_full() {
 	sanitise_npm_env
@@ -1137,6 +1341,8 @@ run_full() {
 	assert_repo_scopes
 	harden_pi_npm_root
 
+	printf 'Checkout dependencies:\n'
+	install_checkout_deps
 	printf 'Pi install:\n'
 	install_pi
 	printf 'Configuration:\n'
@@ -1148,6 +1354,7 @@ run_full() {
 	printf 'Safety delivery path:\n'
 	KYPI_DP_WILL_WRITE_STUB=1 report_delivery_paths
 	install_safety_extension
+	merge_harness_package
 	merge_subagent_config
 	printf 'Composed packages:\n'
 	install_composed_packages

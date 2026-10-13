@@ -149,7 +149,8 @@ describe("the safety extension's source order matches its own documented guarant
 	it("calls registerWrappedTools and registerApprovalTool before registerToolCallHook, textually", () => {
 		const wrappedIdx = source.indexOf("registerWrappedTools(pi)");
 		const approvalIdx = source.indexOf("registerApprovalTool(pi)");
-		const hookIdx = source.indexOf("registerToolCallHook(pi)");
+		// The last call is the full registration path; an earlier one is the hook-only second load.
+		const hookIdx = source.lastIndexOf("registerToolCallHook(pi)");
 
 		expect(wrappedIdx).toBeGreaterThan(-1);
 		expect(approvalIdx).toBeGreaterThan(-1);

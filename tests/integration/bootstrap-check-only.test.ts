@@ -373,7 +373,7 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		expect(run.stdout).toMatch(/WARN user-level package git:github\.com\/kaiyitkoh\/ky-pi-agent@v1\.0\.0 .*double-loads/);
 	}, TIMEOUT_MS);
 
-	it("case 7 -- a local package entry resolving to this checkout warns, with or without the stub", () => {
+	it("case 7 -- an unfiltered local package of this checkout warns that it also loads the guard", () => {
 		const agentDir = tempDir("kypi-agentdir-");
 		writeStub(agentDir);
 		writeUserSettings(agentDir, [repoRoot().replace(/\\/g, "/")]);
@@ -381,7 +381,77 @@ describe("BOOT-03 -- bootstrap probe reporting and idempotence", () => {
 		const run = checkOnlyStubbed(agentDir);
 
 		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
-		expect(run.stdout).toContain("double-loads");
+		expect(run.stdout).toContain("also loads the safety extension; the second copy skips registering");
+		expect(run.stdout).not.toContain("WARN harness package not configured");
+	}, TIMEOUT_MS);
+
+	it("case 7b -- the filtered harness entry bootstrap writes is reported as the harness package, without a warning", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		writeStub(agentDir);
+		const source = repoRoot().replace(/\\/g, "/");
+		writeUserSettings(agentDir, [{ source, extensions: ["!.pi/extensions/safety/**"] }]);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain(`harness package ${source} (safety extension filtered out)`);
+		expect(run.stdout).not.toMatch(/WARN (user-level|harness)/);
+	}, TIMEOUT_MS);
+
+	it("case 7d -- a git package beside the local harness entry fails, stub or not", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const source = repoRoot().replace(/\\/g, "/");
+		writeUserSettings(agentDir, [
+			"git:github.com/kaiyitkoh/ky-pi-agent@v1.0.0",
+			{ source, extensions: ["!.pi/extensions/safety/**"] },
+		]);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status).toBe(1);
+		expect(run.stderr).toContain("both load the harness");
+	}, TIMEOUT_MS);
+
+	it("case 7e -- the filtered harness entry with no stub fails: the harness would run unguarded", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const source = repoRoot().replace(/\\/g, "/");
+		writeUserSettings(agentDir, [{ source, extensions: ["!.pi/extensions/safety/**"] }]);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status).toBe(1);
+		expect(run.stderr).toContain("without the guard");
+	}, TIMEOUT_MS);
+
+	it("case 7c -- no harness entry is reported, since the commands then load only inside this checkout", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		writeStub(agentDir);
+		writeUserSettings(agentDir, []);
+
+		const run = checkOnlyStubbed(agentDir);
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain("WARN harness package not configured");
+	}, TIMEOUT_MS);
+
+	it("case 9 -- a dependency the checkout lacks is reported, and nothing is installed", () => {
+		const agentDir = tempDir("kypi-agentdir-");
+		const repoCopy = bootstrapRepoCopy();
+		const manifestFile = join(repoCopy.root, "package.json");
+		const manifest = JSON.parse(readFileSync(manifestFile, "utf-8")) as { dependencies: Record<string, string> };
+		manifest.dependencies["kypi-absent-fixture"] = "1.0.0";
+		manifest.dependencies.unbash = "0.0.1";
+		writeFileSync(manifestFile, JSON.stringify(manifest), "utf-8");
+		const logDir = tempDir("kypi-log-");
+		const log = join(logDir, "npm.log").replace(/\\/g, "/");
+
+		const run = withStubBin({ npm: npmStub(log) }, (env) => runBootstrap(["--check-only"], { agentDir, env, repoCopy }));
+
+		expect(run.status, `stderr:\n${run.stderr}`).toBe(0);
+		expect(run.stdout).toContain("WARN kypi-absent-fixture@1.0.0 is not installed");
+		expect(run.stdout).toMatch(/WARN unbash@0\.0\.1 is installed at \d/);
+		expect(readFileSync(log, "utf-8")).not.toContain("npm ci");
+		expect(listRecursive(agentDir)).toEqual([]);
 	}, TIMEOUT_MS);
 
 	it("case 8 -- unrelated user packages produce the single-path line and no warning", () => {

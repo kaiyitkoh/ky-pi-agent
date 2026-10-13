@@ -501,8 +501,9 @@ owner machine, or the git package for anyone else, never both (see README
 "Install"). `--global-setup` refuses before installing anything machine-wide
 unless one of the two is in place, and the full run refuses a configured git
 package of this repo before it writes the stub, because the stub it is about
-to write would be the second path. Two copies loading in one process is accepted below only as an
-unintended state, not a supported one. A failing `tool_call` handler blocks the
+to write would be the second path. The stub plus a trusted checkout loads this
+same guard twice in one process; the second copy registers no tool (see
+"may load more than once" below). A failing `tool_call` handler blocks the
 tool in Pi 1.1.0 (`docs/extensions.md`, "Errors and cleanup"), so a crash in
 this guard fails closed.
 
@@ -629,37 +630,41 @@ inside.
   extension is installed in the tool-execution path per `CLAUDE.md`'s
   "What NOT to Use"), but nothing in Pi's own extension model enforces that
   going forward.
-- **This extension may load MORE THAN ONCE in one process — accepted, not
-  solved.** `bin/bootstrap.sh` installs a user-scope stub
-  (`~/.pi/agent/extensions/ky-safety/index.ts`) that unconditionally imports
-  and calls this file's own default export, with no existence check or
-  dedup of any kind (CR-09). When the project is TRUSTED and this
-  repository is also the session's own `cwd`, Pi *also* auto-discovers the
-  project-scoped copy at `.pi/extensions/safety/index.ts`
-  (`dist/core/package-manager.js:1980`) — both copies genuinely load, each
-  registering its own `tool_call` hook, in the same process. An earlier
-  version of this trade was accepted on the claim that the cost is "at
-  worst a duplicate block, never a missed one." **That claim was executed
-  and found FALSE (CR-11):** the deferral marker that lets an APPROVED
-  command's re-issue through (`approvals.ts#markHookDeferred`, WR-12) used
-  to be keyed on the command alone, so the SECOND loaded copy's hook always
-  found the marker already claimed by the first and blocked — permanently
-  defeating the confirm → approve → re-issue protocol (SAFE-10) the moment
-  a second copy loaded, which is exactly the trusted-project, session-
-  rooted-in-this-repo configuration a developer's own interactive daily
-  driver sits in. **Fixed:** the marker is now ALSO keyed on
-  `event.toolCallId` (stable across every hook invocation of ONE tool call,
-  distinct for a genuine re-issue), so every loaded copy's hook can defer
-  for the SAME tool call — because only the single first-registered wrapper
-  ever actually consumes the grant — while a genuinely unconsumed re-issue
-  (a different tool call, before any consume) still blocks, preserving
-  WR-12's own bound. Proven by execution, in one process, with two
-  independent loads of this file, driving both hooks through block →
-  approve → re-issue and confirming the re-issue succeeds EXACTLY ONCE:
-  `tests/integration/bootstrap-safety-stub.test.ts`'s CR-11 case. The
-  residual cost of the double load is therefore exactly what the original
-  claim said and no more: duplicate audit rows, never a missed or
-  permanently-stuck block.
+- **This extension may load more than once in one process; the second
+  copy registers no tool.** The user-scope stub
+  (`~/.pi/agent/extensions/ky-safety/index.ts`) imports this file. With the
+  filtered harness package bootstrap writes, a trusted checkout does not load
+  it again: Pi resolves packages before auto-discovery and keeps the first
+  entry for a path, here the package's disabled one
+  (`dist/core/package-manager.js` `resolve`, `addResource`). A second load
+  still happens with an unfiltered entry for this checkout, or with no entry
+  and a trusted checkout.
+  Two extension paths registering one tool name are a load error in Pi
+  1.1.0 (`dist/core/resource-loader.js` `detectExtensionConflicts`), and
+  `dist/main.js` exits on any load error, so the double load used to stop
+  Pi at start with `Tool "bash" conflicts with ...`. The factory now emits
+  a probe on `pi.events` (`LOADED_CHANNEL`), which Pi's event bus delivers
+  synchronously (`dist/core/event-bus.js`). A copy subscribes to answer it
+  only after all of its registrations succeeded, so a copy that hears an
+  answer registers its `tool_call` hook alone: no tool to conflict, and a
+  second blocking hook that still guards if the answering copy is dropped
+  from the final extension set. `/reload` re-runs the factory in-process
+  after Pi has unsubscribed the old runtime's bus handlers
+  (`dist/core/agent-session.js` `reload`), so a reload registers in full.
+  Two hooks on one call stay correct for approvals: the deferral marker is
+  keyed on `event.toolCallId` as well as the command (CR-11), so both hooks
+  defer for the same tool call while the single wrapper consumes the grant,
+  and a genuine re-issue still blocks. A subagent definition change confirmed
+  in one hook is recorded for 60 s against its tool call id and exact input in
+  a `globalThis` slot, so the other hook does not ask a second time. Any
+  extension can answer the probe, which would leave the guard hook-only: no
+  wrappers and no `approve_ky_command`, so approvals and subagent launches
+  fail closed; loaded extensions already run with full user permissions.
+  Proven by
+  `tests/integration/safety-double-load.test.ts` (Pi's own resource loader:
+  no conflict, both hooks block, reload) and the CR-11 case of
+  `tests/integration/bootstrap-safety-stub.test.ts`. Residual cost:
+  duplicate audit rows.
 - **WR-19: the CR-11 fix removes `HOOK_DEFER_TTL_MS`'s bound entirely for a
   REPLAYED `toolCallId` — narrow, and not reachable in this repository
   today.** `event.toolCallId` is the *provider's* id, passed straight

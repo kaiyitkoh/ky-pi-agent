@@ -741,7 +741,7 @@ already-outstanding `RB-07-01` end-to-end smoke ritual.
 
 `sh bin/bootstrap.sh --global-setup` (also part of a full run) merges into `<agent-dir>/settings.json`, additively. It first refuses, before installing anything, unless the safety guard also reaches every repository: a current fail-closed stub written by a full run, or a user-level git package of this repo, never both:
 
-- `packages`: the four composed packages at the exact pins in `.pi/settings.json`. A different pinned version of one of them already in user settings is refused, naming both versions.
+- `packages`: the four composed packages at the exact pins in `.pi/settings.json`. A different pinned version of one of them already in user settings is refused, naming both versions. Then, once the safety stub exists, this checkout itself, `{ "source": "<checkout path>", "extensions": ["!.pi/extensions/safety/**"] }`, so the harness commands load in every repository while the stub alone delivers the guard (Pi 1.1.0 `dist/core/package-manager.js` `applyPatterns`: a leading `!` excludes). It is added only when no entry for this checkout exists, no git package of this repository is configured and `kyPiAgent.harnessPackage` is not `false`; an existing entry is left as configured. `--check-only` exits 1 when a git package of this repository sits beside a local entry for this checkout, or when the filtered entry has no stub to load the guard.
 - `extensions`: the four `-builtin:` disables (`mcp`, `llama.cpp`, `codemode`, `tool-search`).
 - `theme`: `ky`, only when the user has not set one. `<agent-dir>/themes/ky.json` is copied byte-for-byte.
 - `subagents.agentScanDirs`: this checkout's `.pi/agents`, so `planner` and `executor-handoff` are discoverable in every repository from a single source. pi-subagents 0.76.1 documents the key in `docs/configuration.md` ("Extra agent scan directories") and ranks fixed user and project agent directories above scan roots.
@@ -755,7 +755,7 @@ Subagent children always load the safety guard: the harness registers it as a re
 
 ### One delivery path
 
-The user-scope stub (`<agent-dir>/extensions/ky-safety/index.ts`) loads this checkout's guard by absolute path. A git package of this repository carries its own copy. Exactly one may be active per machine: `sh bin/bootstrap.sh --check-only` exits 1 when both are configured, and prints a warning when a user-level git or local package resolves to this checkout. If the stub's target is missing (checkout moved or deleted) the stub blocks every tool call rather than loading nothing.
+The user-scope stub (`<agent-dir>/extensions/ky-safety/index.ts`) loads this checkout's guard by absolute path. A git package of this repository carries its own copy. Exactly one may be active per machine: `sh bin/bootstrap.sh --check-only` exits 1 when both are configured, and prints a warning when a user-level git package, or a local package of this checkout without the safety filter, resolves to this checkout. If the stub's target is missing (checkout moved or deleted) the stub blocks every tool call rather than loading nothing.
 
 Accepted residual: a user who also installs the git package globally double-loads the harness inside this repository. See `docs/RUNBOOK.md`, Phase 12.1.
 

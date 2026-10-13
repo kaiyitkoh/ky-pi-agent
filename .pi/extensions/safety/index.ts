@@ -369,6 +369,33 @@ function safeStringify(value: unknown): string {
 }
 
 /**
+ * A subagent change confirmed by the full copy's hook, so the hook-only second load, and only it, does not ask again
+ * for the same call and input. globalThis because each copy is its own module instance; short-lived and taken once.
+ */
+const SUBAGENT_CONFIRM_SLOT = Symbol.for("ky-pi-agent.safety.subagent-confirm.v1");
+const SUBAGENT_CONFIRM_TTL_MS = 60_000;
+
+function subagentConfirms(): Map<string, number> {
+	const root = globalThis as unknown as Record<symbol, Map<string, number> | undefined>;
+	root[SUBAGENT_CONFIRM_SLOT] ??= new Map();
+	return root[SUBAGENT_CONFIRM_SLOT];
+}
+
+function recordSubagentConfirm(key: string): void {
+	const confirms = subagentConfirms();
+	const now = Date.now();
+	for (const [k, at] of confirms) if (now - at > SUBAGENT_CONFIRM_TTL_MS) confirms.delete(k);
+	confirms.set(key, now);
+}
+
+function takeSubagentConfirm(key: string): boolean {
+	const confirms = subagentConfirms();
+	const at = confirms.get(key);
+	confirms.delete(key);
+	return at !== undefined && Date.now() - at <= SUBAGENT_CONFIRM_TTL_MS;
+}
+
+/**
  * Hook layer: deny table first (fail closed), bg_run classified as bash, then bash/read/write/edit/grep/find/ls via
  * classifyAtWrapper; any other tool returns undefined unaudited (docs/SAFETY.md limits). Keep the list in sync with
  * policy.ts#evaluate's switch. grep/find/ls are audited and denied here only (not wrapped).
@@ -378,7 +405,7 @@ function safeStringify(value: unknown): string {
  * re-blocked, bounding the unguarded window to HOOK_DEFER_TTL_MS. Otherwise mint a pending approval and block with its id.
  * `terminate` is never set: it only stops the agent when every result in the batch terminates.
  */
-function registerToolCallHook(pi: ExtensionAPI): void {
+function registerToolCallHook(pi: ExtensionAPI, secondLoad = false): void {
 	pi.on("tool_call", async (event, ctx): Promise<ToolCallEventResult | undefined> => {
 		const audit = (tool: string, command: string, verdict: AuditVerdict, reason: string): void => {
 			writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool, command, cwd: ctx.cwd, verdict, reason, parentToolCallId: event.parentToolCallId });
@@ -435,6 +462,11 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 				audit("subagent", input, "block", reason);
 				return { block: true, reason };
 			}
+			const confirmKey = `${event.toolCallId}\0${safeStringify(event.input)}`;
+			if (secondLoad && takeSubagentConfirm(confirmKey)) {
+				audit("subagent", input, "allow", `hook: subagent action "${call.action}" already confirmed by the user in another loaded copy`);
+				return undefined;
+			}
 			if (!(await askUser(ctx, "Allow this subagent definition change?", `action: ${call.action}
 
 ${input}`))) {
@@ -442,6 +474,7 @@ ${input}`))) {
 				audit("subagent", input, "block", reason);
 				return { block: true, reason };
 			}
+			recordSubagentConfirm(confirmKey);
 			audit("subagent", input, "allow", `hook: subagent action "${call.action}" confirmed by the user`);
 			return undefined;
 		}
@@ -503,13 +536,33 @@ ${verdict.prompt}`))) {
 	});
 }
 
+/** Event-bus channel a loaded copy answers on, so a second copy in the same runtime registers nothing. */
+export const LOADED_CHANNEL = "ky-pi-agent.safety.loaded.v1";
+
+interface LoadedProbe {
+	loaded: boolean;
+}
+
+function isLoadedProbe(data: unknown): data is LoadedProbe {
+	return data !== null && typeof data === "object" && "loaded" in data;
+}
+
 /**
- * No idempotency guard: /reload rebuilds the runner and calls this factory again in-process (agent-session.js#reload),
- * so a once-per-process flag would leave a reloaded session unwrapped. The bootstrap stub does not dedupe either: file
- * existence is no proxy for Pi loading the project copy (untrusted headless runs skip it, package-manager.js),
- * and deduping on it left both copies unregistered. The resulting double load is accepted (docs/SAFETY.md "Load order").
+ * Pi aborts startup when two extension paths register the same tool name (pi 1.1.0 core/resource-loader.js
+ * detectExtensionConflicts; main.js exits on any load error), as the stub plus a trusted checkout did. A second copy
+ * asks the shared event bus, which emits synchronously (core/event-bus.js), whether a complete copy already loaded,
+ * and then registers its tool_call hook only: no tool to conflict, and the hook still guards should the answering
+ * copy be dropped from the final extension set. A process flag would not do: /reload re-runs this factory
+ * in-process, after Pi has unsubscribed the old runtime's bus handlers (agent-session.js#reload, loader.js invalidate).
  */
 export default function (pi: ExtensionAPI): void {
+	const probe: LoadedProbe = { loaded: false };
+	pi.events?.emit(LOADED_CHANNEL, probe);
+	if (probe.loaded) {
+		registerToolCallHook(pi, true);
+		return;
+	}
+
 	// Registrations first (first-registration-wins, pi 1.1.0 runner.js:410-417); safety-entry.test pins this order.
 	registerWrappedTools(pi);
 	registerApprovalTool(pi);
@@ -541,5 +594,10 @@ export default function (pi: ExtensionAPI): void {
 		if (sessionId !== undefined) {
 			disposeChildGuard(sessionId);
 		}
+	});
+
+	// Last, so only a copy whose every registration succeeded answers.
+	pi.events?.on(LOADED_CHANNEL, (data) => {
+		if (isLoadedProbe(data)) data.loaded = true;
 	});
 }

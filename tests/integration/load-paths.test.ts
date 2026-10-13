@@ -24,14 +24,14 @@
  * project resources with no error message
  * [CITED: pi 0.84.1 docs/security.md:27, docs/settings.md:16].
  *
- * DOUBLE-LOAD CAVEAT (RESEARCH 2.4). If a user both `pi install`s this repo
- * globally *and* cd's into it, the extension loads twice from two different
- * absolute paths. Deduplication is by canonical path, so it does not dedupe;
- * commands are stored per-extension-instance in a Map keyed by name
- * (src/core/extensions/loader.ts:273-280), so there is no throw — you simply
- * get duplicate entries in the command list. Non-fatal. This is documented in
- * the README ("dogfood *or* install globally, not both") rather than engineered
- * around, and these tests never exercise both at once.
+ * DOUBLE-LOAD CAVEAT. If a user both `pi install`s this repo globally *and*
+ * trusts it as a project, its extensions load twice from two absolute paths.
+ * That is fatal, not cosmetic: two paths registering one tool name are a load
+ * error and Pi exits (pi 1.1.0 dist/core/resource-loader.js
+ * detectExtensionConflicts, dist/main.js). The safety extension skips its tools
+ * on a second load (tests/integration/safety-double-load.test.ts); the rest of
+ * the harness relies on the README's one-delivery-path rule, and these tests
+ * never exercise both at once.
  */
 import { spawnSync } from "node:child_process";
 import { mkdtempSync, rmSync } from "node:fs";
