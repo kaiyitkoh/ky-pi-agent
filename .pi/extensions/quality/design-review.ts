@@ -35,7 +35,8 @@ export function computeDesignSignals(input: {
 	let sinceLoop = Number.POSITIVE_INFINITY;
 
 	for (const line of input.diffText.split("\n")) {
-		const header = /^diff --git a\/.+ b\/(.+)$/.exec(line);
+		// A path git still quotes (a tab, a quote, a backslash) arrives as "b/..."; the quotes are not part of it.
+		const header = /^diff --git "?a\/.+ "?b\/(.*?)"?$/.exec(line);
 		if (header !== null) {
 			currentFile = header[1] ?? "";
 			sinceLoop = Number.POSITIVE_INFINITY;

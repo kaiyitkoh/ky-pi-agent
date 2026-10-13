@@ -111,12 +111,13 @@ export default function (pi: ExtensionAPI): void {
 				const touched = readTouchedFiles(ctx.cwd, changed);
 				const filesTouchedUnion = [...new Set([...spec.spec.scopePin.expectedFiles, ...plan.plan.filesTouched])];
 				const contract: ReviewerContractInput = {
-					diff: git(ctx.cwd, ["diff", `${base}..HEAD`]),
+					diff: git(ctx.cwd, ["-c", "core.quotePath=false", "diff", `${base}..HEAD`]),
 					touchedFiles: touched,
 					gateReport,
 					requirements: ids.map((id) => ({ id, text: (spec.spec.requirementsBody.split("\n").find((l) => new RegExp(`\\b${id}\\b`).test(l)) ?? id).trim() })),
 					filesTouchedUnion,
-					importGraph: buildImportGraph(touched.filter((t) => /\.[cm]?[tj]sx?$/.test(t.path)).map((t) => ({ path: t.path, text: t.contents }))),
+					// A deleted, binary or omitted file carries a note, not source, so it must not read as "no declared imports".
+					importGraph: buildImportGraph(touched.filter((t) => /\.[cm]?[tj]sx?$/.test(t.path) && !/^\((?:deleted|content omitted)\b/.test(t.contents)).map((t) => ({ path: t.path, text: t.contents }))),
 				};
 
 				if (!mechanisms.includes("model-review")) return fail("review: gate depth for review excludes the model review");

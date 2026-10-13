@@ -87,6 +87,18 @@ describe("computeDesignSignals", () => {
 	});
 });
 
+describe("computeDesignSignals with a quoted diff header", () => {
+	it("tracks the current file across a quoted header, so an export in a non-code file does not count", () => {
+		const diff = [
+			'diff --git "a/docs/we\\tird.md" "b/docs/we\\tird.md"',
+			"@@ -1 +1 @@",
+			"+export default x",
+		].join("\n");
+		const before = diffOf("src/a.ts", ["const a = 1;"]);
+		expect(signalsFor(["src/a.ts", "docs/we\tird.md"], before + diff).publicInterfaceChanged).toBe(false);
+	});
+});
+
 describe("runDesignReview never aborts the review it follows", () => {
 	const input = { diffText: "", changed: ["src/a.ts"], requirements: [] };
 	const ctx = {} as Parameters<typeof runDesignReview>[0];

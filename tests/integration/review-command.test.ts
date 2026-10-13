@@ -153,6 +153,7 @@ describe("/review -- the real handler", () => {
 		await h.run(SLUG);
 		expect(existsSync(mocks.reviewPath), h.notes.map((n) => n.text).join("; ")).toBe(true);
 		expect(mocks.context).toContain("(deleted in this change)");
+		expect(mocks.context, "a deleted file was never read, so its imports were not measured").not.toContain("src/old.ts: (no declared imports)");
 	});
 
 	it("refuses with the branch name and a fetch hint when staging exists nowhere", async () => {
