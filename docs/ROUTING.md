@@ -279,19 +279,38 @@ prefix setting refuses the pin.
 The pin is merged per agent key, so overrides the user set for other agents
 stay. The marker `kyPiAgent.plannerPinRestore` in the same file records, for
 each key a pin changed, its value before the first pin, plus `owners`: the
-pids of the sessions that pinned. When a session ends (not on `/reload`), and
-at every session start, the process removes its own pid and every pid that is
-no longer running. Only when no owner is left does it restore the pinned keys;
-overrides added during the session are kept. So:
+pid of each session that pinned and when it last wrote the pin. When a session
+ends (not on `/reload`), and at every session start, the process removes its
+own entry, every pid that is no longer running, and every owner that has not
+written the pin for 24 hours, even if its pid still answers. Windows reuses
+pids quickly, and a service process's pid answers `EPERM`, which reads as
+alive, so a bare pid check could keep a crash-left pin forever. A session
+refreshes its time whenever it pins, at session start or on a mode switch.
+Only when no owner is left are the pinned keys restored; overrides added
+during the session are kept. So:
 
 - a subagent child never touches the pin (it skips the bookkeeping when
   `PI_SUBAGENT_CHILD=1`, and is never an owner anyway);
-- a second terminal starting or ending leaves a live session's pin alone;
-- a crash-left marker is cleaned by the next process that starts.
+- a second terminal starting or ending does not restore a live session's pin;
+- a crash-left marker is cleaned by the next process that starts, or after
+  24 hours at the latest.
 
-The file is still shared: if two sessions pin different modes, the last
-writer's models apply to both until one switches again. A recycled pid can
-keep a stale pin alive until that process exits.
+A session never runs on someone else's pin without saying so. At session
+start, while any session's pin is in the file, a session writes its own
+mode's pin, the default `cheap` included; with no pin in the file a `cheap`
+session writes nothing. `/mode` reads the planner the settings file actually
+pins and, when it differs from the mode's route, says which model subagents
+run and that re-running the mode command re-pins it.
+
+The file is still shared: when two sessions are in different modes, the last
+writer's models apply to both until one switches again or a new session
+starts. A session idle for more than 24 hours without a mode switch loses its
+ownership, so a later process may restore the user's own overrides under it;
+that moves its planner to the cheaper default, never to a dearer one. The
+read-modify-write of the file is not locked across processes: two sessions
+starting or ending in the same instant can lose one owner entry, and the pin
+is then restored early (the cheaper direction) or held until the 24-hour
+expiry.
 
 ### Accepted decisions
 

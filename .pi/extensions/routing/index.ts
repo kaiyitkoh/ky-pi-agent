@@ -12,12 +12,12 @@ import type {
 import { getCurrentTools } from "@earendil-works/pi-ai";
 
 import { appendJsonl, ESCALATION_LOG_BASE } from "../../lib/jsonl.ts";
-import { agentOverridesFor, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
+import { agentOverridesFor, plannerPinHeld, readAgentOverride, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { deriveNeed, guardRoute } from "./guard.ts";
 import { registerBgLoader } from "./loader.ts";
 import { getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
-import { DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
+import { AGENT_NAME_BY_ROLE, DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
 const REVERTING_KEY = "__kypiRoutingReverting";
 /** pi-subagents 0.76.1 sets this in every child it launches (`src/runs/shared/child-runtime-config.js:6`); a child never owns the parent's pin. */
@@ -232,9 +232,12 @@ async function reportMode(ctx: ExtensionCommandContext): Promise<void> {
 		}
 		const route = resolveRoute(role, state);
 		const candidate = pickConfiguredCandidate(ctx.modelRegistry, route.candidates);
-		lines.push(
-			`${role}: ${candidate.ok ? `${candidate.model.provider}/${candidate.model.id}` : `unavailable (${candidate.reason})`}`,
-		);
+		const routed = candidate.ok ? `${candidate.model.provider}/${candidate.model.id}` : undefined;
+		const agent = AGENT_NAME_BY_ROLE[role];
+		// pi-subagents runs whatever the shared settings file pins, which another session may have written since.
+		const pinned = agent === undefined ? undefined : readAgentOverride(agent);
+		const runs = pinned !== undefined && pinned !== routed ? ` -- but subagents run ${pinned}, pinned in the user settings; re-run /${state.mode} to re-pin` : "";
+		lines.push(`${role}: ${candidate.ok ? routed : `unavailable (${candidate.reason})`}${runs}`);
 	}
 
 	ctx.ui.notify(lines.join("\n"), "info");
@@ -376,14 +379,14 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	// Pi gives extensions no view of a `--tools` allowlist, so read argv; the user's named tools must never be narrowed.
 	const profile = () => (hasExplicitToolAllowlist(process.argv) ? "full" : resolveProfile(pi.getFlag("ky-profile")));
 	pi.on("session_start", (event, ctx) => {
-		// NEVER THROWS, like safety/index.ts's session_start prune: a bad payload must not stop session start.
+		// NEVER THROWS: a bad payload must not stop session start.
 		try {
 			const branch = ctx.sessionManager.getBranch();
-			// Pins whose owning processes have all ended are undone, then re-derived for this session's mode.
+			// Pins whose owners have all ended are undone; while another session's pin stands, this one writes its own mode's, default included.
 			const pinBookkeeping = event.reason !== "reload" && !isSubagentChild();
 			if (pinBookkeeping) restorePlannerPin();
 			restoreModeFromBranch(branch);
-			if (pinBookkeeping && getModeState().mode !== DEFAULT_MODE) {
+			if (pinBookkeeping && (getModeState().mode !== DEFAULT_MODE || plannerPinHeld())) {
 				const pins = agentOverridesFor({ mode: getModeState().mode }, testOverrides?.agentOverridesFor);
 				if (pins.ok) writeAgentOverrides(pins.overrides);
 			}

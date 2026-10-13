@@ -52,6 +52,8 @@ import { afterEach, beforeAll, describe, expect, it, vi } from "vitest";
 import {
 	agentOverridesFor,
 	resolveSettingsPath,
+	plannerPinHeld,
+	readAgentOverride,
 	restorePlannerPin,
 	writeAgentOverrides,
 	type AgentOverridesForOptions,
@@ -301,7 +303,7 @@ describe("writeAgentOverrides -- creation", () => {
 		const written = JSON.parse(readFileSync(settingsPath, "utf-8"));
 		expect(written).toEqual({
 			subagents: { agentOverrides: overrides },
-			kyPiAgent: { plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [process.pid] } },
+			kyPiAgent: { plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [{ pid: process.pid, at: expect.any(Number) }] } },
 		});
 	});
 });
@@ -323,7 +325,7 @@ describe("writeAgentOverrides -- sibling-key preservation", () => {
 		const written = JSON.parse(readFileSync(settingsPath, "utf-8"));
 		expect(written.kyPiAgent).toEqual({
 			...initial.kyPiAgent,
-			plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [process.pid] },
+			plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [{ pid: process.pid, at: expect.any(Number) }] },
 		});
 		expect(written.subagents.defaultModel).toBe("dashscope/deepseek-v4-pro");
 		expect(written.subagents.agentOverrides).toEqual(overrides);
@@ -616,9 +618,40 @@ describe("restorePlannerPin", () => {
 		writeAgentOverrides({ planner: { model: "dashscope/deepseek-v4-pro" } }, { settingsPath, pid: 222 });
 
 		expect(restorePlannerPin({ settingsPath, pid: 111, isAlive: () => true })).toMatchObject({ restored: false });
-		expect(JSON.parse(readFileSync(settingsPath, "utf-8")).kyPiAgent.plannerPinRestore.owners).toEqual([222]);
+		expect(JSON.parse(readFileSync(settingsPath, "utf-8")).kyPiAgent.plannerPinRestore.owners.map((o: { pid: number }) => o.pid)).toEqual([222]);
 		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true })).toMatchObject({ restored: true });
 		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("an owner unseen for a day no longer holds the pin, even when its pid still answers", () => {
+		const { settingsPath, bytes } = seed({ theme: "ky" });
+		const day = 24 * 60 * 60 * 1000;
+		writeAgentOverrides(pin, { settingsPath, pid: 111, now: 1_000 });
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true, now: 1_000 + day - 1 })).toMatchObject({ restored: false });
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true, now: 1_000 + day })).toMatchObject({ restored: true });
+		expect(readFileSync(settingsPath, "utf-8")).toBe(bytes);
+	});
+
+	it("a re-pin refreshes the owner's time, so a live session that keeps pinning keeps its pin", () => {
+		const { settingsPath } = seed({ theme: "ky" });
+		const hour = 60 * 60 * 1000;
+		writeAgentOverrides(pin, { settingsPath, pid: 111, now: 0 });
+		writeAgentOverrides(pin, { settingsPath, pid: 111, now: 20 * hour });
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true, now: 30 * hour })).toMatchObject({ restored: false });
+	});
+
+	it("an owner recorded as a bare pid by an older marker counts as expired", () => {
+		const { settingsPath } = seed({ subagents: { agentOverrides: pin }, kyPiAgent: { plannerPinRestore: { hadOverrides: false, keys: { planner: { had: false } }, owners: [111] } } });
+		expect(restorePlannerPin({ settingsPath, pid: 222, isAlive: () => true })).toMatchObject({ restored: true });
+	});
+
+	it("plannerPinHeld and readAgentOverride report the shared file's pin", () => {
+		const { settingsPath } = seed({ theme: "ky" });
+		expect(plannerPinHeld({ settingsPath })).toBe(false);
+		expect(readAgentOverride("planner", { settingsPath })).toBeUndefined();
+		writeAgentOverrides(pin, { settingsPath, pid: 111 });
+		expect(plannerPinHeld({ settingsPath })).toBe(true);
+		expect(readAgentOverride("planner", { settingsPath })).toBe(pin.planner.model);
 	});
 
 	it("restores a marker written before per-key pins", () => {

@@ -120,6 +120,8 @@ export interface AgentOverridesPathOptions {
 	pid?: number;
 	/** Liveness probe for recorded owners; defaults to `process.kill(pid, 0)`. */
 	isAlive?: (pid: number) => boolean;
+	/** Injected clock, for tests. */
+	now?: number;
 }
 
 /** Target settings path: `opts.settingsPath` if given, else the global agent `settings.json`. */
@@ -132,19 +134,35 @@ export function resolveSettingsPath(opts: AgentOverridesPathOptions = {}): strin
 
 const PLANNER_PIN_MARKER = "plannerPinRestore";
 
-/** Per pinned agent key, its value before the first pin; `owners` are the pids whose sessions still hold the pin. */
+/** A session holding the pin, and when it last wrote it. */
+interface PinOwner {
+	readonly pid: number;
+	readonly at: number;
+}
+
+/** Per pinned agent key, its value before the first pin; `owners` are the sessions that still hold the pin. */
 interface PinMarker {
 	readonly hadOverrides: boolean;
 	readonly keys: Record<string, { readonly had: boolean; readonly value?: unknown }>;
-	readonly owners: readonly number[];
+	readonly owners: readonly PinOwner[];
 }
+
+// 24 h: Windows reuses pids and a service's pid answers EPERM, so an owner unseen this long counts as gone even when its pid answers.
+const OWNER_TTL_MS = 86_400_000;
+// 1 h: a re-pin within this window keeps the recorded time, so repeating an identical pin stays a no-op write.
+const OWNER_REFRESH_MS = 3_600_000;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
 	return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-function ownersOf(marker: Record<string, unknown>): number[] {
-	return Array.isArray(marker.owners) ? marker.owners.filter((o): o is number => Number.isInteger(o)) : [];
+/** A bare-pid owner from an older marker has no time, so it counts as expired. */
+function ownersOf(marker: Record<string, unknown>): PinOwner[] {
+	if (!Array.isArray(marker.owners)) return [];
+	return marker.owners.flatMap((o: unknown) => {
+		if (isRecord(o) && Number.isInteger(o.pid) && typeof o.at === "number") return [{ pid: o.pid as number, at: o.at }];
+		return Number.isInteger(o) ? [{ pid: o as number, at: 0 }] : [];
+	});
 }
 
 /** EPERM means the process exists but belongs to someone else. */
@@ -258,7 +276,9 @@ export function writeAgentOverrides(
 		}
 		if (Object.keys(marker.keys).length > 0) {
 			const pid = opts.pid ?? process.pid;
-			ky[PLANNER_PIN_MARKER] = { ...marker, owners: marker.owners.includes(pid) ? marker.owners : [...marker.owners, pid] };
+			const now = opts.now ?? Date.now();
+			const mine = marker.owners.find((o) => o.pid === pid && now - o.at < OWNER_REFRESH_MS);
+			ky[PLANNER_PIN_MARKER] = { ...marker, owners: [...marker.owners.filter((o) => o.pid !== pid), mine ?? { pid, at: now }] };
 			root.kyPiAgent = ky;
 		}
 		subagents.agentOverrides = { ...current, ...overrides };
@@ -291,9 +311,8 @@ export type RestorePlannerPinResult =
 	| { readonly ok: false; readonly reason: string; readonly path: string };
 
 /**
- * Ends this process's hold on the pin: drops its pid and every dead pid from the marker's owners, and only when none remain
- * restores each pinned key to its value before the first pin. A subagent child or a second terminal therefore never undoes a
- * live session's pin, and a crash-left marker is cleaned by the next process. A no-op without a marker.
+ * Ends this process's hold on the pin: drops its own, dead and expired owners, and restores each pinned key to its value before
+ * the first pin only when none remain. A no-op without a marker.
  */
 export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): RestorePlannerPinResult {
 	const path = resolveSettingsPath(opts);
@@ -310,8 +329,9 @@ export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): Restore
 
 		const pid = opts.pid ?? process.pid;
 		const isAlive = opts.isAlive ?? processAlive;
+		const now = opts.now ?? Date.now();
 		const recorded = ownersOf(marker);
-		const owners = recorded.filter((o) => o !== pid && isAlive(o));
+		const owners = recorded.filter((o) => o.pid !== pid && now - o.at < OWNER_TTL_MS && isAlive(o.pid));
 		if (owners.length > 0) {
 			if (owners.length !== recorded.length) {
 				root.kyPiAgent = { ...ky, [PLANNER_PIN_MARKER]: { ...marker, owners } };
@@ -351,5 +371,26 @@ export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): Restore
 			reason: `${path} could not be restored (${err instanceof Error ? err.message : String(err)}).`,
 			path,
 		};
+	}
+}
+
+/** True when some session's planner pin is in the settings file, so a session that never pinned would otherwise inherit it. */
+export function plannerPinHeld(opts: AgentOverridesPathOptions = {}): boolean {
+	try {
+		const root: unknown = JSON.parse(readFileSync(resolveSettingsPath(opts), "utf-8"));
+		return isRecord(root) && isRecord(root.kyPiAgent) && isRecord(root.kyPiAgent[PLANNER_PIN_MARKER]);
+	} catch {
+		return false;
+	}
+}
+
+/** The model the settings file pins for `agent`, which is what pi-subagents actually runs. NEVER THROWS: undefined when none or unreadable. */
+export function readAgentOverride(agent: string, opts: AgentOverridesPathOptions = {}): string | undefined {
+	try {
+		const root: unknown = JSON.parse(readFileSync(resolveSettingsPath(opts), "utf-8"));
+		const entry = isRecord(root) && isRecord(root.subagents) && isRecord(root.subagents.agentOverrides) ? root.subagents.agentOverrides[agent] : undefined;
+		return isRecord(entry) && typeof entry.model === "string" ? entry.model : undefined;
+	} catch {
+		return undefined;
 	}
 }
