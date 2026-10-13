@@ -3,10 +3,10 @@
  * so a live key on disk is a breach the moment it is written (`.gitignore` is only the second control).
  * The payload carries the whole `messages[]` array (a read `.env`, `~/.aws/credentials` or `*.tfstate`),
  * so values are matched by SHAPE and header keys by NAME. The pattern list cannot prove coverage.
- * Patterns are single quantifiers over character classes (no nesting, no unanchored `.*`) against
- * ReDoS on untrusted output. No imports or I/O; `redactDeep` never mutates, since
- * `before_provider_request` hands over the live payload.
+ * The value shapes are `.pi/lib/secret-patterns.ts`, shared with the safety audit. No I/O; `redactDeep` never mutates,
+ * since `before_provider_request` hands over the live payload.
  */
+import { maskSecrets, SECRET_PATTERNS } from "../../lib/secret-patterns.ts";
 
 /** The masked form: the value is gone, its length survives. */
 export function redactionPlaceholder(length: number): string {
@@ -37,48 +37,19 @@ export const REDACTED_HEADER_KEYS: readonly string[] = [
 /** Open half of the header rule: any key that NAMES a credential, so unpredicted headers are caught. */
 export const REDACTED_HEADER_KEY_RE = /(^|[-_])(api[-_]?key|token|secret|credential|password)([-_]|$)/i;
 
-/**
- * Credential shapes worth matching inside a value. `sk-` and `pt-` require a preceding word boundary
- * (`risk-assessment-documents` contains `sk-`); the high-entropy prefixes carry none.
- * The `g` flag is load-bearing: use through `replace` only, never `.test()`, since `lastIndex` persists.
- */
-export const SECRET_VALUE_PATTERNS: readonly RegExp[] = [
-	/\bsk-[A-Za-z0-9_-]{16,}/g,
-	/AKIA[0-9A-Z]{16}/g,
-	// AWS temporary (STS / SSO) access key id.
-	/ASIA[0-9A-Z]{16}/g,
-	/gh[pous]_[A-Za-z0-9]{20,}/g,
-	/github_pat_[A-Za-z0-9_]{20,}/g,
-	/xox[bp]-[A-Za-z0-9-]{10,}/g,
-	/AIza[0-9A-Za-z_-]{35}/g,
-	/\bpt-[A-Za-z0-9]{16,}/g,
-	// PEM private key header; `{0,40}` bounds backtracking.
-	/-----BEGIN [A-Z ]{0,40}PRIVATE KEY-----/g,
-	// Any bearer credential; `\s` and the token class are disjoint.
-	/bearer\s+[A-Za-z0-9._-]{20,}/gi,
-	/aws_secret_access_key\s*=\s*\S+/gi,
-	// JWT: three base64url segments, the first starting with the encoded `{"`.
-	/eyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]*/g,
-	// Credential-named assignment in env, YAML or JSON form, snake or camel case.
-	/(?:access[_-]?token|refresh[_-]?token|session[_-]?token|secret[_-]?access[_-]?key|client[_-]?secret)["']?\s*[:=]\s*["']?[^\s"',;]+/gi,
-	// `curl -u user:pass` and `--user user:pass`.
-	/(?<![\w-])(?:-u|--user)[ =]+[^\s:'"]+:[^\s'"]+/g,
-	// `mysql -pPASSWORD`: the attached form only, scoped to the mysql family so `mkdir -p` and `find -path` survive.
-	/(?<=\bmysql(?:dump|admin)?\b[^\n|;&]{0,200}\s)-p\S+/g,
-];
+/** Credential shapes matched inside a value; see `.pi/lib/secret-patterns.ts`. */
+export const SECRET_VALUE_PATTERNS: readonly RegExp[] = SECRET_PATTERNS;
 
+/** camelCase keys (`apiKey`, `secretAccessKey`) are split to snake case first, so the delimiter in the key rule finds them. */
 function isRedactedHeaderKey(key: string): boolean {
 	const lower = key.toLowerCase();
-	return REDACTED_HEADER_KEYS.includes(lower) || REDACTED_HEADER_KEY_RE.test(lower);
+	const snake = key.replace(/([a-z0-9])([A-Z])/g, "$1_$2").toLowerCase();
+	return REDACTED_HEADER_KEYS.includes(lower) || REDACTED_HEADER_KEY_RE.test(lower) || REDACTED_HEADER_KEY_RE.test(snake);
 }
 
 /** Replace every credential-shaped run, leaving everything else byte-identical. */
 export function redactString(value: string): string {
-	let out = value;
-	for (const pattern of SECRET_VALUE_PATTERNS) {
-		out = out.replace(pattern, (match) => redactionPlaceholder(match.length));
-	}
-	return out;
+	return maskSecrets(value, (secret) => redactionPlaceholder(secret.length));
 }
 
 /** Redact a header map into a NEW map; `null` (delete this header, pi-ai `types.ts` ProviderHeaders) stays `null`. */
@@ -86,7 +57,7 @@ export function redactHeaders(headers: Record<string, string | null>): Record<st
 	const out: Record<string, string | null> = {};
 	for (const [key, value] of Object.entries(headers)) {
 		if (typeof value !== "string" && value !== null) {
-				// Normalise a loose `undefined` to `null`; otherwise `value.length` throws and the whole wire record is lost.
+			// Normalise a loose `undefined` to `null`; otherwise `value.length` throws and the whole wire record is lost.
 			out[key] = null;
 		} else if (value === null) {
 			out[key] = null;
@@ -122,23 +93,23 @@ function walk(value: unknown, depth: number, budget: { nodes: number }): unknown
 	if (isPlainObject(value)) {
 		const out: Record<string, unknown> = {};
 		for (const [key, item] of Object.entries(value)) {
-				// Header rule applies to object keys too: payloads can nest a header map.
+			// Header rule applies to object keys too: payloads can nest a header map.
 			out[key] = isRedactedHeaderKey(key)
 				? redactUnderCredentialKey(item, budget)
 				: walk(item, depth + 1, budget);
 		}
 		return out;
 	}
-		// Keep a Date as the string `JSON.stringify` would produce, not `{}`.
+	// Keep a Date as the string `JSON.stringify` would produce, not `{}`.
 	if (value instanceof Date) {
 		return value.toISOString();
 	}
-		// Any other object-like value (class instance, Map, typed array) is truncated: `JSON.stringify` still
-		// emits its enumerable properties, so a credential could reach disk, and a cycle would throw in the append.
+	// Any other object-like value (class instance, Map, typed array) is truncated: `JSON.stringify` still
+	// emits its enumerable properties, so a credential could reach disk, and a cycle would throw in the append.
 	if (typeof value === "object" && value !== null) {
 		return TRUNCATION_PLACEHOLDER;
 	}
-		// Primitives cannot carry a string.
+	// Primitives cannot carry a string.
 	return value;
 }
 

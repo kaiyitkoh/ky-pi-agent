@@ -225,6 +225,8 @@ Two independent rules, and the key rule is stronger than the shape rule:
    `/(^|[-_])(api[-_]?key|token|secret|credential|password)([-_]|$)/i`. The list
    goes stale the first time a provider invents a header; the pattern is what
    catches `x-session-token` and `client-secret` without having predicted them.
+   A camelCase key is split to snake case before the pattern runs, so `apiKey`,
+   `accessToken` and `secretAccessKey` are credential keys too.
 
    This is **not header-only**. A captured payload can nest a header map, and
    `{ authorization: "…" }` there is the same credential it would be in the
@@ -236,10 +238,18 @@ Two independent rules, and the key rule is stronger than the shape rule:
    Over-redacting is the right way to be wrong here. `null` and `undefined` are
    the one exception and pass through: `null` means *delete this header*, and
    rewriting it would misreport a deletion as a secret.
-2. **By value shape**, applied to strings anywhere in a payload. Eleven patterns:
-   `sk-…`, `AKIA…`, `ASIA…`, `gh[pous]_…`, `github_pat_…`, `xox[bp]-…`, `AIza…`,
-   `pt-…`, a PEM private-key header, `Bearer …`, and an
-   `aws_secret_access_key = …` line. This second rule is the one that matters
+2. **By value shape**, applied to strings anywhere in a payload. The patterns
+   live in `.pi/lib/secret-patterns.ts`, the one table the safety audit's
+   `redactSecrets` uses too, so the wire log is never redacted more weakly than
+   the audit log: `sk-…`, `AKIA…`, `ASIA…`, `gh[pousr]_…`, `github_pat_…`,
+   `glpat-…`, `xox[abprs]-…`, `AIza…`, `pt-…`, Bedrock `ABSK…` keys, a PEM
+   private-key header, `Bearer …` of any length, JWTs, the password in URL
+   userinfo (`scheme://user:pass@host`), `curl -u user:pass`, `mysql -pPASS`,
+   and any credential-named assignment (`password`, `passwd`, `secret`,
+   `token`, `api_key`, `access_key`, `authorization`, `credential`, in env,
+   YAML or JSON form, snake or camel case, so `DB_PASSWORD=` and
+   `"apiKey": "…"` are both caught). A pattern's key name or `Bearer ` prefix
+   is kept; only the value is masked. This second rule is the one that matters
    most in practice: the realistic hazard is not the API key — the wire payload
    never carries it — but a `.env` or a `*.tfstate` the model read into
    `messages[]`.

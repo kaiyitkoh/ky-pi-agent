@@ -58,22 +58,18 @@ const SECRET_SAMPLES: readonly Sample[] = [
 	{ label: "AWS temporary (STS/SSO) access key id", value: ["AS", "IA"].join("") + "JQKLMNOPQRST2345" },
 	{ label: "GitHub classic personal token", value: ["ghp", "abcdefghij0123456789"].join("_") },
 	{ label: "GitHub fine-grained token", value: ["github", "pat", "ABCdef0123456789ghij"].join("_") },
+	{ label: "GitLab personal access token", value: ["glpat", "abcdefghij0123456789"].join("-") },
 	{ label: "Slack bot token", value: ["xoxb", "123456789012"].join("-") },
 	{ label: "Google API key", value: "AIza" + "b".repeat(35) },
 	{ label: "Qoder personal access token", value: ["pt", "abcdef0123456789"].join("-") },
+	{ label: "Bedrock API key", value: ["AB", "SK"].join("") + "QmVkcm9ja0FQSUtleS1leGFtcGxl" },
 	{ label: "PEM private key header", value: ["-----BEGIN ", "RSA ", "PRIVATE KEY", "-----"].join("") },
-	{ label: "bearer credential", value: ["Bearer", "abcdefghij.klmno-pqrst"].join(" ") },
-	{
-		label: "aws_secret_access_key assignment",
-		value: `${["aws", "secret", "access", "key"].join("_")} = wJalrXUtnFEMIK7MDENGbPxRfiCYEXAMPLE`,
-	},
+	{ label: "short bearer credential", value: ["Bearer", "abc123"].join(" ") },
 	{ label: "JWT", value: [["ey", "JhbGciOiJIUzI1NiJ9"].join(""), "eyJzdWIiOiIxMjM0NTY3ODkwIn0", "c2lnbmF0dXJl"].join(".") },
-	{
-		label: "camelCase credential key in JSON",
-		value: `{"${["access", "Token"].join("")}":"${["abc", "def", "123456"].join("")}"}`,
-	},
+	{ label: "URL userinfo password", value: "postgres://app:" + ["Pr0d", "pass"].join("") + "@db.internal:5432/app" },
 	{ label: "curl user:password", value: "curl -u deploy:" + ["hunter", "2"].join("") + " https://example.com" },
 	{ label: "mysql attached password", value: "mysql -h db -u root -p" + ["hunter", "2"].join("") + " app" },
+	{ label: "generic password assignment", value: "DATABASE_PASSWORD=" + ["Pr0d", "!pass"].join("") },
 ];
 
 /**
@@ -144,6 +140,12 @@ describe("DIAG-07 — further credential shapes", () => {
 		["aws_session_token assignment", "aws_session_token = " + ["Fwo", "GZXIvYXdz"].join(""), "FwoGZXIvYXdz"],
 		["lowercase bearer", "authorization: bearer " + ["abcdefghij", "klmnopqrstuv"].join(""), "abcdefghijklmnopqrstuv"],
 		["long user option", "curl --user admin:" + ["s3cr", "etpw"].join(""), "s3cretpw"],
+		["aws_secret_access_key assignment", `${["aws", "secret", "access", "key"].join("_")} = ${["wJalr", "XUtnFEMI"].join("")}`, "wJalrXUtnFEMI"],
+		["api_key assignment", "API_KEY=" + ["k3y", "value"].join(""), "k3yvalue"],
+		["JSON password field", `{"password": "${["hun", "ter22"].join("")}"}`, "hunter22"],
+		["camelCase accessToken in JSON", `{"${["access", "Token"].join("")}":"${["abc", "def", "123456"].join("")}"}`, "abcdef123456"],
+		["GITLAB_TOKEN in a read .env", "GITLAB_TOKEN=" + ["glpat", "xxxxxxxxxxxxxxxxxxxx"].join("-"), "xxxxxxxxxxxxxxxxxxxx"],
+		["Bedrock bearer env", "AWS_BEARER_TOKEN_BEDROCK=" + ["AB", "SK"].join("") + "QmVkcm9ja0FQSUtleS1leGFtcGxl", "QmVkcm9ja0FQSUtleS1leGFtcGxl"],
 	];
 	for (const [label, input, secret] of cases) {
 		it(`masks ${label}`, () => {
@@ -260,7 +262,7 @@ describe("DIAG-07 — the two holes redactDeep used to have", () => {
 	/**
 	 * SHORT AND UNREMARKABLE ON PURPOSE.
 	 *
-	 * It matches NONE of the eleven `SECRET_VALUE_PATTERNS` — that is the whole
+	 * On its own it matches NONE of the `SECRET_VALUE_PATTERNS` — that is the whole
 	 * point. Shape matching cannot save a credential this plain; only the KEY that
 	 * names it can, and the key rule used to fire on a string value only.
 	 */
@@ -268,11 +270,11 @@ describe("DIAG-07 — the two holes redactDeep used to have", () => {
 
 	it("the secret really is invisible to shape matching, so the key rule is what is under test", () => {
 		expect(
-			redactString(`token=${SHORT_SECRET}`),
+			redactString(SHORT_SECRET),
 			"if a pattern started matching this value, every case below would pass through the SHAPE " +
 				"half of the redactor and prove nothing about the key half. Pick a duller secret rather " +
 				"than deleting the assertion",
-		).toBe(`token=${SHORT_SECRET}`);
+		).toBe(SHORT_SECRET);
 	});
 
 	it("redacts a credential nested UNDER a credential-named key", () => {
@@ -492,7 +494,7 @@ describe("DIAG-07 — the pattern set is bounded against a hostile input", () =>
 	 * arranged so that not one of them completes. That is the expensive path:
 	 * a matcher only backtracks on inputs that nearly match.
 	 */
-	const UNIT = "-----BEGIN AAAA Bearer sk-AKIA ghp_ xoxb- AIza pt- aws_secret_access_key ";
+	const UNIT = "-----BEGIN AAAA Bearer, sk-AKIA ghp_ glpat- xoxb- AIza pt- ABSK ://a: aws_secret_access_key password ";
 
 	it("redacts a 1 MB adversarial string in under two seconds", () => {
 		const adversarial = UNIT.repeat(Math.ceil(1_000_000 / UNIT.length));
@@ -514,5 +516,14 @@ describe("DIAG-07 — the pattern set is bounded against a hostile input", () =>
 			"the adversarial unit is built to nearly-match and never match; if anything was replaced " +
 				"the timing above measured the cheap path and proves nothing about backtracking",
 		).toBe(adversarial);
+	});
+});
+
+describe("DIAG-07 — camelCase credential keys", () => {
+	it("treats apiKey, accessToken and secretAccessKey as credential keys, but not maxTokens", () => {
+		const secret = ["s3c", "r3t42"].join("");
+		const out = redactDeep({ apiKey: secret, accessToken: secret, secretAccessKey: secret, maxTokens: 5 }) as Record<string, unknown>;
+		expect(JSON.stringify(out)).not.toContain(secret);
+		expect(out.maxTokens).toBe(5);
 	});
 });
