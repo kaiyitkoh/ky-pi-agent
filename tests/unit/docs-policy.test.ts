@@ -170,6 +170,7 @@ const PHASE_EIGHT_IDS = ["RB-08-01", "RB-08-02", "RB-08-03"] as const;
 const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
 const PHASE_NINE_IDS = ["RB-09-01", "RB-09-02", "RB-09-03"] as const;
 const PHASE_TEN_IDS = ["RB-10-01", "RB-10-02", "RB-10-03"] as const;
+const PHASE_TWELVE_IDS = ["RB-12-01", "RB-12-02", "RB-12-03", "RB-12-04"] as const;
 
 /** Every governed entry, in phase order. A later phase appends its array here. */
 const ALL_IDS = [
@@ -183,6 +184,7 @@ const ALL_IDS = [
 	...PHASE_EIGHT_TWO_IDS,
 	...PHASE_NINE_IDS,
 	...PHASE_TEN_IDS,
+	...PHASE_TWELVE_IDS,
 ] as const;
 
 /**
@@ -545,6 +547,23 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	],
 	"RB-10-03": [
 		'echo "RB-10-03 <package> delta per profile: <recon>/<review>/<implement>/<full>, $(date -u +%FT%TZ)" >> RB-10-03-RESULT.md',
+	],
+
+	"RB-12-01": [
+		"sh scripts/openspec-setup.sh --install-cli",
+		"sh scripts/openspec-setup.sh --check",
+		'echo "RB-12-01 openspec <version> on <machine>, --check exit <code>, $(date -u +%FT%TZ)" >> RB-12-01-RESULT.md',
+	],
+	"RB-12-02": [
+		'echo "RB-12-02 /budget skills slice before=<chars> after=<chars>, /skill:openspec-explore expanded=<yes|no>, /opsx-explore expanded=<yes|no>, $(date -u +%FT%TZ)" >> RB-12-02-RESULT.md',
+	],
+	"RB-12-03": [
+		"openspec config get telemetry.enabled",
+		'echo "RB-12-03 telemetry.enabled=<value>, edge.openspec.dev requests seen=<n>, $(date -u +%FT%TZ)" >> RB-12-03-RESULT.md',
+	],
+	"RB-12-04": [
+		"npm view @fission-ai/openspec time --json",
+		'echo "RB-12-04 bumped <old> -> <new>, tarball reviewed=<yes|no>, --check exit <code>, $(date -u +%FT%TZ)" >> RB-12-04-RESULT.md',
 	],
 };
 

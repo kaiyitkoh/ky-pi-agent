@@ -1671,3 +1671,97 @@ Phase 10 measured the per-turn floor, added `--ky-profile` tool profiles, and bu
 **Expected output.** One recorded line per package, each with four deltas.
 
 **Offline proxy:** `tests/integration/context-floor.test.ts` proves the floor arithmetic for every local extension and Pi built-in. It cannot see a package that is not installed.
+
+## Phase 12 — OpenSpec Opt-in Skill
+
+Phase 12 added opt-in OpenSpec skills at user level at zero per-turn cost, proved offline. `docs/OPENSPEC.md` holds the model, install, upgrade, uninstall and the `openspec-pi` rejection; it is cited, not repeated. Four checks need a second machine or a live session and are governed here.
+
+### Install log
+
+- Date (UTC): 2026-10-13T00:28:05Z, on the development machine (Windows, Git Bash, Node 24, npm 11).
+- Command: `npm install -g --ignore-scripts @fission-ai/openspec@1.13.2`, run through `sh scripts/openspec-setup.sh --install-cli`.
+- Version: `openspec --version` printed `1.13.2`.
+- Registry integrity, matched against the reviewed value before install: `sha512-HzBaN9C1/ET+tgm/pxbWQYY4Kf+X9/1MSVEGQ8ZT3g4ZpdHn6v82CHkN+zmt9qv98Ghw0MDpmURasjJD2f90bg==`. The package declares no `preinstall`, `install`, `postinstall` or `prepare` script. 70 packages were added.
+- Setup: `sh scripts/openspec-setup.sh` installed 12 skills (all flagged `disable-model-invocation: true`) and 12 prompts into the user-level Pi agent directory; `sh scripts/openspec-setup.sh --check` exited 0.
+- Zero per-turn cost: Pi's own loader over the real agent directory returned an identical skills block before and after (SHA-256 `e3b0c442...b855`, length 0, because every skill is flagged), with 12 skills loaded and no diagnostics.
+- Telemetry: `openspec config get telemetry.enabled` printed `false`.
+
+| ID | Check | Status |
+|----|-------|--------|
+| RB-12-01 | OSPEC-1 — install and setup on the work laptop and on macOS | OUTSTANDING |
+| RB-12-02 | OSPEC-2 — a live Pi session: skills slice unchanged, `/skill:openspec-explore` and `/opsx-explore` expand | OUTSTANDING |
+| RB-12-03 | OSPEC-1 — telemetry egress check under a network capture | OUTSTANDING |
+| RB-12-04 | OSPEC-4 — the upgrade drill at the next version bump | OUTSTANDING |
+
+### RB-12-01 — OSPEC-1: install on the work laptop and macOS
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** The development machine is recorded in the install log above. The work laptop and macOS are other machines.
+
+**Precondition.** Node 22.19 or newer, npm, and this repo checked out. Install only after confirming the package and version are the reviewed `@fission-ai/openspec@1.13.2`.
+
+**Procedure.**
+
+1. `npm view @fission-ai/openspec@1.13.2 dist.integrity` must equal the integrity string in the install log. If not, stop.
+2. `sh scripts/openspec-setup.sh --install-cli`
+3. `sh scripts/openspec-setup.sh`
+4. `sh scripts/openspec-setup.sh --check`
+5. Record the result: `echo "RB-12-01 openspec <version> on <machine>, --check exit <code>, $(date -u +%FT%TZ)" >> RB-12-01-RESULT.md`
+
+**Expected output.** `1.13.2`, then `OK: openspec 1.13.2, 12 skills and 12 prompts installed`, exit 0.
+
+**Offline proxy:** `tests/integration/openspec-setup.test.ts` runs the script against a fake CLI and fake npm.
+
+### RB-12-02 — OSPEC-2: live session cost and expansion
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It needs an interactive Pi session in a work repo, and no inference runs from this machine.
+
+**Procedure.**
+
+1. Start Pi in a work repo and read the `/budget` skills slice.
+2. Confirm it is unchanged against the same repo before the skills were installed.
+3. Type `/skill:openspec-explore` and confirm the skill body is expanded into the turn.
+4. Type `/opsx-explore` and confirm the template is expanded.
+5. Record the result: `echo "RB-12-02 /budget skills slice before=<chars> after=<chars>, /skill:openspec-explore expanded=<yes|no>, /opsx-explore expanded=<yes|no>, $(date -u +%FT%TZ)" >> RB-12-02-RESULT.md`
+
+**Expected output.** Equal slice sizes and two `yes` answers.
+
+**Offline proxy:** `tests/integration/openspec-zero-cost.test.ts` proves the flagged skills leave the system prompt unchanged while `/skill:` still expands.
+
+### RB-12-03 — OSPEC-1: telemetry egress
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** Proving no traffic leaves needs a network capture or an offline interface, which this unattended run cannot set up.
+
+**Procedure.**
+
+1. `openspec config get telemetry.enabled` must print `false`.
+2. Under a network capture (or with the interface offline), run `openspec list` in a repo that has an `openspec/` directory.
+3. Confirm no request to `edge.openspec.dev`.
+4. Record the result: `echo "RB-12-03 telemetry.enabled=<value>, edge.openspec.dev requests seen=<n>, $(date -u +%FT%TZ)" >> RB-12-03-RESULT.md`
+
+**Expected output.** `false` and zero requests.
+
+**Offline proxy:** `tests/unit/openspec-env.test.ts` proves the harness sets the four opt-out variables on CLI calls.
+
+### RB-12-04 — OSPEC-4: upgrade drill
+
+**Status:** OUTSTANDING
+
+**Why this cannot be done here.** It happens at the next version bump, which has not occurred.
+
+**Procedure.** Follow `docs/OPENSPEC.md`, "Upgrade".
+
+1. `npm view @fission-ai/openspec time --json`; the target must be at least 14 days old.
+2. Review the new tarball read-only.
+3. Bump `OPENSPEC_VERSION` in `scripts/openspec-setup.sh`, then this document and `docs/OPENSPEC.md`.
+4. Re-run the install and setup, then `sh scripts/openspec-setup.sh --check`.
+5. Record the result: `echo "RB-12-04 bumped <old> -> <new>, tarball reviewed=<yes|no>, --check exit <code>, $(date -u +%FT%TZ)" >> RB-12-04-RESULT.md`
+
+**Expected output.** A passing `--check` at the new version and a recorded line.
+
+**Offline proxy:** `tests/unit/openspec-docs.test.ts` fails if the docs and the script name different versions.

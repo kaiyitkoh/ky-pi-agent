@@ -71,3 +71,17 @@ describe("docs/OPENSPEC.md", () => {
 		expect(missingTokens("nothing here", ["openspec-pi@0.2.1"])).toEqual(["openspec-pi@0.2.1"]);
 	});
 });
+
+describe("RUNBOOK Phase 12 pin parity", () => {
+	const v = scriptVersion();
+
+	it("names the script's pin", () => {
+		const section = runbookPhase12(read("docs", "RUNBOOK.md"));
+		expect(section).not.toBe("");
+		expect(namesPin(section, v)).toBe(true);
+	});
+
+	it("negative control: a section naming another version fails", () => {
+		expect(namesPin("npm install -g @fission-ai/openspec@0.0.1", v)).toBe(false);
+	});
+});
