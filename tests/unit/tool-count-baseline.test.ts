@@ -95,8 +95,8 @@ import { describe, expect, it } from "vitest";
 
 import { classifiedToolNames } from "../../.pi/extensions/routing/profiles.ts";
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
+import { packageNameFromNpmSpec, readSettingsPackages } from "../helpers/settings.ts";
 
-const SETTINGS_PATH = join(".pi", "settings.json");
 const EXT_DIR = ".pi/extensions";
 
 const FLAT = /^\.pi\/extensions\/[^/]+\.ts$/;
@@ -247,30 +247,6 @@ const TOOL_COUNT_BASELINE: readonly ToolCountRow[] = [
 
 /** Exception: `pi-subagents` serves EXT-01..EXT-04, not one of EXT-05's eight capabilities -- named, not silently allowed. */
 const PI_SUBAGENTS_EXCEPTION = "pi-subagents";
-
-function readSettings(): Record<string, unknown> {
-	return JSON.parse(readFileSync(join(repoRoot(), SETTINGS_PATH), "utf-8")) as Record<string, unknown>;
-}
-
-function readSettingsPackages(): string[] {
-	const packages = readSettings().packages;
-	if (packages === undefined) {
-		return [];
-	}
-	if (!Array.isArray(packages)) {
-		throw new Error(`${SETTINGS_PATH} "packages" is present but not an array`);
-	}
-	return packages as string[];
-}
-
-function packageNameFromNpmSpec(spec: string): string | undefined {
-	if (!spec.startsWith("npm:")) {
-		return undefined;
-	}
-	const withoutPrefix = spec.slice("npm:".length);
-	const atIndex = withoutPrefix.indexOf("@", withoutPrefix.startsWith("@") ? 1 : 0);
-	return atIndex === -1 ? withoutPrefix : withoutPrefix.slice(0, atIndex);
-}
 
 /**
  * Every `name:` field belonging to a `registerTool(` (optionally generic,

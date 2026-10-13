@@ -34,9 +34,8 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
+import { packageNameFromNpmSpec, readSettingsPackages } from "../helpers/settings.ts";
 import { isEntryPoint } from "./extension-layout.test.ts";
-
-const SETTINGS_PATH = join(".pi", "settings.json");
 
 /**
  * Mirrors `tests/unit/extension-layout.test.ts`'s own `FLAT`/`NESTED_INDEX`
@@ -139,21 +138,6 @@ const CAPABILITY_SOURCES: readonly CapabilitySource[] = [
  */
 const PI_SUBAGENTS_EXCEPTION = "pi-subagents";
 
-function readSettings(): Record<string, unknown> {
-	return JSON.parse(readFileSync(join(repoRoot(), SETTINGS_PATH), "utf-8")) as Record<string, unknown>;
-}
-
-function readSettingsPackages(): string[] {
-	const packages = readSettings().packages;
-	if (packages === undefined) {
-		return [];
-	}
-	if (!Array.isArray(packages)) {
-		throw new Error(`${SETTINGS_PATH} "packages" is present but not an array`);
-	}
-	return packages as string[];
-}
-
 /**
  * True when `spec` (a `packages[]` entry) names `packageName` -- as
  * `npm:<name>@<ref>` or `npm:<name>`. Boundary-matched so
@@ -163,16 +147,6 @@ function readSettingsPackages(): string[] {
 function specNamesPackage(spec: string, packageName: string): boolean {
 	const escaped = packageName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 	return new RegExp(`^npm:${escaped}(@|$)`).test(spec);
-}
-
-/** Bare package name from an `npm:<name>@<version>` spec, scope-aware. */
-function packageNameFromNpmSpec(spec: string): string | undefined {
-	if (!spec.startsWith("npm:")) {
-		return undefined;
-	}
-	const withoutPrefix = spec.slice("npm:".length);
-	const atIndex = withoutPrefix.indexOf("@", withoutPrefix.startsWith("@") ? 1 : 0);
-	return atIndex === -1 ? withoutPrefix : withoutPrefix.slice(0, atIndex);
 }
 
 describe("EXT-05/EXT-06 -- vacuity guards", () => {

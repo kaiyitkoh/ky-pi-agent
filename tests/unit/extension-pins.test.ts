@@ -58,9 +58,9 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
+import { readSettings, readSettingsPackages } from "../helpers/settings.ts";
 import { isPinnedPackageSpec } from "./pinning.test.ts";
 
-const SETTINGS_PATH = join(".pi", "settings.json");
 const EXT_DIR = ".pi/extensions";
 
 interface ExpectedPackage {
@@ -96,21 +96,6 @@ const EXPECTED_PACKAGES: readonly ExpectedPackage[] = [
 		why: "/find session search across projects, zero model-facing tools",
 	},
 ];
-
-function readSettings(): Record<string, unknown> {
-	return JSON.parse(readFileSync(join(repoRoot(), SETTINGS_PATH), "utf-8")) as Record<string, unknown>;
-}
-
-function readSettingsPackages(): string[] {
-	const packages = readSettings().packages;
-	if (packages === undefined) {
-		return [];
-	}
-	if (!Array.isArray(packages)) {
-		throw new Error(`${SETTINGS_PATH} "packages" is present but not an array`);
-	}
-	return packages as string[];
-}
 
 describe("EXT-08 -- vacuity guards", () => {
 	it("EXPECTED_PACKAGES is non-empty", () => {

@@ -30,9 +30,9 @@ import { dirname, join } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import { repoRoot, trackedFiles } from "../helpers/git.ts";
+import { readSettingsPackages, SETTINGS_PATH } from "../helpers/settings.ts";
 
 const EXT_DIR = ".pi/extensions";
-const SETTINGS_PATH = join(".pi", "settings.json");
 
 interface VendoredRow {
 	/** Repo-relative directory the package's source files live under. */
@@ -152,22 +152,6 @@ const VERSION_PATTERN = /\b\d+\.\d+\.\d+\b/;
  * own PROVENANCE.md files record SHA-256 (64 hex chars), but the pattern is
  * left loose enough to accept either without hardcoding an algorithm name. */
 const HASH_PATTERN = /\b[0-9a-f]{40,}\b/i;
-
-function readSettingsPackages(): string[] {
-	const raw = JSON.parse(readFileSync(join(repoRoot(), SETTINGS_PATH), "utf-8")) as {
-		packages?: unknown;
-	};
-	if (raw.packages === undefined) {
-		// Correct before plan 07-09 lands: Plan 01 created `.pi/settings.json`
-		// as `{}`, and an absent key must read as "no packages", never as a
-		// vacuous pass over `undefined`.
-		return [];
-	}
-	if (!Array.isArray(raw.packages)) {
-		throw new Error(`${SETTINGS_PATH} "packages" is present but not an array`);
-	}
-	return raw.packages as string[];
-}
 
 /**
  * True when `spec` (a `.pi/settings.json` packages[] entry) names
