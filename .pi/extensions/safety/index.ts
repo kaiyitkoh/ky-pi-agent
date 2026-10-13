@@ -13,7 +13,7 @@ import { Type } from "typebox";
 import { approve, consume, createPending, grantConfirmed, markHookDeferred, peek, validate } from "./approvals.ts";
 import { pruneAuditLogs, writeAuditRow } from "./audit.ts";
 import type { AuditVerdict } from "./schema.ts";
-import { currentBranch, gitConfigValues } from "./git.ts";
+import { currentBranch, gitConfigValues, resolveLocalBranch } from "./git.ts";
 import { canonicalisePathArg } from "./paths.ts";
 import { evaluate, type PolicyFacts, type Verdict } from "./policy.ts";
 
@@ -55,6 +55,7 @@ function buildFacts(ctx: ExtensionContext): PolicyFacts {
 		protectedBranches: PROTECTED_BRANCHES,
 		pushProtectedBranches: PUSH_PROTECTED_BRANCHES,
 		gitConfigFor: (dir: string, key: string) => gitConfigValues(dir, key),
+		gitBranchFor: (dir: string, rev: string) => resolveLocalBranch(dir, rev),
 		kubeconfigEnv: process.env.KUBECONFIG,
 	};
 }
@@ -377,7 +378,7 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 				audit(toolName, command, "block", reason);
 				return { block: true, reason };
 			}
-			const approved = await ctx.ui.confirm("Allow this git push?", verdict.prompt);
+			const approved = await ctx.ui.confirm("Allow this git push?", `${command}\n\n${verdict.prompt}`);
 			if (approved !== true) {
 				const reason = `${verdict.reason} -- the user declined it`;
 				audit(toolName, command, "block", reason);

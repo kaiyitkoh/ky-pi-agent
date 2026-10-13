@@ -34,6 +34,8 @@ export interface PolicyFacts {
 	readonly pushProtectedBranches?: readonly string[];
 	/** Lazy `git config --get-all` in a directory; absent means config is unknown and config-derived push destinations block. */
 	readonly gitConfigFor?: (cwd: string, key: string) => readonly string[];
+	/** Lazy `git rev-parse --symbolic-full-name` to a local branch name in a directory; required with gitConfigFor. */
+	readonly gitBranchFor?: (cwd: string, rev: string) => string | undefined;
 	readonly kubeconfigEnv?: string;
 }
 
@@ -94,7 +96,8 @@ const canonicalOf = (text: string, facts: PolicyFacts): string =>
 
 function fromGitVerdict(verdict: GitVerdict, requestKey: string): Verdict {
 	// No approval path for a git/glab block.
-	if (verdict.kind === "ask") return { kind: "ask", reason: verdict.reason, requestKey, prompt: verdict.prompt };
+	// The resolved destination is part of the key, so a grant never covers a push that now resolves elsewhere.
+	if (verdict.kind === "ask") return { kind: "ask", reason: verdict.reason, requestKey: `${requestKey}::${verdict.prompt}`, prompt: verdict.prompt };
 	return verdict.kind === "allow" ? { kind: "allow" } : { kind: "block", reason: verdict.reason };
 }
 
@@ -151,12 +154,13 @@ function evaluateInvocation(invocation: CanonicalInvocation, facts: PolicyFacts,
 		const afterCd = invocation.afterCd === "unknown" ? [facts.protectedBranches[0] ?? ""] : invocation.afterCd === "known" ? [branchIn()] : [];
 		const branches = [branchIn(invocation.cwdOverride), ...afterCd];
 		const gitDir = foldDirectories([facts.cwd, invocation.cwdOverride ?? "."]) ?? facts.cwd;
-		const gitConfigFor = facts.gitConfigFor;
+		const { gitConfigFor, gitBranchFor } = facts;
 		const gitFacts: GitPolicyFacts = {
 			currentBranch: branches.find((b) => facts.protectedBranches.includes(b)) ?? branches[0],
 			protectedBranches: facts.protectedBranches,
 			pushProtectedBranches: facts.pushProtectedBranches,
 			...(gitConfigFor !== undefined ? { readConfig: (key: string) => gitConfigFor(gitDir, key) } : {}),
+			...(gitBranchFor !== undefined ? { resolveBranch: (rev: string) => gitBranchFor(gitDir, rev) } : {}),
 			configTrusted:
 				sole &&
 				invocation.wrappers.length === 0 &&
@@ -206,7 +210,7 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 
 	let strongest: Verdict = { kind: "allow" };
 	for (const invocation of shellVerdict.invocations) {
-		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey, shellVerdict.invocations.length === 1));
+		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey, shellVerdict.commandCount === 1));
 	}
 	return strongest;
 }

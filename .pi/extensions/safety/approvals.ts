@@ -112,11 +112,14 @@ export function approve(id: string, command: string, reason: string, now: number
 	return true;
 }
 
+/** The wrapper runs straight after the hook that confirmed, so a confirmed push's grant lives only this long. */
+export const CONFIRMED_GRANT_TTL_MS = 30_000;
+
 /** A one-shot grant for a command a human confirmed directly in the hook, with no pending request to echo back. */
 export function grantConfirmed(requestKey: string, command: string, reason: string, now: number = Date.now()): void {
 	const store = getStore();
 	sweepExpired(store, now);
-	store.granted.set(requestKey, { command, reason, expiresAt: now + APPROVAL_TTL_MS });
+	store.granted.set(requestKey, { command, reason, expiresAt: now + CONFIRMED_GRANT_TTL_MS });
 }
 
 /** Non-consuming read for the hook: consuming there would leave the wrapper's consume() nothing and block the approved command. */

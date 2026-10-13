@@ -147,7 +147,7 @@ const ROWS: readonly Row[] = [
 	},
 	{ command: "git push -u origin HEAD:refs/heads/feature/x", rest: "push -u origin HEAD:refs/heads/feature/x", kind: "git", currentBranch: "feature/x", expected: "ask", why: "explicit full-ref destination that is not protected" },
 	{ command: "git push -o ci.skip origin feature/x:feature/x", rest: "push -o ci.skip origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "ask", why: "-o consumes its value, so the remote and refspec are still found" },
-	{ command: "git push --repo origin feature/x:feature/x", rest: "push --repo origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "ask", why: "--repo names the remote, so every positional is a refspec" },
+	{ command: "git push --repo origin feature/x:feature/x", rest: "push --repo origin feature/x:feature/x", kind: "git", currentBranch: "feature/x", expected: "block", why: "git lets a positional remote override --repo, so --repo is refused rather than trusted" },
 	{ command: "git push origin --delete feature/old", rest: "push origin --delete feature/old", kind: "git", currentBranch: "feature/x", expected: "ask", why: "--delete names the destination directly, and it is not protected" },
 	{ command: "git push origin --delete main", rest: "push origin --delete main", kind: "git", currentBranch: "feature/x", expected: "block", why: "deleting a protected branch" },
 	{ command: "git push -o -d origin feature/x", rest: "push -o -d origin feature/x", kind: "git", currentBranch: "feature/x", expected: "block", why: "-d is -o's value, not a delete, so the bare source still takes its destination from config (confirmed against a bare remote)" },
@@ -239,12 +239,12 @@ describe("git push with config overrides", () => {
 		},
 	);
 
-	it("an unrelated -c override does not block, so the push asks", () => {
+	it("any -c override blocks a push, since include.path and friends can redirect the config it reads", () => {
 		const verdict = classifyGitInvocation(
 			{ subcommand: "push", args: ["origin", "feature/x:feature/x"], configOverrides: ["core.quotePath=false"] },
 			facts("feature/x"),
 		);
-		expect(verdict.kind).toBe("ask");
+		expect(verdict.kind).toBe("block");
 	});
 });
 

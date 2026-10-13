@@ -7,7 +7,15 @@ import { spawnSync } from "node:child_process";
 import type { ExtensionAPI, ExtensionContext, ToolDefinition } from "@earendil-works/pi-coding-agent";
 import { describe, expect, it } from "vitest";
 
-import { classifyGitInvocation, DETACHED_HEAD, type GitPolicyFacts, type GitVerdict } from "../../.pi/extensions/safety/git.ts";
+import {
+	classifyGitInvocation,
+	currentBranch,
+	DETACHED_HEAD,
+	gitConfigValues,
+	resolveLocalBranch,
+	type GitPolicyFacts,
+	type GitVerdict,
+} from "../../.pi/extensions/safety/git.ts";
 import safety from "../../.pi/extensions/safety/index.ts";
 import { evaluate, type PolicyFacts } from "../../.pi/extensions/safety/policy.ts";
 import { withTempLogCwd } from "../helpers/logs.ts";
@@ -15,20 +23,30 @@ import { withTempLogCwd } from "../helpers/logs.ts";
 const PROTECTED = ["main", "master"];
 const PUSH_PROTECTED = [...PROTECTED, "staging"];
 
+const REMOTES = { "remote.origin.url": "git@example.invalid:o/r.git", "remote.fork.url": "git@example.invalid:f/r.git" };
+
 function configOf(entries: Record<string, string>): (key: string) => readonly string[] {
-	return (key) => (key in entries ? [entries[key]] : []);
+	const all: Record<string, string> = { ...REMOTES, ...entries };
+	return (key) => (key in all ? [all[key]] : []);
 }
 
 function classify(argv: string, opts: { head?: string; config?: Record<string, string>; trusted?: boolean } = {}): GitVerdict {
+	const head = opts.head ?? "feat";
 	const facts: GitPolicyFacts = {
-		currentBranch: opts.head ?? "feat",
+		currentBranch: head,
 		protectedBranches: PROTECTED,
 		pushProtectedBranches: PUSH_PROTECTED,
 		readConfig: configOf(opts.config ?? {}),
 		configTrusted: opts.trusted ?? true,
+		resolveBranch: (rev) => (/^(head|@)$/i.test(rev) ? (head === DETACHED_HEAD ? undefined : head) : rev.replace(/^(refs\/)?heads\//, "")),
 	};
 	const args = argv.split(/\s+/).filter((a) => a !== "");
 	return classifyGitInvocation({ subcommand: "push", args }, facts);
+}
+
+function git(cwd: string, ...args: string[]): void {
+	const r = spawnSync("git", ["-c", "user.email=t@t", "-c", "user.name=t", ...args], { cwd, encoding: "utf-8", windowsHide: true });
+	expect(r.status, `git ${args.join(" ")}: ${r.stderr}`).toBe(0);
 }
 
 const UPSTREAM_MAIN = { "push.default": "upstream", "branch.feat.merge": "refs/heads/main", "branch.feat.remote": "origin" };
@@ -55,7 +73,17 @@ describe("push destinations that always block", () => {
 		["--prune origin feat:feat", {}],
 		["origin tag v1", {}],
 		["--frobnicate origin feat:feat", {}],
+		["--repo=origin evil feat", {}],
+		["--receive-pack=x origin feat:feat", {}],
+		["--follow-tags origin feat:feat", {}],
+		["origin feat:feat", { "push.followTags": "true" }],
 		["-o merge_request.merge_when_pipeline_succeeds origin feat:feat", {}],
+		["-o merge_request.target=main origin feat:feat", {}],
+		["origin feat:feat", { "push.pushOption": "merge_request.merge_when_pipeline_succeeds" }],
+		["origin feat:feat", { "remote.origin.mirror": "true" }],
+		["origin", { "remote.origin.mirror": "yes" }],
+		["evil feat:feat", {}],
+		["origin feat:feat", { "submodule.recurse": "yes" }],
 		["--recurse-submodules=on-demand origin feat:feat", {}],
 		["origin feat:feat", { "push.recurseSubmodules": "on-demand" }],
 		["origin feat:feat", { "submodule.recurse": "true" }],
@@ -113,13 +141,17 @@ describe("implicit destinations resolve through config, never silently to a prot
 		expect(classify("origin feat:feat", { trusted: false }).kind).toBe("ask");
 		const noConfig = classifyGitInvocation({ subcommand: "push", args: [] }, { currentBranch: "feat", protectedBranches: PROTECTED, configTrusted: true });
 		expect(noConfig.kind).toBe("block");
+		const anyOverride = classifyGitInvocation(
+			{ subcommand: "push", args: ["origin", "feat:feat"], configOverrides: ["include.path=x"] },
+			{ currentBranch: "feat", protectedBranches: PROTECTED },
+		);
+		expect(anyOverride.kind).toBe("block");
 	});
 
-	it("the prompt names the exact command, the resolved remote and the branch", () => {
+	it("the prompt names the resolved remote and the branch", () => {
 		const verdict = classify("-u", { config: { "branch.feat.pushRemote": "fork" } });
 		expect(verdict.kind).toBe("ask");
 		if (verdict.kind !== "ask") return;
-		expect(verdict.prompt).toContain("git push -u");
 		expect(verdict.prompt).toContain("Remote: fork");
 		expect(verdict.prompt).toContain("Branch: feat");
 	});
@@ -134,6 +166,7 @@ describe("evaluate(): config is trusted only for a push that runs on its own", (
 		protectedBranches: PROTECTED,
 		pushProtectedBranches: PUSH_PROTECTED,
 		gitConfigFor: (_dir, key) => configOf(config)(key),
+		gitBranchFor: (_dir, rev) => (/^(head|@)$/i.test(rev) ? "feat" : rev),
 	});
 
 	it.each([
@@ -151,6 +184,8 @@ describe("evaluate(): config is trusted only for a push that runs on its own", (
 		["git push origin feat:feat && terraform apply", "block"],
 		["git push origin a:a && git push origin b:b", "block"],
 		["git push origin feat:staging", "block"],
+		["HOME=sub; git push origin feat", "block"],
+		["HOME=sub; git push origin feat:feat", "ask"],
 	])("%s -> %s", (command, expected) => {
 		expect(evaluate("bash", { command }, facts()).kind).toBe(expected);
 	});
@@ -172,8 +207,8 @@ describe("tool_call hook: ask confirms in the TUI only, and the wrapper honours 
 	}
 
 	function initRepo(cwd: string): void {
-		const r = spawnSync("git", ["init", "-q", "-b", "feat", cwd], { encoding: "utf-8", windowsHide: true });
-		expect(r.status, r.stderr).toBe(0);
+		git(cwd, "init", "-q", "-b", "feat", ".");
+		git(cwd, "remote", "add", "origin", "./.no-such-remote.git");
 	}
 
 	function ctxOf(cwd: string, ui: { hasUI: boolean; mode: string; confirm?: (title: string, message: string) => Promise<boolean> }): ExtensionContext {
@@ -239,4 +274,36 @@ describe("tool_call hook: ask confirms in the TUI only, and the wrapper honours 
 			expect(second, "the grant is one-shot").toContain(guardText);
 		});
 	}, 30_000);
+});
+
+describe("against a real repository, config git itself would follow is never shown as a feature branch", () => {
+	const realFacts = (cwd: string): PolicyFacts => ({
+		cwd,
+		projectRoot: cwd,
+		home: "/home/u",
+		currentBranchFor: (dir) => currentBranch(dir),
+		protectedBranches: PROTECTED,
+		pushProtectedBranches: PUSH_PROTECTED,
+		gitConfigFor: (dir, key) => gitConfigValues(dir, key),
+		gitBranchFor: (dir, rev) => resolveLocalBranch(dir, rev),
+	});
+
+	it.each([
+		["heads/feat under push.default=upstream tracking main", ["config push.default upstream", "config branch.feat.merge refs/heads/main"], "git push origin heads/feat", "block"],
+		["a branch that is a symbolic ref to main", ["symbolic-ref refs/heads/alias refs/heads/main"], "git push origin alias", "block"],
+		["HEAD symbolic-ref'd through an alias of main", ["symbolic-ref refs/heads/alias refs/heads/main", "symbolic-ref HEAD refs/heads/alias"], "git push", "block"],
+		["a remote with no git-config url (legacy .git/remotes)", [], "git push legacy feat", "block"],
+		["remote mirror config", ["config remote.origin.mirror true"], "git push origin feat:feat", "block"],
+		["plain feature branch", [], "git push -u origin feat", "ask"],
+		["plain bare push on a feature branch", [], "git push", "ask"],
+	])("%s", async (_name, setup, command, expected) => {
+		await withTempLogCwd(async (cwd) => {
+			git(cwd, "init", "-q", "-b", "main", ".");
+			git(cwd, "commit", "-q", "--allow-empty", "-m", "x");
+			git(cwd, "checkout", "-q", "-b", "feat");
+			git(cwd, "remote", "add", "origin", "./.no-such-remote.git");
+			for (const step of setup) git(cwd, ...step.split(" "));
+			expect(evaluate("bash", { command }, realFacts(cwd)).kind).toBe(expected);
+		});
+	});
 });

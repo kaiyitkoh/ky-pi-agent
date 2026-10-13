@@ -56,6 +56,14 @@ export function gitConfigValues(cwd: string, key: string): readonly string[] {
 	return result.stdout.split(/\r?\n/);
 }
 
+/** The branch `rev` resolves to through DWIM and symbolic refs, or undefined for a tag, a detached HEAD or an unknown name. */
+export function resolveLocalBranch(cwd: string, rev: string): string | undefined {
+	if (rev.startsWith("-")) return undefined;
+	const result = runGit(cwd, ["rev-parse", "--symbolic-full-name", rev]);
+	const full = result.stdout.split(/\r?\n/)[0] ?? "";
+	return result.status === 0 && /^refs\/heads\/./.test(full) ? full.slice("refs/heads/".length) : undefined;
+}
+
 /** THROWS with no sentinel: an unknown id must never compare equal to recorded evidence, so callers refuse (fail closed). */
 function revParse(cwd: string, rev: string, what: string): string {
 	const result = runGit(cwd, ["rev-parse", rev]);
@@ -95,9 +103,11 @@ export interface GitPolicyFacts {
 	readonly readConfig?: (key: string) => readonly string[];
 	/** True only when nothing else in the command can change HEAD or config before the push runs. */
 	readonly configTrusted?: boolean;
+	/** The local branch `rev` names after DWIM and symbolic refs (`git rev-parse --symbolic-full-name`), or undefined. */
+	readonly resolveBranch?: (rev: string) => string | undefined;
 }
 
-/** `ask` is a push to a resolved non-protected branch; `prompt` is what the human sees. */
+/** `ask` is a push to a resolved non-protected branch; `prompt` is the resolved remote and branch the human is shown. */
 export type GitVerdict =
 	| { readonly kind: "allow" }
 	| { readonly kind: "ask"; readonly reason: string; readonly prompt: string }
@@ -176,22 +186,26 @@ const PUSH_REFUSED_LONG: ReadonlyMap<string, string> = new Map([
 	["--branches", "pushes every branch, protected ones included"],
 	["--mirror", "mirrors every ref, force-updating and deleting protected ones"],
 	["--tags", "pushes every tag, and only branch pushes can be confirmed"],
+	["--follow-tags", "also pushes tags, and only branch pushes can be confirmed"],
 	["--prune", "deletes remote branches that have no local counterpart"],
+	// git lets a positional remote override --repo; refusing it avoids showing the wrong remote.
+	["--repo", "is refused; name the remote as the first argument"],
+	["--receive-pack", "runs a remote-side program the guard cannot see"],
+	["--exec", "runs a remote-side program the guard cannot see"],
 ]);
 const PUSH_FORCE_FLAG = /^--(force|force-with-lease|force-if-includes)(=|$)/;
-const PUSH_VALUE_FLAGS: ReadonlySet<string> = new Set(["--repo", "-o", "--push-option", "--receive-pack", "--exec"]);
+const PUSH_OPTION_FLAGS: ReadonlySet<string> = new Set(["-o", "--push-option"]);
 const PUSH_SAFE_LONG: ReadonlySet<string> = new Set(
 	(
 		"--set-upstream --verbose --quiet --dry-run --porcelain --progress --no-progress --atomic --no-atomic --verify " +
-		"--no-verify --follow-tags --no-follow-tags --thin --no-thin --signed --no-signed --ipv4 --ipv6 " +
-		"--no-force-with-lease --no-recurse-submodules"
+		"--no-verify --no-follow-tags --thin --no-thin --signed --no-signed --ipv4 --ipv6 --no-force-with-lease " +
+		"--no-recurse-submodules"
 	).split(" "),
 );
 const PUSH_SAFE_SHORT = new Set("uvqn46");
-/** GitLab push options that merge an MR server-side, the same deploy trigger as `glab mr merge`. */
-const PUSH_OPTION_MERGES = /merge_when_pipeline_succeeds|auto_merge/i;
-/** Config that can redirect a push's destination (remote.<r>.push, push.default, branch.<b>.merge, ...). */
-const PUSH_CONFIG_KEY = /^(push\.|remote\.|branch\.|submodule\.)/i;
+/** GitLab `merge_request.*` push options create, retarget or merge an MR server-side; `glab mr` covers that path. */
+const PUSH_OPTION_REFUSED = /^merge_request\./i;
+const GIT_FALSE = /^(false|no|off|0)$/i;
 
 /** Destinations git resolves to more than one branch, or to the remote's default branch, count as every protected one. */
 function destinationIsProtected(dst: string, protectedBranches: readonly string[]): boolean {
@@ -215,14 +229,17 @@ interface PushArgs {
 	readonly refspecs: readonly string[];
 	readonly deleting: boolean;
 	readonly submodulesOff: boolean;
+	readonly followTagsOff: boolean;
+	readonly optionsGiven: boolean;
 }
 
 /** Parse push flags against an allow-list; an unknown flag refuses because its arity could hide the real remote or refspec. */
 function parsePushArgs(args: readonly string[]): PushArgs | string {
 	const positionals: string[] = [];
-	let repo: string | undefined;
 	let deleting = false;
 	let submodulesOff = false;
+	let followTagsOff = false;
+	let optionsGiven = false;
 	for (let i = 0; i < args.length; i++) {
 		const a = args[i];
 		const name = a.startsWith("--") ? a.split("=")[0] : a;
@@ -233,13 +250,11 @@ function parsePushArgs(args: readonly string[]): PushArgs | string {
 		}
 		if (PUSH_FORCE_FLAG.test(a)) return `"${a}" force-pushes, which is refused on every branch`;
 		if (PUSH_REFUSED_LONG.has(name)) return `"${a}" ${PUSH_REFUSED_LONG.get(name)}`;
-		if (PUSH_VALUE_FLAGS.has(name)) {
+		if (PUSH_OPTION_FLAGS.has(name)) {
 			const value = inlineValue ?? args[++i];
 			if (value === undefined) return `"${a}" has no value`;
-			if (name === "--repo") repo = value;
-			if ((name === "-o" || name === "--push-option") && PUSH_OPTION_MERGES.test(value)) {
-				return `push option "${value}" merges a merge request server-side`;
-			}
+			if (PUSH_OPTION_REFUSED.test(value)) return `push option "${value}" acts on a merge request server-side`;
+			optionsGiven = true;
 		} else if (name === "--delete") {
 			deleting = true;
 		} else if (name === "--recurse-submodules") {
@@ -248,6 +263,7 @@ function parsePushArgs(args: readonly string[]): PushArgs | string {
 		} else if (a.startsWith("--")) {
 			if (!PUSH_SAFE_LONG.has(name)) return `"${a}" is not a recognised push flag`;
 			submodulesOff ||= name === "--no-recurse-submodules";
+			followTagsOff ||= name === "--no-follow-tags";
 		} else if (a.startsWith("-") && a.length > 1) {
 			for (const ch of a.slice(1)) {
 				if (ch === "f") return `"${a}" force-pushes, which is refused on every branch`;
@@ -258,9 +274,8 @@ function parsePushArgs(args: readonly string[]): PushArgs | string {
 			positionals.push(a);
 		}
 	}
-	const remote = repo ?? positionals[0];
-	const refspecs = (repo !== undefined ? positionals : positionals.slice(1)).filter((r) => !r.startsWith("^"));
-	return { remote, refspecs, deleting, submodulesOff };
+	const refspecs = positionals.slice(1).filter((r) => !r.startsWith("^"));
+	return { remote: positionals[0], refspecs, deleting, submodulesOff, followTagsOff, optionsGiven };
 }
 
 /** The last value of a config key, as git reads a single-valued key. */
@@ -269,83 +284,97 @@ function lastConfig(facts: GitPolicyFacts, key: string): string | undefined {
 	return values.length > 0 ? values[values.length - 1] : undefined;
 }
 
+const configList = (facts: GitPolicyFacts, key: string): readonly string[] => facts.readConfig?.(key) ?? [];
+
 /** Destinations git derives from config, read now; untrusted when an earlier command could rewrite HEAD or config first. */
 function configDerivedTargets(facts: GitPolicyFacts, what: string): string | undefined {
-	if (facts.readConfig === undefined) return `${what}, and this repo's git config cannot be read`;
+	if (facts.readConfig === undefined || facts.resolveBranch === undefined) return `${what}, and this repo's git config cannot be read`;
 	if (facts.configTrusted !== true) {
-		return `${what}, and something else in the command (cd, an env prefix, a wrapper or another segment) could change HEAD or config before it runs -- run the push on its own`;
+		return `${what}, and something else in the command (cd, an assignment, a wrapper or another segment) could change HEAD or config before it runs -- run the push on its own`;
 	}
 	return undefined;
 }
+
+/** Every configured upstream of `branch`; git refuses to push a multi-valued one, but each is still checked. */
+const mergeTargets = (facts: GitPolicyFacts, branch: string): string[] => configList(facts, `branch.${branch}.merge`).map(branchOf);
 
 /** `git push <remote> <src>`: builtin/push.c set_refspecs maps a bare source via remote.<r>.push, else via branch.<src>.merge under push.default=upstream. */
 function resolveBareSource(src: string, remote: string, facts: GitPolicyFacts): PushPlan {
 	const untrusted = configDerivedTargets(facts, `refspec "${src}" has no explicit destination`);
 	if (untrusted !== undefined) return refuse(untrusted);
 	if (src === "tag") return refuse('"tag <name>" pushes a tag, and only branch pushes can be confirmed');
-	let name = src;
-	if (/^(head|@)$/i.test(src)) {
-		if (facts.currentBranch === DETACHED_HEAD) return refuse(`refspec "${src}" names a detached HEAD`);
-		name = facts.currentBranch;
-	}
-	if (/[~^?*[\\{]/.test(name)) return refuse(`refspec "${src}" is not a plain branch name`);
-	name = branchOf(name);
-	if ((facts.readConfig?.(`remote.${remote}.push`) ?? []).length > 0) {
+	// git follows DWIM spellings (`heads/x`) and symbolic refs to the branch it actually pushes.
+	const name = /^[\w./-]+$/.test(src) && !src.startsWith("-") ? facts.resolveBranch?.(src) : undefined;
+	if (name === undefined) return refuse(`refspec "${src}" does not resolve to exactly one local branch`);
+	if (configList(facts, `remote.${remote}.push`).length > 0) {
 		return refuse(`remote.${remote}.push is configured and may remap "${src}" to any destination`);
 	}
 	const pushDefault = (lastConfig(facts, "push.default") ?? "simple").toLowerCase();
-	const merge = lastConfig(facts, `branch.${name}.merge`);
-	if ((pushDefault === "upstream" || pushDefault === "tracking") && merge !== undefined) {
-		return { kind: "resolved", remote, targets: [branchOf(merge)], via: `push.default=${pushDefault} maps "${name}" to branch.${name}.merge` };
-	}
-	return { kind: "resolved", remote, targets: [name], via: `"${src}" pushes to the same name (push.default=${pushDefault})` };
+	const merges = pushDefault === "upstream" || pushDefault === "tracking" ? mergeTargets(facts, name) : [];
+	const targets = [...new Set([name, ...merges])];
+	const via = merges.length > 0 ? `push.default=${pushDefault} maps "${name}" to branch.${name}.merge` : `"${src}" is branch "${name}", pushed to the same name`;
+	return { kind: "resolved", remote, targets, via };
 }
 
 /** `git push [<remote>]`: remote and destination both come from config (git-config(1) push.default, branch.<b>.pushRemote). */
 function resolveNoRefspec(given: string | undefined, facts: GitPolicyFacts): PushPlan {
 	const untrusted = configDerivedTargets(facts, "names no refspec, so its destination comes from config");
 	if (untrusted !== undefined) return refuse(untrusted);
-	const head = facts.currentBranch;
-	if (head === DETACHED_HEAD) return refuse("names no refspec and HEAD is detached");
+	const head = facts.resolveBranch?.("HEAD");
+	if (head === undefined) return refuse("names no refspec and HEAD is not on a local branch");
 	const upstreamRemote = lastConfig(facts, `branch.${head}.remote`);
 	const remote = given ?? lastConfig(facts, `branch.${head}.pushRemote`) ?? lastConfig(facts, "remote.pushDefault") ?? upstreamRemote ?? "origin";
-	if ((facts.readConfig?.(`remote.${remote}.push`) ?? []).length > 0) {
+	if (configList(facts, `remote.${remote}.push`).length > 0) {
 		return refuse(`remote.${remote}.push is configured and may push to any destination`);
 	}
 	const pushDefault = (lastConfig(facts, "push.default") ?? "simple").toLowerCase();
-	const merge = lastConfig(facts, `branch.${head}.merge`);
+	const merges = mergeTargets(facts, head);
 	if (pushDefault === "current") return { kind: "resolved", remote, targets: [head], via: `push.default=current pushes HEAD ("${head}") to the same name` };
 	if (pushDefault === "upstream" || pushDefault === "tracking") {
-		if (merge === undefined) return refuse(`push.default=${pushDefault} but "${head}" has no upstream`);
-		return { kind: "resolved", remote, targets: [branchOf(merge)], via: `push.default=${pushDefault} pushes "${head}" to its upstream branch.${head}.merge` };
+		if (merges.length === 0) return refuse(`push.default=${pushDefault} but "${head}" has no upstream`);
+		return { kind: "resolved", remote, targets: [...new Set(merges)], via: `push.default=${pushDefault} pushes "${head}" to its upstream branch.${head}.merge` };
 	}
 	if (pushDefault === "simple") {
-		// simple refuses a differently named upstream on the upstream remote; both names are checked rather than trusting that refusal.
-		const targets = merge !== undefined && upstreamRemote === remote && branchOf(merge) !== head ? [head, branchOf(merge)] : [head];
-		return { kind: "resolved", remote, targets, via: `push.default=simple pushes HEAD ("${head}")${merge !== undefined ? ` with upstream ${branchOf(merge)}` : ""}` };
+		// simple refuses a differently named upstream on the upstream remote; every name is checked rather than trusting that refusal.
+		const targets = [...new Set([head, ...(upstreamRemote === remote ? merges : [])])];
+		return { kind: "resolved", remote, targets, via: `push.default=simple pushes HEAD ("${head}")` };
 	}
 	return refuse(`push.default=${pushDefault} may push branches other than HEAD, protected ones included`);
 }
 
-/** Refuse submodule recursion from config; `--recurse-submodules=on-demand` pushes submodule branches resolved nowhere here. */
-function submoduleRefusal(facts: GitPolicyFacts): string | undefined {
-	const push = lastConfig(facts, "push.recurseSubmodules")?.toLowerCase();
-	const recurse = lastConfig(facts, "submodule.recurse")?.toLowerCase();
-	if (push === "on-demand" || push === "only" || (push === undefined && recurse === "true")) {
-		return "config recurses into submodules, whose branches this guard does not resolve -- add --no-recurse-submodules";
+/** Config that turns an ordinary push into something else; read whenever config is readable, whatever the refspec. */
+function remoteConfigRefusal(remote: string | undefined, parsed: PushArgs, facts: GitPolicyFacts): string | undefined {
+	if (facts.readConfig === undefined) return undefined;
+	if (remote !== undefined && !/[/:\\]/.test(remote)) {
+		// Without remote.<r>.url, git falls back to .git/remotes/<r> and .git/branches/<r>, which carry their own push rules.
+		if (configList(facts, `remote.${remote}.url`).length === 0) return `"${remote}" is not a remote configured in git config`;
+		const mirror = lastConfig(facts, `remote.${remote}.mirror`);
+		if (mirror !== undefined && !GIT_FALSE.test(mirror)) return `remote.${remote}.mirror makes every push a forced mirror`;
+		if (configList(facts, `remote.${remote}.receivepack`).length > 0) return `remote.${remote}.receivepack runs a remote-side program the guard cannot see`;
+	}
+	if (!parsed.optionsGiven && configList(facts, "push.pushOption").some((o) => PUSH_OPTION_REFUSED.test(o))) {
+		return "push.pushOption sets a merge_request.* option that acts server-side";
+	}
+	const followTags = lastConfig(facts, "push.followTags");
+	if (!parsed.followTagsOff && followTags !== undefined && !GIT_FALSE.test(followTags)) {
+		return "push.followTags also pushes tags -- add --no-follow-tags";
+	}
+	if (!parsed.submodulesOff) {
+		const push = lastConfig(facts, "push.recurseSubmodules");
+		const recurse = lastConfig(facts, "submodule.recurse");
+		if ((push !== undefined && !/^(no|check)$/i.test(push)) || (push === undefined && recurse !== undefined && !GIT_FALSE.test(recurse))) {
+			return "config recurses into submodules, whose branches this guard does not resolve -- add --no-recurse-submodules";
+		}
 	}
 	return undefined;
 }
 
 /** Every branch a push may update, or why it cannot be confirmed; force, protected and ambiguous destinations always refuse. */
 function planPush(args: readonly string[], configOverrides: readonly string[], facts: GitPolicyFacts): PushPlan {
-	if (configOverrides.some((c) => PUSH_CONFIG_KEY.test(c))) return refuse("overrides push or remote config with -c");
+	// An include.path or any other override can redirect config this guard reads, so none is accepted on a push.
+	if (configOverrides.length > 0) return refuse("overrides git config with -c/--config-env");
 	const parsed = parsePushArgs(args);
 	if (typeof parsed === "string") return refuse(parsed);
-	if (!parsed.submodulesOff) {
-		const submodules = submoduleRefusal(facts);
-		if (submodules !== undefined) return refuse(submodules);
-	}
 	const protectedNames = facts.pushProtectedBranches ?? facts.protectedBranches;
 	let plan: PushPlan;
 	if (parsed.refspecs.length === 0) {
@@ -373,6 +402,8 @@ function planPush(args: readonly string[], configOverrides: readonly string[], f
 		plan = { kind: "resolved", remote, targets, via: vias.length > 0 ? vias.join("; ") : "explicit <src>:<dst> refspec" };
 	}
 	if (plan.kind === "refused") return plan;
+	const configWhy = remoteConfigRefusal(plan.remote === "" ? undefined : plan.remote, parsed, facts);
+	if (configWhy !== undefined) return refuse(configWhy);
 	for (const t of plan.targets) {
 		const dst = t.replace(/^delete /, "");
 		if (destinationIsProtected(dst, protectedNames)) {
@@ -401,7 +432,7 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 		return {
 			kind: "ask",
 			reason: `"${display}" pushes to ${push.targets.join(", ")} on ${remote}, which needs human confirmation`,
-			prompt: `${display}\n\nRemote: ${remote}\nBranch: ${push.targets.join(", ")}\nResolved: ${push.via}`,
+			prompt: `Remote: ${remote}\nBranch: ${push.targets.join(", ")}\nResolved: ${push.via}`,
 		};
 	}
 

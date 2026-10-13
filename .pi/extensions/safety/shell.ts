@@ -175,6 +175,8 @@ export type ShellVerdict =
 			readonly invocations: readonly CanonicalInvocation[];
 			/** Every distinct `Redirect.operator` in walk order, so callers need no second AST walk. */
 			readonly redirectOperators: readonly string[];
+			/** Every `Command` node, including assignment-only statements (`HOME=x`) that yield no invocation. */
+			readonly commandCount: number;
 	  };
 
 /** Basename, lower-cased, Windows extension stripped; every bare-verb gate must use it or `git.exe push` classifies as allow. */
@@ -500,5 +502,5 @@ export function canonicalise(command: string): ShellVerdict {
 	if (findShellRunnerDenial(invocations) !== undefined) return refused("shell-runner", command);
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
 	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
-	return { kind: "ok", invocations, redirectOperators: [...scan.redirects] };
+	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], commandCount: scan.commands.length };
 }

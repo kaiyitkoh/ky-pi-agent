@@ -146,21 +146,25 @@ Every `git push` resolves to one of three outcomes, checked on any branch:
   `staging` (`PUSH_PROTECTED_BRANCHES` in `safety/index.ts`, compared
   case-insensitively, with `refs/heads/` and `heads/` stripped); any force
   (`--force`, `-f` alone or clustered, `--force-with-lease`,
-  `--force-if-includes`, a `+refspec`); every-ref forms (`--all`,
-  `--branches`, `--mirror`, `--tags`, `--prune`, `tag <name>`); an empty,
-  wildcard or `HEAD` destination (`:`, `refs/heads/*:refs/heads/*`,
-  `feat:HEAD`); deleting a protected branch (`--delete staging`, `:main`);
-  a GitLab push option that merges server-side
-  (`merge_request.merge_when_pipeline_succeeds`, `auto_merge`); submodule
-  recursion (`--recurse-submodules=on-demand`, or `push.recurseSubmodules` /
-  `submodule.recurse` in config, unless `--no-recurse-submodules`); a global
-  `-c`/`--config-env` touching `push.*`, `remote.*`, `branch.*` or
-  `submodule.*`; an unrecognised flag; and every push while `HEAD` itself is
-  protected.
+  `--force-if-includes`, a `+refspec`, `remote.<r>.mirror`); every-ref and
+  tag forms (`--all`, `--branches`, `--mirror`, `--tags`, `--follow-tags`,
+  `push.followTags`, `--prune`, `tag <name>`); an empty, wildcard or `HEAD`
+  destination (`:`, `refs/heads/*:refs/heads/*`, `feat:HEAD`); deleting a
+  protected branch (`--delete staging`, `:main`); any GitLab
+  `merge_request.*` push option, from `-o` or `push.pushOption` (the MR path
+  is `glab mr`); `--receive-pack`, `--exec`, `remote.<r>.receivepack` and
+  `--repo` (git lets a positional remote override it); a named remote with no
+  `remote.<r>.url` in git config (git would fall back to `.git/remotes/` or
+  `.git/branches/`); submodule recursion (`--recurse-submodules=on-demand`,
+  `push.recurseSubmodules`, or a true `submodule.recurse`, unless
+  `--no-recurse-submodules`); any global `-c`/`--config-env` (an
+  `include.path` can redirect everything); an unrecognised flag; and every
+  push while `HEAD` itself is protected.
 - **Ask**: a push whose destination resolves to a non-protected branch. The
   `tool_call` hook calls `ctx.ui.confirm` with the exact command, the
   resolved remote and branch, and how it was resolved. Approve records a
-  one-shot grant the bash wrapper consumes; deny blocks.
+  one-shot grant, keyed on the command and the resolved destination and
+  valid for 30 seconds, that the bash wrapper consumes; deny blocks.
 - **Refuse when nobody can be asked**: an `ask` blocks unless
   `ctx.hasUI` is true and `ctx.mode` is `"tui"`, so print, json, rpc and
   subagent children fail closed. `bg_run` always blocks it (no wrapper to
@@ -170,9 +174,11 @@ How the destination is resolved:
 
 - `git push origin feat:feat` (explicit `src:dst`) needs no config.
 - `git push origin feat` / `git push origin HEAD` follow git's own mapping
-  (`builtin/push.c` `set_refspecs`): a configured `remote.<r>.push` blocks,
-  `push.default=upstream` maps to `branch.<src>.merge`, otherwise the same
-  name.
+  (`builtin/push.c` `set_refspecs`). The source is resolved by
+  `git rev-parse --symbolic-full-name`, so `heads/feat` and a branch that is
+  a symbolic ref to `main` resolve as git sees them; a tag or unknown name
+  blocks. A configured `remote.<r>.push` blocks; `push.default=upstream`
+  maps to every `branch.<src>.merge` value; the source name is checked too.
 - `git push`, `git push -u`, `git push origin` read `branch.<b>.pushRemote`,
   `remote.pushDefault`, `branch.<b>.remote` and `push.default`: `current`
   pushes `HEAD`; `upstream` pushes to `branch.<b>.merge`; `simple` checks
@@ -180,15 +186,17 @@ How the destination is resolved:
   unknown value, a configured `remote.<r>.push` and a detached `HEAD` block.
 
 Config and `HEAD` are read before the command runs, so a config-derived
-destination is trusted only when the push is the command's only invocation,
-with no `NAME=value` prefix, no wrapper (`env`, `sudo`, ...), no earlier
+destination is trusted only when the push is the command's only statement
+(an assignment-only statement such as `HOME=x;` counts), with no
+`NAME=value` prefix, no wrapper (`env`, `sudo`, ...), no earlier
 `cd`, and no `--git-dir`/`--work-tree`/`--namespace`. Otherwise
 `git config push.default upstream && git push origin feat` or
 `git checkout main && git push` could change the answer after it was read;
 those block and ask for an explicit `src:dst`. Two pushes in one command, or
 a push combined with an approval-protocol command (`terraform apply`), block:
-one grant cannot cover both. Residual: config changed by a concurrent
-process between the read and the push is not seen; GitLab's server-side
+one grant cannot cover both. Residuals: config changed by a concurrent
+process between the read and the push is not seen, and the resolver mirrors
+git's rules rather than asking git for its push plan; GitLab's server-side
 protection still refuses a protected branch.
 
 ## What this guard does not register (WR-09)
