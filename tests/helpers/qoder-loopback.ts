@@ -161,6 +161,8 @@ export interface QoderLoopbackOptions {
 	 * -- a value the DEFAULT id generator can never produce on its own.
 	 */
 	sessionIdOverride?: string;
+	/** Replace the whole `POST /sessions` JSON body, e.g. with `null`, to prove the client refuses a body that is not an object. */
+	sessionBodyOverride?: { readonly body: unknown };
 	/**
 	 * Deliver the stream frames only to a stream that is already open when the
 	 * events POST arrives. A stream opened after the POST receives nothing, so a
@@ -501,6 +503,10 @@ export async function withQoderLoopback<T>(
 					const status = overrides.sessions ?? 200;
 					if (status < 200 || status >= 300) {
 						writeJson(res, status, { error: `qoder-loopback: session create forced to HTTP ${status}` });
+						return;
+					}
+					if (opts.sessionBodyOverride !== undefined) {
+						writeJson(res, status, opts.sessionBodyOverride.body);
 						return;
 					}
 					writeJson(res, status, {

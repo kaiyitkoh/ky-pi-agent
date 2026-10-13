@@ -37,19 +37,13 @@ interface MessageEndReplacement {
  * The template sentinel passes the shape check, so only the equality test rejects it.
  */
 function usableProfileName(value: string | undefined): string | undefined {
-	if (value === undefined) {
-		return undefined;
-	}
-	const trimmed = value.trim();
-	if (trimmed === PROFILE_TEMPLATE_SENTINEL) {
-		return undefined;
-	}
-	return SAFE_PROFILE_NAME.test(trimmed) ? trimmed : undefined;
+	const trimmed = value?.trim();
+	return trimmed !== undefined && trimmed !== PROFILE_TEMPLATE_SENTINEL && SAFE_PROFILE_NAME.test(trimmed) ? trimmed : undefined;
 }
 
 /**
  * The profile name a stored Bedrock credential names, if any (pi dist/core/model-registry.d.ts).
- * Resolution failure falls through to the ambient variable: a degraded message beats the raw SDK string.
+ * NEVER THROWS: a resolution failure falls through to the ambient variable, since a degraded message beats the raw SDK string.
  */
 async function storedProfileName(ctx: ExtensionContext): Promise<string | undefined> {
 	try {
@@ -74,38 +68,25 @@ export async function resolveProfileName(ctx: ExtensionContext): Promise<string>
 }
 
 export default function (pi: ExtensionAPI): void {
-		// Importing safeHandler registers nothing; the diagnostics extension still loads once, from its own directory.
+	// Importing safeHandler registers nothing; the diagnostics extension still loads once, from its own directory.
 	pi.on(
 		"message_end",
 		safeHandler<MessageEndEvent, MessageEndReplacement>(HANDLER_NAME, async (event, ctx) => {
-			// Role check first: message_end also fires for user and toolResult messages (core/extensions/types.d.ts MessageEndEvent).
-			if (event.message.role !== "assistant") {
-				return;
-			}
 			const message = event.message;
-
-			// Only an error-stopped message with text can be a credential failure (pi-ai dist/utils/retry.js).
-			if (message.stopReason !== "error") {
-				return;
-			}
+			// message_end also fires for user and toolResult messages, and only an error-stopped message with text can be a
+			// credential failure (pi-ai dist/utils/retry.js).
+			if (message.role !== "assistant" || message.stopReason !== "error") return;
 			const original = message.errorMessage;
-			if (original === undefined || original.length === 0) {
-				return;
-			}
+			if (original === undefined || original.length === 0) return;
 
 			// Only Bedrock reaches the AWS credential chain; another vendor's body that quotes
 			// `CredentialsProviderError` would lose its text, which survives only on diagnostics[].
 			// The adapter sets `provider` before the try whose catch sets errorMessage (pi-ai 1.1.0 bedrock-converse-stream.js:32, :231-236).
 			// An expired AWS_BEARER_TOKEN_BEDROCK (pi-ai 1.1.0 amazon-bedrock.js:63) has no profile and gets the placeholder hint.
-			if (message.provider !== BEDROCK_PROVIDER_ID) {
-				return;
-			}
-
+			if (message.provider !== BEDROCK_PROVIDER_ID) return;
 			const verdict = classifySso(original);
-			if (verdict.kind !== "sso-credential") {
-				// A transient failure keeps its text and its retries; see sso.ts.
-				return;
-			}
+			// A transient failure keeps its text and its retries; see sso.ts.
+			if (verdict.kind !== "sso-credential") return;
 
 			const profile = await resolveProfileName(ctx);
 			const hint = profile === PROFILE_PLACEHOLDER ? PROFILE_PLACEHOLDER_HINT : "";

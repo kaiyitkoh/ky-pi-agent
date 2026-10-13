@@ -47,70 +47,49 @@ export type QoderConfigResult =
  * Refusals come one class at a time: missing variables, then token shape, then base-URL scheme.
  */
 export function resolveQoderConfig(env: NodeJS.ProcessEnv): QoderConfigResult {
+	const refuse = (message: string): QoderConfigResult => ({ ok: false, message: `Qoder delegate refused: ${message}` });
 	const token = env[QODER_TOKEN_ENV];
 	const agentId = env[QODER_AGENT_ID_ENV];
 	const environmentId = env[QODER_ENVIRONMENT_ID_ENV];
 
-	const missing: string[] = [];
-	if (!token) missing.push(QODER_TOKEN_ENV);
-	if (!agentId) missing.push(QODER_AGENT_ID_ENV);
-	if (!environmentId) missing.push(QODER_ENVIRONMENT_ID_ENV);
-
-	if (missing.length > 0) {
-		const parts: string[] = [`Qoder delegate refused: ${missing.join(", ")} not set.`];
-		if (missing.includes(QODER_TOKEN_ENV)) {
+	if (!token || !agentId || !environmentId) {
+		const missing = [!token && QODER_TOKEN_ENV, !agentId && QODER_AGENT_ID_ENV, !environmentId && QODER_ENVIRONMENT_ID_ENV].filter(Boolean);
+		const parts = [`${missing.join(", ")} not set.`];
+		if (!token) {
+			parts.push(`Generate a personal access token once at qoder.com/account/integrations (shown only once) and export it as ${QODER_TOKEN_ENV}.`);
+		}
+		if (!agentId || !environmentId) {
 			parts.push(
-				`Generate a personal access token once at qoder.com/account/integrations (shown only ` +
-					`once) and export it as ${QODER_TOKEN_ENV}.`,
+				`${QODER_AGENT_ID_ENV} and ${QODER_ENVIRONMENT_ID_ENV} are one-time Qoder console/API setup values -- an agent and an ` +
+					"environment are created once and reused, never per task. Create them once via the Qoder console or API and export the resulting ids.",
 			);
 		}
-		if (missing.includes(QODER_AGENT_ID_ENV) || missing.includes(QODER_ENVIRONMENT_ID_ENV)) {
-			parts.push(
-				`${QODER_AGENT_ID_ENV} and ${QODER_ENVIRONMENT_ID_ENV} are one-time Qoder console/API ` +
-					"setup values -- an agent and an environment are created once and reused, never " +
-					"per task. Create them once via the Qoder console or API and export the resulting ids.",
-			);
-		}
-		return { ok: false, message: parts.join(" ") };
+		return refuse(parts.join(" "));
 	}
 
-	if (!(token as string).startsWith(TOKEN_PREFIX)) {
-		return {
-			ok: false,
-			message:
-				`Qoder delegate refused: ${QODER_TOKEN_ENV} does not start with "${TOKEN_PREFIX}" -- this ` +
-				"does not look like a Qoder personal access token. Re-check the value generated at " +
-				"qoder.com/account/integrations.",
-		};
+	if (!token.startsWith(TOKEN_PREFIX)) {
+		return refuse(
+			`${QODER_TOKEN_ENV} does not start with "${TOKEN_PREFIX}" -- this does not look like a Qoder personal access token. ` +
+				"Re-check the value generated at qoder.com/account/integrations.",
+		);
 	}
 
-	const rawBaseUrl = env[QODER_BASE_URL_ENV];
-	const baseUrl = rawBaseUrl !== undefined && rawBaseUrl.length > 0 ? rawBaseUrl : DEFAULT_QODER_BASE_URL;
-
+	const baseUrl = env[QODER_BASE_URL_ENV] || DEFAULT_QODER_BASE_URL;
 	let parsed: URL;
 	try {
 		parsed = new URL(baseUrl);
 	} catch {
-		return {
-			ok: false,
-			message: `Qoder delegate refused: ${QODER_BASE_URL_ENV} (${JSON.stringify(baseUrl)}) is not a parseable URL.`,
-		};
+		return refuse(`${QODER_BASE_URL_ENV} (${JSON.stringify(baseUrl)}) is not a parseable URL.`);
 	}
-
 	// Enforced here, not at a call site, so a real non-TLS host can never receive the bearer credential;
 	// the literal is independent of tests/helpers/loopback.ts.
-	const isLoopback = parsed.hostname === "127.0.0.1";
-	if (parsed.protocol !== "https:" && !isLoopback) {
-		return {
-			ok: false,
-			message:
-				`Qoder delegate refused: ${QODER_BASE_URL_ENV} (${JSON.stringify(baseUrl)}) is neither ` +
-				"https: nor a 127.0.0.1 loopback URL -- refusing to send a bearer credential to an " +
-				"unencrypted, non-loopback host.",
-		};
+	if (parsed.protocol !== "https:" && parsed.hostname !== "127.0.0.1") {
+		return refuse(
+			`${QODER_BASE_URL_ENV} (${JSON.stringify(baseUrl)}) is neither https: nor a 127.0.0.1 loopback URL -- refusing to send ` +
+				"a bearer credential to an unencrypted, non-loopback host.",
+		);
 	}
-
-	return { ok: true, config: { token: token as string, agentId: agentId as string, environmentId: environmentId as string, baseUrl } };
+	return { ok: true, config: { token, agentId, environmentId, baseUrl } };
 }
 
 /** One parsed SSE frame; `data` is JSON-parsed or `undefined`, and `event` may be any string. */
@@ -221,27 +200,25 @@ export interface FoldedResult {
 }
 
 function readRecord(value: unknown): Record<string, unknown> | undefined {
-	if (value !== null && typeof value === "object" && !Array.isArray(value)) {
-		return value as Record<string, unknown>;
-	}
-	return undefined;
+	return value !== null && typeof value === "object" && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 }
 
 function readString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-/** Incremental fold state: each frame is read once, and message text is joined only when a result is requested. */
+/** Incremental fold state: each frame is read once, and message text is joined only by `result()`. */
 export interface ResultFolder {
-	/** Fold more frames into the running state. */
 	push(frames: readonly SseFrame[]): void;
-	/** The result so far. */
+	/** The running state without joining the message text. */
+	progress(): { readonly done: boolean; readonly thinkingText: string; readonly textChars: number };
 	result(): FoldedResult;
 }
 
 /** Start an incremental fold; see {@link foldDelegatedResult} for the frame semantics. */
 export function createResultFolder(): ResultFolder {
 	const textChunks: string[] = [];
+	let textChars = 0;
 	let thinkingText = "";
 	let done = false;
 	let started = false;
@@ -250,69 +227,50 @@ export function createResultFolder(): ResultFolder {
 
 	function foldFrame(frame: SseFrame): void {
 		const record = readRecord(frame.data);
-		if (record === undefined) {
-			return;
-		}
-		const type = readString(record.type);
-
-		if (type === "session.status_running") {
-			started = true;
-			return;
-		}
-
-		if (type === "event_start") {
-			started = true;
-			const inner = readRecord(record.event);
-			const innerId = inner === undefined ? undefined : readString(inner.id);
-			const innerType = inner === undefined ? undefined : readString(inner.type);
-			if (innerId !== undefined) {
-				const kind: EventKind = innerType === "agent.message" ? "message" : innerType === "agent.thinking" ? "thinking" : "other";
-				kindByEventId.set(innerId, kind);
-			}
-			return;
-		}
-
-		if (type === "event_delta") {
-			const eventId = readString(record.event_id);
-			const delta = readRecord(record.delta);
-			if (eventId === undefined || delta === undefined || readString(delta.type) !== "content_delta") {
+		switch (readString(record?.type)) {
+			case "session.status_running":
+				started = true;
+				return;
+			case "event_start": {
+				started = true;
+				const inner = readRecord(record?.event);
+				const innerId = readString(inner?.id);
+				const innerType = readString(inner?.type);
+				if (innerId !== undefined) {
+					kindByEventId.set(innerId, innerType === "agent.message" ? "message" : innerType === "agent.thinking" ? "thinking" : "other");
+				}
 				return;
 			}
-			const content = readRecord(delta.content);
-			const deltaText = content === undefined ? undefined : readString(content.text);
-			if (deltaText === undefined) {
+			case "event_delta": {
+				const eventId = readString(record?.event_id);
+				const delta = readRecord(record?.delta);
+				const deltaText = readString(readRecord(delta?.content)?.text);
+				if (eventId === undefined || readString(delta?.type) !== "content_delta" || deltaText === undefined) return;
+				const kind = kindByEventId.get(eventId);
+				if (kind === "message") {
+					textChunks.push(deltaText);
+					textChars += deltaText.length;
+				} else if (kind === "thinking") {
+					thinkingText += deltaText;
+				}
 				return;
 			}
-			const kind = kindByEventId.get(eventId);
-			if (kind === "message") {
-				textChunks.push(deltaText);
-			} else if (kind === "thinking") {
-				thinkingText += deltaText;
-			}
-			return;
-		}
-
-		if (type === "session.status_idle") {
-			const sr = readRecord(record.stop_reason);
-			const srType = sr === undefined ? undefined : readString(sr.type);
-			// A new session's own idle arrives before the agent starts; only one naming a failure ends the stream that early.
-			if (!started && (srType === undefined || srType === "end_turn")) return;
-			done = true;
-			if (srType !== undefined) {
-				stopReason = srType;
+			case "session.status_idle": {
+				const srType = readString(readRecord(record?.stop_reason)?.type);
+				// A new session's own idle arrives before the agent starts; only one naming a failure ends the stream that early.
+				if (!started && (srType === undefined || srType === "end_turn")) return;
+				done = true;
+				stopReason = srType ?? stopReason;
 			}
 		}
 	}
 
 	return {
 		push(frames) {
-			for (const frame of frames) {
-				foldFrame(frame);
-			}
+			for (const frame of frames) foldFrame(frame);
 		},
-		result() {
-			return { text: textChunks.join(""), thinkingText, done, stopReason };
-		},
+		progress: () => ({ done, thinkingText, textChars }),
+		result: () => ({ text: textChunks.join(""), thinkingText, done, stopReason }),
 	};
 }
 
@@ -325,10 +283,6 @@ export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
 	folder.push(frames);
 	return folder.result();
 }
-
-// -----------------------------------------------------------------------------
-// Transcript — redacted, own base, never throws
-// -----------------------------------------------------------------------------
 
 /**
  * Redact `record` and append it to the `qoder` transcript stream; never throws, so logging cannot break the task.
@@ -372,7 +326,7 @@ function requestHeaders(token: string): Record<string, string> {
 	return { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
 }
 
-/** Cancel a stream reader, swallowing cancellation errors so they never mask the timeout error that follows. */
+/** NEVER THROWS: a cancellation error must not mask the timeout error that follows. */
 async function cancelReaderQuietly(reader: ReadableStreamDefaultReader<Uint8Array>, reason: string): Promise<void> {
 	try {
 		await reader.cancel(reason);
@@ -391,15 +345,10 @@ function abortedError(): Error {
 }
 
 /** `POST /sessions/{id}/cancel` (docs.qoder.com/cloud-agents/sessions.md, "Cancel Semantics"); best effort, never throws. */
-async function cancelRemoteSession(
-	config: QoderConfig,
-	headers: Record<string, string>,
-	encodedSessionId: string,
-	cwd: string,
-): Promise<void> {
+async function cancelRemoteSession(sessionUrl: string, headers: Record<string, string>, cwd: string): Promise<void> {
 	let status: number | undefined;
 	try {
-		const response = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/cancel`, {
+		const response = await fetch(`${sessionUrl}/cancel`, {
 			method: "POST",
 			headers,
 			signal: AbortSignal.timeout(CANCEL_TIMEOUT_MS),
@@ -451,8 +400,8 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	if (!sessionResponse.ok) {
 		throw new Error(`Qoder delegate: session create failed with HTTP ${sessionResponse.status}.`);
 	}
-	const sessionBody = (await sessionResponse.json()) as { id?: unknown };
-	const sessionId = readString(sessionBody.id);
+	// A null or non-object body must refuse like a missing id, not throw a TypeError.
+	const sessionId = readString(readRecord(await sessionResponse.json())?.id);
 	if (sessionId === undefined || sessionId.length === 0) {
 		throw new Error("Qoder delegate: session create returned no usable session id.");
 	}
@@ -465,15 +414,11 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 				`(${JSON.stringify(sessionId)}) -- refusing to splice it into a request path.`,
 		);
 	}
-	const encodedSessionId = encodeURIComponent(sessionId);
+	const sessionUrl = `${config.baseUrl}/sessions/${encodeURIComponent(sessionId)}`;
 
 	// The stream is opened before the task is sent so no early frame can be missed.
-	writeQoderTranscript(cwd, {
-		event: "qoder.stream.open.request",
-		url: `${config.baseUrl}/sessions/${encodedSessionId}/events/stream`,
-	});
-
-	const streamResponse = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/events/stream`, {
+	writeQoderTranscript(cwd, { event: "qoder.stream.open.request", url: `${sessionUrl}/events/stream` });
+	const streamResponse = await fetch(`${sessionUrl}/events/stream`, {
 		method: "GET",
 		headers: { Authorization: headers.Authorization, Accept: "text/event-stream" },
 		signal,
@@ -485,14 +430,9 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 
 	const reader = streamResponse.body.getReader();
 
-	writeQoderTranscript(cwd, {
-		event: "qoder.event.send.request",
-		url: `${config.baseUrl}/sessions/${encodedSessionId}/events`,
-		taskChars: trimmed.length,
-	});
-
+	writeQoderTranscript(cwd, { event: "qoder.event.send.request", url: `${sessionUrl}/events`, taskChars: trimmed.length });
 	try {
-		const eventResponse = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/events`, {
+		const eventResponse = await fetch(`${sessionUrl}/events`, {
 			method: "POST",
 			headers,
 			body: JSON.stringify({ events: [{ type: "user.message", content: [{ type: "text", text: trimmed }] }] }),
@@ -506,7 +446,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		await cancelReaderQuietly(reader, "task send failed");
 		reader.releaseLock();
 		if (signal?.aborted) {
-			await cancelRemoteSession(config, headers, encodedSessionId, cwd);
+			await cancelRemoteSession(sessionUrl, headers, cwd);
 			throw abortedError();
 		}
 		throw error;
@@ -519,7 +459,20 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		succeeded = true;
 		return result;
 	} finally {
-		if (!succeeded) await cancelRemoteSession(config, headers, encodedSessionId, cwd);
+		if (!succeeded) await cancelRemoteSession(sessionUrl, headers, cwd);
+	}
+}
+
+/** One read raced against `ms`; undefined when the deadline passed first, so a late-starting read cannot extend it. */
+async function readWithin(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	ms: number,
+): Promise<Awaited<ReturnType<typeof reader.read>> | undefined> {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	try {
+		return await Promise.race([reader.read(), new Promise<undefined>((resolve) => (timer = setTimeout(() => resolve(undefined), ms)))]);
+	} finally {
+		clearTimeout(timer);
 	}
 }
 
@@ -530,81 +483,40 @@ async function readDelegatedResult(
 	opts: DelegateTaskOptions,
 ): Promise<FoldedResult> {
 	const decoder = new TextDecoder();
-	let buffer = "";
 	const folder = createResultFolder();
-	let folded: FoldedResult = folder.result();
-	let lastReportedThinking = "";
+	let buffer = "";
+	let reportedThinking = "";
+	const feed = (text: string): void => {
+		const parsed = parseSseFrames(text);
+		buffer = parsed.rest;
+		folder.push(parsed.frames);
+		const { thinkingText } = folder.progress();
+		if (opts.onThinking !== undefined && thinkingText !== reportedThinking) {
+			reportedThinking = thinkingText;
+			opts.onThinking(thinkingText);
+		}
+	};
 
-	// Inactivity deadline: reset on every chunk, never a fixed budget from stream start. `now` is injectable in tests.
-	const inactivityTimeoutMs = opts.inactivityTimeoutMs ?? STREAM_INACTIVITY_TIMEOUT_MS;
+	// Inactivity deadline: reset on every chunk, never a fixed budget from stream start.
+	const timeoutMs = opts.inactivityTimeoutMs ?? STREAM_INACTIVITY_TIMEOUT_MS;
 	const now = opts.now ?? Date.now;
 	let lastProgressAt = now();
+	const stalled = async (): Promise<Error> => {
+		// Cancel before throwing: a pending read() makes releaseLock() throw and mask this error.
+		await cancelReaderQuietly(reader, "inactivity timeout");
+		writeQoderTranscript(cwd, { event: "qoder.delegate.failed", cause: "inactivity-timeout", afterMs: timeoutMs, textChars: folder.progress().textChars });
+		return new Error(`Qoder delegate: the event stream produced no bytes for ${timeoutMs}ms -- treating the connection as stalled rather than hanging indefinitely.`);
+	};
 
 	try {
-		while (!folded.done) {
-			const remaining = inactivityTimeoutMs - (now() - lastProgressAt);
-			if (remaining <= 0) {
-				await cancelReaderQuietly(reader, "inactivity timeout");
-				// Terminal transcript record, as for the malformed-session-id branch.
-				writeQoderTranscript(cwd, {
-					event: "qoder.delegate.failed",
-					cause: "inactivity-timeout",
-					afterMs: inactivityTimeoutMs,
-					textChars: folded.text.length,
-				});
-				throw new Error(
-					`Qoder delegate: the event stream produced no bytes for ${inactivityTimeoutMs}ms -- ` +
-						"treating the connection as stalled rather than hanging indefinitely.",
-				);
-			}
-
-			// Race against the remaining budget so a late-starting read cannot extend the deadline.
-			const TIMED_OUT = Symbol("qoder-stream-read-timed-out");
-			let timeoutHandle: ReturnType<typeof setTimeout> | undefined;
-			const raced = await Promise.race([
-				reader.read(),
-				new Promise<typeof TIMED_OUT>((resolve) => {
-					timeoutHandle = setTimeout(() => resolve(TIMED_OUT), remaining);
-				}),
-			]);
-			if (timeoutHandle !== undefined) {
-				clearTimeout(timeoutHandle);
-			}
-
-			if (raced === TIMED_OUT) {
-				// Cancel before throwing: a pending read() makes releaseLock() throw and mask this error.
-				await cancelReaderQuietly(reader, "inactivity timeout");
-				// Same terminal record as the pre-loop check.
-				writeQoderTranscript(cwd, {
-					event: "qoder.delegate.failed",
-					cause: "inactivity-timeout",
-					afterMs: inactivityTimeoutMs,
-					textChars: folded.text.length,
-				});
-				throw new Error(
-					`Qoder delegate: the event stream produced no bytes for ${inactivityTimeoutMs}ms -- ` +
-						"treating the connection as stalled rather than hanging indefinitely.",
-				);
-			}
-
-			const { value, done: streamDone } = raced;
-			if (streamDone) {
-				break;
-			}
-			// Progress: reset the deadline.
+		while (!folder.progress().done) {
+			const remaining = timeoutMs - (now() - lastProgressAt);
+			const read = remaining > 0 ? await readWithin(reader, remaining) : undefined;
+			if (read === undefined) throw await stalled();
+			if (read.done) break;
 			lastProgressAt = now();
-			// Test-only synchronisation point.
 			opts.onProgress?.();
-
-			buffer += decoder.decode(value, { stream: true });
-			const parsed = parseSseFrames(buffer);
-			buffer = parsed.rest;
-			folder.push(parsed.frames);
-			folded = folder.result();
-			if (opts.onThinking && folded.thinkingText !== lastReportedThinking) {
-				lastReportedThinking = folded.thinkingText;
-				opts.onThinking(folded.thinkingText);
-			}
+			feed(buffer + decoder.decode(read.value, { stream: true }));
 		}
 	} catch (error) {
 		if (signal?.aborted) {
@@ -616,43 +528,26 @@ async function readDelegatedResult(
 		reader.releaseLock();
 	}
 
-	// Flush what the transport left unterminated: a server may close without a final blank line and drop the last frame.
-	buffer += decoder.decode();
-	if (buffer.trim().length > 0) {
-		const flushed = parseSseFrames(`${buffer}\n\n`);
-		folder.push(flushed.frames);
-		folded = folder.result();
-		if (opts.onThinking && folded.thinkingText !== lastReportedThinking) {
-			lastReportedThinking = folded.thinkingText;
-			opts.onThinking(folded.thinkingText);
-		}
-	}
+	// A server may close without a final blank line, which would drop the last frame.
+	const tail = buffer + decoder.decode();
+	if (tail.trim().length > 0) feed(`${tail}\n\n`);
 
-	writeQoderTranscript(cwd, {
-		event: "qoder.delegate.result",
-		done: folded.done,
-		stopReason: folded.stopReason,
-		textChars: folded.text.length,
-	});
-
+	const folded = folder.result();
+	writeQoderTranscript(cwd, { event: "qoder.delegate.result", done: folded.done, stopReason: folded.stopReason, textChars: folded.text.length });
 	if (folded.stopReason !== undefined && folded.stopReason !== "end_turn") {
 		throw new Error(
 			`Qoder delegate: the remote session ended with stop_reason "${folded.stopReason}" after ` +
 				`${folded.text.length} characters -- the result is not a completed answer.`,
 		);
 	}
-
-	// Check `done`: a dropped or early-closed stream must not be returned as a complete answer.
 	if (!folded.done) {
 		throw new Error(
 			"Qoder delegate: the event stream ended without a session.status_idle frame after " +
-				`${folded.text.length} characters -- the delegated result is incomplete and must not be ` +
-				"treated as an answer.",
+				`${folded.text.length} characters -- the delegated result is incomplete and must not be treated as an answer.`,
 		);
 	}
 	if (folded.text.trim().length === 0) {
 		throw new Error("Qoder delegate: the remote session went idle without any message text -- an empty result is not an answer.");
 	}
-
 	return folded;
 }

@@ -134,15 +134,15 @@ export default function (pi: ExtensionAPI): void {
 
 	// Gate from session_start, never the factory: get/setActiveTools throw until the runtime binds (extensions/loader.js;
 	// the factory is awaited in loader.js, bound later by agent-session.js) and a throw discards the whole extension.
-	// A new tool is active by default (agent-session.js) and costs ~329 tokens per request, so
-	// deactivate it when unconfigured. Best-effort: on error it stays active and execute() still refuses.
+	// A new tool is active by default (agent-session.js) and costs ~329 tokens per request, so deactivate it when unconfigured.
 	pi.on("session_start", () => {
+		// NEVER THROWS: on error the tool stays active and execute() still refuses.
 		try {
 			if (!resolveQoderConfig(process.env).ok) {
 				pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "qoder_delegate"));
 			}
 		} catch {
-			// Swallowed deliberately; execute() still refuses.
+			// Swallowed deliberately.
 		}
 	});
 }

@@ -69,11 +69,7 @@ export const CHAIN: readonly ChainEntry[] = [
 	{ provider: "dashscope", id: "deepseek-v4-flash" },
 ];
 
-/** The four failure class names; the union type derives from this array. */
-export const FAILURE_CLASSES = ["quota", "transient", "unavailable", "fatal"] as const;
-
-/** One of {@link FAILURE_CLASSES}. */
-export type FailureClass = (typeof FAILURE_CLASSES)[number];
+export type FailureClass = "quota" | "transient" | "unavailable" | "fatal";
 
 /**
  * Quota exhaustion, checked before the retryable predicate: Pi calls it non-retryable, but a second provider survives it.

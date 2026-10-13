@@ -350,8 +350,19 @@ describe("QUAL-01 Group C — dead-rule guard", () => {
  * providers/index.ts x1, qoder/client.ts x1, qoder/index.ts x1,
  * routing/agent-overrides.ts x1, workflows/index.ts x1, workflows/settle.ts x1;
  * magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
+ *
+ * RE-MEASURE (2026-10-14): 68 -> 65 -> 61. The safety refactor added three
+ * (safety/index.ts prune catch, safety/paths.ts repeated depth literal x2),
+ * cleared again by a NEVER THROWS contract and a destructured match. The
+ * routing/providers/qoder pass then documented the contracts of four
+ * best-effort catches (providers/index.ts, qoder/client.ts, qoder/index.ts,
+ * routing/agent-overrides.ts). Remaining: 45 vendored plus 16 authored
+ * (swallowed-exception 11: checkpoint/git.ts x3, checkpoint/index.ts x1,
+ * diagnostics/budget.ts x2, diagnostics/call-model.ts x1, diagnostics/index.ts
+ * x1, loop-police/loop-police.ts x1, workflows/index.ts x1, workflows/settle.ts
+ * x1; magic-number 5: loop-police/loop-police.ts x2, todo.ts x3).
  */
-const ERROR_BUDGET_ON_OWN_SOURCE = 65;
+const ERROR_BUDGET_ON_OWN_SOURCE = 61;
 
 function realExtensionSources(): QualitySource[] {
 	return trackedFiles(".pi/extensions")

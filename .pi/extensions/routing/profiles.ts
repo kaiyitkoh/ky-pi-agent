@@ -8,7 +8,7 @@ export const PROFILE_NAMES = ["recon", "review", "implement", "full"] as const;
 export type ProfileName = (typeof PROFILE_NAMES)[number];
 export const DEFAULT_PROFILE: ProfileName = "implement";
 
-const ALL: readonly ProfileName[] = ["recon", "review", "implement", "full"];
+const ALL: readonly ProfileName[] = PROFILE_NAMES;
 const NOT_RECON: readonly ProfileName[] = ["review", "implement", "full"];
 const WRITERS: readonly ProfileName[] = ["implement", "full"];
 

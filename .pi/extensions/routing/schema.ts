@@ -17,7 +17,6 @@ export const MODES = ["cheap", "balanced", "max"] as const;
 
 /** One of {@link MODES}. */
 export type ModeName = (typeof MODES)[number];
-
 /** Which mechanism serves a role. */
 export type Mechanism = "set-model" | "call-model" | "subagent";
 

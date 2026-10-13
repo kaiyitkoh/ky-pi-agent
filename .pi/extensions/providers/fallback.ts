@@ -9,13 +9,7 @@ import { isRetryableAssistantError } from "@earendil-works/pi-ai";
 import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { callModel, type CallModelOptions } from "../diagnostics/call-model.ts";
-import {
-	CHAIN,
-	QUOTA_PATTERN,
-	UNAVAILABLE_PATTERN,
-	type ChainEntry,
-	type FailureClass,
-} from "./schema.ts";
+import { CHAIN, QUOTA_PATTERN, UNAVAILABLE_PATTERN, type FailureClass } from "./schema.ts";
 
 /**
  * The chokepoint contract minus `model`, which the chain supplies. `role` stays mandatory and undefaulted:
@@ -36,36 +30,13 @@ function retryProbe(errorText: string): AssistantMessage {
  * then Pi's own predicate for the retryable/fatal split, then the availability table. Empty text is `fatal`.
  */
 export function classifyFailure(errorText: string): FailureClass {
-	if (QUOTA_PATTERN.test(errorText)) {
-		return "quota";
-	}
-	if (!isRetryableAssistantError(retryProbe(errorText))) {
-		return "fatal";
-	}
+	if (QUOTA_PATTERN.test(errorText)) return "quota";
+	if (!isRetryableAssistantError(retryProbe(errorText))) return "fatal";
 	return UNAVAILABLE_PATTERN.test(errorText) ? "unavailable" : "transient";
-}
-
-/** Thrown for an entry that does not resolve before any hop was attempted: a silent skip would report a chain failure for a chain never walked. */
-function unresolvedEntryError(entry: ChainEntry): Error {
-	return new Error(
-		`callWithFallback: the chain entry ${entry.provider}/${entry.id} does not resolve in this ` +
-			"session's registry, so that hop would be skipped in silence and a chain failure would be " +
-			"reported for a chain that was never walked. Either the provider is not configured (add it " +
-			"to ~/.pi/agent/models.json from .pi/templates/models-template.json) or the model id has " +
-			"been renamed upstream — in which case fix CHAIN in " +
-			".pi/extensions/providers/schema.ts, do not delete the hop",
-	);
 }
 
 /** Per-hop capability check, structural so this module does not import routing. */
 export type HopGuard = (model: Model<Api>) => { readonly ok: true } | { readonly ok: false; readonly reason: string };
-
-function allHopsSkippedError(skipped: readonly string[]): Error {
-	return new Error(
-		`callWithFallback: no chain hop was usable, so nothing was attempted (${skipped.join(", ")}). ` +
-			"Add a credential for the first hop in ~/.pi/agent/auth.json",
-	);
-}
 
 /**
  * First hop that answers wins; `fatal` stops the chain and the first failing message is returned if every attempted hop fails.
@@ -83,22 +54,28 @@ export async function callWithFallback(
 	const skipped: string[] = [];
 
 	for (const entry of CHAIN) {
+		const ref = `${entry.provider}/${entry.id}`;
 		// Registry lookup only; the chokepoint lint does not ban it.
 		const model = ctx.modelRegistry.find(entry.provider, entry.id);
 		if (!model) {
+			// A silent skip before any attempt would report a chain failure for a chain never walked.
 			if (!attempted) {
-				throw unresolvedEntryError(entry);
+				throw new Error(
+					`callWithFallback: the chain entry ${ref} does not resolve in this session's registry. Either the provider ` +
+						"is not configured (add it to ~/.pi/agent/models.json from .pi/templates/models-template.json) or the model " +
+						"id was renamed upstream; fix CHAIN in .pi/extensions/providers/schema.ts, do not delete the hop",
+				);
 			}
-			skipped.push(`${entry.provider}/${entry.id} (does not resolve)`);
+			skipped.push(`${ref} (does not resolve)`);
 			continue;
 		}
 		if (!ctx.modelRegistry.hasConfiguredAuth(model)) {
-			skipped.push(`${entry.provider}/${entry.id} (no configured auth)`);
+			skipped.push(`${ref} (no configured auth)`);
 			continue;
 		}
 		const verdict = guard?.(model);
 		if (verdict !== undefined && !verdict.ok) {
-			skipped.push(`${entry.provider}/${entry.id} (capability guard: ${verdict.reason})`);
+			skipped.push(`${ref} (capability guard: ${verdict.reason})`);
 			continue;
 		}
 
@@ -108,39 +85,24 @@ export async function callWithFallback(
 			// The sanctioned path outside diagnostics/: each hop gets its own turns row.
 			message = await callModel(ctx, { ...opts, model });
 		} catch (error) {
-			if (classifyFailure(String(error)) === "fatal") {
-				throw error;
-			}
-			if (firstFailure === undefined && firstRejection === undefined) {
-				firstRejection = error;
-			}
+			if (classifyFailure(String(error)) === "fatal") throw error;
+			if (firstFailure === undefined && firstRejection === undefined) firstRejection = error;
 			continue;
 		}
-
-		if (message.stopReason !== "error") {
-			return message;
-		}
-
+		if (message.stopReason !== "error") return message;
 		firstFailure ??= message;
-
-		if (classifyFailure(message.errorMessage ?? "") === "fatal") {
-			// A 400, 401 or expired credential fails at every vendor; advancing would disclose the prompt for nothing.
-			return message;
-		}
+		// A 400, 401 or expired credential fails at every vendor; advancing would disclose the prompt for nothing.
+		if (classifyFailure(message.errorMessage ?? "") === "fatal") return message;
 	}
 
 	// Every attempted hop failed with an advancing class; the first real failure is the one worth reading.
-	if (firstFailure !== undefined) {
-		return firstFailure;
-	}
-	if (firstRejection !== undefined) {
-		throw firstRejection;
-	}
+	if (firstFailure !== undefined) return firstFailure;
+	if (firstRejection !== undefined) throw firstRejection;
 	if (skipped.length > 0) {
-		throw allHopsSkippedError(skipped);
+		throw new Error(
+			`callWithFallback: no chain hop was usable, so nothing was attempted (${skipped.join(", ")}). ` +
+				"Add a credential for the first hop in ~/.pi/agent/auth.json",
+		);
 	}
-	throw new Error(
-		"callWithFallback: CHAIN is empty, so no provider was attempted. A chain with no " +
-			"entries is not a fallback policy; restore CHAIN in .pi/extensions/providers/schema.ts",
-	);
+	throw new Error("callWithFallback: CHAIN is empty, so no provider was attempted; restore CHAIN in .pi/extensions/providers/schema.ts");
 }

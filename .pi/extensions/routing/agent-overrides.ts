@@ -1,17 +1,15 @@
 /**
  * Derives and writes `settings.subagents.agentOverrides` so a mode switch swaps the whole role-to-model map, not just the executor.
- * Writes the GLOBAL agent settings (`getAgentDir()`, honours `PI_CODING_AGENT_DIR`, `dist/config.d.ts` getAgentDir): the project `.pi/settings.json`
- * is tracked and would dirty `git status`, and headless subagents never get project trust. Chokepoint-lint scans comments, so no model route is named.
+ * Writes the GLOBAL agent settings: the project `.pi/settings.json` is tracked and would dirty `git status`, and headless
+ * subagents never get project trust. Chokepoint-lint scans comments, so no model route is named.
  * Shape `{ subagents: { agentOverrides: { <agent>: { model: "<provider>/<id>" } } } }` is unverified against the pinned `pi-subagents` schema.
  */
 import type { Model } from "@earendil-works/pi-ai";
-import { getAgentDir } from "@earendil-works/pi-coding-agent";
 import { randomUUID } from "node:crypto";
-import { existsSync, readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, renameSync, rmSync, writeFileSync } from "node:fs";
 
 import { guardRoute } from "./guard.ts";
-import { resolveBedrockRef, type ModelRegistryLike } from "./modes.ts";
+import { agentSettingsPath, resolveBedrockRef, type ModelRegistryLike } from "./modes.ts";
 import { AGENT_NAME_BY_ROLE, type KyModeData, type ModelRef, ROLE_MAP, ROLE_MECHANISM, type Role } from "./schema.ts";
 
 /** Structural fixture for `guardRoute`, no registry lookup. Sound because only `usesToolLoop` is set, so only the tool-loop deny-list block can fire; inert fields keep any new block failing safe. */
@@ -30,16 +28,9 @@ function candidateAsModelFixture(candidate: ModelRef): Model<"openai-completions
 	};
 }
 
-
-/** One entry of the written `agentOverrides` object. */
-export interface AgentOverrideEntry {
-	readonly model: string;
-}
-
 /** The whole derived override object, keyed by agent name. */
-export type AgentOverrides = Record<string, AgentOverrideEntry>;
+export type AgentOverrides = Record<string, { readonly model: string }>;
 
-/** The result of deriving the override object for one mode. */
 export type AgentOverridesResult =
 	| { readonly ok: true; readonly overrides: AgentOverrides }
 	| { readonly ok: false; readonly reason: string };
@@ -57,69 +48,54 @@ export interface AgentOverridesForOptions {
 
 /**
  * Derives the override object for `state.mode`: the first candidate per subagent role that passes `guardRoute` (`usesToolLoop: true`).
- * Returns `ok:false` with the last guard refusal when every candidate is blocked; callers must not write on `ok:false`.
+ * Returns `ok:false` with the last refusal when every candidate is blocked; callers must not write on `ok:false`.
  * Auth is checked only when a registry is passed, and only to prefer a usable candidate over an unusable one.
  */
-export function agentOverridesFor(
-	state: Pick<KyModeData, "mode">,
-	opts: AgentOverridesForOptions = {},
-): AgentOverridesResult {
-	const roleMap = opts.roleMap ?? ROLE_MAP;
+export function agentOverridesFor(state: Pick<KyModeData, "mode">, opts: AgentOverridesForOptions = {}): AgentOverridesResult {
 	const roleMechanism = opts.roleMechanism ?? ROLE_MECHANISM;
 	const agentNameByRole = opts.agentNameByRole ?? AGENT_NAME_BY_ROLE;
-
-	const overrides: Record<string, AgentOverrideEntry> = {};
-	const modeMap = roleMap[state.mode];
+	const modeMap = (opts.roleMap ?? ROLE_MAP)[state.mode];
+	const { registry } = opts;
+	const overrides: Record<string, { model: string }> = {};
 
 	for (const roleKey of Object.keys(roleMechanism) as Role[]) {
-		if (roleMechanism[roleKey] !== "subagent") {
-			continue;
-		}
+		if (roleMechanism[roleKey] !== "subagent") continue;
 		const agentName = agentNameByRole[roleKey];
+		// A schema authoring bug; refuse rather than omit the role.
 		if (agentName === undefined) {
-			// A subagent role missing from AGENT_NAME_BY_ROLE is a schema authoring bug; refuse rather than omit it.
-			return {
-				ok: false,
-				reason: `role "${roleKey}" is ROLE_MECHANISM.subagent but has no AGENT_NAME_BY_ROLE entry`,
-			};
+			return { ok: false, reason: `role "${roleKey}" is ROLE_MECHANISM.subagent but has no AGENT_NAME_BY_ROLE entry` };
 		}
 
-		const route = modeMap[roleKey];
 		let lastReason = `no candidates configured for role "${roleKey}" in mode "${state.mode}"`;
 		let picked: string | undefined;
-
-		for (const candidate of route.candidates) {
-			const ref = resolveBedrockRef(candidate, opts.settingsPath);
-			if (!ref.ok) {
-				lastReason = ref.reason;
+		for (const candidate of modeMap[roleKey].candidates) {
+			const resolved = resolveBedrockRef(candidate, opts.settingsPath);
+			if (!resolved.ok) {
+				lastReason = resolved.reason;
 				continue;
 			}
-			const verdict = guardRoute(candidateAsModelFixture(ref.ref), roleKey, { usesToolLoop: true });
-			if (verdict.ok) {
-				picked ??= `${ref.ref.provider}/${ref.ref.id}`;
-				const model = opts.registry?.find(ref.ref.provider, ref.ref.id);
-				if (opts.registry === undefined || (model !== undefined && opts.registry.hasConfiguredAuth(model))) {
-					picked = `${ref.ref.provider}/${ref.ref.id}`;
-					break;
-				}
+			const verdict = guardRoute(candidateAsModelFixture(resolved.ref), roleKey, { usesToolLoop: true });
+			if (!verdict.ok) {
+				lastReason = verdict.reason;
 				continue;
 			}
-			lastReason = verdict.reason;
+			const ref = `${resolved.ref.provider}/${resolved.ref.id}`;
+			picked ??= ref;
+			const model = registry?.find(resolved.ref.provider, resolved.ref.id);
+			if (registry === undefined || (model !== undefined && registry.hasConfiguredAuth(model))) {
+				picked = ref;
+				break;
+			}
 		}
 
 		if (picked === undefined) {
-			return {
-				ok: false,
-				reason: `role "${roleKey}": every candidate is guard-blocked (${lastReason})`,
-			};
+			return { ok: false, reason: `role "${roleKey}": every candidate is guard-blocked (${lastReason})` };
 		}
 		overrides[agentName] = { model: picked };
 	}
-
 	return { ok: true, overrides };
 }
 
-/** Options accepted by {@link resolveSettingsPath} and {@link writeAgentOverrides}. */
 export interface AgentOverridesPathOptions {
 	/** Injected path, for tests. */
 	settingsPath?: string;
@@ -133,10 +109,7 @@ export interface AgentOverridesPathOptions {
 
 /** Target settings path: `opts.settingsPath` if given, else the global agent `settings.json`. */
 export function resolveSettingsPath(opts: AgentOverridesPathOptions = {}): string {
-	if (opts.settingsPath !== undefined) {
-		return opts.settingsPath;
-	}
-	return join(getAgentDir(), "settings.json");
+	return opts.settingsPath ?? agentSettingsPath();
 }
 
 const PLANNER_PIN_MARKER = "plannerPinRestore";
@@ -184,95 +157,86 @@ function processAlive(pid: number): boolean {
 	}
 }
 
+const errorText = (err: unknown): string => (err instanceof Error ? err.message : String(err));
+const toJsonText = (root: unknown): string => `${JSON.stringify(root, null, 2)}\n`;
+
+/** The file's text, or undefined when it does not exist; any other read failure throws. */
+function readIfPresent(path: string): string | undefined {
+	try {
+		return readFileSync(path, "utf-8");
+	} catch (err) {
+		if ((err as NodeJS.ErrnoException).code === "ENOENT") return undefined;
+		throw err;
+	}
+}
+
+const BOM = "﻿";
+
+/** Pi strips a leading BOM before parsing settings (pi 1.1.0 dist/core/settings-manager.js:269); blank text is `{}`. */
+function parseSettings(text: string): unknown {
+	const body = text.startsWith(BOM) ? text.slice(1) : text;
+	return JSON.parse(body.trim() === "" ? "{}" : body);
+}
+
+/** NEVER THROWS: the parsed settings root, or undefined when absent or unreadable. */
+function readSettingsRoot(opts: AgentOverridesPathOptions): unknown {
+	try {
+		const text = readIfPresent(resolveSettingsPath(opts));
+		return text === undefined ? undefined : parseSettings(text);
+	} catch {
+		return undefined;
+	}
+}
+
 /** Temp file beside the target, then atomic rename: a direct write can truncate the user's settings on a crash. */
 function atomicWrite(path: string, text: string): void {
-	// The uuid avoids pid collisions between two jiti copies in one process; the rm below removes the temp file if rename fails.
+	// The uuid avoids pid collisions between two jiti copies in one process.
 	const tmpPath = `${path}.${process.pid}.${randomUUID()}.tmp`;
 	try {
 		writeFileSync(tmpPath, text, "utf-8");
 		renameSync(tmpPath, path);
 	} catch (err) {
+		// NEVER THROWS: a failed cleanup must not mask the original failure, which the caller reports.
 		try {
 			rmSync(tmpPath, { force: true });
 		} catch {
-			// Best-effort cleanup; the caller reports the original failure.
+			// Swallowed deliberately.
 		}
 		throw err;
 	}
 }
 
-/** What {@link writeAgentOverrides} returns. */
-export type WriteAgentOverridesResult =
-	| { readonly ok: true; readonly written: boolean; readonly path: string }
-	| { readonly ok: false; readonly reason: string; readonly path: string };
+type Refusal = { readonly ok: false; readonly reason: string; readonly path: string };
+
+const refuse = (path: string, problem: string): Refusal => ({ ok: false, reason: `${path}${problem} Refusing to touch it.`, path });
+
+export type WriteAgentOverridesResult = { readonly ok: true; readonly written: boolean; readonly path: string } | Refusal;
 
 /**
  * Validated read-modify-write of `subagents.agentOverrides`, ported from `bin/bootstrap.sh#merge_settings`.
  * Refuses rather than throwing on invalid JSON, non-object roots or a non-object `subagents`; every sibling key survives.
  * Skips the write when the output is byte-identical. Trusts the caller to have refused on an `ok:false` derivation.
  */
-export function writeAgentOverrides(
-	overrides: AgentOverrides,
-	opts: AgentOverridesPathOptions = {},
-): WriteAgentOverridesResult {
+export function writeAgentOverrides(overrides: AgentOverrides, opts: AgentOverridesPathOptions = {}): WriteAgentOverridesResult {
 	const path = resolveSettingsPath(opts);
-
 	// Whole body is guarded: fs calls throw on EACCES, EISDIR, missing parent or a Windows lock, and the caller already switched the model.
 	try {
-		let raw = "{}";
-		if (existsSync(path)) {
-			const fileText = readFileSync(path, "utf-8").trim();
-			raw = fileText === "" ? "{}" : fileText;
-		}
-
-		let obj: unknown;
+		const text = readIfPresent(path);
+		let root: unknown;
 		try {
-			obj = JSON.parse(raw);
+			root = parseSettings(text ?? "");
 		} catch (err) {
-			const message = err instanceof Error ? err.message : String(err);
-			return {
-				ok: false,
-				reason: `${path} is not valid JSON (${message}). Refusing to touch it.`,
-				path,
-			};
+			return refuse(path, ` is not valid JSON (${errorText(err)}).`);
 		}
-
-		if (obj === null || typeof obj !== "object" || Array.isArray(obj)) {
-			return {
-				ok: false,
-				reason: `${path} is not a JSON object. Refusing to touch it.`,
-				path,
-			};
+		if (!isRecord(root)) return refuse(path, " is not a JSON object.");
+		for (const key of ["subagents", "kyPiAgent"]) {
+			if (root[key] !== undefined && !isRecord(root[key])) return refuse(path, `'s "${key}" key is not a JSON object.`);
 		}
-
-		const root = obj as Record<string, unknown>;
-		const existingSubagents = root.subagents;
-		if (
-			existingSubagents !== undefined &&
-			(existingSubagents === null || typeof existingSubagents !== "object" || Array.isArray(existingSubagents))
-		) {
-			return {
-				ok: false,
-				reason: `${path}'s "subagents" key is not a JSON object. Refusing to touch it.`,
-				path,
-			};
-		}
-
-		const existingKy = root.kyPiAgent;
-		if (existingKy !== undefined && (existingKy === null || typeof existingKy !== "object" || Array.isArray(existingKy))) {
-			return {
-				ok: false,
-				reason: `${path}'s "kyPiAgent" key is not a JSON object. Refusing to touch it.`,
-				path,
-			};
-		}
-
-		const subagents: Record<string, unknown> = { ...(existingSubagents as Record<string, unknown> | undefined) };
+		const subagents: Record<string, unknown> = { ...(root.subagents as Record<string, unknown> | undefined) };
 		const current = subagents.agentOverrides;
-		if (current !== undefined && !isRecord(current)) {
-			return { ok: false, reason: `${path}'s "subagents.agentOverrides" key is not a JSON object. Refusing to touch it.`, path };
-		}
-		const ky: Record<string, unknown> = { ...(existingKy as Record<string, unknown> | undefined) };
+		if (current !== undefined && !isRecord(current)) return refuse(path, `'s "subagents.agentOverrides" key is not a JSON object.`);
+
+		const ky: Record<string, unknown> = { ...(root.kyPiAgent as Record<string, unknown> | undefined) };
 		const prior = ky[PLANNER_PIN_MARKER];
 		const marker: PinMarker =
 			isRecord(prior) && isRecord(prior.keys)
@@ -293,31 +257,36 @@ export function writeAgentOverrides(
 		subagents.agentOverrides = { ...current, ...overrides };
 		root.subagents = subagents;
 
-		const nextText = `${JSON.stringify(root, null, 2)}\n`;
-
-		if (existsSync(path)) {
-			const currentText = readFileSync(path, "utf-8");
-			if (currentText === nextText) {
-				return { ok: true, written: false, path };
-			}
-		}
-
+		const nextText = toJsonText(root);
+		if (text === nextText) return { ok: true, written: false, path };
 		atomicWrite(path, nextText);
-
 		return { ok: true, written: true, path };
 	} catch (err) {
-		return {
-			ok: false,
-			reason: `${path} could not be written (${err instanceof Error ? err.message : String(err)}).`,
-			path,
-		};
+		return { ok: false, reason: `${path} could not be written (${errorText(err)}).`, path };
 	}
 }
 
-/** What {@link restorePlannerPin} returns. */
-export type RestorePlannerPinResult =
-	| { readonly ok: true; readonly restored: boolean; readonly path: string }
-	| { readonly ok: false; readonly reason: string; readonly path: string };
+export type RestorePlannerPinResult = { readonly ok: true; readonly restored: boolean; readonly path: string } | Refusal;
+
+/** Puts each key the marker recorded back to its value before the first pin. */
+function restoreRecordedKeys(subagents: Record<string, unknown>, marker: Record<string, unknown>): Record<string, unknown> {
+	const next = { ...subagents };
+	if (isRecord(marker.keys)) {
+		const restored: Record<string, unknown> = isRecord(next.agentOverrides) ? { ...next.agentOverrides } : {};
+		for (const [key, entry] of Object.entries(marker.keys)) {
+			if (isRecord(entry) && entry.had === true) restored[key] = entry.value;
+			else delete restored[key];
+		}
+		if (Object.keys(restored).length === 0 && marker.hadOverrides !== true) delete next.agentOverrides;
+		else next.agentOverrides = restored;
+	} else if (marker.had === true) {
+		// A marker written before per-key pins recorded the whole object.
+		next.agentOverrides = marker.value;
+	} else {
+		delete next.agentOverrides;
+	}
+	return next;
+}
 
 /**
  * Ends this process's hold on the pin: drops its own, dead and expired owners, and restores each pinned key to its value before
@@ -326,11 +295,10 @@ export type RestorePlannerPinResult =
 export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): RestorePlannerPinResult {
 	const path = resolveSettingsPath(opts);
 	try {
-		if (!existsSync(path)) return { ok: true, restored: false, path };
-		const root: unknown = JSON.parse(readFileSync(path, "utf-8"));
-		if (!isRecord(root)) {
-			return { ok: false, reason: `${path} is not a JSON object. Refusing to touch it.`, path };
-		}
+		const text = readIfPresent(path);
+		if (text === undefined) return { ok: true, restored: false, path };
+		const root = parseSettings(text);
+		if (!isRecord(root)) return refuse(path, " is not a JSON object.");
 		const ky = root.kyPiAgent;
 		if (!isRecord(ky)) return { ok: true, restored: false, path };
 		const { [PLANNER_PIN_MARKER]: marker, ...restOfKy } = ky;
@@ -344,62 +312,35 @@ export function restorePlannerPin(opts: AgentOverridesPathOptions = {}): Restore
 		if (owners.length > 0) {
 			if (owners.length !== recorded.length) {
 				root.kyPiAgent = { ...ky, [PLANNER_PIN_MARKER]: { ...marker, owners } };
-				atomicWrite(path, `${JSON.stringify(root, null, 2)}\n`);
+				atomicWrite(path, toJsonText(root));
 			}
 			return { ok: true, restored: false, path };
 		}
 
-		const subagents = root.subagents;
-		if (isRecord(subagents)) {
-			const next = { ...subagents };
-			if (isRecord(marker.keys)) {
-				const restoredOverrides: Record<string, unknown> = isRecord(next.agentOverrides) ? { ...next.agentOverrides } : {};
-				for (const [key, entry] of Object.entries(marker.keys)) {
-					if (isRecord(entry) && entry.had === true) restoredOverrides[key] = entry.value;
-					else delete restoredOverrides[key];
-				}
-				if (Object.keys(restoredOverrides).length === 0 && marker.hadOverrides !== true) delete next.agentOverrides;
-				else next.agentOverrides = restoredOverrides;
-			} else if (marker.had === true) {
-				// A marker written before per-key pins recorded the whole object.
-				next.agentOverrides = marker.value;
-			} else {
-				delete next.agentOverrides;
-			}
+		if (isRecord(root.subagents)) {
+			const next = restoreRecordedKeys(root.subagents, marker);
 			if (Object.keys(next).length === 0) delete root.subagents;
 			else root.subagents = next;
 		}
 		if (Object.keys(restOfKy).length === 0) delete root.kyPiAgent;
 		else root.kyPiAgent = restOfKy;
 
-		atomicWrite(path, `${JSON.stringify(root, null, 2)}\n`);
+		atomicWrite(path, toJsonText(root));
 		return { ok: true, restored: true, path };
 	} catch (err) {
-		return {
-			ok: false,
-			reason: `${path} could not be restored (${err instanceof Error ? err.message : String(err)}).`,
-			path,
-		};
+		return { ok: false, reason: `${path} could not be restored (${errorText(err)}).`, path };
 	}
 }
 
 /** True when some session's planner pin is in the settings file, so a session that never pinned would otherwise inherit it. */
 export function plannerPinHeld(opts: AgentOverridesPathOptions = {}): boolean {
-	try {
-		const root: unknown = JSON.parse(readFileSync(resolveSettingsPath(opts), "utf-8"));
-		return isRecord(root) && isRecord(root.kyPiAgent) && isRecord(root.kyPiAgent[PLANNER_PIN_MARKER]);
-	} catch {
-		return false;
-	}
+	const root = readSettingsRoot(opts);
+	return isRecord(root) && isRecord(root.kyPiAgent) && isRecord(root.kyPiAgent[PLANNER_PIN_MARKER]);
 }
 
 /** The model the settings file pins for `agent`, which is what pi-subagents actually runs. NEVER THROWS: undefined when none or unreadable. */
 export function readAgentOverride(agent: string, opts: AgentOverridesPathOptions = {}): string | undefined {
-	try {
-		const root: unknown = JSON.parse(readFileSync(resolveSettingsPath(opts), "utf-8"));
-		const entry = isRecord(root) && isRecord(root.subagents) && isRecord(root.subagents.agentOverrides) ? root.subagents.agentOverrides[agent] : undefined;
-		return isRecord(entry) && typeof entry.model === "string" ? entry.model : undefined;
-	} catch {
-		return undefined;
-	}
+	const root = readSettingsRoot(opts);
+	const entry = isRecord(root) && isRecord(root.subagents) && isRecord(root.subagents.agentOverrides) ? root.subagents.agentOverrides[agent] : undefined;
+	return isRecord(entry) && typeof entry.model === "string" ? entry.model : undefined;
 }

@@ -29,13 +29,11 @@ import {
 	type RoleRoute,
 } from "./schema.ts";
 
-
 /** Minimal structural registry lookup; a plain object satisfies it in tests. */
 export interface ModelRegistryLike {
 	find(provider: string, id: string): Model<Api> | undefined;
 	hasConfiguredAuth(model: Model<Api>): boolean;
 }
-
 
 /** `globalThis` slot key: jiti keeps separate module registries, so a module-level `let` would split state across copies (same hazard as `diagnostics/index.ts#ROWS_WRITTEN_KEY`). */
 const MODE_STATE_KEY = "__kypiRoutingModeState";
@@ -43,51 +41,33 @@ const MODE_STATE_KEY = "__kypiRoutingModeState";
 /** The mode/escalation shape a resolution actually needs — no `at`, no `escalatedFrom`. */
 export type ModeState = Pick<KyModeData, "mode" | "escalated">;
 
-function defaultState(): KyModeData {
-	return { mode: DEFAULT_MODE, escalated: false, at: Date.now() };
+const slot = globalThis as Record<string, unknown>;
+
+export function isModeName(value: unknown): value is ModeName {
+	return typeof value === "string" && (MODES as readonly string[]).includes(value);
 }
 
 /** Rejects a stale or foreign slot value; an unknown mode would make `ROLE_MAP[mode][role]` throw. */
 function isKyModeData(value: unknown): value is KyModeData {
-	if (typeof value !== "object" || value === null) {
-		return false;
-	}
-	const candidate = value as Partial<KyModeData>;
-	return (
-		typeof candidate.mode === "string" &&
-		(MODES as readonly string[]).includes(candidate.mode) &&
-		typeof candidate.escalated === "boolean" &&
-		typeof candidate.at === "number"
-	);
-}
-
-function writeModeState(state: KyModeData): void {
-	(globalThis as Record<string, unknown>)[MODE_STATE_KEY] = state;
+	const candidate = value as Partial<KyModeData> | null | undefined;
+	return isModeName(candidate?.mode) && typeof candidate?.escalated === "boolean" && typeof candidate.at === "number";
 }
 
 /** Current mode/escalation state, falling back to the default when the slot is empty or malformed. */
 export function getModeState(): KyModeData {
-	const raw = (globalThis as Record<string, unknown>)[MODE_STATE_KEY];
-	return isKyModeData(raw) ? raw : defaultState();
+	const raw = slot[MODE_STATE_KEY];
+	return isKyModeData(raw) ? raw : { mode: DEFAULT_MODE, escalated: false, at: Date.now() };
 }
 
 /** Switches the mode; escalation bookkeeping is left untouched. */
 export function setMode(mode: ModeName): void {
-	const current = getModeState();
-	writeModeState({ ...current, mode, at: Date.now() });
+	slot[MODE_STATE_KEY] = { ...getModeState(), mode, at: Date.now() };
 }
 
 /** Records sticky escalation; `from` is dropped when `escalated` goes false. */
 export function setEscalated(escalated: boolean, from?: ModeName): void {
-	const current = getModeState();
-	writeModeState({
-		...current,
-		escalated,
-		escalatedFrom: escalated ? from : undefined,
-		at: Date.now(),
-	});
+	slot[MODE_STATE_KEY] = { ...getModeState(), escalated, escalatedFrom: escalated ? from : undefined, at: Date.now() };
 }
-
 
 /** Only the `executor` route changes under escalation; every other role reads its mode's own route. */
 export function resolveRoute(role: Role, state: ModeState): RoleRoute {
@@ -96,7 +76,6 @@ export function resolveRoute(role: Role, state: ModeState): RoleRoute {
 	}
 	return ROLE_MAP[state.mode][role];
 }
-
 
 export type CandidateResult =
 	| { readonly ok: true; readonly model: Model<Api>; readonly ref: ModelRef }
@@ -109,8 +88,11 @@ export type BedrockPrefixResult =
 	| { readonly ok: true; readonly prefix: string }
 	| { readonly ok: false; readonly reason: string };
 
+/** The global agent `settings.json` (`getAgentDir()` honours `PI_CODING_AGENT_DIR`). */
+export const agentSettingsPath = (): string => join(getAgentDir(), "settings.json");
+
 /** Reads `kyPiAgent.bedrockProfilePrefix` from the agent settings file; a missing file or key yields the default and `""` selects the bare id. */
-export function bedrockProfilePrefix(settingsPath: string = join(getAgentDir(), "settings.json")): BedrockPrefixResult {
+export function bedrockProfilePrefix(settingsPath: string = agentSettingsPath()): BedrockPrefixResult {
 	const read = readSettingValue(settingsPath, ["kyPiAgent", "bedrockProfilePrefix"]);
 	const value = read.ok ? read.value : undefined;
 	if (value === undefined) return { ok: true, prefix: BEDROCK_PROFILE_PREFIX_DEFAULT };
@@ -178,7 +160,6 @@ export function pickConfiguredCandidate(
 		reason: `no configured candidate among: ${attempts.length > 0 ? attempts.join(", ") : "(no candidates)"}`,
 	};
 }
-
 
 export interface FreshSessionInput {
 	readonly reason: string;
@@ -248,7 +229,6 @@ export function planRoleCall(registry: ModelRegistryLike, opts: PlanRoleCallOpti
 	};
 }
 
-
 /**
  * Builds the nested call's `api` options for the resolved candidate's `model.api`.
  * `BedrockOptions` has no `reasoningEffort` field (pi-ai 1.1.0 `dist/api/bedrock-converse-stream.d.ts:10`), so it needs `{ reasoning }`;
@@ -269,13 +249,8 @@ export function buildNestedApiOptions(
 			return { reasoning: effort };
 		case "anthropic-messages":
 			throw new Error(
-				`buildNestedApiOptions: no per-level token budget has been chosen for anthropic-messages ` +
-					`(model ${model.provider}/${model.id}) -- ROLE_MAP resolves no anthropic-messages candidate ` +
-					"today, so there is nothing measured to map " +
-					`${JSON.stringify(effort)} onto. AnthropicMessagesOptions wants thinkingBudgetTokens, a ` +
-					"concrete number, not a level string -- inventing one here would be a fabricated " +
-					"measurement. Add a real mapping to this function before routing any role through an " +
-					"anthropic-messages candidate that declares reasoningEffort.",
+				`buildNestedApiOptions: no measured thinkingBudgetTokens for anthropic-messages (model ${model.provider}/${model.id}, ` +
+					`effort ${JSON.stringify(effort)}); add a real mapping before routing a reasoning role through one.`,
 			);
 		case "openai-completions":
 		default:
@@ -283,7 +258,6 @@ export function buildNestedApiOptions(
 			return { reasoningEffort: effort };
 	}
 }
-
 
 export interface RunSingleShotRoleOptions {
 	readonly role: Role;
@@ -312,31 +286,19 @@ export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleSh
 		);
 	}
 
-	const ref: ModelRef = { provider: plan.model.provider, id: plan.model.id };
-	const api = buildNestedApiOptions(plan.model, plan.reasoningEffort);
-
-	// `callWithFallback` always restarts at the chain head and takes no starting model, so enter the chain only when the
-	// resolved candidate IS the head; otherwise it would discard the router's pick and hit a provider with no auth.
-	const chainHead = CHAIN[0];
-	const resolvedIsChainHead =
-		chainHead !== undefined && ref.provider === chainHead.provider && ref.id === chainHead.id;
-
-	if (resolvedIsChainHead) {
-		return callWithFallback(ctx, {
-			role: opts.role,
-			systemPrompt: opts.systemPrompt,
-			messages: opts.messages,
-			tools: opts.tools,
-			api,
-		}, (m) => guardRoute(m, opts.role, { ...need, usesToolLoop: usesToolLoop(opts.role) }));
-	}
-
-	return callModel(ctx, {
+	const request = {
 		role: opts.role,
-		model: plan.model,
 		systemPrompt: opts.systemPrompt,
 		messages: opts.messages,
 		tools: opts.tools,
-		api,
-	});
+		api: buildNestedApiOptions(plan.model, plan.reasoningEffort),
+	};
+	// `callWithFallback` always restarts at the chain head, so enter it only when the pick IS the head; otherwise it would
+	// discard the router's pick and hit a provider with no auth.
+	const head = CHAIN[0];
+	if (head !== undefined && plan.model.provider === head.provider && plan.model.id === head.id) {
+		const hopNeed: GuardNeed = { ...need, usesToolLoop: usesToolLoop(opts.role) };
+		return callWithFallback(ctx, request, (m) => guardRoute(m, opts.role, hopNeed));
+	}
+	return callModel(ctx, { ...request, model: plan.model });
 }

@@ -525,6 +525,28 @@ describe("writeAgentOverrides -- byte-idempotence", () => {
 	});
 });
 
+describe("settings files with a BOM or no content", () => {
+	const pin = { planner: { model: "dashscope/deepseek-v4-flash" } };
+
+	it("reads and pins through a leading BOM, as Pi's own settings reader does", () => {
+		const settingsPath = freshSettingsPath();
+		writeFileSync(settingsPath, `﻿${JSON.stringify({ theme: "ky" })}`, "utf-8");
+		expect(writeAgentOverrides(pin, { settingsPath })).toMatchObject({ ok: true, written: true });
+		expect(readAgentOverride("planner", { settingsPath })).toBe(pin.planner.model);
+		expect(plannerPinHeld({ settingsPath })).toBe(true);
+		expect(restorePlannerPin({ settingsPath })).toMatchObject({ ok: true, restored: true });
+		expect(JSON.parse(readFileSync(settingsPath, "utf-8"))).toEqual({ theme: "ky" });
+	});
+
+	it("treats a blank file as an empty object on both write and restore", () => {
+		const settingsPath = freshSettingsPath();
+		writeFileSync(settingsPath, "  \n", "utf-8");
+		expect(restorePlannerPin({ settingsPath })).toMatchObject({ ok: true, restored: false });
+		expect(writeAgentOverrides(pin, { settingsPath })).toMatchObject({ ok: true, written: true });
+		expect(readAgentOverride("planner", { settingsPath })).toBe(pin.planner.model);
+	});
+});
+
 describe("restorePlannerPin", () => {
 	const pin = { planner: { model: "dashscope/deepseek-v4-flash" } };
 

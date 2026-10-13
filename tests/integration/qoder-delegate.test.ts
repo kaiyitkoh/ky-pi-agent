@@ -807,6 +807,16 @@ describe("qoder-delegate -- WR-08: a malformed server-supplied session id is ref
 		});
 	});
 
+	it("a null session-create body is refused as a missing id, not a TypeError", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES, sessionBodyOverride: { body: null } }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(/no usable session id/);
+				expect(loop.received).toHaveLength(1);
+			});
+		});
+	});
+
 	it("a well-formed session id containing a real '/' is refused the same way (the shape check, not merely a blocklist)", async () => {
 		// A slash is not on any blocklist enumerated anywhere in this file --
 		// this proves the check is a POSITIVE shape match

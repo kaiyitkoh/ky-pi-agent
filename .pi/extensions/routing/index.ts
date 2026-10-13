@@ -10,13 +10,13 @@ import type {
 	ExtensionContext,
 	SessionEntry,
 } from "@earendil-works/pi-coding-agent";
-import { getCurrentTools } from "@earendil-works/pi-ai";
+import { getCurrentTools, type Api, type Model } from "@earendil-works/pi-ai";
 
 import { appendJsonl, ESCALATION_LOG_BASE } from "../../lib/jsonl.ts";
 import { agentOverridesFor, plannerPinHeld, readAgentOverride, restorePlannerPin, writeAgentOverrides, type AgentOverridesForOptions } from "./agent-overrides.ts";
 import { deriveNeed, guardRoute } from "./guard.ts";
 import { registerBgLoader } from "./loader.ts";
-import { freshSessionPlan, getModeState, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
+import { freshSessionPlan, getModeState, isModeName, pickConfiguredCandidate, resolveRoute, setEscalated, setMode, type ModeState } from "./modes.ts";
 import { applyProfile, DEFAULT_PROFILE, hasExplicitToolAllowlist, resolveProfile } from "./profiles.ts";
 import { AGENT_NAME_BY_ROLE, DEFAULT_MODE, MODE_ENTRY_TYPE, MODES, ROLES, ROUTING_EVENT, type KyModeData, type ModeName } from "./schema.ts";
 
@@ -29,212 +29,104 @@ export interface RoutingTestOptions {
 	readonly agentOverridesFor?: AgentOverridesForOptions;
 }
 
-/**
- * Shared path for the three mode commands. Order is the requirement: idle first (`waitForIdle` exists only on
- * `ExtensionCommandContext`, `dist/core/extensions/types.d.ts`), then resolve, guard, `setModel`, persist, notify.
- * An explicit mode pick clears any sticky escalation.
- */
-async function applyMode(
-	pi: ExtensionAPI,
-	ctx: ExtensionCommandContext,
-	mode: ModeName,
-	testOverrides?: RoutingTestOptions,
-): Promise<void> {
-	await ctx.waitForIdle();
+const refOf = (model: { readonly provider: string; readonly id: string }): string => `${model.provider}/${model.id}`;
 
-	const priorState = getModeState();
-	const previousModel = ctx.model !== undefined ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-
-	// Escalation is cleared by every explicit mode pick.
-	const state: ModeState = { mode, escalated: false };
-	const route = resolveRoute("executor", state);
-	const candidate = pickConfiguredCandidate(ctx.modelRegistry, route.candidates);
-	if (!candidate.ok) {
-		ctx.ui.notify(`cannot switch to ${mode}: ${candidate.reason}`, "error");
-		return;
-	}
-
-	const guardVerdict = guardRoute(candidate.model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
-	if (!guardVerdict.ok) {
-		ctx.ui.notify(guardVerdict.reason, "error");
-		return;
-	}
-
-	// `setModel` returns false without auth (`dist/core/agent-session.js#setModel`) and can throw in a TOCTOU window;
-	// surface both, never silently try another model.
-	let switched: boolean;
-	try {
-		switched = await pi.setModel(candidate.model);
-	} catch (err) {
-		ctx.ui.notify(
-			`setModel threw switching to ${candidate.model.provider}/${candidate.model.id}: ${String(err)}`,
-			"error",
-		);
-		return;
-	}
-	if (!switched) {
-		ctx.ui.notify(
-			`setModel returned false for ${candidate.model.provider}/${candidate.model.id} -- no configured auth`,
-			"error",
-		);
-		return;
-	}
-
-	// A pin-derivation refusal is carried into the final message, never written anyway.
-	setMode(mode);
-	setEscalated(false);
-
-	const modeData: KyModeData = { mode, escalated: false, at: Date.now() };
-	pi.appendEntry(MODE_ENTRY_TYPE, modeData);
-
-	// Clearing a real escalation needs a durable record, else escalation-*.jsonl shows ON and never OFF.
-	if (priorState.escalated) {
-		writeEscalationRecord(ctx.cwd, {
-			mode,
-			escalated: false,
-			previousModel,
-			newModel: `${candidate.model.provider}/${candidate.model.id}`,
-		});
-	}
-
-	let overridesNote = "";
-	const overridesResult = agentOverridesFor({ mode }, { ...testOverrides?.agentOverridesFor, registry: ctx.modelRegistry });
-	if (!overridesResult.ok) {
-		overridesNote = ` subagent pins unchanged because ${overridesResult.reason}`;
-	} else {
-		const writeResult = writeAgentOverrides(overridesResult.overrides);
-		if (!writeResult.ok) {
-			overridesNote = ` subagent pins unchanged because ${writeResult.reason}`;
-		}
-	}
-
-	pi.events.emit(ROUTING_EVENT, {
-		mode,
-		escalated: false,
-		model: `${candidate.model.provider}/${candidate.model.id}`,
-	});
-
-	ctx.ui.notify(
-		`mode switched to ${mode}; executor is now ${candidate.model.provider}/${candidate.model.id}.` +
-			overridesNote,
-		"info",
-	);
+interface Switched {
+	readonly model: Model<Api>;
+	readonly previousModel: string | undefined;
 }
 
 /**
- * NEVER THROWS: best-effort record, written after `setModel` succeeded so a failed write cannot turn a switch into an error.
+ * Resolves, guards and sets the executor for `state`; a refusal comes back as text and another model is never tried.
+ * `keepCurrent` skips `setModel` when the executor already is the target.
  */
+async function switchExecutor(pi: ExtensionAPI, ctx: ExtensionContext, state: ModeState, keepCurrent = false): Promise<Switched | string> {
+	const candidate = pickConfiguredCandidate(ctx.modelRegistry, resolveRoute("executor", state).candidates);
+	if (!candidate.ok) return candidate.reason;
+	const previousModel = ctx.model === undefined ? undefined : refOf(ctx.model);
+	const target = refOf(candidate.model);
+	if (keepCurrent && previousModel === target) return { model: candidate.model, previousModel };
+	const verdict = guardRoute(candidate.model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
+	if (!verdict.ok) return verdict.reason;
+	// `setModel` returns false without auth (`dist/core/agent-session.js#setModel`) and can throw in a TOCTOU window.
+	try {
+		return (await pi.setModel(candidate.model)) ? { model: candidate.model, previousModel } : `setModel returned false for ${target} -- no configured auth`;
+	} catch (err) {
+		return `setModel threw switching to ${target}: ${String(err)}`;
+	}
+}
+
+/** NEVER THROWS: best-effort record, written after `setModel` succeeded so a failed write cannot turn a switch into an error. */
 function writeEscalationRecord(
 	cwd: string,
 	input: { mode: ModeName; escalated: boolean; previousModel: string | undefined; newModel: string },
 ): void {
 	try {
-		appendJsonl(cwd, ESCALATION_LOG_BASE, {
-			ts: Date.now(),
-			mode: input.mode,
-			escalated: input.escalated,
-			previousModel: input.previousModel,
-			newModel: input.newModel,
-		});
+		appendJsonl(cwd, ESCALATION_LOG_BASE, { ts: Date.now(), ...input });
 	} catch {
 		// Best-effort.
 	}
 }
 
-/** `/escalate` two-way switch; a separate function from `applyMode` because it never calls `setMode` and resolves with `escalated: escalate`. */
+/** Persists the switch, logs it to escalation-*.jsonl when `log`, and announces it. */
+function recordSwitch(pi: ExtensionAPI, cwd: string, data: KyModeData, switched: Switched, log: boolean): void {
+	pi.appendEntry(MODE_ENTRY_TYPE, data);
+	const newModel = refOf(switched.model);
+	if (log) writeEscalationRecord(cwd, { mode: data.mode, escalated: data.escalated, previousModel: switched.previousModel, newModel });
+	pi.events.emit(ROUTING_EVENT, { mode: data.mode, escalated: data.escalated, model: newModel });
+}
+
+/**
+ * Idle first: `waitForIdle` exists only on `ExtensionCommandContext` (`dist/core/extensions/types.d.ts`). An explicit mode pick
+ * clears any sticky escalation and re-pins the subagents; a pin refusal is reported, never written anyway.
+ */
+async function applyMode(pi: ExtensionAPI, ctx: ExtensionCommandContext, mode: ModeName, testOverrides?: RoutingTestOptions): Promise<void> {
+	await ctx.waitForIdle();
+	const wasEscalated = getModeState().escalated;
+	const switched = await switchExecutor(pi, ctx, { mode, escalated: false });
+	if (typeof switched === "string") return ctx.ui.notify(`cannot switch to ${mode}: ${switched}`, "error");
+	setMode(mode);
+	setEscalated(false);
+	// Clearing a real escalation needs a durable record, else escalation-*.jsonl shows ON and never OFF.
+	recordSwitch(pi, ctx.cwd, { mode, escalated: false, at: Date.now() }, switched, wasEscalated);
+
+	const pins = agentOverridesFor({ mode }, { ...testOverrides?.agentOverridesFor, registry: ctx.modelRegistry });
+	const written = pins.ok ? writeAgentOverrides(pins.overrides) : pins;
+	const pinNote = written.ok ? "" : ` subagent pins unchanged because ${written.reason}`;
+	ctx.ui.notify(`mode switched to ${mode}; executor is now ${refOf(switched.model)}.${pinNote}`, "info");
+}
+
+/** `/escalate` two-way switch: never changes the mode, only whether its executor is lifted. */
 async function applyEscalate(pi: ExtensionAPI, ctx: ExtensionCommandContext, escalate: boolean): Promise<void> {
 	await ctx.waitForIdle();
-
-	const state = getModeState();
-	const route = resolveRoute("executor", { mode: state.mode, escalated: escalate });
-	const candidate = pickConfiguredCandidate(ctx.modelRegistry, route.candidates);
-	if (!candidate.ok) {
-		ctx.ui.notify(
-			`cannot ${escalate ? "escalate" : "clear escalation"}: ${candidate.reason}`,
-			"error",
-		);
-		return;
-	}
-
-	const guardVerdict = guardRoute(candidate.model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
-	if (!guardVerdict.ok) {
-		ctx.ui.notify(guardVerdict.reason, "error");
-		return;
-	}
-
-	const previousModel = ctx.model !== undefined ? `${ctx.model.provider}/${ctx.model.id}` : undefined;
-
-	let switched: boolean;
-	try {
-		switched = await pi.setModel(candidate.model);
-	} catch (err) {
-		ctx.ui.notify(
-			`setModel threw switching executor to ${candidate.model.provider}/${candidate.model.id}: ${String(err)}`,
-			"error",
-		);
-		return;
-	}
-	if (!switched) {
-		ctx.ui.notify(
-			`setModel returned false for ${candidate.model.provider}/${candidate.model.id} -- no configured auth`,
-			"error",
-		);
-		return;
-	}
-
-	// State must not claim an escalation that never took effect.
-	setEscalated(escalate, escalate ? state.mode : undefined);
-
-	const modeData: KyModeData = {
-		mode: state.mode,
-		escalated: escalate,
-		escalatedFrom: escalate ? state.mode : undefined,
-		at: Date.now(),
-	};
-	pi.appendEntry(MODE_ENTRY_TYPE, modeData);
-
-	writeEscalationRecord(ctx.cwd, {
-		mode: state.mode,
-		escalated: escalate,
-		previousModel,
-		newModel: `${candidate.model.provider}/${candidate.model.id}`,
-	});
-
-	pi.events.emit(ROUTING_EVENT, {
-		mode: state.mode,
-		escalated: escalate,
-		model: `${candidate.model.provider}/${candidate.model.id}`,
-	});
-
+	const { mode } = getModeState();
+	const switched = await switchExecutor(pi, ctx, { mode, escalated: escalate });
+	if (typeof switched === "string") return ctx.ui.notify(`cannot ${escalate ? "escalate" : "clear escalation"}: ${switched}`, "error");
+	// Set only after the switch took effect, so state never claims an escalation that did not happen.
+	const escalatedFrom = escalate ? mode : undefined;
+	setEscalated(escalate, escalatedFrom);
+	recordSwitch(pi, ctx.cwd, { mode, escalated: escalate, escalatedFrom, at: Date.now() }, switched, true);
+	const target = refOf(switched.model);
 	ctx.ui.notify(
 		escalate
-			? `escalated -- executor is now ${candidate.model.provider}/${candidate.model.id} (from ${state.mode}).`
-			: `escalation cleared -- executor restored to ${state.mode}'s own model: ` +
-				`${candidate.model.provider}/${candidate.model.id}.`,
+			? `escalated -- executor is now ${target} (from ${mode}).`
+			: `escalation cleared -- executor restored to ${mode}'s own model: ${target}.`,
 		"info",
 	);
 }
 
 /** Read-only `/mode` status: mode, escalation, and each role's resolved model. */
-async function reportMode(ctx: ExtensionCommandContext): Promise<void> {
+function reportMode(ctx: ExtensionCommandContext): void {
 	const state = getModeState();
-
-	const lines: string[] = [
-		state.escalated
-			? `mode: ${state.mode} (escalated from ${state.escalatedFrom ?? state.mode})`
-			: `mode: ${state.mode} (not escalated)`,
-		`executor: ${ctx.model !== undefined ? `${ctx.model.provider}/${ctx.model.id}` : "(no model selected)"}`,
+	const lines = [
+		state.escalated ? `mode: ${state.mode} (escalated from ${state.escalatedFrom ?? state.mode})` : `mode: ${state.mode} (not escalated)`,
+		`executor: ${ctx.model === undefined ? "(no model selected)" : refOf(ctx.model)}`,
 	];
-
 	const expectedPins = agentOverridesFor({ mode: state.mode }, { registry: ctx.modelRegistry });
 	for (const role of ROLES) {
-		if (role === "executor") {
-			// Executor is reported above from the real `ctx.model`.
-			continue;
-		}
-		const route = resolveRoute(role, state);
-		const candidate = pickConfiguredCandidate(ctx.modelRegistry, route.candidates);
-		const routed = candidate.ok ? `${candidate.model.provider}/${candidate.model.id}` : undefined;
+		if (role === "executor") continue;
+		const candidate = pickConfiguredCandidate(ctx.modelRegistry, resolveRoute(role, state).candidates);
+		const routed = candidate.ok ? refOf(candidate.model) : undefined;
 		const agent = AGENT_NAME_BY_ROLE[role];
 		// pi-subagents runs whatever the shared settings file pins, which another session may have written since.
 		const pinned = agent === undefined ? undefined : readAgentOverride(agent);
@@ -242,13 +134,7 @@ async function reportMode(ctx: ExtensionCommandContext): Promise<void> {
 		const runs = pinned !== undefined && pinned !== expected ? ` -- but subagents run ${pinned}, pinned in the user settings; re-run /${state.mode} to re-pin` : "";
 		lines.push(`${role}: ${candidate.ok ? routed : `unavailable (${candidate.reason})`}${runs}`);
 	}
-
 	ctx.ui.notify(lines.join("\n"), "info");
-}
-
-/** Narrows an unknown string to a {@link ModeName}. */
-function isModeName(value: unknown): value is ModeName {
-	return typeof value === "string" && (MODES as readonly string[]).includes(value);
 }
 
 /**
@@ -259,40 +145,25 @@ function isModeName(value: unknown): value is ModeName {
  * Exported because `session_start` does not fire in a headless `createAgentSession`.
  */
 export function restoreModeFromBranch(branch: readonly SessionEntry[]): void {
-	const modeEntries = branch.filter(
+	const latest = branch.findLast(
 		(entry): entry is CustomEntry<KyModeData> => entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE,
 	);
-	const latest = modeEntries.at(-1);
-	// `null` passes a bare `=== undefined` check, so reject it and every non-object payload explicitly (contract: never throws).
-	if (latest === undefined || latest.data === null || typeof latest.data !== "object") {
-		return;
-	}
-
-	const data = latest.data;
-	// Validate before trusting: a hand-edited session file must not smuggle in an unresolvable mode.
-	const mode: ModeName = isModeName(data.mode) ? data.mode : DEFAULT_MODE;
-	const escalated = data.escalated === true;
-	const escalatedFrom = escalated && isModeName(data.escalatedFrom) ? data.escalatedFrom : undefined;
-
-	setMode(mode);
-	setEscalated(escalated, escalatedFrom);
+	const data: unknown = latest?.data;
+	if (data === null || typeof data !== "object") return;
+	// A hand-edited session file must not smuggle in an unresolvable mode.
+	const { mode, escalated, escalatedFrom } = data as Partial<Record<keyof KyModeData, unknown>>;
+	setMode(isModeName(mode) ? mode : DEFAULT_MODE);
+	setEscalated(escalated === true, escalated === true && isModeName(escalatedFrom) ? escalatedFrom : undefined);
 }
 
 /** Puts the default mode's executor on a fresh session; any refusal leaves the model alone and says why once. NEVER THROWS. */
 async function applyDefaultExecutor(pi: ExtensionAPI, ctx: ExtensionContext): Promise<void> {
-	const notify = (text: string): void => {
-		if (ctx.hasUI) ctx.ui.notify(text, "warning");
-	};
+	const switched = await switchExecutor(pi, ctx, { mode: DEFAULT_MODE, escalated: false }, true).catch((err: unknown) => String(err));
+	// NEVER THROWS: a failed notice must not fail session start.
 	try {
-		const candidate = pickConfiguredCandidate(ctx.modelRegistry, resolveRoute("executor", { mode: DEFAULT_MODE, escalated: false }).candidates);
-		if (!candidate.ok) return notify(`default mode ${DEFAULT_MODE}: executor not applied: ${candidate.reason}`);
-		const { model } = candidate;
-		if (ctx.model?.provider === model.provider && ctx.model?.id === model.id) return;
-		const verdict = guardRoute(model, "executor", deriveNeed(ctx, { usesToolLoop: true }));
-		if (!verdict.ok) return notify(`default mode ${DEFAULT_MODE}: executor not applied: ${verdict.reason}`);
-		if (!(await pi.setModel(model))) notify(`default mode ${DEFAULT_MODE}: executor not applied: setModel returned false for ${model.provider}/${model.id}`);
-	} catch (err) {
-		notify(`default mode ${DEFAULT_MODE}: executor not applied: ${String(err)}`);
+		if (typeof switched === "string" && ctx.hasUI) ctx.ui.notify(`default mode ${DEFAULT_MODE}: executor not applied: ${switched}`, "warning");
+	} catch {
+		// Swallowed deliberately.
 	}
 }
 
@@ -325,9 +196,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 
 	pi.registerCommand("mode", {
 		description: "Show the current mode, escalation state, and every role's resolved route",
-		handler: async (_args, ctx) => {
-			await reportMode(ctx);
-		},
+		handler: async (_args, ctx) => reportMode(ctx),
 	});
 
 	// Pi fires model_select after the switch and ignores the return value, so enforcement is undo plus refuse.
@@ -339,7 +208,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			const need = deriveNeed(ctx, { usesToolLoop: true });
 			const verdict = guardRoute(event.model, "executor", need);
 			if (verdict.ok) return;
-			const ref = `${event.model.provider}/${event.model.id}`;
+			const ref = refOf(event.model);
 			// Pi resets thinking to the default on every switch, so the user cannot turn it off first; turning it off here is the only way in.
 			if (guardRoute(event.model, "executor", { ...need, thinkingRequested: false }).ok) {
 				pi.setThinkingLevel("off");
@@ -356,7 +225,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 				ctx.ui.notify(`${verdict.reason}. Switch to a capable model with /cheap, /balanced or /max.${savedDefault}`, "error");
 				return;
 			}
-			const back = `${previous.provider}/${previous.id}`;
+			const back = refOf(previous);
 			slot[REVERTING_KEY] = true;
 			let reverted: boolean | string;
 			try {
@@ -404,10 +273,11 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 		// NEVER THROWS: a bad payload must not stop session start.
 		try {
 			const branch = ctx.sessionManager.getBranch();
+			const hasMessages = branch.some((entry) => entry.type === "message");
 			const plan = freshSessionPlan({
 				reason: event.reason,
 				hasModeEntry: branch.some((entry) => entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE),
-				hasMessages: branch.some((entry) => entry.type === "message"),
+				hasMessages,
 				isChild: isSubagentChild(),
 				argv: process.argv,
 			});
@@ -428,7 +298,7 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 			const flag = pi.getFlag("ky-profile");
 			if (typeof flag === "string" && resolveProfile(flag) !== flag && ctx.hasUI) ctx.ui.notify(`unknown --ky-profile "${flag}"; using ${DEFAULT_PROFILE}`, "warning");
 			// A transcript already declared its tools (Pi restores them before session_start); removing any re-prices the cached prefix.
-			if (event.reason === "reload" || branch.some((entry) => entry.type === "message")) return;
+			if (event.reason === "reload" || hasMessages) return;
 			const next = narrow(pi.getActiveTools());
 			if (next !== undefined) pi.setActiveTools(next);
 		} catch {
