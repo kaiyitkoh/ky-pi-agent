@@ -29,8 +29,15 @@ export const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl|openspec)
  */
 export const SHELL_RUNNERS = wordSet(
 	"sh bash zsh dash fish xargs python python3 node perl ruby eval watch ksh mksh ash csh tcsh " +
-		"cmd powershell pwsh su script parallel ssh chroot strace flock",
+		"cmd powershell pwsh su script parallel ssh chroot strace flock " +
+		"trap source . hash alias unalias enable fc bind complete coproc",
 );
+
+/** Builtins whose arguments are command text or bind a name to one, so a guarded verb anywhere in the script taints them. */
+const COMMAND_TEXT_BUILTINS = wordSet("trap alias hash enable fc source .");
+
+/** Runners whose first argument is command text rather than a script file. */
+const COMMAND_TEXT_RUNNERS = wordSet("trap alias unalias hash enable fc bind complete coproc");
 
 /** `find`/`fd` primaries that run a command, which makes them runners like `xargs`. */
 const FIND_EXEC_PRIMARIES = new Map([
@@ -46,6 +53,7 @@ export const SHELL_REFUSAL_CAUSES = [
 	"heredoc",
 	"background",
 	"unresolved-expansion-in-command-position",
+	"non-literal-command-name",
 	"shell-runner",
 	"unresolved-wrapper",
 	"parse-error",
@@ -226,6 +234,34 @@ function hasExpansionPart(word: Word | undefined): boolean {
 	return found;
 }
 
+const NON_LITERAL_NAME_CHARS = /[*?[\]{}~]/;
+
+const isQuotedPart = (part: { readonly type: string; readonly parts?: readonly { readonly type: string }[] }): boolean =>
+	part.type === "Literal" ||
+	part.type === "SingleQuoted" ||
+	part.type === "AnsiCQuoted" ||
+	(part.type === "DoubleQuoted" && (part.parts ?? []).every((child) => child.type === "Literal"));
+
+/** Allow-list over the word-part union, so a part type added later is refused until it is listed. */
+function isPlainCommandWord(word: Word | undefined): boolean {
+	if (word === undefined) return true;
+	if (word.text === "[" || word.text === "[[") return true;
+	if (/\s/.test(word.value)) return false;
+	const singleQuoted = word.parts?.length === 1 && word.parts[0].type === "SingleQuoted";
+	if (!singleQuoted && NON_LITERAL_NAME_CHARS.test(word.text)) return false;
+	return (word.parts ?? []).every((part) => isQuotedPart(part));
+}
+
+const hasBraceOrGlobPart = (word: Word): boolean => (word.parts ?? []).some((part) => part.type === "BraceExpansion" || part.type === "ExtendedGlob");
+
+function hasNonLiteralCommandWord(commands: readonly Command[]): boolean {
+	return commands.some((c) => {
+		if (c.name === undefined) return false;
+		if (!isPlainCommandWord(c.name)) return true;
+		return isLiteralGuardedExecutable(c.name) && c.suffix.some(hasBraceOrGlobPart);
+	});
+}
+
 function isLiteralGuardedExecutable(word: Word | undefined): boolean {
 	return word !== undefined && !hasExpansionPart(word) && GUARDED_VERB_PATTERN.test(word.value);
 }
@@ -242,6 +278,7 @@ function detectRefusalCause(script: ParsedScript, scan: ScriptScan): ShellRefusa
 	if ([...HEREDOC_OPERATORS].some((op) => scan.redirects.has(op))) return "heredoc";
 	if (scan.background) return "background";
 	if (hasUnresolvedExpansionInCommandPosition(scan.commands)) return "unresolved-expansion-in-command-position";
+	if (hasNonLiteralCommandWord(scan.commands)) return "non-literal-command-name";
 	return (script.errors ?? []).length > 0 ? "parse-error" : undefined;
 }
 
@@ -254,6 +291,8 @@ const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
 	background: (c) => `"${c}" backgrounds the command (&), which this guard cannot observe complete before returning`,
 	"unresolved-expansion-in-command-position": (c) =>
 		`"${c}" resolves its executable or a guarded verb's subcommand from an unresolved shell variable`,
+	"non-literal-command-name": (c) =>
+		`"${c}" names a command through a brace expansion, glob, tilde or embedded whitespace; spell the command literally`,
 	"shell-runner": (c) =>
 		`"${c}" hands a guarded verb or an encoded script to a shell runner (${[...SHELL_RUNNERS].join(", ")}, find -exec) as a script argument`,
 	"unresolved-wrapper": (c) =>
@@ -387,7 +426,7 @@ const CD_COMMANDS = wordSet("cd pushd popd");
 /** Any expansion among wrapper words is refused too: word splitting can turn `timeout $T apply` into `timeout 5 terraform apply`. */
 function hasExpansionBehindWrappers(words: readonly Word[], index: number): boolean {
 	if (index === 0) return false;
-	if (words.slice(0, index + 1).some((w) => hasExpansionPart(w))) return true;
+	if (words.slice(0, index + 1).some((w) => hasExpansionPart(w) || !isPlainCommandWord(w))) return true;
 	return isLiteralGuardedExecutable(words[index]) && words.slice(index + 1).some((w) => hasExpansionPart(w));
 }
 
@@ -462,6 +501,7 @@ function runnerTexts(inv: CanonicalInvocation): string[] | undefined {
 		return at === -1 ? undefined : inv.args.slice(at + 1);
 	}
 	if (!SHELL_RUNNERS.has(executable)) return undefined;
+	if (COMMAND_TEXT_RUNNERS.has(executable)) return segmentTexts(inv);
 	const script = inv.args[0] ?? "-";
 	const namedForVerb = variantsOf(normaliseExecutable(script)).some((v) => v.search(GUARDED_VERB_PATTERN) === 0);
 	return script.startsWith("-") || namedForVerb ? segmentTexts(inv) : [inv.rawSegment.replace(script, " "), ...inv.args.slice(1)];
@@ -483,6 +523,11 @@ const findShellRunnerDenial = (invocations: readonly CanonicalInvocation[]): Can
 		return texts !== undefined && (mentionsGuardedVerb(texts) || hidesItsScript(inv));
 	});
 
+/** A trap, alias, hash or sourced file can carry a verb into a later segment, so any guarded verb in the script taints them. */
+const carriesVerbAcrossSegments = (invocations: readonly CanonicalInvocation[]): boolean =>
+	invocations.some((inv) => COMMAND_TEXT_BUILTINS.has(normaliseExecutable(inv.executable))) &&
+	mentionsGuardedVerb(invocations.flatMap(segmentTexts));
+
 /** Parse and fail closed on {@link SHELL_REFUSAL_CAUSES}; otherwise one canonical invocation per `Command` node. */
 export function canonicalise(command: string): ShellVerdict {
 	let script: ParsedScript;
@@ -499,7 +544,7 @@ export function canonicalise(command: string): ShellVerdict {
 	const extracted = extractInvocations(script, command, scan.commands);
 	const invocations = extracted.map((e) => e.invocation);
 	if (extracted.some((e) => e.expansionInCommandPosition)) return refused("unresolved-expansion-in-command-position", command);
-	if (findShellRunnerDenial(invocations) !== undefined) return refused("shell-runner", command);
+	if (findShellRunnerDenial(invocations) !== undefined || carriesVerbAcrossSegments(invocations)) return refused("shell-runner", command);
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
 	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
 	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], commandCount: scan.commands.length };

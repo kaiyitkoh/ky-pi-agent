@@ -321,6 +321,13 @@ const TABLE: readonly DenyRow[] = [
 		why: "the unresolved-wrapper refusal is gated on a guarded verb in the segment, so an ordinary command is not over-blocked",
 	},
 	{
+		label: "brace expansion builds the executable and subcommand",
+		cmd: "{git,push} origin HEAD:main",
+		expected: "refused",
+		cause: "non-literal-command-name",
+		why: "bash expands the braces to `git push origin HEAD:main` after the guard has read one opaque word",
+	},
+	{
 		label: "unparseable input (final catch-all)",
 		cmd: 'git "push',
 		expected: "refused",
@@ -407,5 +414,65 @@ describe("SAFE-03 -- DENIED_PART_TYPES / HEREDOC_OPERATORS export the executed v
 
 	it("HEREDOC_OPERATORS matches the three redirect operators proven in tests/unit/unbash-ast.test.ts", () => {
 		expect([...HEREDOC_OPERATORS].sort()).toEqual(["<<", "<<-", "<<<"].sort());
+	});
+});
+
+const NON_LITERAL_REFUSED: readonly string[] = [
+	"{git,push} origin HEAD:main",
+	"{terraform,apply} -auto-approve",
+	"{aws,s3,rm} s3://b --recursive",
+	"gi? push",
+	"/usr/bin/gi[t] push",
+	"~/bin/git push",
+	"git$' 'push",
+	"git push{,} origin main",
+];
+
+const NON_LITERAL_OK: readonly string[] = [
+	"[ -f x ]",
+	"[[ -n \"$a\" ]]",
+	"'git' status",
+	'"git" status',
+	"$'git' status",
+	"echo {a,b}",
+	"ls *.md",
+];
+
+describe("fail-closed command-name predicate", () => {
+	it.each(NON_LITERAL_REFUSED)("refuses %s", (cmd) => {
+		const verdict = canonicalise(cmd);
+		expect(verdict.kind).toBe("refused");
+		if (verdict.kind === "refused") expect(verdict.cause).toBe("non-literal-command-name");
+	});
+
+	it("refuses a brace-built executable behind a wrapper", () => {
+		expect(canonicalise("sudo {git,push} origin main").kind).toBe("refused");
+	});
+
+	it.each(NON_LITERAL_OK)("accepts %s", (cmd) => {
+		expect(canonicalise(cmd).kind).toBe("ok");
+	});
+});
+
+const RUNNER_REFUSED: readonly string[] = [
+	"trap 'git push origin HEAD:main' EXIT",
+	"trap 'terraform apply -auto-approve' EXIT",
+	". git-push.sh",
+	"source ./git-push.sh",
+	"alias p='git push'; p",
+	"hash -p /usr/bin/git g; g push",
+	"enable -f x git",
+	"alias p=push; git p origin main",
+];
+
+describe("builtins that carry command text", () => {
+	it.each(RUNNER_REFUSED)("refuses %s as a shell runner", (cmd) => {
+		const verdict = canonicalise(cmd);
+		expect(verdict.kind).toBe("refused");
+		if (verdict.kind === "refused") expect(verdict.cause).toBe("shell-runner");
+	});
+
+	it("leaves a trap without a guarded verb alone", () => {
+		expect(canonicalise("trap 'rm -f tmp' EXIT").kind).toBe("ok");
 	});
 });

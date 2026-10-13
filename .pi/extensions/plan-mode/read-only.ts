@@ -90,13 +90,11 @@ const ALWAYS_READ_ONLY = new Set([
 	"head",
 	"tail",
 	"wc",
-	"uniq",
 	"diff",
 	"file",
 	"stat",
 	"du",
 	"df",
-	"tree",
 	"which",
 	"whereis",
 	"type",
@@ -115,7 +113,6 @@ const ALWAYS_READ_ONLY = new Set([
 	"hostname",
 	"ls",
 	"grep",
-	"rg",
 	"bat",
 	"eza",
 	"jq",
@@ -308,6 +305,14 @@ const CURL_DENIED_FLAGS = [
 	"--config",
 	"-X",
 	"--request",
+	"-c",
+	"--cookie-jar",
+	"-D",
+	"--dump-header",
+	"--trace",
+	"--trace-ascii",
+	"--libcurl",
+	"--json",
 ];
 
 /** `find`/`fd` primaries that execute a command or write. */
@@ -460,6 +465,18 @@ const ARGUMENT_RULES: Record<string, (args: readonly string[]) => string | undef
 			if (reading === undefined) return "`git config` is only read-only in its --get/--list form";
 		}
 		return undefined;
+	},
+	rg: (args) => {
+		const bad = args.find((a) => a === "--pre" || a.startsWith("--pre=") || a === "--pre-glob" || a.startsWith("--pre-glob="));
+		return bad === undefined ? undefined : "`rg --pre` runs a preprocessor command";
+	},
+	tree: (args) => {
+		const bad = hasBundledFlag(args, ["-o"]);
+		return bad === undefined ? undefined : "`tree -o` writes a file";
+	},
+	uniq: (args) => {
+		const positional = args.filter((a) => !a.startsWith("-"));
+		return positional.length > 1 ? "`uniq INPUT OUTPUT` writes the second file" : undefined;
 	},
 	npm: nodePackageManagerRule,
 	yarn: nodePackageManagerRule,
