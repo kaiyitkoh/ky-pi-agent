@@ -671,7 +671,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 8. Quality Gates & Engineering Quality | 0/TBD | Not started | - |
 | 9. Ceremonial Workflows | 17/17 | Complete    | 2026-10-12 |
 | 10. Context Budget & Progressive Disclosure | 0/TBD | Not started | - |
-| 11. Terminal UI | 7/7 | Complete   | 2026-10-13 |
+| 11. Terminal UI | 7/7 | Complete    | 2026-10-13 |
 
 ### Phase 12: OpenSpec Opt-in Skill
 
