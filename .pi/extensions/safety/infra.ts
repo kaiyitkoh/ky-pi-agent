@@ -1,5 +1,5 @@
 /**
- * terraform / aws / kubectl mutating-vs-read classification. Prompting on `aws sts get-caller-identity`
+ * terraform / aws / kubectl / openspec mutating-vs-read classification. Prompting on `aws sts get-caller-identity`
  * trains reflexive approval, which is worse than no gate, so the allow-list matters as much as the confirm-list.
  *
  * Invariants:
@@ -15,6 +15,8 @@
  *   `git.ts`: an operator may legitimately run them, and under `--mode json` `noOpUIContext.select`
  *   returns `undefined`, so confirm is terminal there anyway.
  * - `terraform state`/`workspace` classify on the pair so `state rm` and `state list` differ.
+ * - `openspec archive` is a named allow row because it writes only inside `openspec/`; bash writes are
+ *   not path-classified, so a future path-write rule must not silently regress it.
  * - Every `confirm` carries a `reason`: it is what the model reads, what `audit.ts` records and what
  *   the approval request shows.
  *
@@ -258,13 +260,114 @@ function classifyKubectlInvocation(args: readonly string[]): InfraVerdict {
 }
 
 
+/** openspec subcommands (or `config`/`store`/`workset` pairs) that read only, or write only inside `openspec/`. */
+export const OPENSPEC_ALLOW_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"list",
+	"view",
+	"show",
+	"validate",
+	"status",
+	"instructions",
+	"archive",
+	"new",
+	"change",
+	"spec",
+	"schema",
+	"schemas",
+	"templates",
+	"context",
+	"doctor",
+	"__complete",
+	"--help",
+	"-h",
+	"--version",
+	"-V",
+	"config get",
+	"config list",
+	"config path",
+	"store list",
+	"store doctor",
+	"workset list",
+]);
+
+/** openspec subcommands that write outside `openspec/`, change global state or leave this machine. */
+export const OPENSPEC_CONFIRM_SUBCOMMANDS: ReadonlySet<string> = new Set([
+	"init",
+	"update",
+	"completion",
+	"feedback",
+	"config set",
+	"config unset",
+	"config reset",
+	"config edit",
+	"config profile",
+	"store setup",
+	"store register",
+	"store unregister",
+	"store remove",
+	"workset create",
+	"workset open",
+	"workset remove",
+]);
+
+/** Parents whose second word forms the classification key. */
+const OPENSPEC_TWO_WORD_PARENTS = new Set(["config", "store", "workset"]);
+
+function openspecSubcommandKey(args: readonly string[]): string | undefined {
+	const first = args[0];
+	if (first === undefined) {
+		return undefined;
+	}
+	if (OPENSPEC_TWO_WORD_PARENTS.has(first) && args[1] !== undefined) {
+		return `${first} ${args[1]}`;
+	}
+	return first;
+}
+
+function openspecConfirmWhy(key: string): string {
+	if (key === "init" || key === "update") {
+		return "writes agent config directories such as .pi/ and .claude/, and update can offer an unpinned global self-upgrade";
+	}
+	if (key === "completion") {
+		return "install edits shell rc files";
+	}
+	if (key === "feedback") {
+		return "posts to GitHub via gh";
+	}
+	return "changes OpenSpec global config or store state";
+}
+
+function classifyOpenspecInvocation(args: readonly string[]): InfraVerdict {
+	const key = openspecSubcommandKey(args);
+	if (key === undefined) {
+		return {
+			kind: "confirm",
+			reason: "\"openspec\" with no subcommand -- fail closed to confirmation",
+		};
+	}
+	if (OPENSPEC_CONFIRM_SUBCOMMANDS.has(key)) {
+		return {
+			kind: "confirm",
+			reason: `"openspec ${key}" ${openspecConfirmWhy(key)}; it cannot be trivially undone or leaves this repo`,
+		};
+	}
+	if (OPENSPEC_ALLOW_SUBCOMMANDS.has(key)) {
+		return { kind: "allow" };
+	}
+	return {
+		kind: "confirm",
+		reason: `"openspec ${key}" is an unclassified subcommand -- defaults to confirm (fail-safe, not a hard block: add a table row rather than widening a default)`,
+	};
+}
+
+
 export type InfraVerdict =
 	| { readonly kind: "not-applicable" }
 	| { readonly kind: "allow" }
 	| { readonly kind: "confirm"; readonly reason: string }
 	| { readonly kind: "sensitive-read"; readonly reason: string };
 
-/** `not-applicable` for any executable other than aws/terraform/kubectl, so composers need not special-case it. */
+/** `not-applicable` for any executable other than aws/terraform/kubectl/openspec, so composers need not special-case it. */
 export function classifyInfraInvocation(invocation: CanonicalInvocation): InfraVerdict {
 	// Normalised so `aws.exe` and path-qualified spellings classify as the bare verb.
 	const executable = normaliseExecutable(invocation.executable);
@@ -276,6 +379,9 @@ export function classifyInfraInvocation(invocation: CanonicalInvocation): InfraV
 	}
 	if (executable === "kubectl") {
 		return classifyKubectlInvocation(invocation.args);
+	}
+	if (executable === "openspec") {
+		return classifyOpenspecInvocation(invocation.args);
 	}
 	return { kind: "not-applicable" };
 }

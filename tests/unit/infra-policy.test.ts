@@ -25,6 +25,8 @@ import {
 	isSensitiveAwsRead,
 	KUBECTL_ALLOW_VERBS,
 	KUBECTL_CONFIRM_VERBS,
+	OPENSPEC_ALLOW_SUBCOMMANDS,
+	OPENSPEC_CONFIRM_SUBCOMMANDS,
 	SAFE_AWS_EXACT_OPERATIONS,
 	TERRAFORM_ALLOW_SUBCOMMANDS,
 	TERRAFORM_CONFIRM_SUBCOMMANDS,
@@ -172,6 +174,56 @@ const ROWS: readonly Row[] = [
 	{ command: "kubectl frobnicate x", expected: "confirm", why: "unknown verb defaults to confirm, not allow" },
 
 	// -------------------------------------------------------------------------
+	// openspec -- read-only verbs and archive ALLOW; mutators and unknowns CONFIRM
+	// -------------------------------------------------------------------------
+	{ command: "openspec list", expected: "allow", why: "read-only" },
+	{ command: "openspec view", expected: "allow", why: "read-only" },
+	{ command: "openspec show add-foo", expected: "allow", why: "read-only" },
+	{ command: "openspec validate add-foo", expected: "allow", why: "read-only" },
+	{ command: "openspec status --json", expected: "allow", why: "read-only" },
+	{ command: "openspec instructions proposal", expected: "allow", why: "read-only" },
+	{ command: "openspec --help", expected: "allow", why: "read-only" },
+	{ command: "openspec -h", expected: "allow", why: "read-only" },
+	{ command: "openspec --version", expected: "allow", why: "read-only" },
+	{ command: "openspec -V", expected: "allow", why: "read-only" },
+	{ command: "openspec archive add-foo -y", expected: "allow", why: "writes only inside openspec/ -- named row so a path rule cannot regress it" },
+	{ command: "openspec new add-foo", expected: "allow", why: "writes only inside openspec/" },
+	{ command: "openspec change list", expected: "allow", why: "writes only inside openspec/" },
+	{ command: "openspec spec list", expected: "allow", why: "read-only" },
+	{ command: "openspec schema list", expected: "allow", why: "read-only" },
+	{ command: "openspec schemas", expected: "allow", why: "read-only" },
+	{ command: "openspec templates", expected: "allow", why: "read-only" },
+	{ command: "openspec context", expected: "allow", why: "read-only" },
+	{ command: "openspec doctor", expected: "allow", why: "read-only" },
+	{ command: "openspec __complete x", expected: "allow", why: "shell completion helper, read-only" },
+	{ command: "openspec config get telemetry.enabled", expected: "allow", why: "two-word subcommand: read-only" },
+	{ command: "openspec config list", expected: "allow", why: "two-word subcommand: read-only" },
+	{ command: "openspec config path", expected: "allow", why: "two-word subcommand: read-only" },
+	{ command: "openspec store list", expected: "allow", why: "two-word subcommand: read-only" },
+	{ command: "openspec store doctor", expected: "allow", why: "two-word subcommand: read-only" },
+	{ command: "openspec workset list", expected: "allow", why: "two-word subcommand: read-only" },
+	{ command: "openspec.cmd list", expected: "allow", why: "normaliseExecutable strips .cmd" },
+	{ command: "openspec init --tools pi", expected: "confirm", why: "writes agent config directories" },
+	{ command: "openspec update", expected: "confirm", why: "self-upgrade and agent config rewrite" },
+	{ command: "openspec completion install", expected: "confirm", why: "edits shell rc files" },
+	{ command: "openspec feedback hi", expected: "confirm", why: "posts to GitHub" },
+	{ command: "openspec config set telemetry.enabled false", expected: "confirm", why: "changes global config" },
+	{ command: "openspec config unset x", expected: "confirm", why: "changes global config" },
+	{ command: "openspec config reset", expected: "confirm", why: "changes global config" },
+	{ command: "openspec config edit", expected: "confirm", why: "changes global config" },
+	{ command: "openspec config profile", expected: "confirm", why: "changes global config" },
+	{ command: "openspec store setup", expected: "confirm", why: "changes store state" },
+	{ command: "openspec store register x", expected: "confirm", why: "changes store state" },
+	{ command: "openspec store unregister x", expected: "confirm", why: "changes store state" },
+	{ command: "openspec store remove x", expected: "confirm", why: "changes store state" },
+	{ command: "openspec workset create x", expected: "confirm", why: "changes workset state" },
+	{ command: "openspec workset open x", expected: "confirm", why: "changes workset state" },
+	{ command: "openspec workset remove x", expected: "confirm", why: "changes workset state" },
+	{ command: "openspec", expected: "confirm", why: "no subcommand fails closed" },
+	{ command: "openspec frobnicate", expected: "confirm", why: "unknown subcommand defaults to confirm" },
+	{ command: "openspec config", expected: "confirm", why: "bare two-word parent is unclassified" },
+
+	// -------------------------------------------------------------------------
 	// not-applicable -- a non-infra executable
 	// -------------------------------------------------------------------------
 	{ command: "ls -la", expected: "not-applicable", why: "not an infra executable -- lets a composer chain classifiers" },
@@ -180,7 +232,7 @@ const ROWS: readonly Row[] = [
 
 describe("SAFE-07 -- infra-policy.test.ts: table is non-empty (vacuous-pass guard)", () => {
 	it("has at least the rows the plan's acceptance criteria name", () => {
-		expect(ROWS.length, "a shortened table silently drops a named allow or confirm case").toBeGreaterThanOrEqual(45);
+		expect(ROWS.length, "a shortened table silently drops a named allow or confirm case").toBeGreaterThanOrEqual(91);
 	});
 });
 
@@ -224,6 +276,12 @@ describe("SAFE-07 -- liveness guard: every table key is exercised", () => {
 			return words[0] === "state" || words[0] === "workspace" ? `${words[0]} ${words[1]}` : words[0];
 		}),
 	);
+	const openspecUsed = new Set(
+		ROWS.filter((r) => /^openspec(\.cmd)?(\s|$)/.test(r.command)).map((r) => {
+			const words = r.command.split(/\s+/).slice(1);
+			return ["config", "store", "workset"].includes(words[0]) && words[1] !== undefined ? `${words[0]} ${words[1]}` : words[0];
+		}),
+	);
 	const kubectlUsed = new Set(
 		ROWS.filter((r) => r.command.startsWith("kubectl ")).map((r) => r.command.split(/\s+/)[1]),
 	);
@@ -248,11 +306,28 @@ describe("SAFE-07 -- liveness guard: every table key is exercised", () => {
 		expect(dead, `these kubectl allow verbs have no fixture row: ${dead.join(", ")}`).toEqual([]);
 	});
 
-	it("all four tables are non-empty (guards against a vacuous coverage check)", () => {
+	it("every OPENSPEC_CONFIRM_SUBCOMMANDS key is exercised by at least one row", () => {
+		const dead = [...OPENSPEC_CONFIRM_SUBCOMMANDS].filter((k) => !openspecUsed.has(k));
+		expect(dead, `these openspec confirm keys have no fixture row: ${dead.join(", ")}`).toEqual([]);
+	});
+
+	it("every OPENSPEC_ALLOW_SUBCOMMANDS key is exercised by at least one row", () => {
+		const dead = [...OPENSPEC_ALLOW_SUBCOMMANDS].filter((k) => !openspecUsed.has(k));
+		expect(dead, `these openspec allow keys have no fixture row: ${dead.join(", ")}`).toEqual([]);
+	});
+
+	it("init's confirm reason names the agent config it writes", () => {
+		const v = classifyInfraInvocation(inv("openspec init --tools pi"));
+		expect(v.kind === "confirm" && v.reason.includes("agent config")).toBe(true);
+	});
+
+	it("all six tables are non-empty (guards against a vacuous coverage check)", () => {
 		expect(TERRAFORM_CONFIRM_SUBCOMMANDS.size).toBeGreaterThan(0);
 		expect(TERRAFORM_ALLOW_SUBCOMMANDS.size).toBeGreaterThan(0);
 		expect(KUBECTL_CONFIRM_VERBS.size).toBeGreaterThan(0);
 		expect(KUBECTL_ALLOW_VERBS.size).toBeGreaterThan(0);
+		expect(OPENSPEC_CONFIRM_SUBCOMMANDS.size).toBeGreaterThan(0);
+		expect(OPENSPEC_ALLOW_SUBCOMMANDS.size).toBeGreaterThan(0);
 	});
 });
 
