@@ -83,6 +83,7 @@ const writeAtomic = (file, data, mode) => {
 # files. Valid shell names are unset; any name no POSIX shell can unset
 # (npm_config_ignore-scripts, npm_config_//registry...:_authToken) is refused,
 # because certifying a control we did not exercise is worse than stopping.
+# bash passes such names on to children; dash drops them when it starts.
 # The prefix match is case-insensitive: Windows hands children NPM_CONFIG_*.
 # Bracket classes instead of a sed `I` flag, which is not POSIX.
 sanitise_npm_env() {

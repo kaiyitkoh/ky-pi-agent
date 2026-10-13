@@ -94,6 +94,16 @@ function bootstrapRepoCopy(): BootstrapRepoCopy {
  * `cwd`) at a throwaway copy instead of the real repo -- see
  * `bootstrapRepoCopy`.
  */
+/** Whether `sh` hands an inherited `key` on to the programs it runs. */
+function shPassesToChildren(key: string): boolean {
+	const r = spawnSync("sh", ["-c", "env"], {
+		env: { ...(process.env as Record<string, string>), [key]: "true" },
+		encoding: "utf-8",
+		windowsHide: true,
+	});
+	return (r.stdout ?? "").toLowerCase().split("\n").some((l) => l.startsWith(`${key.toLowerCase()}=`));
+}
+
 function runBootstrap(
 	args: string[],
 	opts: { agentDir: string; env?: Record<string, string>; repoCopy?: BootstrapRepoCopy },
@@ -308,6 +318,14 @@ describe("BOOT-01 (sanitiser) -- npm_config_* can never certify an absent contro
 				agentDir: hardenedAgentDir(),
 				env: { ...(process.env as Record<string, string>), [key]: "true" },
 			});
+
+			// dash drops a name that is not a valid identifier when it starts, so
+			// npm under it never sees the poison and the file really answers.
+			if (!shPassesToChildren(key)) {
+				expect(run.status, `stdout:\n${run.stdout}\nstderr:\n${run.stderr}`).toBe(0);
+				expect(run.stdout).toContain("All npm scopes are hardened");
+				return;
+			}
 
 			expect(
 				run.status,
