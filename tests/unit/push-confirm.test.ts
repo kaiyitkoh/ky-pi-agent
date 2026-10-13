@@ -291,6 +291,50 @@ describe("tool_call hook: ask confirms in the TUI and RPC only, and the wrapper 
 	}, 30_000);
 });
 
+describe("tool_call hook: a write to extension code asks in the TUI and RPC and is refused elsewhere", () => {
+	function load(): { hook: (event: unknown, ctx: ExtensionContext) => Promise<{ block?: boolean; reason?: string } | undefined>; write: ToolDefinition<never, unknown> } {
+		const handlers = new Map<string, unknown>();
+		const tools = new Map<string, ToolDefinition<never, unknown>>();
+		safety({
+			on: (event: string, handler: unknown) => handlers.set(event, handler),
+			registerTool: (tool: ToolDefinition<never, unknown>) => tools.set(tool.name, tool),
+		} as unknown as ExtensionAPI);
+		return { hook: handlers.get("tool_call") as never, write: tools.get("write") as ToolDefinition<never, unknown> };
+	}
+
+	const ctxOf = (cwd: string, hasUI: boolean, mode: string, confirm: (title: string, message: string) => Promise<boolean>): ExtensionContext =>
+		({ cwd, hasUI, mode, ui: { confirm } }) as unknown as ExtensionContext;
+	const input = { path: ".pi/extensions/safety/policy.ts", content: "export {};" };
+
+	it("json, print and a missing UI refuse without prompting", async () => {
+		const { hook } = load();
+		await withTempLogCwd(async (cwd) => {
+			let asked = 0;
+			for (const [hasUI, mode] of [[false, "json"], [true, "json"], [true, "print"], [false, "rpc"]] as const) {
+				const result = await hook({ toolName: "write", input, toolCallId: `tc-${mode}-${hasUI}` }, ctxOf(cwd, hasUI, mode, async () => (asked++, true)));
+				expect(result?.block, `${mode} hasUI=${hasUI} must refuse`).toBe(true);
+			}
+			expect(asked).toBe(0);
+		});
+	});
+
+	it("the TUI asks under the extension-code title; a decline refuses; an approval passes the wrapper once", async () => {
+		const { hook, write } = load();
+		await withTempLogCwd(async (cwd) => {
+			const declined = await hook({ toolName: "write", input, toolCallId: "tc-no" }, ctxOf(cwd, true, "tui", async () => false));
+			expect(declined?.block).toBe(true);
+			let title = "";
+			const ctx = ctxOf(cwd, true, "rpc", async (t) => ((title = t), true));
+			expect(await hook({ toolName: "write", input, toolCallId: "tc-yes" }, ctx)).toBeUndefined();
+			expect(title).toBe("Allow this change to extension code?");
+			const execute = (write as unknown as { execute: (...a: unknown[]) => Promise<unknown> }).execute;
+			const outcome = (id: string): Promise<string> => execute(id, input, undefined, undefined, ctx).then(() => "", (err: unknown) => String(err));
+			expect(await outcome("tc-yes")).toBe("");
+			expect(await outcome("tc-again"), "the grant is one-shot").toContain("extension code");
+		});
+	}, 30_000);
+});
+
 describe("against a real repository, config git itself would follow is never shown as a feature branch", () => {
 	const realFacts = (cwd: string): PolicyFacts => ({
 		cwd,

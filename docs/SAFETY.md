@@ -152,6 +152,15 @@ docstring for the structural argument). Concretely, it catches:
   regardless of project-root containment, because a later, entirely benign
   command is what actually executes the payload.
 - **Writes outside the project root** — blocked by default.
+- **Extension code asks** — a write (tool or bash) inside the project's
+  `.pi/extensions/**` or `.pi/npm/**`, or, when the project is `$HOME`,
+  `~/.pi/agent/extensions/**` (the user-scope safety stub and
+  `subagent/config.json`), `~/.pi/agent/npm/**` and `~/.pi/agent/models.json`,
+  runs in-process at the next start or `/reload`, the guard itself included.
+  It is put to the human with `ctx.ui.confirm` ("Allow this change to
+  extension code?") in the TUI and RPC, like a feature-branch push, and is
+  refused in json, print and subagent children. Outside the project these
+  paths block like any other out-of-project write.
 - **Bash writes** go through the same write classifier, in the session
   directory and the `cd` target: output redirects (`>`, `>>`, `>|`, `&>`,
   `<>`, `>&file`), and the write operands of `tee`, `cp`/`mv`/`install`/`ln`

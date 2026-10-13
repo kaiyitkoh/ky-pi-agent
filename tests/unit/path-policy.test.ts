@@ -505,3 +505,23 @@ describe("classifyReadGlob", () => {
 		expect(glob("README.md")).toBe("allow");
 	});
 });
+
+describe("classifyPathWrite asks for extension code instead of allowing it", () => {
+	const facts: PathPolicyFacts = { projectRoot: "C:/repo", home: "C:/Users/tester" };
+	it.each([
+		["C:/repo/.pi/extensions/safety/index.ts", "ask"],
+		["C:/repo/.pi/extensions/new/index.ts", "ask"],
+		["C:/repo/.pi/npm/node_modules/x/index.js", "ask"],
+		["C:/repo/.pi/prompts/x.md", "allow"],
+		["C:/repo/src/extensions/x.ts", "allow"],
+		["C:/Users/tester/.pi/agent/extensions/ky-safety/index.ts", "block"],
+	])("%s -> %s", (path, expected) => {
+		expect(classifyPathWrite(path, facts).kind).toBe(expected);
+	});
+
+	it("asks under home only when the project is home", () => {
+		const home: PathPolicyFacts = { projectRoot: "C:/Users/tester", home: "C:/Users/tester" };
+		expect(classifyPathWrite("C:/Users/tester/.pi/agent/extensions/subagent/config.json", home).kind).toBe("ask");
+		expect(classifyPathWrite("C:/Users/tester/.pi/agent/models.json", home).kind).toBe("ask");
+	});
+});

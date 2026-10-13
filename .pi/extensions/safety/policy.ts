@@ -14,12 +14,13 @@ import type { InfraVerdict } from "./infra.ts";
 import { classifyInfraInvocation } from "./infra.ts";
 
 /**
- * `confirm` goes through the approve-tool protocol; `ask` (a feature-branch push) is put to the human directly by the hook.
- * Both carry the requestKey a grant is keyed on; protected-branch writes and sensitive reads never ask because approval cannot undo them.
+ * `confirm` goes through the approve-tool protocol; `ask` (a feature-branch push, an extension-code write) is put to the human
+ * directly by the hook under `title`. Both carry the requestKey a grant is keyed on; protected-branch writes and sensitive reads
+ * never ask because approval cannot undo them.
  */
 export type Verdict =
 	| { readonly kind: "allow" }
-	| { readonly kind: "ask"; readonly reason: string; readonly requestKey: string; readonly prompt: string }
+	| { readonly kind: "ask"; readonly reason: string; readonly requestKey: string; readonly prompt: string; readonly title: string }
 	| { readonly kind: "confirm"; readonly reason: string; readonly requestKey: string }
 	| { readonly kind: "block"; readonly reason: string };
 
@@ -48,10 +49,10 @@ const VERDICT_RANK: Record<Verdict["kind"], number> = { allow: 0, ask: 1, confir
 function strongerOf(a: Verdict, b: Verdict): Verdict {
 	const kinds = new Set([a.kind, b.kind]);
 	if (kinds.has("ask") && kinds.has("confirm")) {
-		return { kind: "block", reason: "a git push that needs confirmation is combined with a command that needs approval -- run them separately" };
+		return { kind: "block", reason: "an action that needs confirmation is combined with a command that needs approval -- run them separately" };
 	}
 	if (a.kind === "ask" && b.kind === "ask") {
-		return { kind: "block", reason: `two git pushes in one command cannot share one confirmation -- run them separately (${a.reason}; ${b.reason})` };
+		return { kind: "block", reason: `two actions in one command cannot share one confirmation -- run them separately (${a.reason}; ${b.reason})` };
 	}
 	return VERDICT_RANK[b.kind] > VERDICT_RANK[a.kind] ? b : a;
 }
@@ -106,7 +107,9 @@ const CWD_INDEPENDENT = /^(([A-Za-z]:)?[/\\]|~([/\\]|$)|\$\{?HOME\}?([/\\]|$))/;
 function fromGitVerdict(verdict: GitVerdict, requestKey: string): Verdict {
 	// No approval path for a git/glab block.
 	// The resolved destination is part of the key, so a grant never covers a push that now resolves elsewhere.
-	if (verdict.kind === "ask") return { kind: "ask", reason: verdict.reason, requestKey: `${requestKey}::${verdict.prompt}`, prompt: verdict.prompt };
+	if (verdict.kind === "ask") {
+		return { kind: "ask", reason: verdict.reason, requestKey: `${requestKey}::${verdict.prompt}`, prompt: verdict.prompt, title: "Allow this git push?" };
+	}
 	return verdict.kind === "allow" ? { kind: "allow" } : { kind: "block", reason: verdict.reason };
 }
 
@@ -249,7 +252,7 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 
 	strongest = strongerOf(strongest, fromInfraVerdict(classifyInfraInvocation(invocation), requestKey));
 
-	return strongerOf(strongest, classifyInvocationPaths(invocation, executable, facts));
+	return strongerOf(strongest, classifyInvocationPaths(invocation, executable, facts, requestKey));
 }
 
 const sensitiveRootReason = (canonicalPath: string): string =>
@@ -280,7 +283,7 @@ function recursiveRoots(executable: string, args: readonly string[]): string[] {
 }
 
 /** Every path an invocation names, read-classified in the session cwd and in the directory its `cd`s lead to (a subshell `cd` does not persist). */
-function classifyInvocationPaths(invocation: CanonicalInvocation, executable: string, facts: PolicyFacts): Verdict {
+function classifyInvocationPaths(invocation: CanonicalInvocation, executable: string, facts: PolicyFacts, requestKey: string): Verdict {
 	const relative = [...invocation.args.filter((a) => !a.startsWith("-")), ...(invocation.redirectReads ?? []), ...(invocation.redirectWrites ?? [])];
 	if (invocation.afterCd === "unknown" && executable !== "git" && executable !== "glab" && relative.some((a) => !CWD_INDEPENDENT.test(a))) {
 		return { kind: "block", reason: `"${invocation.rawSegment}" names a relative path after a cd/pushd/popd whose target is not a literal directory -- use an absolute path` };
@@ -305,23 +308,38 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 			if (isSensitiveSearchRoot(canonical, pathFacts)) return { kind: "block", reason: sensitiveRootReason(canonical) };
 		}
 	}
-	return classifyShellWrites([...writeOperands(invocation), ...(invocation.redirectWrites ?? [])], dirs, facts);
+	return classifyShellWrites([...writeOperands(invocation), ...(invocation.redirectWrites ?? [])], dirs, facts, requestKey);
 }
 
 const DEVICE_FILE = /^\/dev\/(null|stdout|stderr|tty|fd\/\d+)$/i;
 
+const EXTENSION_CODE_TITLE = "Allow this change to extension code?";
+
+/** An extension-code write asks; the canonical paths are the prompt and part of the key, so a grant covers only these files. */
+function askForPaths(reasons: readonly string[], paths: readonly string[], requestKey: string): Verdict {
+	if (paths.length === 0) return { kind: "allow" };
+	const prompt = `Path: ${[...new Set(paths)].join(", ")}`;
+	return { kind: "ask", reason: reasons.join("; "), requestKey: `${requestKey}::${prompt}`, prompt, title: EXTENSION_CODE_TITLE };
+}
+
 /** Bash writes go through the write tool's classifier in every candidate directory; device files, `/tmp` and the temp dir are scratch. */
-function classifyShellWrites(targets: readonly string[], dirs: Iterable<string>, facts: PolicyFacts): Verdict {
+function classifyShellWrites(targets: readonly string[], dirs: Iterable<string>, facts: PolicyFacts, requestKey: string): Verdict {
 	const scratch = ["/tmp", ...(facts.tempDir !== undefined ? [facts.tempDir] : [])];
+	const askReasons: string[] = [];
+	const askPaths: string[] = [];
 	for (const cwd of dirs) {
 		for (const target of targets) {
 			const canonical = canonicalOf(target, facts, cwd);
 			if (DEVICE_FILE.test(canonical)) continue;
 			const verdict = classifyPathWrite(canonical, pathFactsOf(facts), scratch);
 			if (verdict.kind === "block") return { kind: "block", reason: `bash write: ${verdict.reason}` };
+			if (verdict.kind === "ask") {
+				askReasons.push(verdict.reason);
+				askPaths.push(canonical);
+			}
 		}
 	}
-	return { kind: "allow" };
+	return askForPaths(askReasons, askPaths, requestKey);
 }
 
 /** canonicalise() refusal blocks first; then each invocation is classified and the strongest verdict wins, so one blocked segment blocks the whole command. */
@@ -346,7 +364,7 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	}
 	// A compound statement's redirect may run in any directory its commands reach.
 	const dirs = new Set([facts.cwd, ...shellVerdict.invocations.map((inv) => invocationDir(inv, facts))]);
-	strongest = strongerOf(strongest, classifyShellWrites(shellVerdict.redirectWriteTargets, dirs, facts));
+	strongest = strongerOf(strongest, classifyShellWrites(shellVerdict.redirectWriteTargets, dirs, facts, requestKey));
 	for (const cwd of dirs) {
 		for (const target of shellVerdict.redirectReadTargets) {
 			const verdict = classifyPathRead(canonicalOf(target, facts, cwd), pathFactsOf(facts));
@@ -364,11 +382,13 @@ function evaluateRead(input: unknown, facts: PolicyFacts): Verdict {
 }
 
 /** Shared by write and edit: both take { path } and are governed by classifyPathWrite. */
-function evaluateWrite(input: unknown, facts: PolicyFacts): Verdict {
+function evaluateWrite(toolName: string, input: unknown, facts: PolicyFacts): Verdict {
 	const pathField = extractStringField(input, "path");
 	if (pathField.kind === "missing") return { kind: "block", reason: `write/edit input is malformed: ${pathField.reason}` };
-	const verdict = classifyPathWrite(canonicalOf(pathField.value, facts), pathFactsOf(facts));
-	return verdict.kind === "block" ? { kind: "block", reason: verdict.reason } : { kind: "allow" };
+	const canonical = canonicalOf(pathField.value, facts);
+	const verdict = classifyPathWrite(canonical, pathFactsOf(facts));
+	if (verdict.kind === "block") return { kind: "block", reason: verdict.reason };
+	return verdict.kind === "ask" ? askForPaths([verdict.reason], [canonical], computeRequestKey(toolName, { path: pathField.value }, facts.cwd)) : { kind: "allow" };
 }
 
 type OptionalFieldExtraction =
@@ -442,7 +462,7 @@ export function evaluate(toolName: string, input: unknown, facts: PolicyFacts): 
 				return evaluateRead(input, facts);
 			case "write":
 			case "edit":
-				return evaluateWrite(input, facts);
+				return evaluateWrite(toolName, input, facts);
 			case "grep":
 				return evaluateGrep(input, facts);
 			case "find":

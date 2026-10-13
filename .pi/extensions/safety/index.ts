@@ -430,7 +430,7 @@ ${input}`))) {
 				audit(toolName, command, "block", reason);
 				return { block: true, reason };
 			}
-			if (!(await askUser(ctx, "Allow this git push?", `${command}
+			if (!(await askUser(ctx, verdict.title, `${command}
 
 ${verdict.prompt}`))) {
 				const reason = `${verdict.reason} -- the user declined it`;

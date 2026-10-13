@@ -166,7 +166,10 @@ export function canonicalisePathArg(arg: PathWordArg, ctx: PathResolutionContext
 
 
 /** Discriminated verdict shape, mirroring `.pi/extensions/safety/shell.ts`'s `ShellVerdict`. */
-export type PathVerdict = { readonly kind: "allow" } | { readonly kind: "block"; readonly reason: string };
+export type PathVerdict =
+	| { readonly kind: "allow" }
+	| { readonly kind: "block"; readonly reason: string }
+	| { readonly kind: "ask"; readonly reason: string };
 
 /** Facts a policy never derives itself; `projectRoot` and `kubeconfigEnv` must already be canonical (only segment-compared). */
 export interface PathPolicyFacts {
@@ -444,6 +447,19 @@ export const DETONATION_TARGETS: readonly PathPattern[] = [
 	},
 ];
 
+/** Extension code Pi runs in-process at the next start or `/reload`, the guard included: a write needs a human confirm. */
+export const GUARD_CODE_TARGETS: readonly PathPattern[] = [
+	{
+		id: "extension-code",
+		match: (path, facts) => {
+			const roots = [projectPath(facts, ".pi", "extensions"), projectPath(facts, ".pi", "npm")];
+			roots.push(homePath(facts, ".pi", "agent", "extensions"), homePath(facts, ".pi", "agent", "npm"));
+			return roots.some((root) => isWithinRoot(path, root)) || sameCanonicalPath(path, homePath(facts, ".pi", "agent", "models.json"));
+		},
+		reason: (path) => `"${path}" is extension code or provider config that Pi loads with full permissions, the safety guard included`,
+	},
+];
+
 /** Block the sensitive read classes; allow their benign neighbours (`.env.example`, `src/config.ts`). `ignore` names pattern ids to skip. */
 export function classifyPathRead(canonicalPath: string, facts: PathPolicyFacts, ignore: readonly string[] = []): PathVerdict {
 	const target = stripStreamSuffix(canonicalPath);
@@ -563,7 +579,7 @@ export function isSensitiveSearchRoot(canonicalPath: string, facts: PathPolicyFa
 	return isWithinRoot(facts.home, canonicalPath);
 }
 
-/** Detonation targets block regardless of project containment, then writes outside the project and the caller's explicit `scratchRoots` block. */
+/** Detonation targets block regardless of project containment, then writes outside the project and the caller's explicit `scratchRoots` block; extension code asks. */
 export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFacts, scratchRoots: readonly string[] = []): PathVerdict {
 	const canonicalPath = stripStreamSuffix(rawCanonicalPath);
 	for (const target of DETONATION_TARGETS) {
@@ -581,5 +597,6 @@ export function classifyPathWrite(rawCanonicalPath: string, facts: PathPolicyFac
 			reason: `"${canonicalPath}" resolves outside the project root "${facts.projectRoot}"`,
 		};
 	}
-	return { kind: "allow" };
+	const guardCode = GUARD_CODE_TARGETS.find((target) => target.match(canonicalPath, facts));
+	return guardCode !== undefined ? { kind: "ask", reason: guardCode.reason(canonicalPath) } : { kind: "allow" };
 }
