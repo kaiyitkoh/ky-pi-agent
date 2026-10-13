@@ -395,7 +395,8 @@ plainly what a passing check does not cover:
 - **The production runner never names `npx`.** `npx` is `npx.cmd` on Windows and
   unspawnable without a shell; elsewhere an unpinned `npx <pkg>` downloads from
   the registry. `productionExec` resolves `node_modules/.bin/<name>` (walking up
-  ancestors), refuses a `%` in the command line on Windows, and degrades to
+  ancestors to the git top level, never past it, so a binary outside the
+  trusted project is never run), refuses a `%` in the command line on Windows, and degrades to
   `unavailable` for a foreign `cwd` or an untrusted project.
 - **Chokepoint hygiene.** `gates.ts` never reaches a model and never spells the
   bypass routes or the tool-registration call, even in comments; the raw-source

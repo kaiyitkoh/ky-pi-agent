@@ -29,18 +29,12 @@ export function registeredToolNames(): readonly string[] {
 
 /**
  * The local binary, resolved per platform and never `npx` (unpinned download; `npx.cmd` is unspawnable on Windows).
- * Walks up through ancestors because `cwd` is often a subdirectory; `undefined` once the root is reached.
+ * Walks up from a subdirectory `cwd`, but never past the git top level: a binary above the trusted project is not its own.
  */
 function localBin(cwd: string, name: string): string | undefined {
-	const suffix = process.platform === "win32" ? ".cmd" : "";
-	let dir = resolve(cwd);
-	for (;;) {
-		const candidate = join(dir, "node_modules", ".bin", `${name}${suffix}`);
-		if (existsSync(candidate)) return candidate;
-		const parent = dirname(dir);
-		if (parent === dir) return undefined; // reached the filesystem root
-		dir = parent;
-	}
+	const bin = join("node_modules", ".bin", `${name}${process.platform === "win32" ? ".cmd" : ""}`);
+	const dir = findUp(cwd, [bin]);
+	return dir === undefined ? undefined : join(dir, bin);
 }
 
 /**
@@ -57,7 +51,7 @@ export const productionExec: ExecRunner = (cmd, args, cwd) => {
 	const bin = localBin(cwd, cmd);
 	if (bin === undefined) {
 		// Unavailable, naming the missing binary: never a network fetch, never a silent pass.
-		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin or any ancestor's -- the leg is unavailable, not skipped or passed`);
+		throw new Error(`${cmd} is not installed under ${cwd}/node_modules/.bin or any ancestor's up to the git top level -- the leg is unavailable, not skipped or passed`);
 	}
 	// `cmd.exe` expands `%VAR%` inside double quotes before quote processing, which `commandFor` cannot suppress.
 	// The check covers `bin` and `args`, the whole command line. Win32 only.

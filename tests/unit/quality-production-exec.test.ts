@@ -4,7 +4,9 @@
  * untrusted project or a cwd hazardous to `cmd.exe` degrades to `unavailable`, never to a false FAIL.
  * `quality-gate-order.test.ts` installs an override for the opposite reason (never reach a subprocess).
  */
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 
@@ -371,5 +373,17 @@ describe("a cwd below the git top level still gates the changed files git report
 		expect(result.antiPattern.status, result.report).toBe("fail");
 		expect(result.lint.status, result.report).toBe("pass");
 		expect(readFileSync(argsFile, "utf-8")).toContain("x.ts");
+	});
+});
+
+describe("localBin never resolves a binary above the git top level", () => {
+	it("a tsc installed in a directory that contains the repo is not used", () => {
+		const outer = mkdtempSync(join(tmpdir(), "kypi-outer-bin-"));
+		stubBin(outer, "tsc", { exitCode: 0 });
+		const repo = join(outer, "repo");
+		mkdirSync(repo);
+		expect(spawnSync("git", ["init", "-q"], { cwd: repo, shell: false }).status).toBe(0);
+		expect(() => productionExec("tsc", ["--version"], repo)).toThrowError(/not installed under .* up to the git top level/);
+		rmSync(outer, { recursive: true, force: true });
 	});
 });
