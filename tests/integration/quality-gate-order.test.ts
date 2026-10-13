@@ -126,6 +126,9 @@ function seedOffendingSource(cwd: string): void {
 		"// TODO: replace this stub before shipping\nexport const OFFENDING_MARKER = 1;\n",
 		"utf-8",
 	);
+	// Committed, because /quick refuses to gate a working tree that is not the commit.
+	runGit(["add", "--", ".pi/extensions/quality-fixture/offender.ts"], cwd);
+	runGit(["commit", "-m", "pre-existing finding"], cwd);
 }
 
 /** `ROLE_MAP.cheap.executor`'s first candidate, read out of the real table — never hardcoded. */
