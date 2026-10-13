@@ -42,10 +42,13 @@ export const HEREDOC_OPERATORS = new Set(["<<", "<<-", "<<<"]);
 /** Word-part types that mark an UNRESOLVED shell expansion (not a literal value yet). */
 const EXPANSION_PART_TYPES = new Set(["SimpleExpansion", "ParameterExpansion"]);
 
-/** Guarded executables, word-bounded so `git` does not match `digit`; shared by the command-position rule and shell-runner denial. */
-export const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl|openspec)\b/i;
+/**
+ * Guarded executables, word-bounded so `git` does not match `digit`. A word followed by a path
+ * separator is a directory (`openspec/changes`, `.git/config`), not a verb.
+ */
+export const GUARDED_VERB_PATTERN = /\b(git|glab|terraform|aws|kubectl|openspec)\b(?![/\\])/i;
 
-/** Runners that can hide a guarded verb in a script argument; denied only with {@link GUARDED_VERB_PATTERN} in the raw segment. */
+/** Runners that can hide a guarded verb in a script argument; denied only when the segment names a {@link GUARDED_VERB_PATTERN} verb. */
 export const SHELL_RUNNERS = new Set([
 	"sh",
 	"bash",
@@ -197,7 +200,7 @@ const PACKAGE_RUNNER_GRAMMAR: WrapperGrammar = {
 		"--offline",
 		"--bun",
 	]),
-	value: new Set(["-p", "--package"]),
+	value: new Set(["-p", "--package", "-w", "--workspace", "--registry"]),
 	shellString: new Set(["-c", "--call", "--shell-mode"]),
 };
 
@@ -765,10 +768,12 @@ function extractInvocations(
  * and `\git` (which bash runs as `git`) match even when nested inside a runner's script string.
  */
 function mentionsGuardedVerb(inv: CanonicalInvocation): boolean {
-	const unquotedRaw = inv.rawSegment.replace(/['"\\]/g, "");
-	return (
-		GUARDED_VERB_PATTERN.test(unquotedRaw) ||
-		[inv.executable, ...inv.args].some((word) => GUARDED_VERB_PATTERN.test(word.replace(/['"\\]/g, "")))
+	// Each text is also tested as-is, so a backslash path separator (`C:\Git\cmd\git.exe`) still bounds the verb.
+	return [inv.rawSegment, inv.executable, ...inv.args].some(
+		(text) =>
+			GUARDED_VERB_PATTERN.test(text) ||
+			GUARDED_VERB_PATTERN.test(text.replace(/['"]/g, "")) ||
+			GUARDED_VERB_PATTERN.test(text.replace(/['"\\]/g, "")),
 	);
 }
 

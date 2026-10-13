@@ -56,7 +56,7 @@ For your own terminal use you may `export OPENSPEC_TELEMETRY=0 DO_NOT_TRACK=1`. 
 
 ## Using it in a work repo
 
-In a repo where you want OpenSpec, run `openspec init --tools none`. That creates only the `openspec/` directory and no agent config. The bash safety guard (see [SAFETY.md](SAFETY.md)) allows the read-only verbs and `archive`, and asks for confirmation on `init`, `update`, `completion`, `feedback`, config mutations and `context --code-workspace`. The same applies through wrappers (`env A=1`, `timeout`) and package runners (`npx`, `bunx`, `pnpm dlx`). `openspec` handed to a shell runner (`sh -c`, `xargs`, `node .../openspec.js`) is refused outright, which also refuses an agent running `sh scripts/openspec-setup.sh`. A bare package-manager script (`yarn openspec update`) is not caught; SAFETY.md lists it as EV-94.
+In a repo where you want OpenSpec, run `openspec init --tools none`. That creates only the `openspec/` directory and no agent config. The bash safety guard (see [SAFETY.md](SAFETY.md)) allows the read-only verbs and `archive`, and asks for confirmation on `init`, `update`, `completion`, `feedback`, config mutations and `context --code-workspace`. The same applies through wrappers (`env A=1`, `timeout`) and package runners (`npx`, `bunx`, `pnpm dlx`). `openspec` handed to a shell runner (`sh -c`, `xargs`, `node .../openspec.js`) is refused outright, which also refuses an agent running `sh scripts/openspec-setup.sh`. Paths under `openspec/` handed to a runner (`xargs cat openspec/changes/...`) are not refused. A bare package-manager script (`yarn openspec update`) is not caught; SAFETY.md lists it as EV-94.
 
 ## Upgrade
 

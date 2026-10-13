@@ -530,6 +530,25 @@ const SHELL_RUNNER_TABLE: readonly ShellRunnerRow[] = [
 		why: "another POSIX shell",
 	},
 	{
+		label: "cmd //c running git.exe by a Windows backslash path",
+		cmd: 'cmd //c "C:\\Git\\cmd\\git.exe push origin main"',
+		expected: "refused",
+		cause: "shell-runner",
+		why: "a backslash is a path separator here, so `git.exe` after it is still the guarded verb",
+	},
+	{
+		label: "xargs over paths under the openspec/ directory",
+		cmd: "ls openspec/changes | xargs -I{} cat openspec/changes/{}/proposal.md",
+		expected: "ok",
+		why: "`openspec/` is the workspace directory; a guarded word followed by a path separator is not a verb",
+	},
+	{
+		label: "python over a path under openspec/",
+		cmd: "python3 tools/lint.py openspec/specs",
+		expected: "ok",
+		why: "same as the xargs row for an interpreter",
+	},
+	{
 		label: "cmd //c with NO guarded verb (negative control)",
 		cmd: "cmd //c dir",
 		expected: "ok",
@@ -598,6 +617,8 @@ describe("SAFE-02 -- SHELL_RUNNERS / GUARDED_VERB_PATTERN are exported and consi
 		for (const verb of ["git", "glab", "terraform", "aws", "kubectl", "openspec"]) {
 			expect(GUARDED_VERB_PATTERN.test(`sh -c "${verb} status"`), `${verb} must be recognised as a guarded verb`).toBe(true);
 		}
+		expect(GUARDED_VERB_PATTERN.test("cat openspec/changes/x.md"), "a guarded word followed by a path separator is a directory").toBe(false);
+		expect(GUARDED_VERB_PATTERN.test("node /x/openspec/bin/openspec.js"), "the file name still names the verb").toBe(true);
 		expect(GUARDED_VERB_PATTERN.test("sh -c \"digit status\""), "must not match 'git' as a substring of another word").toBe(
 			false,
 		);

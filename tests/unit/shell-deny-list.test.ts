@@ -217,6 +217,12 @@ const TABLE: readonly DenyRow[] = [
 		why: "busybox resolves to ash, which is a shell runner",
 	},
 	{
+		label: "npx -w with a path that merely contains a guarded word",
+		cmd: "npx -w packages/app vitest run tests/git-policy.test.ts",
+		expected: "ok",
+		why: "-w takes a value, so the resolution is confident and the path's `git` does not trigger the unresolved-wrapper refusal",
+	},
+	{
 		label: "find without an -exec primary",
 		cmd: "find . -name git",
 		expected: "ok",
