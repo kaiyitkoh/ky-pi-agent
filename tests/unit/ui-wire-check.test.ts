@@ -103,6 +103,16 @@ describe("analyseWire", () => {
 		expect(w.missing).toBe(2);
 		expect(w.hashes).toEqual([]);
 	});
+	it("flags a tool list truncated by redaction", () => {
+		const w = analyseWire([req("s1", "a", undefined, "[redacted:truncated]"), req("s1", "a", undefined, "[redacted:truncated]")], { probes: [] });
+		expect(w.truncated).toBe(true);
+		expect(w.missing).toBe(0);
+	});
+	it("finds a probe containing a quote or backslash in a tool description", () => {
+		const probe = 'C:\\ky\\"x"';
+		const w = analyseWire([req("s1", "a", undefined, tool(`at ${probe}`))], { probes: [probe] });
+		expect(w.probeHits).toEqual([{ probe, request: 1 }]);
+	});
 	it("counts requests with no system text as missing", () => {
 		const noSystem = JSON.stringify({ kind: "main.request", sessionId: "s1", payload: { messages: [{ role: "user", content: "u" }] } });
 		const w = analyseWire([noSystem, noSystem], { probes: ["u"] });
@@ -176,6 +186,12 @@ describe("verdict", () => {
 	it("fails on a changed system prompt even without any turn ratio", () => {
 		const w = analyseWire([req("s1", "a"), req("s1", "b")], { probes: [] });
 		expect(verdict(w, [], 0.5).status).toBe("FAIL");
+	});
+	it("passes with the best-effort caveat when redaction truncated the tool list", () => {
+		const w = analyseWire([req("s1", "a", undefined, "[redacted:truncated]"), req("s1", "a", undefined, "[redacted:truncated]")], { probes: [] });
+		const v = verdict(w, [{ corr: "c", ratio: 0.9 }], 0.5);
+		expect(v.status).toBe("PASS");
+		expect(v.reasons.join(" ")).toContain("tool list truncated by redaction");
 	});
 	it("is insufficient with no turn-2 ratio", () => {
 		expect(verdict(good, [], 0.5).status).toBe("INSUFFICIENT");

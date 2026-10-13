@@ -101,6 +101,8 @@ export function analyseWire(
 	const sessionId = opts.sessionId ?? (typeof lastRec?.sessionId === "string" ? lastRec.sessionId : undefined);
 	const mine = records.filter((r) => r.sessionId === sessionId).slice(-(opts.last ?? 10));
 	const probes = opts.probes.filter((p) => p.length > 0);
+	// Tool text is JSON, so a probe with a quote or backslash only appears there in escaped form.
+	const escaped = (p: string) => JSON.stringify(p).slice(1, -1);
 
 	const hashes: string[] = [];
 	const toolHashes: string[] = [];
@@ -117,10 +119,13 @@ export function analyseWire(
 			return;
 		}
 		const tools = extractToolText(rec.payload);
+		if (tools.includes(TRUNCATED_MARKER)) {
+			truncated = true;
+		}
 		hashes.push(sha256(text));
 		toolHashes.push(sha256(tools));
 		for (const probe of probes) {
-			if (text.includes(probe) || tools.includes(probe)) {
+			if (text.includes(probe) || tools.includes(probe) || tools.includes(escaped(probe))) {
 				probeHits.push({ probe, request: i + 1 });
 			}
 		}
@@ -184,7 +189,7 @@ export function verdict(
 	}
 	const failed = reasons.length > 0;
 	if (wire.truncated) {
-		reasons.push("system text truncated by redaction; hash comparison is best-effort");
+		reasons.push("system text or tool list truncated by redaction; hash comparison is best-effort");
 	}
 	if (failed) {
 		return { status: "FAIL", reasons };
