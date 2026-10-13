@@ -213,7 +213,19 @@ docstring for the structural argument). Concretely, it catches:
   directory and the `cd` target: output redirects (`>`, `>>`, `>|`, `&>`,
   `<>`, `>&file`), and the write operands of `tee`, `cp`/`mv`/`install`/`ln`
   (the destination, or `-t DIR`), `dd of=`, `sed -i`, `rm`, `rmdir`, `touch`,
-  `truncate`, `shred`, `curl -o` and `wget -O`. Bash alone may also write
+  `truncate`, `shred`, `perl -i`, `curl -o` and `wget -O`, and the paths
+  `git checkout`, `git restore`, `git rm` and `git mv` rewrite (so
+  `git restore --source=HEAD~3 .pi/extensions/safety` asks and
+  `git checkout feat -- .gitlab-ci.yml` blocks). `git apply` (not
+  `--check`/`--stat`/`--numstat`), `git am`, a `--pathspec-from-file`, and a
+  writer run by `xargs` or `find -exec` on its input names
+  (`xargs sed -i ...`, `find ... -exec rm {} +`) name their files where the
+  guard cannot see them, so they need confirmation. An interpreter
+  one-liner (`python -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`) whose
+  code opens a file, writes, imports a module by name or starts a process
+  (`open(`, `fs.`, `require(` other than a `.json` file, `subprocess`,
+  `child_process`, `system`, `exec`, backticks, ...) is refused (cause
+  `inline-code-effect`); pure prints stay allowed. Bash alone may also write
   device files (`/dev/null`, `/dev/stdout`, `/dev/stderr`, `/dev/tty`,
   `/dev/fd/N`), `/tmp` and the OS temp directory. A file written by any other
   program (a build script, `npm install`) is not classified.

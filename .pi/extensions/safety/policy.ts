@@ -4,7 +4,7 @@
  * Pure: no ctx, process.env, node:fs or default export; the one impure fact (current branch) arrives via PolicyFacts.
  */
 import type { CanonicalInvocation } from "./shell.ts";
-import { canonicalise, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable, writeOperands } from "./shell.ts";
+import { canonicalise, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable, wrappedCommands, writeOperands } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
 import { canonicalisePathArg, classifyPathRead, classifyPathWrite, classifyReadGlob, isSensitiveSearchRoot } from "./paths.ts";
 import type { PathVerdict } from "./paths.ts";
@@ -280,7 +280,11 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 				invocation.afterCd === undefined &&
 				!invocation.args.some((a) => GIT_REPO_REDIRECT_OPTIONS.test(a)),
 		};
-		strongest = strongerOf(strongest, fromGitVerdict(classifyGitInvocation(toGitInvocation(invocation), gitFacts), requestKey));
+		const parsed = toGitInvocation(invocation);
+		strongest = strongerOf(strongest, fromGitVerdict(classifyGitInvocation(parsed, gitFacts), requestKey));
+		if (gitPathWrites(parsed) === "unnamed") {
+			strongest = strongerOf(strongest, { kind: "confirm", reason: `"${invocation.rawSegment}" rewrites files a patch names, which the guard cannot see`, requestKey });
+		}
 	} else if (executable === "glab") {
 		// glab needs protectedBranches for its mr create rule, not currentBranch.
 		strongest = strongerOf(
@@ -289,6 +293,16 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 		);
 	}
 
+	for (const wrapped of wrappedCommands(invocation) ?? []) {
+		const inner: CanonicalInvocation = { ...invocation, executable: wrapped.executable, args: wrapped.args, redirectReads: undefined, redirectWrites: undefined };
+		strongest = strongerOf(strongest, evaluateInvocation(inner, facts, requestKey, false, switched));
+		// The input names land on `{}`, or are appended; a write operand carrying the placeholder is a file the guard cannot name.
+		const pasted = wrapped.args.some((a) => a.includes("{}"));
+		const probe = pasted ? wrapped.args.map((a) => a.replaceAll("{}", INPUT_NAME)) : [...wrapped.args, INPUT_NAME, INPUT_NAME];
+		if (writeOperands({ executable: wrapped.executable, args: probe }).some((o) => o.includes(INPUT_NAME))) {
+			strongest = strongerOf(strongest, { kind: "confirm", reason: `"${invocation.rawSegment}" writes or deletes files named by its input, which the guard cannot see`, requestKey });
+		}
+	}
 	strongest = strongerOf(strongest, fromInfraVerdict(classifyInfraInvocation(invocation), requestKey));
 	const dump = environmentDump(invocation);
 	if (dump !== undefined) return { kind: "block", reason: `"${invocation.rawSegment}" ${dump}; approving cannot take a secret back out of the context` };
@@ -343,6 +357,8 @@ function patternOperands(executable: string, args: readonly string[]): Set<numbe
 	return new Set(at === -1 ? [] : [at]);
 }
 
+const INPUT_NAME = "\u0000input";
+
 const PATH_SHAPED = /[./\\*?[~]/;
 const SECRET_BARE_NAME = /^(id_\w+|credentials|config|known_hosts|authorized_keys|environ|netrc|npmrc)$/i;
 
@@ -378,7 +394,22 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 			if (isSensitiveSearchRoot(canonical, pathFacts)) return { kind: "block", reason: sensitiveRootReason(canonical) };
 		}
 	}
-	return classifyShellWrites([...writeOperands(invocation), ...(invocation.redirectWrites ?? [])], dirs, facts, requestKey);
+	const gitWrites = executable === "git" ? gitPathWrites(toGitInvocation(invocation)) : [];
+	const writes = [...writeOperands(invocation), ...(Array.isArray(gitWrites) ? gitWrites : []), ...(invocation.redirectWrites ?? [])];
+	return classifyShellWrites(writes, dirs, facts, requestKey);
+}
+
+const GIT_PATH_VALUE_OPTIONS = new Set(["-s", "--source", "-b", "-B", "--orphan", "-m", "--conflict"]);
+
+/** Working-tree paths a git subcommand rewrites, or `"unnamed"` when a patch or a pathspec file names them instead. */
+function gitPathWrites(git: GitInvocation): string[] | "unnamed" {
+	const { subcommand, args } = git;
+	if (subcommand === "am" || (subcommand === "apply" && !args.some((a) => a === "--check" || a === "--stat" || a === "--numstat"))) return "unnamed";
+	if (!["checkout", "restore", "rm", "mv"].includes(subcommand)) return [];
+	if (args.some((a) => a.startsWith("--pathspec-from-file"))) return "unnamed";
+	const dashes = args.indexOf("--");
+	const named = dashes === -1 ? args : args.slice(0, dashes);
+	return [...named.filter((a, i) => !a.startsWith("-") && !GIT_PATH_VALUE_OPTIONS.has(named[i - 1] ?? "")), ...(dashes === -1 ? [] : args.slice(dashes + 1))];
 }
 
 const DEVICE_FILE = /^\/dev\/(null|stdout|stderr|tty|fd\/\d+)$/i;

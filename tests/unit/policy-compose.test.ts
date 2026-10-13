@@ -675,6 +675,19 @@ const ROWS: readonly Row[] = [
 	{ name: "checkout @{-1}, then commit -- block, the previous branch is unknown", toolName: "bash", input: { command: "git checkout @{-1} && git commit -am x" }, expected: "block" },
 	{ name: "worktree add of main, then a commit there -- block", toolName: "bash", input: { command: "git worktree add ../wt main && cd ../wt && git commit -am x" }, expected: "block" },
 	{ name: "checkout -t of a feature branch, then commit -- allow", toolName: "bash", input: { command: "git checkout -t origin/feat2 && git commit -am x" }, expected: "allow" },
+	{ name: "git checkout of an old CI file -- block, a detonation target", toolName: "bash", input: { command: "git checkout feat -- .gitlab-ci.yml" }, expected: "block" },
+	{ name: "git restore of guard code from an old revision -- ask", toolName: "bash", input: { command: "git restore --source=HEAD~3 .pi/extensions/safety" }, expected: "ask" },
+	{ name: "git checkout of guard code from an old revision without -- -- ask", toolName: "bash", input: { command: "git checkout HEAD~3 .pi/extensions/safety" }, expected: "ask" },
+	{ name: "git rm of guard code -- ask", toolName: "bash", input: { command: "git rm .pi/extensions/safety/shell.ts" }, expected: "ask" },
+	{ name: "git apply on a feature branch -- confirm, the patch names its own paths", toolName: "bash", input: { command: "git apply x.patch" }, expected: "confirm" },
+	{ name: "git am on a feature branch -- confirm", toolName: "bash", input: { command: "git am x.mbox" }, expected: "confirm" },
+	{ name: "xargs sed -i -- confirm, the files come from the pipe", toolName: "bash", input: { command: "rg -l TODO | xargs sed -i 's/TODO/DONE/'" }, expected: "confirm" },
+	{ name: "find -exec rm -- confirm", toolName: "bash", input: { command: "find . -name '*.pyc' -exec rm {} +" }, expected: "confirm" },
+	{ name: "perl -pi -e on a git hook -- block, -i writes the files", toolName: "bash", input: { command: "perl -pi -e 's/a/b/' .git/hooks/pre-commit" }, expected: "block" },
+	{ name: "git restore of a source file -- allow", toolName: "bash", input: { command: "git restore src/x.ts" }, expected: "allow" },
+	{ name: "git checkout -- a source file -- allow", toolName: "bash", input: { command: "git checkout -- src/x.ts" }, expected: "allow" },
+	{ name: "git apply --check -- allow, a dry run", toolName: "bash", input: { command: "git apply --check x.patch" }, expected: "allow" },
+	{ name: "xargs grep -- allow, no writer", toolName: "bash", input: { command: "rg -l TODO | xargs grep -n FIXME" }, expected: "allow" },
 ];
 
 describe("SAFE-03/SAFE-10 -- policy-compose.test.ts: table is non-empty (vacuous-pass guard)", () => {

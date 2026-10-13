@@ -57,6 +57,7 @@ export const SHELL_REFUSAL_CAUSES = [
 	"shell-runner",
 	"generated-script",
 	"command-string-program",
+	"inline-code-effect",
 	"unresolved-wrapper",
 	"parse-error",
 ] as const;
@@ -351,6 +352,8 @@ const CAUSE_DETAIL: Record<ShellRefusalCause, (command: string) => string> = {
 		`"${c}" gives a code runner its input through a pipe or a stdin alias, or runs a file the same command writes, so the guard never sees the code; pass input as a file argument or through jq, and write a script in one command and run it in another`,
 	"command-string-program": (c) =>
 		`"${c}" runs a program that takes a command string from its own arguments (awk system() or a pipe, sed e or w /dev/, tar --to-command or -I, rsync -e, bat --pager, make --eval or -f -, sort --compress-program) or an interactive pager or editor`,
+	"inline-code-effect": (c) =>
+		`"${c}" runs interpreter one-liner code that opens files, writes them or starts processes, which the guard cannot classify; read files with cat or jq and run programs directly`,
 	"unresolved-wrapper": (c) =>
 		`"${c}" puts a guarded verb, a code runner or piped input behind a wrapper word this guard cannot resolve, or runs a wrapper under xargs, find -exec or parallel, whose command then comes from the input`,
 	"parse-error": (c) => `"${c}" did not parse cleanly; this catch-all denies rather than falls through to allow`,
@@ -611,6 +614,7 @@ const WRITE_VALUE_OPTIONS: ReadonlyMap<string, ReadonlySet<string>> = new Map([
 	["truncate", wordSet("-s --size -r --reference")],
 	["touch", wordSet("-d --date -t -r --reference")],
 	["sed", wordSet("-e --expression -f --file -l --line-length")],
+	["perl", wordSet("-e -E -M -m -I")],
 	["tee", wordSet("")],
 ]);
 
@@ -633,7 +637,7 @@ const optionValue = (args: readonly string[], names: readonly string[]): string 
 	return undefined;
 };
 
-/** Files an invocation writes or deletes through its own operands (not redirects): tee, cp/mv/install/ln destinations, dd of=, sed -i, rm, touch, truncate, curl -o, wget -O. */
+/** Files an invocation writes or deletes through its own operands (not redirects): tee, cp/mv/install/ln destinations, dd of=, sed -i, perl -i, rm, touch, truncate, curl -o, wget -O. */
 export function writeOperands(inv: Pick<CanonicalInvocation, "executable" | "args">): string[] {
 	const executable = normaliseExecutable(inv.executable);
 	const args = inv.args;
@@ -661,6 +665,8 @@ export function writeOperands(inv: Pick<CanonicalInvocation, "executable" | "arg
 			const scripted = optionValue(args, ["-e", "--expression", "-f", "--file"]) !== undefined;
 			return scripted ? positionals : positionals.slice(1);
 		}
+		case "perl":
+			return args.some((a) => /^-[a-zA-Z]*i/.test(a)) ? positionals : [];
 		case "curl":
 		case "wget": {
 			const out = optionValue(args, executable === "curl" ? ["-o", "--output"] : ["-O", "--output-document"]);
@@ -869,6 +875,29 @@ const firstCommandString = (invocations: readonly CanonicalInvocation[]): string
 	return commands.map(commandStringProgram).find((why) => why !== undefined);
 };
 
+const ONE_LINER_RUNNERS = /^(python[\d.]*|py|pypy[\d.]*|node|deno|bun|perl[\d.]*|ruby[\d.]*|php[\d.]*)$/;
+
+/** Calls and modules that open files, start processes or load code by name; a match refuses the one-liner. */
+const INLINE_CODE_EFFECT = new RegExp(
+	[
+		String.raw`\b(open|exec\w*|eval|system|popen\w*|spawn\w*|fork|unlink\w*|rename\w*|remove|rmdir\w*|mkdir\w*|makedirs|write\w*|chmod\w*|symlink\w*|copy\w*|move|getattr|compile|Function|constructor|require|import_module|__import__)\s*\(`,
+		String.raw`\b(subprocess|shutil|pathlib|importlib|child_process|ctypes|socket|urllib|Open3|FileUtils|Kernel|globalThis)\b`,
+		String.raw`\b(os|fs|Deno|Bun|File|IO|Dir)\.|process\.binding|__\w+__|\bimport\s*\(|` + "`" + String.raw`|\bqx\W|%x\W`,
+	].join("|"),
+);
+
+/** Effects that only print or parse a JSON file, removed before the check. */
+const INLINE_CODE_BENIGN = /\brequire\s*\(\s*(['"])[^'"]*\.json\1\s*\)|\b(process\.|sys\.)?std(out|err)\.write\s*\(/g;
+
+/** An interpreter one-liner (`python -c`, `node -e`, `perl -e`, `ruby -e`, `php -r`) whose code may write, open or run. */
+function inlineCodeEffect(inv: Pick<CanonicalInvocation, "executable" | "args">): boolean {
+	const executable = normaliseExecutable(inv.executable);
+	const inline = INLINE_CODE_FLAGS.get(executable) ?? (/^python[\d.]*$/.test(executable) ? (a: string) => a === "-c" : undefined);
+	if (inline === undefined || !ONE_LINER_RUNNERS.test(executable)) return false;
+	const codes = inv.args.flatMap((a, i) => (inline(a) ? [inv.args[i + 1] ?? ""] : []));
+	return codes.some((code) => INLINE_CODE_EFFECT.test(code.replace(INLINE_CODE_BENIGN, "")));
+}
+
 /** Parse and fail closed on {@link SHELL_REFUSAL_CAUSES}; otherwise one canonical invocation per `Command` node. */
 export function canonicalise(command: string): ShellVerdict {
 	let script: ParsedScript;
@@ -889,6 +918,7 @@ export function canonicalise(command: string): ShellVerdict {
 	const wrappedCause = firstWrappedRefusal(invocations);
 	if (wrappedCause !== undefined) return refused(wrappedCause, command);
 	if (firstCommandString(invocations) !== undefined) return refused("command-string-program", command);
+	if (invocations.some(inlineCodeEffect)) return refused("inline-code-effect", command);
 	if (runsGeneratedScript(extracted, scan)) return refused("generated-script", command);
 	// An unresolved wrapper is refused when a guarded verb or a code runner could be behind it, or it reads a pipe; `env -x ls` stays ok.
 	const hidesRunner = (e: ExtractedInvocation): boolean =>
