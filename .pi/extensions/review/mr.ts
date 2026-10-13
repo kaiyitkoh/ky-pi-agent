@@ -166,8 +166,12 @@ export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined, timeo
  */
 export function openMr(input: MrInput, deps: OpenMrDeps): MrOutcome {
 	const outcome = attemptMr(input, deps);
-	const verdict = outcome.kind === "opened" ? "allow" : "block";
-	const reason = outcome.kind === "refused" ? outcome.reason : outcome.kind === "failed" ? `glab failed (exit ${outcome.code}): ${outcome.stderr.slice(0, 200)}` : "opened";
+	// The verdict is the classifier's: a failed or timed-out glab was allowed and ran, and the MR may exist on GitLab.
+	const verdict = outcome.kind === "refused" ? "block" : "allow";
+	const reason =
+		outcome.kind === "refused" ? outcome.reason
+		: outcome.kind === "failed" ? `allowed, but glab failed (exit ${outcome.code ?? "none"}) -- the MR may still exist: ${outcome.stderr.slice(0, 200)}`
+		: "opened";
 	writeAuditRow(deps.cwd, {
 		event: "mr_create",
 		tool: "glab",

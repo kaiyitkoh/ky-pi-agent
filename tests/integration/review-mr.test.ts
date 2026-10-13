@@ -264,7 +264,7 @@ describe("stubbed glab on PATH", () => {
 });
 
 describe("openMr audit row", () => {
-	it("writes one allow row for an opened MR, one block row for a refusal, and one block row for a failure", () => {
+	it("writes one allow row for an opened MR, one block row for a refusal, and one allow row naming the failure for a glab that ran and failed", () => {
 		const opened = scratch();
 		expect(openMr(input("staging"), { exec: recorder().exec, cwd: opened }).kind).toBe("opened");
 		expect(auditRows(opened)).toMatchObject([{ tool: "glab", verdict: "allow" }]);
@@ -278,8 +278,9 @@ describe("openMr audit row", () => {
 		expect(openMr(input("staging"), { exec, cwd: failed }).kind).toBe("failed");
 		const rows = auditRows(failed);
 		expect(rows).toHaveLength(1);
-		expect(rows[0]).toMatchObject({ verdict: "block" });
+		expect(rows[0]).toMatchObject({ verdict: "allow" });
 		expect(rows[0]?.reason).toContain("boom");
+		expect(rows[0]?.reason).toContain("may still exist");
 	});
 
 	it("never records the MR body", () => {
