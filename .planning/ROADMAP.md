@@ -675,7 +675,7 @@ Phase 4 (Safety) has no dependency on Phase 3 (Providers) or Phase 5 (Routing) a
 | 8.2. Comment Discipline | 13/13 | Complete | 2026-10-12 |
 | 11. Terminal UI | 7/7 | Complete    | 2026-10-13 |
 | 12. OpenSpec Opt-in Skill | 4/4 | Complete — 4 live checks OUTSTANDING | 2026-10-13 |
-| 12.1. v1.0 Gap Closure | 10/10 | Complete   | 2026-10-13 |
+| 12.1. v1.0 Gap Closure | 10/10 | Complete — live checks RB-12-05..08 OUTSTANDING | 2026-10-13 |
 | 13. Orca Desktop Front-end | 0/0 | Awaiting discussion | - |
 
 ### Phase 12: OpenSpec Opt-in Skill
