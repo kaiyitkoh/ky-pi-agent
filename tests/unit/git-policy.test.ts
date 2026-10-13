@@ -70,6 +70,7 @@ const ROWS: readonly Row[] = [
 	{ command: "git reset --hard", rest: "reset --hard", kind: "git", currentBranch: "main", expected: "block", why: "moves the checked-out branch's tip" },
 	{ command: "git merge other", rest: "merge other", kind: "git", currentBranch: "main", expected: "block", why: "merges into the checked-out branch" },
 	{ command: "git cherry-pick abc123", rest: "cherry-pick abc123", kind: "git", currentBranch: "main", expected: "block", why: "writes a new commit onto the checked-out branch" },
+	{ command: "git pull", rest: "pull", kind: "git", currentBranch: "main", expected: "block", why: "merges or rebases the fetched branch into the checked-out branch; git fetch, then branch from origin/<branch>" },
 	{ command: "git revert abc123", rest: "revert abc123", kind: "git", currentBranch: "main", expected: "block", why: "writes a new commit onto the checked-out branch" },
 	{ command: "git am patch.mbox", rest: "am patch.mbox", kind: "git", currentBranch: "main", expected: "block", why: "applies patches as commits onto the checked-out branch" },
 	{ command: "git apply diff.patch", rest: "apply diff.patch", kind: "git", currentBranch: "main", expected: "block", why: "writes the tree -- not --check/--stat/--numstat" },
@@ -402,5 +403,16 @@ describe("known subcommands on a feature branch", () => {
 
 	it("still asks before a feature-branch push", () => {
 		expect(classifyGitInvocation(invocation("push origin feat:feat"), facts("feat")).kind).toBe("ask");
+	});
+});
+
+describe("git pull on a protected HEAD", () => {
+	it("blocks with a reason that names the way forward, not as an unclassified subcommand", () => {
+		const verdict = classifyGitInvocation({ subcommand: "pull", args: [] }, facts("main"));
+		expect(verdict.kind).toBe("block");
+		if (verdict.kind === "block") {
+			expect(verdict.reason).toContain("git fetch, then branch from origin/<branch>");
+			expect(verdict.reason).not.toContain("unclassified");
+		}
 	});
 });

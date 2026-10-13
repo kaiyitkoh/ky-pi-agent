@@ -131,6 +131,7 @@ export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "cherry-pick", matches: () => true, why: "writes a new commit onto the checked-out branch" },
 	{ subcommand: "revert", matches: () => true, why: "writes a new commit onto the checked-out branch" },
 	{ subcommand: "am", matches: () => true, why: "applies patches as commits onto the checked-out branch" },
+	{ subcommand: "pull", matches: () => true, why: "merges or rebases the fetched branch into the checked-out branch; git fetch, then branch from origin/<branch>" },
 	{
 		subcommand: "apply",
 		matches: (args) => !args.includes("--check") && !args.includes("--stat") && !args.includes("--numstat"),

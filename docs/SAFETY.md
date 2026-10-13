@@ -124,7 +124,8 @@ docstring for the structural argument). Concretely, it catches:
 - **Backgrounding** (`nohup ... &`) — denied on the presence of a backgrounded
   statement, because this guard cannot observe it complete before returning.
 - **`git`/`glab` writes to a protected branch** — `git push`, `commit`,
-  `reset`, `merge`, `cherry-pick`, `revert`, `am`, a non-dry-run `apply`, and
+  `reset`, `merge`, `pull` (the reason says to `git fetch` and branch from
+  `origin/<branch>`), `cherry-pick`, `revert`, `am`, a non-dry-run `apply`, and
   every `rebase` (`git rebase origin/main` rewrites the checked-out branch)
   all block when `HEAD` is protected, while `fetch`, `diff`,
   `log`, `status`, `show`, `branch`, `remote`, `checkout`, `switch`,
