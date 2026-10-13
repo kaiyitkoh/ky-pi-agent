@@ -47,7 +47,8 @@ import { beforeAll, describe, expect, it } from "vitest";
 
 import { logDir, logPath } from "../../.pi/extensions/diagnostics/jsonl.ts";
 import { WIRE_LOG_BASE, WIRE_TAIL_MESSAGES, type WireKind } from "../../.pi/extensions/diagnostics/schema.ts";
-import { boundRequestPayload } from "../../.pi/extensions/diagnostics/wire.ts";
+import { redactDeep } from "../../.pi/extensions/diagnostics/redact.ts";
+import { boundRequestPayload, captureRequestPayload } from "../../.pi/extensions/diagnostics/wire.ts";
 import {
 	buildOpenAiFixturePayload,
 	SECRET_FIXTURE_TOKEN,
@@ -342,6 +343,16 @@ describe("wire request rows stay bounded as history grows", () => {
 	it("row size is flat between 10 and 50 turns", () => {
 		const size = (turns: number): number => JSON.stringify(boundRequestPayload(payloadWith(turns))).length;
 		expect(size(50)).toBeLessThan(size(10) * 1.2);
+	});
+
+	it("a long history does not spend the redactor's budget, so the kept tail is never truncated", () => {
+		const history = Array.from({ length: 60 }, (_, i) => ({ role: "user", content: Array.from({ length: 2000 }, () => ({ type: "text", text: `old ${i}` })) }));
+		const tail = { role: "user", content: "the newest prompt" };
+		const redactedFirst = JSON.stringify(boundRequestPayload(redactDeep({ model: "m", messages: [...history, tail] })).payload);
+		expect(redactedFirst, "non-vacuity: redacting the whole history first does exhaust the budget").toContain("[redacted:truncated]");
+		const captured = JSON.stringify(captureRequestPayload({ model: "m", messages: [...history, tail] }).payload);
+		expect(captured).toContain("the newest prompt");
+		expect(captured).not.toContain("[redacted:truncated]");
 	});
 
 	it("passes a payload with no messages array through unchanged", () => {

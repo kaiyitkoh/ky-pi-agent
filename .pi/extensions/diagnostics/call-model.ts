@@ -16,7 +16,7 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 
 import { noteRowWritten } from "./index.ts";
 import { appendJsonl } from "./jsonl.ts";
-import { redactDeep, redactHeaders, redactString } from "./redact.ts";
+import { redactHeaders, redactString } from "./redact.ts";
 import {
 	MAX_ROTATED_FILES,
 	TURNS_LOG_BASE,
@@ -28,7 +28,7 @@ import {
 	type WireRecord,
 } from "./schema.ts";
 import { composeTurnRow } from "./turns.ts";
-import { boundRequestPayload, nextCorrelationId, wireRecord, type WireFieldsFor } from "./wire.ts";
+import { captureRequestPayload, nextCorrelationId, wireRecord, type WireFieldsFor } from "./wire.ts";
 
 /**
  * The caller's option bag minus the keys this function owns. Distributive (`T extends unknown`):
@@ -153,13 +153,13 @@ export async function callModel<TApi extends Api>(
 				record("nested.headers", { headers: redactHeaders(headers) });
 			});
 			// Returned unchanged and outside the containment: `prepareRequest` sends what comes back
-						// (core/model-runtime.ts), so the redacted map must never be returned.
+			// (core/model-runtime.ts), so the redacted map must never be returned.
 			return headers;
 		},
 		onPayload: (payload: unknown) => {
-			// `redactDeep` copies, so the live payload stays byte-identical. Contained: a throw kills the request.
+			// Bounding and `redactDeep` both copy, so the live payload stays byte-identical. Contained: a throw kills the request.
 			contained(() => {
-				record("nested.request", boundRequestPayload(redactDeep(payload)));
+				record("nested.request", captureRequestPayload(payload));
 			});
 			// Returns nothing: a non-`undefined` return replaces the payload (pi 1.1.0 runner.js:1077-1078).
 			return undefined;

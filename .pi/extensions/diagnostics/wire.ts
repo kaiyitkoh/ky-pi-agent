@@ -103,23 +103,26 @@ export function wireRecord<K extends WireKind>(
 }
 
 /**
- * Cut `messages` in an already-redacted request payload to the last {@link WIRE_TAIL_MESSAGES}, returning the full
- * count and a hash beside it. A payload without a `messages` array is returned unchanged.
+ * Cut `messages` in a request payload to the last {@link WIRE_TAIL_MESSAGES}, returning the full count and a hash of the
+ * full array beside it. A payload without a `messages` array is returned unchanged. Never mutates its argument.
  */
-export function boundRequestPayload(redacted: unknown): { payload: unknown; messageCount?: number; messagesHash?: string } {
-	if (typeof redacted !== "object" || redacted === null || Array.isArray(redacted)) {
-		return { payload: redacted };
+export function boundRequestPayload(raw: unknown): { payload: unknown; messageCount?: number; messagesHash?: string } {
+	if (typeof raw !== "object" || raw === null || Array.isArray(raw)) {
+		return { payload: raw };
 	}
-	const messages = (redacted as { messages?: unknown }).messages;
+	const messages = (raw as { messages?: unknown }).messages;
 	if (!Array.isArray(messages)) {
-		return { payload: redacted };
+		return { payload: raw };
 	}
 	const messagesHash = createHash("sha256").update(JSON.stringify(messages)).digest("hex").slice(0, 16);
-	const payload =
-		messages.length > WIRE_TAIL_MESSAGES
-			? { ...redacted, messages: messages.slice(-WIRE_TAIL_MESSAGES) }
-			: redacted;
+	const payload = messages.length > WIRE_TAIL_MESSAGES ? { ...raw, messages: messages.slice(-WIRE_TAIL_MESSAGES) } : raw;
 	return { payload, messageCount: messages.length, messagesHash };
+}
+
+/** Bounds, then redacts, so the redactor's node budget is spent on the tail that is kept, never on history that is dropped. */
+export function captureRequestPayload(raw: unknown): { payload: unknown; messageCount?: number; messagesHash?: string } {
+	const bounded = boundRequestPayload(raw);
+	return { ...bounded, payload: redactDeep(bounded.payload) };
 }
 
 /** Register the three main-loop provider hooks. `safeHandler` and `noteRow` are injected to avoid an import cycle. */
@@ -163,8 +166,8 @@ export function registerWireHooks(
 					// Passed explicitly so the join key is visible at the call site.
 					corr: currentCorrelationId() ?? UNCORRELATED,
 					sessionId: ctx.sessionManager.getSessionId(),
-					// `redactDeep` copies; the live payload stays byte-identical.
-					...boundRequestPayload(redactDeep(event.payload)),
+					// Bounding and `redactDeep` both copy; the live payload stays byte-identical.
+					...captureRequestPayload(event.payload),
 				}),
 			);
 			// No return: a non-`undefined` return replaces the payload (pi 1.1.0 runner.js:1077-1078).
