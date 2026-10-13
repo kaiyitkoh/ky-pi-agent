@@ -610,6 +610,28 @@ const ROWS: readonly Row[] = [
 	{ name: "sed -i inside the project -- allow (negative control)", toolName: "bash", input: { command: "sed -i 's/a/b/' src/x.ts" }, expected: "allow" },
 	{ name: "tee inside the project -- allow (negative control)", toolName: "bash", input: { command: "echo x | tee out.txt" }, expected: "allow" },
 	{
+		name: "a write under core.hooksPath -- block, read from git config",
+		toolName: "write",
+		input: { path: "tools/hooks/pre-push" },
+		facts: { gitConfigFor: (_dir: string, key: string) => (key === "core.hooksPath" ? ["tools/hooks"] : []) },
+		expected: "block",
+		reasonIncludes: "git hook",
+	},
+	{
+		name: "a bash write under core.hooksPath -- block",
+		toolName: "bash",
+		input: { command: "echo x > tools/hooks/pre-commit" },
+		facts: { gitConfigFor: (_dir: string, key: string) => (key === "core.hooksPath" ? ["tools/hooks"] : []) },
+		expected: "block",
+	},
+	{
+		name: "an unreadable git config adds no hooks path -- allow",
+		toolName: "write",
+		input: { path: "tools/hooks/pre-push" },
+		facts: { gitConfigFor: () => { throw new Error("no git"); } },
+		expected: "allow",
+	},
+	{
 		name: "cd into a project directory, then a relative read -- allow (negative control)",
 		toolName: "bash",
 		input: { command: "cd src && cat index.ts" },

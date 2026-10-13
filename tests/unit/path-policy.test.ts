@@ -325,6 +325,14 @@ const WRITE_TABLE: readonly WriteRow[] = [
 		targetId: "github-workflows",
 	},
 	{ label: ".gitlab-ci.yml", rawText: ".gitlab-ci.yml", expected: "block", targetId: "gitlab-ci" },
+	{ label: ".git/config.worktree", rawText: ".git/config.worktree", expected: "block", targetId: "git-config" },
+	{ label: "a submodule's git config", rawText: ".git/modules/s/config", expected: "block", targetId: "git-config" },
+	{ label: "a submodule's hook", rawText: ".git/modules/s/hooks/pre-push", expected: "block", targetId: "git-hooks" },
+	{ label: "a husky hook", rawText: ".husky/pre-push", expected: "block", targetId: "hook-manager" },
+	{ label: "pre-commit config", rawText: ".pre-commit-config.yaml", expected: "block", targetId: "hook-manager" },
+	{ label: "lefthook config", rawText: "lefthook.yml", expected: "block", targetId: "hook-manager" },
+	{ label: "a doc about husky", rawText: "docs/husky.md", expected: "allow" },
+	{ label: "an app config file", rawText: "src/config", expected: "allow" },
 	{ label: "a harness ledger file (model-forged evidence)", rawText: ".git/kypi-ledger/s1.jsonl", expected: "block" },
 	{
 		label: "absolute path elsewhere on the drive",
@@ -523,5 +531,13 @@ describe("classifyPathWrite asks for extension code instead of allowing it", () 
 		const home: PathPolicyFacts = { projectRoot: "C:/Users/tester", home: "C:/Users/tester" };
 		expect(classifyPathWrite("C:/Users/tester/.pi/agent/extensions/subagent/config.json", home).kind).toBe("ask");
 		expect(classifyPathWrite("C:/Users/tester/.pi/agent/models.json", home).kind).toBe("ask");
+	});
+});
+
+describe("classifyPathWrite treats a core.hooksPath directory as git hooks", () => {
+	it("blocks a write under the configured hooks path and allows its neighbours", () => {
+		const facts: PathPolicyFacts = { projectRoot: "C:/repo", home: "C:/Users/tester", hooksPaths: ["C:/repo/tools/hooks"] };
+		expect(classifyPathWrite("C:/repo/tools/hooks/pre-push", facts).kind).toBe("block");
+		expect(classifyPathWrite("C:/repo/tools/other.sh", facts).kind).toBe("allow");
 	});
 });

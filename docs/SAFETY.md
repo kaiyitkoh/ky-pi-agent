@@ -147,7 +147,11 @@ docstring for the structural argument). Concretely, it catches:
   approval.
 - **OpenSpec CLI** — `openspec list|view|show|validate|status|instructions` and the other read-only verbs are allowed, and so is `openspec archive`: it writes only inside `openspec/`, and it is a named allow row rather than a path exemption. `init` and `update` (they write agent config directories, and `update` can offer an unpinned global self-upgrade), `completion` (edits shell rc files), `feedback` (posts to GitHub), `context --code-workspace` (writes a workspace file at an arbitrary path), the state-changing second words of `config`, `store` and `workset`, a bare `openspec`, and any unknown subcommand require confirmation.
 - **Deferred-detonation writes** — a `write`/`edit` into
-  `.git/hooks/*`, `.git/config`, `~/.bashrc`, `~/.bash_profile`, `~/.profile`,
+  a git hook (`.git/hooks/*`, `.git/modules/*/hooks/*`, or the directory
+  `core.hooksPath` names), a git config file below `.git` (`config`,
+  `config.worktree`, a submodule's `config`), a hook manager's files
+  (`.husky/**`, `.pre-commit-config.yaml`, `lefthook.yml`), `~/.bashrc`,
+  `~/.bash_profile`, `~/.profile`,
   `~/.gitconfig`, a `.github/workflows/*.yml`, or `.gitlab-ci.yml` blocks
   regardless of project-root containment, because a later, entirely benign
   command is what actually executes the payload.

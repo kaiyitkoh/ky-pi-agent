@@ -176,6 +176,8 @@ export interface PathPolicyFacts {
 	readonly projectRoot: string;
 	readonly home: string;
 	readonly kubeconfigEnv?: string;
+	/** Canonical `core.hooksPath` directories, when the caller read them; only write classification uses them. */
+	readonly hooksPaths?: readonly string[];
 }
 
 interface PathPattern {
@@ -363,6 +365,8 @@ export const SENSITIVE_READ_PATTERNS: readonly PathPattern[] = [
 	},
 ];
 
+const HOOK_MANAGER_FILES = new Set([".pre-commit-config.yaml", ".pre-commit-config.yml", "lefthook.yml", "lefthook.yaml", ".lefthook.yml", ".lefthook.yaml", "lefthook-local.yml"]);
+
 function hasSegmentPair(parts: readonly string[], first: string, second: string): number {
 	for (let i = 0; i < parts.length - 1; i += 1) {
 		if (parts[i].toLowerCase() === first && parts[i + 1].toLowerCase() === second) {
@@ -376,21 +380,32 @@ function hasSegmentPair(parts: readonly string[], first: string, second: string)
 export const DETONATION_TARGETS: readonly PathPattern[] = [
 	{
 		id: "git-hooks",
-		match: (path) => {
-			const { parts } = rootedSegmentsOf(path);
-			const idx = hasSegmentPair(parts, ".git", "hooks");
-			return idx !== -1 && parts.length > idx + 2;
+		match: (path, facts) => {
+			const parts = rootedSegmentsOf(path).parts.map((p) => p.toLowerCase());
+			const git = parts.indexOf(".git");
+			const hooks = parts.indexOf("hooks", git + 1);
+			// Submodule hooks live under .git/modules/<name>/hooks; core.hooksPath can name any directory.
+			return (git !== -1 && hooks !== -1 && parts.length > hooks + 1) || (facts.hooksPaths ?? []).some((root) => isWithinRoot(path, root));
 		},
 		reason: (path) => `"${path}" is a git hook — a later, benign git operation executes it automatically`,
 	},
 	{
 		id: "git-config",
 		match: (path) => {
-			const { parts } = rootedSegmentsOf(path);
-			const idx = hasSegmentPair(parts, ".git", "config");
-			return idx !== -1 && idx + 1 === parts.length - 1;
+			const parts = rootedSegmentsOf(path).parts.map((p) => p.toLowerCase());
+			const base = parts[parts.length - 1];
+			return parts.slice(0, -1).includes(".git") && (base === "config" || base === "config.worktree");
 		},
-		reason: (path) => `"${path}" is the repository's git config — an [alias] entry there executes on the next ordinary git command`,
+		reason: (path) => `"${path}" is a git config file — an [alias] entry there executes on the next ordinary git command`,
+	},
+	{
+		id: "hook-manager",
+		match: (path) => {
+			const parts = rootedSegmentsOf(path).parts.map((p) => p.toLowerCase());
+			const base = parts[parts.length - 1] ?? "";
+			return parts.slice(0, -1).includes(".husky") || HOOK_MANAGER_FILES.has(base);
+		},
+		reason: (path) => `"${path}" configures a git hook manager (husky, pre-commit, lefthook) — the next commit or push runs it`,
 	},
 	{
 		id: "bashrc",

@@ -95,6 +95,18 @@ const pathFactsOf = (facts: PolicyFacts): PathPolicyFacts => ({
 	kubeconfigEnv: facts.kubeconfigEnv,
 });
 
+/** Write facts add `core.hooksPath`, read lazily because only a write needs it; an unreadable config adds nothing. */
+function writeFactsOf(facts: PolicyFacts): PathPolicyFacts {
+	let values: readonly string[] = [];
+	try {
+		values = facts.gitConfigFor?.(facts.cwd, "core.hooksPath") ?? [];
+	} catch {
+		values = [];
+	}
+	const hooksPaths = values.filter((v) => v !== "").map((v) => canonicalOf(v, facts, facts.projectRoot));
+	return { ...pathFactsOf(facts), hooksPaths };
+}
+
 const canonicalOf = (text: string, facts: PolicyFacts, cwd = facts.cwd): string => canonicalisePathArg({ text, value: text }, { cwd, home: facts.home });
 
 /** The directory an invocation runs in: each `cd`/`env -C`/`git -C` target resolved against the one before, `~` expanded. */
@@ -260,22 +272,31 @@ const sensitiveRootReason = (canonicalPath: string): string =>
 
 const GREP_RECURSIVE = /^(-[a-zA-Z]*[rR][a-zA-Z]*|--recursive|--dereference-recursive|--directories=recurse)$/;
 
+interface Walker {
+	readonly when: RegExp | true;
+	readonly implicitDot: boolean;
+	readonly pattern?: true;
+}
+
+const walkers = (names: readonly string[], walker: Walker): [string, Walker][] => names.map((n) => [n, walker]);
+
 /** Executables that walk a directory tree, with the flag that makes them recurse (`true`: always) and whether they default to `.`. */
-const RECURSIVE_WALKERS: ReadonlyMap<string, { readonly when: RegExp | true; readonly implicitDot: boolean; readonly pattern?: true }> = new Map([
-	...["rg", "ag"].map((n) => [n, { when: true, implicitDot: true, pattern: true }] as const),
-	...["find", "fd"].map((n) => [n, { when: true, implicitDot: true }] as const),
-	...["grep", "egrep", "fgrep"].map((n) => [n, { when: GREP_RECURSIVE, implicitDot: true, pattern: true }] as const),
-	["ls", { when: /^(-[a-zA-Z]*R[a-zA-Z]*|--recursive)$/, implicitDot: true }],
-	["cp", { when: /^(-[a-zA-Z]*[rRa][a-zA-Z]*|--recursive|--archive)$/, implicitDot: false }],
-	["rsync", { when: /^(-[a-zA-Z]*[ra][a-zA-Z]*|--recursive|--archive)$/, implicitDot: false }],
-	["zip", { when: /^(-[a-zA-Z]*r[a-zA-Z]*|--recurse-paths)$/, implicitDot: false }],
-	["tar", { when: true, implicitDot: false }],
+const RECURSIVE_WALKERS = new Map<string, Walker>([
+	...walkers(["rg", "ag"], { when: true, implicitDot: true, pattern: true }),
+	...walkers(["find", "fd"], { when: true, implicitDot: true }),
+	...walkers(["grep", "egrep", "fgrep"], { when: GREP_RECURSIVE, implicitDot: true, pattern: true }),
+	...walkers(["ls"], { when: /^(-[a-zA-Z]*R[a-zA-Z]*|--recursive)$/, implicitDot: true }),
+	...walkers(["cp"], { when: /^(-[a-zA-Z]*[rRa][a-zA-Z]*|--recursive|--archive)$/, implicitDot: false }),
+	...walkers(["rsync"], { when: /^(-[a-zA-Z]*[ra][a-zA-Z]*|--recursive|--archive)$/, implicitDot: false }),
+	...walkers(["zip"], { when: /^(-[a-zA-Z]*r[a-zA-Z]*|--recurse-paths)$/, implicitDot: false }),
+	...walkers(["tar"], { when: true, implicitDot: false }),
 ]);
 
 /** The directories a recursive walker descends from; a pattern-first search with no path operand walks `.`. */
 function recursiveRoots(executable: string, args: readonly string[]): string[] {
 	const walker = RECURSIVE_WALKERS.get(executable);
-	if (walker === undefined || (walker.when !== true && !args.some((a) => (walker.when as RegExp).test(a)))) return [];
+	const when = walker?.when;
+	if (walker === undefined || (when instanceof RegExp && !args.some((a) => when.test(a)))) return [];
 	const positionals = args.filter((a) => !a.startsWith("-"));
 	const explicitPattern = args.some((a) => /^(-e|-f|--regexp|--file)(=|$)/.test(a));
 	const paths = walker.pattern === true && !explicitPattern ? positionals.slice(1) : positionals;
@@ -327,11 +348,12 @@ function classifyShellWrites(targets: readonly string[], dirs: Iterable<string>,
 	const scratch = ["/tmp", ...(facts.tempDir !== undefined ? [facts.tempDir] : [])];
 	const askReasons: string[] = [];
 	const askPaths: string[] = [];
+	const writeFacts = targets.length > 0 ? writeFactsOf(facts) : pathFactsOf(facts);
 	for (const cwd of dirs) {
 		for (const target of targets) {
 			const canonical = canonicalOf(target, facts, cwd);
 			if (DEVICE_FILE.test(canonical)) continue;
-			const verdict = classifyPathWrite(canonical, pathFactsOf(facts), scratch);
+			const verdict = classifyPathWrite(canonical, writeFacts, scratch);
 			if (verdict.kind === "block") return { kind: "block", reason: `bash write: ${verdict.reason}` };
 			if (verdict.kind === "ask") {
 				askReasons.push(verdict.reason);
@@ -386,7 +408,7 @@ function evaluateWrite(toolName: string, input: unknown, facts: PolicyFacts): Ve
 	const pathField = extractStringField(input, "path");
 	if (pathField.kind === "missing") return { kind: "block", reason: `write/edit input is malformed: ${pathField.reason}` };
 	const canonical = canonicalOf(pathField.value, facts);
-	const verdict = classifyPathWrite(canonical, pathFactsOf(facts));
+	const verdict = classifyPathWrite(canonical, writeFactsOf(facts));
 	if (verdict.kind === "block") return { kind: "block", reason: verdict.reason };
 	return verdict.kind === "ask" ? askForPaths([verdict.reason], [canonical], computeRequestKey(toolName, { path: pathField.value }, facts.cwd)) : { kind: "allow" };
 }
