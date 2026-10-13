@@ -9,7 +9,6 @@ import { StringEnum } from "@earendil-works/pi-ai";
 
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
 import { redactString } from "../diagnostics/redact.ts";
-import { deriveNeed } from "../routing/guard.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 import type { DesignReviewSignals } from "./gates.ts";
 import { isFileLine, type ReviewFinding } from "./review-schema.ts";
@@ -134,7 +133,6 @@ export async function runDesignReview(
 			role: "reviewer",
 			systemPrompt: DESIGN_SYSTEM_PROMPT,
 			messages,
-			need: deriveNeed(ctx, { promptChars: content.length + DESIGN_SYSTEM_PROMPT.length }),
 			tools,
 		});
 	} catch (err) {

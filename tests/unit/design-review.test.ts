@@ -12,7 +12,6 @@ vi.mock("../../.pi/extensions/routing/modes.ts", async (importOriginal) => ({
 		return reply.next;
 	},
 }));
-vi.mock("../../.pi/extensions/routing/guard.ts", async (importOriginal) => ({ ...(await importOriginal<object>()), deriveNeed: () => ({}) }));
 
 import { computeDesignSignals, runDesignReview } from "../../.pi/extensions/quality/design-review.ts";
 import { shouldRunDesignReview } from "../../.pi/extensions/quality/gates.ts";

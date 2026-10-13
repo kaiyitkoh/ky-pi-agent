@@ -9,7 +9,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
 import { redactString } from "../diagnostics/redact.ts";
 import { isProseToolCall } from "../diagnostics/prose.ts";
-import { deriveNeed } from "../routing/guard.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 import {
 	NIT_CAP,
@@ -193,12 +192,11 @@ export async function runReview(ctx: ExtensionContext, input: RunReviewInput): P
 	];
 
 	const messages: Message[] = [{ role: "user", content: context, timestamp: Date.now() }];
-	const need = deriveNeed(ctx, { promptChars: context.length + REVIEWER_SYSTEM_PROMPT.length });
 
 	const callOnce = async (): Promise<AssistantMessage> => {
 		// A thrown guard refusal never reaches a model, so nothing is charged and it propagates.
 		const start = process.hrtime.bigint();
-		const reply = await runSingleShotRole(ctx, { role: "reviewer", systemPrompt: REVIEWER_SYSTEM_PROMPT, messages, need, tools });
+		const reply = await runSingleShotRole(ctx, { role: "reviewer", systemPrompt: REVIEWER_SYSTEM_PROMPT, messages, tools });
 		addQualityCost({ ms: Number(process.hrtime.bigint() - start) / 1_000_000, tokens: reply.usage.totalTokens });
 		return reply;
 	};

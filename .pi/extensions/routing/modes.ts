@@ -12,7 +12,7 @@ import { join } from "node:path";
 import { callModel } from "../diagnostics/call-model.ts";
 import { callWithFallback } from "../providers/fallback.ts";
 import { CHAIN } from "../providers/schema.ts";
-import { guardRoute, type GuardNeed } from "./guard.ts";
+import { guardRoute, nestedNeed, type GuardNeed } from "./guard.ts";
 import {
 	BEDROCK_PROFILE_PREFIX_DEFAULT,
 	BEDROCK_PROFILE_PREFIX_SETTING,
@@ -268,7 +268,6 @@ export interface RunSingleShotRoleOptions {
 	readonly role: Role;
 	readonly messages: Message[];
 	readonly systemPrompt?: string;
-	readonly need: RoleNeed;
 	/** Forced structured-output tool(s), forwarded to the chokepoint's `tools`. */
 	readonly tools?: Tool[];
 }
@@ -279,7 +278,9 @@ export interface RunSingleShotRoleOptions {
  */
 export async function runSingleShotRole(ctx: ExtensionContext, opts: RunSingleShotRoleOptions): Promise<AssistantMessage> {
 	const state = getModeState();
-	const plan = planRoleCall(ctx.modelRegistry, { role: opts.role, state, need: opts.need });
+	// The need describes this request alone; the main session's history, images and thinking level never reach the nested call.
+	const need = nestedNeed(opts, resolveRoute(opts.role, state).reasoningEffort);
+	const plan = planRoleCall(ctx.modelRegistry, { role: opts.role, state, need });
 	if (!plan.ok) {
 		throw new Error(`runSingleShotRole: cannot serve role "${opts.role}": ${plan.reason}`);
 	}

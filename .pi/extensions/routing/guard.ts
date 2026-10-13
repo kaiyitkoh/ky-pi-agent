@@ -4,7 +4,7 @@
  * request over `contextWindow`, thinking on a Bedrock reasoning model whose request builder sends none (pi-ai 1.1.0 `dist/api/bedrock-converse-stream.js:1011`),
  * and a tool-loop role on Bedrock DeepSeek R1. Contributing-boundary and chokepoint-lint scan comments, so those calls are not named here.
  */
-import type { Api, Model } from "@earendil-works/pi-ai";
+import type { Api, Message, Model } from "@earendil-works/pi-ai";
 
 /** Two arms only: a refusal is never a licence to pick another model. */
 export type GuardVerdict = { readonly ok: true } | { readonly ok: false; readonly reason: string };
@@ -71,6 +71,19 @@ export function deriveNeed(
 		estimatedInputTokens: used + Math.ceil((extra.promptChars ?? 0) / 4) + (extra.extraTokens ?? 0),
 		thinkingRequested: level !== undefined && level !== "off",
 		usesToolLoop: extra.usesToolLoop,
+	};
+}
+
+/** Builds a nested single-shot call's need from the request it sends: its own messages, system prompt, tools and reasoning effort. */
+export function nestedNeed(
+	request: { readonly messages: readonly Message[]; readonly systemPrompt?: string; readonly tools?: readonly unknown[] },
+	effort: "high" | "max" | undefined,
+): Omit<GuardNeed, "usesToolLoop"> {
+	const chars = (request.systemPrompt?.length ?? 0) + JSON.stringify(request.messages).length + JSON.stringify(request.tools ?? []).length;
+	return {
+		image: request.messages.some((m) => Array.isArray(m.content) && m.content.some((block) => block.type === "image")),
+		estimatedInputTokens: Math.ceil(chars / 4),
+		thinkingRequested: effort !== undefined,
 	};
 }
 

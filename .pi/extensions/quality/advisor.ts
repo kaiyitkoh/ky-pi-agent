@@ -9,7 +9,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
-import { deriveNeed } from "../routing/guard.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 
 /** Tool name used at registration. */
@@ -60,7 +59,6 @@ export async function executeConsultAdvisor(ctx: ExtensionContext, args: Consult
 		role: "advisor",
 		systemPrompt: ADVISOR_SYSTEM_PROMPT,
 		messages,
-		need: deriveNeed(ctx, { promptChars: args.question.length + args.context.length }),
 	});
 	const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;
 	addQualityCost({ ms: elapsedMs, tokens: message.usage.totalTokens });

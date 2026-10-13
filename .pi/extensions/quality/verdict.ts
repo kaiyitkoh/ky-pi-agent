@@ -8,7 +8,6 @@ import type { ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 
 import { addQualityCost } from "../diagnostics/quality-cost.ts";
-import { deriveNeed } from "../routing/guard.ts";
 import { runSingleShotRole } from "../routing/modes.ts";
 import type { ReviewArtifact, ReviewFinding } from "./review-schema.ts";
 import { buildReviewerContext, type ReviewerContractInput } from "./reviewer.ts";
@@ -188,7 +187,6 @@ export async function runRefuteOrPromote(
 			role: "reviewer",
 			systemPrompt: REFUTATION_SYSTEM_PROMPT,
 			messages,
-			need: deriveNeed(ctx, { promptChars: prompt.length + REFUTATION_SYSTEM_PROMPT.length }),
 			tools,
 		});
 		const elapsedMs = Number(process.hrtime.bigint() - start) / 1_000_000;

@@ -217,14 +217,12 @@ async function runFixture(): Promise<Capture[]> {
 		await runSingleShotRole(ctx, {
 			role: "reviewer",
 			messages: [{ role: "user", content: "please review this change", timestamp: Date.now() }],
-			need: {},
 		});
 
 		setMode("max");
 		await runSingleShotRole(ctx, {
 			role: "reviewer",
 			messages: [{ role: "user", content: "please review this change", timestamp: Date.now() }],
-			need: {},
 		});
 
 		return captures;

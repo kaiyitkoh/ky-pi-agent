@@ -206,6 +206,13 @@ text-only model pi-ai already replaces earlier images with a placeholder
 blocks a mode switch. The mode commands and `/escalate` check the candidate
 with it before switching.
 
+Nested single-shot roles (reviewer, advisor, refutation, design review) never
+use the session's need. `runSingleShotRole` builds it with `nestedNeed` from
+the request it is about to send: its own messages, system prompt and tools
+(characters divided by four), any image in those messages, and the route's
+`reasoningEffort`. A long main session therefore never refuses an advisor
+call, and the session's thinking level never decides a nested call.
+
 The built-in `/model` picker and `Ctrl+P` bypass those commands, and Pi's
 `model_select` event is notification-only in Pi 1.1.0 (`types.d.ts:859-866`):
 it fires after the switch and its return value is ignored. Enforcement is

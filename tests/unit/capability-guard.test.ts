@@ -56,6 +56,7 @@ import {
 	guardRoute,
 	isAnthropicClaudeModel,
 	deriveNeed,
+	nestedNeed,
 	type GuardNeed,
 	type GuardVerdict,
 } from "../../.pi/extensions/routing/guard.ts";
@@ -332,5 +333,26 @@ describe("deriveNeed", () => {
 
 	it("passes usesToolLoop through", () => {
 		expect(deriveNeed(ctxOf({}), { usesToolLoop: true }).usesToolLoop).toBe(true);
+	});
+});
+
+describe("nestedNeed", () => {
+	const text = { role: "user" as const, content: "x".repeat(400), timestamp: 0 };
+
+	it("sizes the request it sends, not the main session", () => {
+		const need = nestedNeed({ messages: [text], systemPrompt: "s".repeat(40) }, undefined);
+		expect(need.estimatedInputTokens).toBeGreaterThanOrEqual(110);
+		expect(need.estimatedInputTokens).toBeLessThan(200);
+	});
+
+	it("an image in the request's own messages sets image; none in the request means none", () => {
+		const withImage = { role: "user" as const, content: [{ type: "image" as const, data: "", mimeType: "image/png" }], timestamp: 0 };
+		expect(nestedNeed({ messages: [withImage] }, undefined).image).toBe(true);
+		expect(nestedNeed({ messages: [text] }, undefined).image).toBe(false);
+	});
+
+	it("thinking follows the route's reasoning effort, not the session's thinking level", () => {
+		expect(nestedNeed({ messages: [text] }, "high").thinkingRequested).toBe(true);
+		expect(nestedNeed({ messages: [text] }, undefined).thinkingRequested).toBe(false);
 	});
 });

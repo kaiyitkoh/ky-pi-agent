@@ -309,7 +309,6 @@ async function runFixture(): Promise<Run> {
 		await runSingleShotRole(ctx, {
 			role: "reviewer",
 			messages: [{ role: "user", content: "please review this change", timestamp: Date.now() }],
-			need: {},
 		});
 
 		const modelAfter = { provider: ctx.model?.provider, id: ctx.model?.id };
@@ -330,8 +329,13 @@ async function runFixture(): Promise<Run> {
 		try {
 			await runSingleShotRole(ctx, {
 				role: "summariser",
-				messages: [{ role: "user", content: "describe this image", timestamp: Date.now() }],
-				need: { image: true },
+				messages: [
+					{
+						role: "user",
+						content: [{ type: "text", text: "describe this image" }, { type: "image", data: "", mimeType: "image/png" }],
+						timestamp: Date.now(),
+					},
+				],
 			});
 		} catch (error) {
 			guardRefusalThrew = true;
@@ -345,7 +349,6 @@ async function runFixture(): Promise<Run> {
 		await runSingleShotRole(ctx, {
 			role: "summariser",
 			messages: [{ role: "user", content: "please summarise this", timestamp: Date.now() }],
-			need: {},
 		});
 
 		const turnsAfterSummariser = readRows<TurnsRow>(turnsFile);
@@ -650,7 +653,6 @@ async function runDashscopeOnlyFixture(): Promise<{
 		const reply = await runSingleShotRole(ctx, {
 			role: "reviewer",
 			messages: [{ role: "user", content: "please review this change", timestamp: Date.now() }],
-			need: {},
 		});
 
 		return {

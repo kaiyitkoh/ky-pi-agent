@@ -339,7 +339,6 @@ async function runFixture(): Promise<Run> {
 		await runSingleShotRole(ctx, {
 			role: "reviewer",
 			messages: [{ role: "user", content: "please review this change", timestamp: Date.now() }],
-			need: {},
 		});
 
 		const turnsAfterNested = readRows<TurnsRow>(turnsFile);
@@ -399,7 +398,6 @@ async function runFixture(): Promise<Run> {
 		await runSingleShotRole(ctx, {
 			role: "advisor",
 			messages: [{ role: "user", content: "please advise on this change", timestamp: Date.now() }],
-			need: {},
 		});
 
 		const turnsAfterAdvisor = readRows<TurnsRow>(turnsFile);
