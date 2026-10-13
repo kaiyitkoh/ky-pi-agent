@@ -25,7 +25,7 @@ export const SUBMIT_REVIEW_DESCRIPTION =
 export const submitReviewParameters = Type.Object({
 	verdicts: Type.Array(
 		Type.Object({
-			requirementId: Type.String({ description: "The requirement id this verdict is about, e.g. GATE-03." }),
+			requirementId: Type.String({ description: "The requirement id this verdict is about, e.g. R1." }),
 			status: StringEnum(["Implemented", "Partial", "Missing"], {
 				description: "Your honest verdict for this requirement, based only on what you actually checked.",
 			}),
@@ -91,6 +91,14 @@ export interface ReviewArtifact {
 	readonly deferralReason?: string;
 	/** Computed from git by the caller and never taken from the model's arguments. */
 	readonly scopeDrift?: ScopeDriftReport;
+	/** Set by the caller after the optional design-level pass; findings it added are already in `findings`. */
+	readonly designPass?: DesignPassReport;
+}
+
+export interface DesignPassReport {
+	readonly ran: boolean;
+	readonly note: string;
+	readonly signals: object;
 }
 
 // Declared structurally so quality/ does not import the review/ module and its git-reading dependency chain.
@@ -113,7 +121,14 @@ const VALID_STATUSES = new Set(["Implemented", "Partial", "Missing"]);
 const VALID_SEVERITIES = new Set(["BLOCKER", "WARNING", "NIT"]);
 const VALID_CLASSIFICATIONS = new Set(["root-cause", "symptomatic", "workaround"]);
 
-const FILE_LINE_PATTERN = /^.+:\d+$/;
+const FILE_LINE_PATTERN = /^.+:(\d+)(?:-(\d+))?$/;
+
+/** `path:N` or `path:N-M` with M >= N. */
+export function isFileLine(value: string): boolean {
+	const match = FILE_LINE_PATTERN.exec(value);
+	if (match === null) return false;
+	return match[2] === undefined || Number(match[2]) >= Number(match[1]);
+}
 
 function isPlainObject(value: unknown): value is Record<string, unknown> {
 	return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -204,7 +219,7 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 			return {
 				ok: false,
 				reason:
-					`findings[${i}].severity must be exactly one of BLOCKER, WARNING, or NIT (GATE-05) -- ` +
+					`findings[${i}].severity must be exactly one of BLOCKER, WARNING, or NIT -- ` +
 					`received ${describeValue(severity)}`,
 			};
 		}
@@ -258,12 +273,12 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 		const verdict = verdicts[i];
 		const requirementId = isPlainObject(verdict) && typeof verdict.requirementId === "string" ? verdict.requirementId : `verdicts[${i}]`;
 		const evidence = isPlainObject(verdict) && typeof verdict.evidence === "string" ? verdict.evidence : "";
-		if (!FILE_LINE_PATTERN.test(evidence)) {
+		if (!isFileLine(evidence)) {
 			return {
 				ok: false,
 				reason:
 					`verdict for requirement "${requirementId}" has a malformed evidence string -- expected a ` +
-					`"path:line" shape (<path>:<digits>), received ${describeValue(evidence)}`,
+					`"path:line" or "path:start-end" shape, received ${describeValue(evidence)}`,
 			};
 		}
 	}
@@ -273,7 +288,7 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 			ok: false,
 			reason:
 				"checkedAndCleared must be a non-empty, non-whitespace-only string describing what was examined " +
-				`and found fine (GATE-04) -- received ${describeValue(checkedAndCleared)}`,
+				`and found fine -- received ${describeValue(checkedAndCleared)}`,
 		};
 	}
 
@@ -281,7 +296,7 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 		return {
 			ok: false,
 			reason:
-				"classification must be exactly one of root-cause, symptomatic, or workaround (QUAL-04) -- " +
+				"classification must be exactly one of root-cause, symptomatic, or workaround -- " +
 				`received ${describeValue(classification)}`,
 		};
 	}
@@ -290,7 +305,7 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 			ok: false,
 			reason:
 				`classificationJustification must be a non-empty string explaining the "${classification}" ` +
-				`classification (QUAL-04) -- received ${describeValue(classificationJustification)}`,
+				`classification -- received ${describeValue(classificationJustification)}`,
 		};
 	}
 
@@ -306,7 +321,7 @@ export function validateReview(raw: unknown, expectedRequirementIds: readonly st
 			return {
 				ok: false,
 				reason:
-					`classification "workaround" requires a non-empty properFix and deferralReason (QUAL-06) -- ` +
+					`classification "workaround" requires a non-empty properFix and deferralReason -- ` +
 					`missing: ${missingWorkaroundFields.join(", ")}`,
 			};
 		}
@@ -409,6 +424,17 @@ export function renderReviewMarkdown(review: ReviewArtifact): string {
 				lines.push(`| ${path} |`);
 			}
 		}
+	}
+	lines.push("");
+
+	lines.push("## Design review");
+	lines.push("");
+	const design = review.designPass;
+	if (design === undefined) {
+		lines.push("Design pass NOT COMPUTED.");
+	} else {
+		const signalText = Object.entries(design.signals).map(([k, v]) => `${k}=${String(v)}`).join(", ");
+		lines.push(`${design.ran ? "Ran" : "Did not fire"}: ${design.note} (${signalText}).`);
 	}
 	lines.push("");
 

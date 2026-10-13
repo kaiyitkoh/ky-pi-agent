@@ -9,6 +9,7 @@ import { progressBlocks, recordedEntries } from "../execute/progress.ts";
 import type { SpecArtifact } from "../grill/spec-schema.ts";
 import type { PlanArtifact } from "../plan-ceremony/plan-schema.ts";
 import type { ReviewArtifact } from "../quality/review-schema.ts";
+import { writeAuditRow } from "../safety/audit.ts";
 import { classifyGlabInvocation } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 
@@ -41,6 +42,7 @@ export function buildMrBody(input: MrBodyInput): string {
 	lines.push("## What", "", spec.requirementsBody.trim(), "");
 	const coverage = [...plan.coverageMatrix].map(([req, tasks]) => `${req}: ${tasks.join(", ")}`);
 	if (coverage.length > 0) lines.push("Planned tasks per requirement:", "", ...coverage.map((c) => `- ${c}`), "");
+	if (review.verdicts.length > 0) lines.push("Reviewer verdict per requirement:", "", ...review.verdicts.map((v) => `- ${v.requirementId}: ${v.status} (${v.evidence})`), "");
 
 	lines.push("## Verification", "");
 	const entries = progressBlocks(input.progress);
@@ -132,6 +134,8 @@ export type MrOutcome =
 
 export interface OpenMrDeps {
 	readonly exec: MrExec;
+	/** Where the audit row is written: the working repository. */
+	readonly cwd: string;
 }
 
 const GLAB_TIMEOUT_MS = 60_000;
@@ -161,6 +165,21 @@ export function spawnExec(cwd: string, env: NodeJS.ProcessEnv | undefined, timeo
  * executes is not a block.
  */
 export function openMr(input: MrInput, deps: OpenMrDeps): MrOutcome {
+	const outcome = attemptMr(input, deps);
+	const verdict = outcome.kind === "opened" ? "allow" : "block";
+	const reason = outcome.kind === "refused" ? outcome.reason : outcome.kind === "failed" ? `glab failed (exit ${outcome.code}): ${outcome.stderr.slice(0, 200)}` : "opened";
+	writeAuditRow(deps.cwd, {
+		event: "mr_create",
+		tool: "glab",
+		command: `glab mr create ${MR_TARGET_BRANCH_FLAG} ${input.targetBranch} --source-branch ${input.sourceBranch} --title ${input.title}`,
+		cwd: deps.cwd,
+		verdict,
+		reason,
+	});
+	return outcome;
+}
+
+function attemptMr(input: MrInput, deps: OpenMrDeps): MrOutcome {
 	const quotedLength = input.body.length + (input.body.match(/["\\]/g)?.length ?? 0);
 	if (quotedLength > MAX_MR_BODY_CHARS) {
 		return { kind: "refused", reason: `the MR body is ${quotedLength} characters once quoted, over the ${MAX_MR_BODY_CHARS}-character command-line limit -- not truncating evidence` };

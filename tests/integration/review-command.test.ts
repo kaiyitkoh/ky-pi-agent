@@ -17,6 +17,7 @@ import { commitFile, makeTempRepo } from "../helpers/git.ts";
 
 const mocks = vi.hoisted(() => ({
 	review: undefined as unknown,
+	designCalls: 0,
 	calls: [] as { args: string[]; reviewWritten: boolean }[],
 	reviewPath: "",
 }));
@@ -24,6 +25,13 @@ const mocks = vi.hoisted(() => ({
 vi.mock("../../.pi/extensions/quality/reviewer.ts", async (importOriginal) => ({
 	...(await importOriginal<object>()),
 	runReview: async () => ({ ok: true, review: mocks.review }),
+}));
+vi.mock("../../.pi/extensions/quality/design-review.ts", async (importOriginal) => ({
+	...(await importOriginal<object>()),
+	runDesignReview: async () => {
+		mocks.designCalls += 1;
+		return { findings: [{ severity: "WARNING", location: "src/a.ts:1", concreteFailure: "quadratic scan", suggestedFix: "index it" }] };
+	},
 }));
 vi.mock("../../.pi/extensions/quality/verdict.ts", async (importOriginal) => ({
 	...(await importOriginal<object>()),
@@ -65,6 +73,7 @@ const CLEAN: ReviewArtifact = {
 const repos: string[] = [];
 beforeEach(() => {
 	mocks.calls = [];
+	mocks.designCalls = 0;
 	mocks.review = CLEAN;
 });
 afterEach(() => {
@@ -74,17 +83,18 @@ afterEach(() => {
 const git = (repo: string, args: string[]) => execFileSync("git", args, { cwd: repo, stdio: "ignore" });
 
 /** A repo whose HEAD is one recorded, pushed task commit on top of `staging`; `extra` lands in the same commit. */
-function setup(extra?: string) {
+function setup(extra?: string, aSource = "export const a = 1;\n") {
+	const extras = extra === undefined ? [] : extra.split(",");
 	const repo = makeTempRepo("kypi-review-");
 	repos.push(repo);
 	const baseSha = commitFile(repo, "README.md", "base\n", "base");
 	git(repo, ["branch", "staging"]);
 	mkdirSync(join(repo, "src"), { recursive: true });
-	writeFileSync(join(repo, "src", "a.ts"), "export const a = 1;\n");
-	if (extra !== undefined) writeFileSync(join(repo, "src", extra), "export const x = 1;\n");
-	const sha = commitFile(repo, "src/a.ts", "export const a = 1;\n", "task");
-	if (extra !== undefined) {
-		git(repo, ["add", "--", `src/${extra}`]);
+	writeFileSync(join(repo, "src", "a.ts"), aSource);
+	for (const e of extras) writeFileSync(join(repo, "src", e), "const x = 1;\n");
+	const sha = commitFile(repo, "src/a.ts", aSource, "task");
+	if (extras.length > 0) {
+		git(repo, ["add", "--", ...extras.map((e) => `src/${e}`)]);
 		git(repo, ["commit", "--amend", "--no-edit"]);
 	}
 	const head = execFileSync("git", ["rev-parse", "HEAD"], { cwd: repo, encoding: "utf-8" }).trim();
@@ -93,7 +103,7 @@ function setup(extra?: string) {
 	mkdirSync(dir, { recursive: true });
 	writeFileSync(join(dir, "SPEC.md"), renderSpecMarkdown(SPEC));
 	writeFileSync(join(dir, "PLAN.md"), "- [ ] T001 [R1] Create the a module in src/a.ts | verify: npm test\n");
-	const recordedSha = extra === undefined ? sha : head;
+	const recordedSha = extras.length === 0 ? sha : head;
 	const entry = renderProgressAppend({ taskId: "T001", commitSha: recordedSha, verificationCommand: "npm test", output: "ok", exitCode: 0, recordedAt: 0 });
 	writeFileSync(join(dir, "PROGRESS.md"), entry);
 	appendLedger(repo, SLUG, { kind: "base", sha: baseSha, allowance: allowanceOf(SPEC.scopePin.expectedFiles, ["src/a.ts"]), reason: "test" });
@@ -117,6 +127,31 @@ function setup(extra?: string) {
 }
 
 describe("/review -- the real handler", () => {
+	it("an eight-file change runs the design pass once and REVIEW.md carries its section and findings", async () => {
+		const h = setup("b.ts,c.ts,d.ts,e.ts,f.ts,g.ts,h.ts", "const a = 1;\n");
+		await h.run(SLUG);
+		expect(mocks.designCalls).toBe(1);
+		const md = readFileSync(mocks.reviewPath, "utf-8");
+		expect(md).toContain("## Design review");
+		expect(md).toContain("Ran:");
+		expect(md).toContain("[design] quadratic scan");
+	});
+
+	it("a one-file change makes no design call and REVIEW.md says why", async () => {
+		const h = setup(undefined, "const a = 1;\n");
+		await h.run(SLUG);
+		expect(mocks.designCalls).toBe(0);
+		const md = readFileSync(mocks.reviewPath, "utf-8");
+		expect(md).toContain("Did not fire: no signal fired");
+		expect(md).toContain("filesTouched=1");
+	});
+
+	it("an added export fires the design pass on a one-file change", async () => {
+		const h = setup();
+		await h.run(SLUG);
+		expect(mocks.designCalls).toBe(1);
+	});
+
 	it("writes REVIEW.md, then opens exactly one MR against staging", async () => {
 		const h = setup();
 		await h.run();

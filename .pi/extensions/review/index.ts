@@ -13,15 +13,17 @@ import { ensureHarnessIgnored, uncommittedPaths } from "../execute/progress.ts";
 import { validateGatedSpec } from "../grill/spec-gate.ts";
 import { extractSpecRequirementIds } from "../plan-ceremony/requirement-ids.ts";
 import { validatePlan } from "../plan-ceremony/plan-schema.ts";
-import { gateDepthFor } from "../quality/gates.ts";
+import { computeDesignSignals, runDesignReview } from "../quality/design-review.ts";
+import { gateDepthFor, shouldRunDesignReview } from "../quality/gates.ts";
 import { runChangeGateStage } from "../quality/index.ts";
 import { buildImportGraph, runReview, type ReviewerContractInput } from "../quality/reviewer.ts";
 import { renderReviewMarkdown, type ReviewArtifact } from "../quality/review-schema.ts";
 import { decideWorkflowStop, runRefuteOrPromote } from "../quality/verdict.ts";
 import { classifyGitInvocation, currentBranch } from "../safety/git.ts";
+import { getModeState } from "../routing/modes.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { MR_TARGET_BRANCH, buildMrBody, historyMismatch, openMr, sanitizeTitle, spawnExec, upstreamMismatch } from "./mr.ts";
-import { changedFilesSince, compareScope } from "./scope-drift.ts";
+import { changedFilesSince, compareScope, readTouchedFiles, resolveBaseRef } from "./scope-drift.ts";
 
 function slugsWithProgress(cwd: string): string[] {
 	const root = resolve(join(cwd, ".pi", "work"));
@@ -87,7 +89,9 @@ export default function (pi: ExtensionAPI): void {
 				// Calibration scores seeded-defect fixtures and has no meaning for a live diff, so it is never announced here.
 				ctx.ui.notify(`review: running ${mechanisms.filter((m) => m !== "calibration").join(", ")}`, "info");
 
-				const base = git(ctx.cwd, ["merge-base", "HEAD", MR_TARGET_BRANCH]).trim();
+				const baseRef = resolveBaseRef(ctx.cwd, MR_TARGET_BRANCH);
+				if (!baseRef.ok) return fail(`review: ${baseRef.reason}`);
+				const base = git(ctx.cwd, ["merge-base", "HEAD", baseRef.ref]).trim();
 				const changed = changedFilesSince(ctx.cwd, base);
 				let gateReport = "The deterministic stage is outside this workflow's gate depth and did not run.";
 				const gateDoubts: string[] = [];
@@ -100,7 +104,7 @@ export default function (pi: ExtensionAPI): void {
 					if (!gate.ranAny) gateDoubts.push(`no deterministic check applies to this change:\n${gate.report}`);
 					gateReport = gate.report;
 				}
-				const touched = changed.filter((p) => existsSync(join(ctx.cwd, p))).map((p) => ({ path: p, contents: readFileSync(join(ctx.cwd, p), "utf-8") }));
+				const touched = readTouchedFiles(ctx.cwd, changed);
 				const filesTouchedUnion = [...new Set([...spec.spec.scopePin.expectedFiles, ...plan.plan.filesTouched])];
 				const contract: ReviewerContractInput = {
 					diff: git(ctx.cwd, ["diff", `${base}..HEAD`]),
@@ -117,6 +121,16 @@ export default function (pi: ExtensionAPI): void {
 
 				// The stop decision runs on the post-refutation review, so BLOCKERs are rebuilt first.
 				let review: ReviewArtifact = reviewed.review;
+				const signals = computeDesignSignals({ changed, diffText: contract.diff, escalated: getModeState().escalated });
+				if (shouldRunDesignReview(signals)) {
+					ctx.ui.notify("review: running the design-level pass", "info");
+					const design = await runDesignReview(ctx, { diffText: contract.diff, changed, requirements: contract.requirements });
+					if (design.notice !== undefined) ctx.ui.notify(`review: ${design.notice}`, "warning");
+					const added = design.findings.map((f) => ({ ...f, concreteFailure: `[design] ${f.concreteFailure}` }));
+					review = { ...review, findings: [...review.findings, ...added], designPass: { ran: true, note: design.notice ?? `${added.length} finding(s) added`, signals } };
+				} else {
+					review = { ...review, designPass: { ran: false, note: "no signal fired", signals } };
+				}
 				if (mechanisms.includes("refute-or-promote")) {
 					const { promoted } = await runRefuteOrPromote(ctx, review, contract);
 					review = { ...review, findings: [...review.findings.filter((f) => f.severity !== "BLOCKER"), ...promoted] };
@@ -139,7 +153,7 @@ export default function (pi: ExtensionAPI): void {
 				if (unpushed !== undefined) return fail(`review: MR not opened -- ${unpushed}`);
 				const body = buildMrBody({ spec: spec.spec, plan: plan.plan, progress, review });
 				const title = sanitizeTitle(spec.spec.goal.split("\n")[0] ?? "");
-				const out = openMr({ targetBranch: MR_TARGET_BRANCH, sourceBranch: currentBranch(ctx.cwd), title, body }, { exec: spawnExec(ctx.cwd, undefined) });
+				const out = openMr({ targetBranch: MR_TARGET_BRANCH, sourceBranch: currentBranch(ctx.cwd), title, body }, { exec: spawnExec(ctx.cwd, undefined), cwd: ctx.cwd });
 				if (out.kind === "refused") return fail(`review: MR refused -- ${out.reason}`);
 				if (out.kind === "failed") return fail(`review: glab exited ${out.code}: ${out.stderr}`);
 				ctx.ui.notify(`review: MR opened against ${MR_TARGET_BRANCH}\n${out.stdout}`, "info");

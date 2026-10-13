@@ -9,7 +9,7 @@
  * target branch exists, or that server-side branch protection is configured. Those need the work laptop.
  */
 import { execFileSync } from "node:child_process";
-import { mkdirSync, mkdtempSync, readFileSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -60,6 +60,18 @@ afterEach(() => {
 	for (const d of dirs.splice(0)) rmSync(d, { recursive: true, force: true });
 });
 
+function scratch(): string {
+	const d = mkdtempSync(join(tmpdir(), "kypi-mraudit-"));
+	dirs.push(d);
+	return d;
+}
+
+function auditRows(cwd: string): { tool: string; verdict: string; reason: string; command: string }[] {
+	const logs = join(cwd, ".pi", "logs");
+	if (!existsSync(logs)) return [];
+	return readdirSync(logs).filter((f) => f.startsWith("audit-")).flatMap((f) => readFileSync(join(logs, f), "utf-8").split(/\r?\n/).filter((l) => l.trim() !== "").map((l) => JSON.parse(l)));
+}
+
 function recorder(): { exec: MrExec; calls: { file: string; args: string[] }[] } {
 	const calls: { file: string; args: string[] }[] = [];
 	return { calls, exec: (file, args) => (calls.push({ file, args }), { status: 0, stdout: "https://example.invalid/mr/1", stderr: "" }) };
@@ -70,7 +82,7 @@ const input = (targetBranch: string) => ({ targetBranch, sourceBranch: "work", t
 describe("openMr classification (injected executor)", () => {
 	it("allows an explicit staging target and sends it", () => {
 		const r = recorder();
-		const out = openMr(input("staging"), { exec: r.exec });
+		const out = openMr(input("staging"), { exec: r.exec, cwd: scratch() });
 		expect(out.kind).toBe("opened");
 		expect(r.calls).toHaveLength(1);
 		const sent = [r.calls[0]?.file, ...(r.calls[0]?.args ?? [])].join(" ");
@@ -79,7 +91,7 @@ describe("openMr classification (injected executor)", () => {
 
 	it.each(["main", "MAIN", "master", ""])("refuses target %j and executes nothing", (target) => {
 		const r = recorder();
-		const out = openMr(input(target), { exec: r.exec });
+		const out = openMr(input(target), { exec: r.exec, cwd: scratch() });
 		expect(out.kind).toBe("refused");
 		if (out.kind === "refused") expect(out.reason.length).toBeGreaterThan(0);
 		expect(r.calls).toHaveLength(0);
@@ -87,7 +99,7 @@ describe("openMr classification (injected executor)", () => {
 
 	it("MR_TARGET_BRANCH is not a protected branch", () => {
 		const r = recorder();
-		expect(openMr(input(MR_TARGET_BRANCH), { exec: r.exec }).kind).toBe("opened");
+		expect(openMr(input(MR_TARGET_BRANCH), { exec: r.exec, cwd: scratch() }).kind).toBe("opened");
 	});
 
 	it("the classifier openMr relies on refuses mr merge even with a staging target", () => {
@@ -98,7 +110,7 @@ describe("openMr classification (injected executor)", () => {
 	it("passes the whole body as the single argv element after --description, straight to glab", () => {
 		const r = recorder();
 		const full = buildMrBody({ spec: { ...SPEC, goal: `${BODY_TEXT} %PATH% & "q"` }, plan: PLAN, progress: PROGRESS, review: REVIEW });
-		expect(openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: full }, { exec: r.exec }).kind).toBe("opened");
+		expect(openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: full }, { exec: r.exec, cwd: scratch() }).kind).toBe("opened");
 		expect(r.calls[0]?.file).toBe("glab");
 		const args = r.calls[0]?.args ?? [];
 		expect(args[args.indexOf(MR_BODY_FLAG) + 1]).toBe(full);
@@ -107,14 +119,14 @@ describe("openMr classification (injected executor)", () => {
 
 	it("refuses an over-long body rather than truncating the evidence", () => {
 		const r = recorder();
-		const out = openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: "x".repeat(MAX_MR_BODY_CHARS + 1) }, { exec: r.exec });
+		const out = openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: "x".repeat(MAX_MR_BODY_CHARS + 1) }, { exec: r.exec, cwd: scratch() });
 		expect(out.kind).toBe("refused");
 		expect(r.calls).toHaveLength(0);
 	});
 
 	it("counts quotes and backslashes twice, as Windows argv quoting does", () => {
 		const r = recorder();
-		const out = openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: '"'.repeat(MAX_MR_BODY_CHARS / 2 + 1) }, { exec: r.exec });
+		const out = openMr({ targetBranch: "staging", sourceBranch: "work", title: "T", body: '"'.repeat(MAX_MR_BODY_CHARS / 2 + 1) }, { exec: r.exec, cwd: scratch() });
 		expect(out.kind).toBe("refused");
 		expect(r.calls).toHaveLength(0);
 	});
@@ -208,7 +220,7 @@ describe("stubbed glab on PATH", () => {
 		const logTo = join(dir, "calls.log");
 		const out = withStubBin(
 			{ glab: { logTo, match: [{ when: ["mr", "create"], stdout: "https://example.invalid/mr/1\n" }, { when: ["merge"], exitCode: 9 }] } },
-			(env) => openMr({ targetBranch: "staging", sourceBranch: "work", title: "Add the a module", body: "## Why" }, { exec: spawnExec(dir, env) }),
+			(env) => openMr({ targetBranch: "staging", sourceBranch: "work", title: "Add the a module", body: "## Why" }, { exec: spawnExec(dir, env), cwd: dir }),
 		);
 		expect(out.kind).toBe("opened");
 		const log = readFileSync(logTo, "utf-8").trim().split("\n");
@@ -221,7 +233,7 @@ describe("stubbed glab on PATH", () => {
 		const dir = mkdtempSync(join(tmpdir(), "kypi-mrlog-"));
 		dirs.push(dir);
 		const logTo = join(dir, "calls.log");
-		const out = withStubBin({ glab: { logTo } }, (env) => openMr(input("staging"), { exec: spawnExec(dir, env) }));
+		const out = withStubBin({ glab: { logTo } }, (env) => openMr(input("staging"), { exec: spawnExec(dir, env), cwd: dir }));
 		expect(out.kind).toBe("failed");
 		if (out.kind === "failed") expect(out.stderr).toContain("without a shell");
 		let log = "";
@@ -243,10 +255,51 @@ describe("stubbed glab on PATH", () => {
 		const dir = mkdtempSync(join(tmpdir(), "kypi-mrlog-"));
 		dirs.push(dir);
 		const logTo = join(dir, "calls.log");
-		const out = withStubBin({ glab: { logTo } }, (env) => openMr(input("main"), { exec: spawnExec(dir, env) }));
+		const out = withStubBin({ glab: { logTo } }, (env) => openMr(input("main"), { exec: spawnExec(dir, env), cwd: dir }));
 		expect(out.kind).toBe("refused");
 		let log = "";
 		try { log = readFileSync(logTo, "utf-8"); } catch { /* never created */ }
 		expect(log).toBe("");
+	});
+});
+
+describe("openMr audit row", () => {
+	it("writes one allow row for an opened MR, one block row for a refusal, and one block row for a failure", () => {
+		const opened = scratch();
+		expect(openMr(input("staging"), { exec: recorder().exec, cwd: opened }).kind).toBe("opened");
+		expect(auditRows(opened)).toMatchObject([{ tool: "glab", verdict: "allow" }]);
+
+		const refused = scratch();
+		expect(openMr(input("main"), { exec: recorder().exec, cwd: refused }).kind).toBe("refused");
+		expect(auditRows(refused)).toMatchObject([{ tool: "glab", verdict: "block" }]);
+
+		const failed = scratch();
+		const exec: MrExec = () => ({ status: 1, stdout: "", stderr: "glab: boom" });
+		expect(openMr(input("staging"), { exec, cwd: failed }).kind).toBe("failed");
+		const rows = auditRows(failed);
+		expect(rows).toHaveLength(1);
+		expect(rows[0]).toMatchObject({ verdict: "block" });
+		expect(rows[0]?.reason).toContain("boom");
+	});
+
+	it("never records the MR body", () => {
+		const cwd = scratch();
+		openMr({ ...input("staging"), body: "SECRET-BODY-TEXT" }, { exec: recorder().exec, cwd });
+		expect(JSON.stringify(auditRows(cwd))).not.toContain("SECRET-BODY-TEXT");
+	});
+});
+
+describe("buildMrBody requirement verdicts", () => {
+	it("lists every verdict with its status and evidence", () => {
+		const review: ReviewArtifact = {
+			...REVIEW,
+			verdicts: [
+				{ requirementId: "R1", status: "Implemented", evidence: "src/a.ts:1" },
+				{ requirementId: "R2", status: "Missing", evidence: "src/b.ts:4" },
+			],
+		};
+		const body = buildMrBody({ spec: SPEC, plan: PLAN, progress: PROGRESS, review });
+		expect(body).toContain("- R1: Implemented (src/a.ts:1)");
+		expect(body).toContain("- R2: Missing (src/b.ts:4)");
 	});
 });
