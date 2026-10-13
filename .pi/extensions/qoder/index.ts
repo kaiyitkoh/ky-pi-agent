@@ -18,13 +18,13 @@ const qoderDelegateSchema = Type.Object({
 	}),
 });
 
-/** User- and model-facing bypass statement; measured 1315 bytes / 329 tokens (see the allowlist entry). Full text: docs/ROUTING.md. */
+/** User- and model-facing bypass statement; its per-request size is recorded in the allowlist entry. Full text: docs/ROUTING.md. */
 const QODER_DELEGATE_DESCRIPTION =
 	"Delegates a task to Qoder's own hosted agent loop -- a FOREIGN AGENT, not a Pi tool call. " +
 	"It runs inside Qoder's own container with Qoder's own Read/Write/Edit/Glob/Grep/Bash tools, " +
 	"entirely outside this harness. Invoking it bypasses Pi's own tools, this project's AGENTS.md " +
-	"and system prompt, the Phase 4 safety guard (branch protection, terraform/kubectl confirmation, " +
-	".env/*.tfstate read blocks, the audit log) and the Phase 2 wire inspector -- none of them see or " +
+	"and system prompt, this project's safety guard (branch protection, terraform/kubectl confirmation, " +
+	".env/*.tfstate read blocks, the audit log) and the wire inspector -- none of them see or " +
 	"govern what Qoder does. On a laptop where merging to main auto-deploys to AWS, delegating a task " +
 	"means trusting Qoder's own agent loop with whatever repository access its environment is " +
 	"configured with, outside every control this harness builds. Requires QODER_PERSONAL_ACCESS_TOKEN, " +
@@ -88,8 +88,8 @@ export default function (pi: ExtensionAPI): void {
 			const choice = ctx.hasUI
 				? await ctx.ui.select(
 						"Delegate this task to Qoder's own hosted agent loop? This bypasses Pi's own tools, " +
-							"this project's AGENTS.md and system prompt, the Phase 4 safety guard and the " +
-							"Phase 2 wire inspector -- Qoder's own agent runs unsupervised inside its own " +
+							"this project's AGENTS.md and system prompt, the safety guard and the " +
+							"wire inspector -- Qoder's own agent runs unsupervised inside its own " +
 							`container with its own file/shell tools.\n\nTask:\n  ${excerpt}`,
 						[DELEGATE_CHOICE, CANCEL_CHOICE],
 					)

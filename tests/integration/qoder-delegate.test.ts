@@ -153,14 +153,14 @@ async function runDelegate(
 }
 
 describe("qoder-delegate -- the exact three-request sequence, in order", () => {
-	it("posts /sessions, then posts .../events, then GETs .../events/stream -- with the right auth and content-type", async () => {
+	it("posts /sessions, then GETs .../events/stream, then posts .../events -- with the right auth and content-type", async () => {
 		const { loop } = await runDelegate({ frames: FRAMES });
 
 		// Non-vacuity, before anything else is asserted about the contents.
 		expect(loop.received.length).toBeGreaterThan(0);
 		expect(loop.received).toHaveLength(3);
 
-		const [sessionReq, eventReq, streamReq] = loop.received;
+		const [sessionReq, streamReq, eventReq] = loop.received;
 
 		expect(sessionReq?.method).toBe("POST");
 		expect(sessionReq?.url).toBe("/sessions");
@@ -191,19 +191,19 @@ describe("qoder-delegate -- the exact three-request sequence, in order", () => {
 		// path of steps 2 and 3), which is the observable proof that
 		// `delegateTask` actually parsed the create-session response rather
 		// than fabricating a path.
-		const eventsMatch = /^\/sessions\/([^/]+)\/events$/.exec(loop.received[1]?.url ?? "");
-		expect(eventsMatch, `step 2's url "${loop.received[1]?.url}" did not match the expected shape`).not.toBeNull();
+		const eventsMatch = /^\/sessions\/([^/]+)\/events$/.exec(loop.received[2]?.url ?? "");
+		expect(eventsMatch, `the events url "${loop.received[2]?.url}" did not match the expected shape`).not.toBeNull();
 		const sessionId = eventsMatch?.[1] as string;
 		expect(sessionId).toMatch(/^sess_kypi_loopback_\d+$/);
 
-		expect(loop.received[2]?.url).toBe(`/sessions/${sessionId}/events/stream`);
+		expect(loop.received[1]?.url).toBe(`/sessions/${sessionId}/events/stream`);
 	});
 
 	it("the events POST body carries exactly one user.message event whose content is the delegated task text", async () => {
 		const { loop } = await runDelegate({ frames: FRAMES });
 		expect(loop.received.length).toBeGreaterThan(0);
 
-		const body = loop.received[1]?.body as
+		const body = loop.received[2]?.body as
 			| { events?: { type?: unknown; content?: { type?: unknown; text?: unknown }[] }[] }
 			| undefined;
 		expect(body?.events).toHaveLength(1);
@@ -799,5 +799,46 @@ describe("qoder-delegate -- this file never dials the real host", () => {
 		// is what every other case in this file actually dialled.
 		expect(DEFAULT_QODER_BASE_URL.startsWith("https://")).toBe(true);
 		expect(new URL(DEFAULT_QODER_BASE_URL).hostname).not.toBe("127.0.0.1");
+	});
+});
+
+describe("qoder-delegate -- the stream is open before the task is sent", () => {
+	it("receives frames the server emits the moment the task arrives", async () => {
+		const { folded, loop } = await runDelegate({ frames: FRAMES, liveStreamOnly: true });
+		expect(loop.received.length).toBeGreaterThan(0);
+		expect(folded.text).toBe("Hello world");
+		expect(folded.done).toBe(true);
+	});
+});
+
+describe("qoder-delegate -- a failed remote turn is an error", () => {
+	for (const reason of ["error", "interrupted"]) {
+		it(`throws naming stop_reason ${reason} instead of returning the partial text`, async () => {
+			const idle = STATUS_IDLE.replace('"end_turn"', `"${reason}"`);
+			const frames = [MESSAGE_START, MESSAGE_DELTA_1, idle].join("\n") + "\n";
+			await expect(runDelegate({ frames })).rejects.toThrow(new RegExp(`stop_reason "${reason}"`));
+		});
+	}
+});
+
+describe("qoder-delegate -- Esc cancels the remote turn", () => {
+	it("posts the cancel endpoint and rejects as aborted when the signal fires mid-stream", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: FRAMES, splitStreamAt: 40 }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				const controller = new AbortController();
+				const run = delegateTask({
+					config,
+					task: DELEGATED_TASK_TEXT,
+					cwd,
+					signal: controller.signal,
+					onProgress: () => controller.abort(),
+				});
+				await expect(run).rejects.toThrow(/aborted/);
+				const cancel = loop.received.find((req) => req.method === "POST" && /\/cancel$/.test(req.url));
+				expect(cancel, "no cancel request reached the server").toBeDefined();
+				expect(cancel?.headers.authorization).toBe(`Bearer ${FIXTURE_TOKEN}`);
+			});
+		});
 	});
 });

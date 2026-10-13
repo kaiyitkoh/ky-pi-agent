@@ -161,6 +161,12 @@ export interface QoderLoopbackOptions {
 	 * -- a value the DEFAULT id generator can never produce on its own.
 	 */
 	sessionIdOverride?: string;
+	/**
+	 * Deliver the stream frames only to a stream that is already open when the
+	 * events POST arrives. A stream opened after the POST receives nothing, so a
+	 * client that subscribes late loses its early frames.
+	 */
+	liveStreamOnly?: boolean;
 }
 
 /** What the callback gets. */
@@ -287,6 +293,7 @@ export const DEFAULT_QODER_SSE_FRAMES =
 
 const SESSIONS_PATH_RE = /^\/sessions\/?$/;
 const EVENTS_PATH_RE = /^\/sessions\/([^/]+)\/events\/?$/;
+const CANCEL_PATH_RE = /^\/sessions\/([^/]+)\/cancel\/?$/;
 const STREAM_PATH_RE = /^\/sessions\/([^/]+)\/events\/stream\/?$/;
 
 /** JSON-encode and write a full response in one call. */
@@ -451,6 +458,8 @@ export async function withQoderLoopback<T>(
 	const pendingResponders = new Set<Promise<void>>();
 
 	let sessionCounter = 0;
+	const eventsPosted = createDeferred<void>();
+	let eventsPostedFlag = false;
 
 	const server = createServer((req, res) => {
 		const chunks: Buffer[] = [];
@@ -510,6 +519,13 @@ export async function withQoderLoopback<T>(
 						return;
 					}
 					writeJson(res, status, { ok: true });
+					eventsPostedFlag = true;
+					eventsPosted.resolve();
+					return;
+				}
+
+				if (method === "POST" && CANCEL_PATH_RE.test(url)) {
+					writeJson(res, 202, { status: "canceling" });
 					return;
 				}
 
@@ -518,6 +534,17 @@ export async function withQoderLoopback<T>(
 					if (status < 200 || status >= 300) {
 						res.writeHead(status, { "content-type": "application/json" });
 						res.end(JSON.stringify({ error: `qoder-loopback: stream open forced to HTTP ${status}` }));
+						return;
+					}
+					if (opts.liveStreamOnly === true) {
+						res.writeHead(status, { "content-type": "text/event-stream", "cache-control": "no-cache", connection: "close" });
+						res.flushHeaders();
+						if (!eventsPostedFlag) {
+							await eventsPosted.promise;
+							res.write(frames);
+						}
+						res.end();
+						firstChunkWrittenGate.resolve();
 						return;
 					}
 					if (multiSplitPoints.length > 0) {
@@ -640,6 +667,7 @@ export async function withQoderLoopback<T>(
 		// deadlock teardown on a responder that is awaiting a gate nobody will
 		// ever open.
 		releaseSecondChunk();
+		eventsPosted.resolve();
 		for (const gate of nextChunkGates) {
 			gate.resolve();
 		}

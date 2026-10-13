@@ -234,21 +234,26 @@ function readString(value: unknown): string | undefined {
 	return typeof value === "string" ? value : undefined;
 }
 
-/**
- * Fold frames into the delegated agent's text: `agent.message` deltas accumulate until `session.status_idle`,
- * `agent.thinking` deltas separately. Unknown event types and malformed shapes are ignored because the documented enum is incomplete.
- */
-export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
-	let text = "";
+/** Incremental fold state: each frame is read once, and message text is joined only when a result is requested. */
+export interface ResultFolder {
+	/** Fold more frames into the running state. */
+	push(frames: readonly SseFrame[]): void;
+	/** The result so far. */
+	result(): FoldedResult;
+}
+
+/** Start an incremental fold; see {@link foldDelegatedResult} for the frame semantics. */
+export function createResultFolder(): ResultFolder {
+	const textChunks: string[] = [];
 	let thinkingText = "";
 	let done = false;
 	let stopReason: string | undefined;
 	const kindByEventId = new Map<string, EventKind>();
 
-	for (const frame of frames) {
+	function foldFrame(frame: SseFrame): void {
 		const record = readRecord(frame.data);
 		if (record === undefined) {
-			continue;
+			return;
 		}
 		const type = readString(record.type);
 
@@ -260,28 +265,27 @@ export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
 				const kind: EventKind = innerType === "agent.message" ? "message" : innerType === "agent.thinking" ? "thinking" : "other";
 				kindByEventId.set(innerId, kind);
 			}
-			continue;
+			return;
 		}
 
 		if (type === "event_delta") {
 			const eventId = readString(record.event_id);
 			const delta = readRecord(record.delta);
 			if (eventId === undefined || delta === undefined || readString(delta.type) !== "content_delta") {
-				continue;
+				return;
 			}
 			const content = readRecord(delta.content);
 			const deltaText = content === undefined ? undefined : readString(content.text);
 			if (deltaText === undefined) {
-				continue;
+				return;
 			}
 			const kind = kindByEventId.get(eventId);
 			if (kind === "message") {
-				text += deltaText;
+				textChunks.push(deltaText);
 			} else if (kind === "thinking") {
 				thinkingText += deltaText;
 			}
-				// kind "other" or unknown eventId: ignored.
-			continue;
+			return;
 		}
 
 		if (type === "session.status_idle") {
@@ -291,13 +295,29 @@ export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
 			if (srType !== undefined) {
 				stopReason = srType;
 			}
-			continue;
 		}
-
-		// Any other top-level type is ignored.
 	}
 
-	return { text, thinkingText, done, stopReason };
+	return {
+		push(frames) {
+			for (const frame of frames) {
+				foldFrame(frame);
+			}
+		},
+		result() {
+			return { text: textChunks.join(""), thinkingText, done, stopReason };
+		},
+	};
+}
+
+/**
+ * Fold frames into the delegated agent's text: `agent.message` deltas accumulate until `session.status_idle`,
+ * `agent.thinking` deltas separately. Unknown event types and malformed shapes are ignored because the documented enum is incomplete.
+ */
+export function foldDelegatedResult(frames: readonly SseFrame[]): FoldedResult {
+	const folder = createResultFolder();
+	folder.push(frames);
+	return folder.result();
 }
 
 // -----------------------------------------------------------------------------
@@ -355,8 +375,39 @@ async function cancelReaderQuietly(reader: ReadableStreamDefaultReader<Uint8Arra
 	}
 }
 
+/** Upper bound on the best-effort remote cancel, so Esc is never held up by an unreachable host. */
+const CANCEL_TIMEOUT_MS = 5_000;
+
+function abortedError(): Error {
+	const error = new Error("Qoder delegate: aborted by the user; a remote cancel was requested.");
+	error.name = "AbortError";
+	return error;
+}
+
+/** `POST /sessions/{id}/cancel` (docs.qoder.com/cloud-agents/sessions.md, "Cancel Semantics"); best effort, never throws. */
+async function cancelRemoteSession(
+	config: QoderConfig,
+	headers: Record<string, string>,
+	encodedSessionId: string,
+	cwd: string,
+): Promise<void> {
+	let status: number | undefined;
+	try {
+		const response = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/cancel`, {
+			method: "POST",
+			headers,
+			signal: AbortSignal.timeout(CANCEL_TIMEOUT_MS),
+		});
+		status = response.status;
+	} catch {
+		status = undefined;
+	}
+	writeQoderTranscript(cwd, { event: "qoder.session.cancel", status });
+}
+
 /**
- * Run the three-step sequence: create a session, send the task as `user.message`, stream and fold until `session.status_idle`.
+ * Run the three-step sequence: create a session, open the event stream, send the task as `user.message`, fold until `session.status_idle`.
+ * A stop_reason other than `end_turn` throws; an abort cancels the remote turn.
  * The task is validated (non-empty, bounded) first; the token goes only in the Authorization header, never in a transcript.
  */
 export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedResult> {
@@ -410,24 +461,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	}
 	const encodedSessionId = encodeURIComponent(sessionId);
 
-	writeQoderTranscript(cwd, {
-		event: "qoder.event.send.request",
-		url: `${config.baseUrl}/sessions/${encodedSessionId}/events`,
-		taskChars: trimmed.length,
-	});
-
-	const eventResponse = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/events`, {
-		method: "POST",
-		headers,
-		body: JSON.stringify({ events: [{ type: "user.message", content: [{ type: "text", text: trimmed }] }] }),
-		signal,
-	});
-	writeQoderTranscript(cwd, { event: "qoder.event.send.response", status: eventResponse.status });
-	if (!eventResponse.ok) {
-		throw new Error(`Qoder delegate: sending the task failed with HTTP ${eventResponse.status}.`);
-	}
-
-	// Transcript records for the stream-open step so a 401/403 is visible in the log, as for the two steps above.
+	// The stream is opened before the task is sent so no early frame can be missed.
 	writeQoderTranscript(cwd, {
 		event: "qoder.stream.open.request",
 		url: `${config.baseUrl}/sessions/${encodedSessionId}/events/stream`,
@@ -444,10 +478,38 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	}
 
 	const reader = streamResponse.body.getReader();
+
+	writeQoderTranscript(cwd, {
+		event: "qoder.event.send.request",
+		url: `${config.baseUrl}/sessions/${encodedSessionId}/events`,
+		taskChars: trimmed.length,
+	});
+
+	try {
+		const eventResponse = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/events`, {
+			method: "POST",
+			headers,
+			body: JSON.stringify({ events: [{ type: "user.message", content: [{ type: "text", text: trimmed }] }] }),
+			signal,
+		});
+		writeQoderTranscript(cwd, { event: "qoder.event.send.response", status: eventResponse.status });
+		if (!eventResponse.ok) {
+			throw new Error(`Qoder delegate: sending the task failed with HTTP ${eventResponse.status}.`);
+		}
+	} catch (error) {
+		await cancelReaderQuietly(reader, "task send failed");
+		reader.releaseLock();
+		if (signal?.aborted) {
+			await cancelRemoteSession(config, headers, encodedSessionId, cwd);
+			throw abortedError();
+		}
+		throw error;
+	}
+
 	const decoder = new TextDecoder();
 	let buffer = "";
-	const allFrames: SseFrame[] = [];
-	let folded: FoldedResult = { text: "", thinkingText: "", done: false };
+	const folder = createResultFolder();
+	let folded: FoldedResult = folder.result();
 	let lastReportedThinking = "";
 
 	// Inactivity deadline: reset on every chunk, never a fixed budget from stream start. `now` is injectable in tests.
@@ -514,13 +576,20 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 			buffer += decoder.decode(value, { stream: true });
 			const parsed = parseSseFrames(buffer);
 			buffer = parsed.rest;
-			allFrames.push(...parsed.frames);
-			folded = foldDelegatedResult(allFrames);
+			folder.push(parsed.frames);
+			folded = folder.result();
 			if (opts.onThinking && folded.thinkingText !== lastReportedThinking) {
 				lastReportedThinking = folded.thinkingText;
 				opts.onThinking(folded.thinkingText);
 			}
 		}
+	} catch (error) {
+		if (signal?.aborted) {
+			await cancelReaderQuietly(reader, "aborted");
+			await cancelRemoteSession(config, headers, encodedSessionId, cwd);
+			throw abortedError();
+		}
+		throw error;
 	} finally {
 		reader.releaseLock();
 	}
@@ -529,8 +598,8 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	buffer += decoder.decode();
 	if (buffer.trim().length > 0) {
 		const flushed = parseSseFrames(`${buffer}\n\n`);
-		allFrames.push(...flushed.frames);
-		folded = foldDelegatedResult(allFrames);
+		folder.push(flushed.frames);
+		folded = folder.result();
 		if (opts.onThinking && folded.thinkingText !== lastReportedThinking) {
 			lastReportedThinking = folded.thinkingText;
 			opts.onThinking(folded.thinkingText);
@@ -543,6 +612,13 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		stopReason: folded.stopReason,
 		textChars: folded.text.length,
 	});
+
+	if (folded.stopReason !== undefined && folded.stopReason !== "end_turn") {
+		throw new Error(
+			`Qoder delegate: the remote session ended with stop_reason "${folded.stopReason}" after ` +
+				`${folded.text.length} characters -- the result is not a completed answer.`,
+		);
+	}
 
 	// Check `done`: a dropped or early-closed stream must not be returned as a complete answer.
 	if (!folded.done) {

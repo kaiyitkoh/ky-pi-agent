@@ -15,6 +15,7 @@
  */
 import { describe, expect, it } from "vitest";
 import {
+	createResultFolder,
 	DEFAULT_QODER_BASE_URL,
 	foldDelegatedResult,
 	parseSseFrames,
@@ -244,5 +245,34 @@ describe("this file's own discipline", () => {
 		// assertion cannot trip the acceptance grep it exists to satisfy.
 		const forbidden = ["process", "env"].join("\\.");
 		expect(self.match(new RegExp(forbidden, "g")) ?? []).toHaveLength(0);
+	});
+});
+
+describe("createResultFolder -- each frame is read once", () => {
+	it("reads every frame's data exactly once across incremental pushes", () => {
+		let reads = 0;
+		const frames = Array.from({ length: 300 }, (_, i) => {
+			const data = {
+				type: "event_delta",
+				event_id: "m",
+				delta: { type: "content_delta", content: { text: String(i % 10) } },
+			};
+			return {
+				event: "event_delta",
+				get data() {
+					reads += 1;
+					return data;
+				},
+			};
+		});
+		const start = { event: "event_start", data: { type: "event_start", event: { id: "m", type: "agent.message" } } };
+		const folder = createResultFolder();
+		folder.push([start]);
+		for (let i = 0; i < frames.length; i += 50) {
+			folder.push(frames.slice(i, i + 50));
+			folder.result();
+		}
+		expect(reads).toBe(frames.length);
+		expect(folder.result().text).toHaveLength(frames.length);
 	});
 });
