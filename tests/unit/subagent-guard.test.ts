@@ -210,6 +210,18 @@ describe("tool_call hook for the subagent tool", () => {
 			expect(seen).toEqual([300000, 300000]);
 		});
 	});
+
+	it("a management input too long to show in full is refused without asking", async () => {
+		const { hook } = load();
+		await withTempLogCwd(async (cwd) => {
+			let asked = 0;
+			const input = { action: "create", config: { name: "x", systemPrompt: "y".repeat(3000) } };
+			const result = await hook({ toolName: "subagent", input, toolCallId: "t" }, ctxOf(cwd, SESSION, { hasUI: true, mode: "tui", confirm: async () => (asked++, true) }));
+			expect(result?.block).toBe(true);
+			expect(result?.reason).toContain("too long");
+			expect(asked).toBe(0);
+		});
+	});
 });
 
 describe("lifecycle handlers", () => {
@@ -225,6 +237,20 @@ describe("lifecycle handlers", () => {
 			await (handlers.get("session_shutdown") as (e: unknown, c: ExtensionContext) => Promise<void>)({}, ctx);
 			expect(disposed).toBe(1);
 			expect(isChildGuardRegistered(SESSION)).toBe(false);
+		});
+	});
+
+	it("a failed registration is audited and shown when a UI is present", async () => {
+		setRequiredChildLoaderForTests(async () => {
+			throw new Error("no pi-subagents");
+		});
+		const { handlers } = load();
+		await withTempLogCwd(async (cwd) => {
+			const notes: string[] = [];
+			const ctx = { ...ctxOf(cwd, SESSION, { hasUI: true, mode: "tui" }), ui: { notify: (m: string) => notes.push(m) } } as unknown as ExtensionContext;
+			await (handlers.get("session_start") as (e: unknown, c: ExtensionContext) => Promise<void>)({}, ctx);
+			expect(isChildGuardRegistered(SESSION)).toBe(false);
+			expect(notes.join(" ")).toContain("subagent launches are refused");
 		});
 	});
 });

@@ -400,6 +400,12 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 				audit("subagent", input, "block", reason);
 				return { block: true, reason };
 			}
+			// The human must see the whole definition that would be written, so one too long to show is refused.
+			if (safeStringify(event.input).length > DENY_COMMAND_MAX) {
+				const reason = `subagent action "${call.action}" is longer than ${DENY_COMMAND_MAX} characters, too long to show in full for a confirm`;
+				audit("subagent", input, "block", reason);
+				return { block: true, reason };
+			}
 			if (!(await askUser(ctx, "Allow this subagent definition change?", `action: ${call.action}
 
 ${input}`))) {
@@ -490,8 +496,13 @@ export default function (pi: ExtensionAPI): void {
 		}
 		const sessionId = sessionIdOf(ctx);
 		if (sessionId !== undefined) {
-			// A failed registration is not fatal here: the subagent launch branch fails closed on its own.
-			await registerChildGuard(sessionId, fileURLToPath(new URL("./index.ts", import.meta.url)), ctx.cwd);
+			// Not fatal: the subagent launch branch fails closed on its own, but the cause is recorded and shown.
+			const registered = await registerChildGuard(sessionId, fileURLToPath(new URL("./index.ts", import.meta.url)), ctx.cwd);
+			if (!registered.ok) {
+				const reason = `the safety guard could not be registered for subagent children, so subagent launches are refused: ${registered.reason}`;
+				writeAuditRow(ctx.cwd, { event: HOOK_AUDIT_EVENT, tool: "subagent", command: "", cwd: ctx.cwd, verdict: "block", reason });
+				if (ctx.hasUI) ctx.ui.notify(reason, "warning");
+			}
 		}
 	});
 
