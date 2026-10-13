@@ -6,7 +6,7 @@
  */
 import { posix } from "node:path";
 import { parse } from "unbash";
-import type { Command, ParsedScript, Word } from "unbash";
+import type { Command, ParsedScript, Redirect, Word } from "unbash";
 
 const wordSet = (words: string): Set<string> => new Set(words.split(" ").filter((w) => w !== ""));
 
@@ -171,12 +171,17 @@ export interface CanonicalInvocation {
 	readonly rawSegment: string;
 	/** Earlier `cd` targets, then `env -C`/`sudo -D`, then `git -C`/`--git-dir`, folded as git and env apply them. */
 	readonly cwdOverride?: string;
+	/** The same directories unfolded, in order; `~` forms are kept for the caller, which knows home, to expand. */
+	readonly cwdChain?: readonly string[];
 	/** Set when a `cd`/`pushd`/`popd` ran earlier in the script; `"unknown"` when its target is not a literal directory. */
 	readonly afterCd?: "known" | "unknown";
 	/** Set when `NAME=value` words prefix the command, which can change git's config or repository for this run only. */
 	readonly assignments?: true;
 	/** Every `NAME=value` word before the command, from the statement prefix and from wrapper assignments (`env NAME=value`). */
 	readonly assignmentWords?: readonly string[];
+	/** Files this command's own redirects read and write. */
+	readonly redirectReads?: readonly string[];
+	readonly redirectWrites?: readonly string[];
 }
 
 export type ShellVerdict =
@@ -186,8 +191,10 @@ export type ShellVerdict =
 			readonly invocations: readonly CanonicalInvocation[];
 			/** Every distinct `Redirect.operator` in walk order, so callers need no second AST walk. */
 			readonly redirectOperators: readonly string[];
-			/** Targets of input redirects (`<`, `<>`, and `<&` onto a non-descriptor), which read a file as surely as an argument does. */
+			/** Input-redirect targets on compound statements (`{ ...; } < f`); a simple command's own are on its invocation. */
 			readonly redirectReadTargets: readonly string[];
+			/** Output-redirect targets on compound statements; a simple command's own are on its invocation. */
+			readonly redirectWriteTargets: readonly string[];
 			/** Every `Command` node, including assignment-only statements (`HOME=x`) that yield no invocation. */
 			readonly commandCount: number;
 	  };
@@ -217,6 +224,8 @@ interface ScriptScan {
 	readonly redirects: Set<string>;
 	readonly readTargets: string[];
 	readonly writeTargets: string[];
+	readonly compoundReads: string[];
+	readonly compoundWrites: string[];
 	readonly commands: Command[];
 	/** Commands whose stdin is a pipe from an earlier pipeline element. */
 	readonly piped: Set<Command>;
@@ -226,8 +235,24 @@ interface ScriptScan {
 const WRITE_REDIRECTS = new Set([">", ">>", ">|", "&>", "&>>", "<>"]);
 const DESCRIPTOR = /^(\d+-?|-)$/;
 
+/** Files a redirect list reads and writes; `<>` does both, and a `<&`/`>&` onto a descriptor touches no file. */
+function redirectFiles(redirects: readonly Redirect[]): { readonly reads: string[]; readonly writes: string[] } {
+	const reads: string[] = [];
+	const writes: string[] = [];
+	for (const r of redirects) {
+		const target = r.target?.value;
+		if (target === undefined) continue;
+		if (r.operator === "<" || r.operator === "<>" || (r.operator === "<&" && !DESCRIPTOR.test(target))) reads.push(target);
+		if (WRITE_REDIRECTS.has(r.operator) || (r.operator === ">&" && !DESCRIPTOR.test(target))) writes.push(target);
+	}
+	return { reads, writes };
+}
+
 function scanScript(script: ParsedScript): ScriptScan {
-	const scan: ScriptScan = { types: new Set(), redirects: new Set(), commands: [], piped: new Set(), background: false, readTargets: [], writeTargets: [] };
+	const scan: ScriptScan = {
+		...{ types: new Set(), redirects: new Set(), commands: [], piped: new Set(), background: false },
+		...{ readTargets: [], writeTargets: [], compoundReads: [], compoundWrites: [] },
+	};
 	walk(script, (node) => {
 		if (typeof node.type === "string") scan.types.add(node.type);
 		if (node.type === "Statement" && node.background === true) scan.background = true;
@@ -236,13 +261,14 @@ function scanScript(script: ParsedScript): ScriptScan {
 			for (const stage of (node.commands as unknown[]).slice(1)) walk(stage, (n) => n.type === "Command" && scan.piped.add(n as unknown as Command));
 		}
 		if (!Array.isArray(node.redirects)) return;
-		for (const r of node.redirects as Record<string, unknown>[]) {
-			if (typeof r.operator !== "string") continue;
-			scan.redirects.add(r.operator);
-			const target = (r.target as Word | undefined)?.value;
-			if (target === undefined) continue;
-			if (r.operator === "<" || r.operator === "<>" || (r.operator === "<&" && !DESCRIPTOR.test(target))) scan.readTargets.push(target);
-			if (WRITE_REDIRECTS.has(r.operator) || (r.operator === ">&" && !DESCRIPTOR.test(target))) scan.writeTargets.push(target);
+		const redirects = (node.redirects as Redirect[]).filter((r) => typeof r.operator === "string");
+		for (const r of redirects) scan.redirects.add(r.operator);
+		const { reads, writes } = redirectFiles(redirects);
+		scan.readTargets.push(...reads);
+		scan.writeTargets.push(...writes);
+		if (node.type !== "Command") {
+			scan.compoundReads.push(...reads);
+			scan.compoundWrites.push(...writes);
 		}
 	});
 	return scan;
@@ -461,6 +487,11 @@ interface ExtractedInvocation {
 	readonly node: Command;
 }
 
+function redirectFields(node: Command): Pick<CanonicalInvocation, "redirectReads" | "redirectWrites"> {
+	const { reads, writes } = redirectFiles(node.redirects);
+	return { ...(reads.length > 0 ? { redirectReads: reads } : {}), ...(writes.length > 0 ? { redirectWrites: writes } : {}) };
+}
+
 function extractInvocations(script: ParsedScript, command: string, commands: readonly Command[]): ExtractedInvocation[] {
 	// Backtick-decoded scripts index the decoded `ParsedScript.source`, not the caller's string.
 	const sourceText = script.source ?? command;
@@ -476,15 +507,17 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 		const viaPackageRunner = resolved.wrappers.some((w) => PACKAGE_RUNNER_WRAPPERS.has(w));
 		const executable = viaPackageRunner ? word.replace(/(.)@[^@/]*$/, "$1") : word;
 		const args = values.slice(resolved.index + 1);
-		const cwdOverride = foldDirectories([...(cd?.dirs ?? []), ...resolved.dirs, ...gitDirectories(executable, args)]);
+		const cwdChain = [...(cd?.dirs ?? []), ...resolved.dirs, ...gitDirectories(executable, args)];
+		const cwdOverride = foldDirectories(cwdChain);
 		const rawSegment = sourceText.slice(node.pos, node.end);
 		const assignmentWords = [...node.prefix.map((a) => a.text), ...values.slice(0, resolved.index).filter((w) => ASSIGNMENT_WORD.test(w))];
 		const afterCd = cd === undefined ? {} : { afterCd: cd.known ? ("known" as const) : ("unknown" as const) };
 		if (CD_COMMANDS.has(normaliseExecutable(executable))) {
-			// `popd`, a bare `cd`, `cd -`, `cd ~/x` and `cd "$D"` leave the directory unknowable here.
-			const target = normaliseExecutable(executable) === "popd" || args.length !== 1 || hasExpansionPart(words[resolved.index + 1]) ? "-" : args[0];
-			const literal = !/^[-~]/.test(target);
-			cd = { dirs: [...(cd?.dirs ?? []), ...(literal ? args : [])], known: (cd?.known ?? true) && literal };
+			// `popd`, `cd -`, `cd ~user` and `cd "$D"` leave the directory unknowable here; a bare `cd` goes home.
+			const bare = normaliseExecutable(executable) !== "popd" && args.length === 0;
+			const target = bare ? "~" : normaliseExecutable(executable) === "popd" || args.length !== 1 || hasExpansionPart(words[resolved.index + 1]) ? "-" : args[0];
+			const literal = !target.startsWith("-") && (!target.startsWith("~") || /^~([/\\]|$)/.test(target));
+			cd = { dirs: [...(cd?.dirs ?? []), ...(literal ? [target] : [])], known: (cd?.known ?? true) && literal };
 		}
 		return [
 			{
@@ -493,10 +526,11 @@ function extractInvocations(script: ParsedScript, command: string, commands: rea
 					args,
 					wrappers: resolved.wrappers,
 					rawSegment,
-					...(cwdOverride !== undefined ? { cwdOverride } : {}),
+					...(cwdOverride !== undefined ? { cwdOverride, cwdChain } : {}),
 					...afterCd,
 					...(node.prefix.length > 0 ? { assignments: true as const } : {}),
 					...(assignmentWords.length > 0 ? { assignmentWords } : {}),
+					...redirectFields(node),
 				},
 				confident: resolved.confident,
 				expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
@@ -689,5 +723,6 @@ export function canonicalise(command: string): ShellVerdict {
 	if (runsGeneratedScript(extracted, scan)) return refused("generated-script", command);
 	// An unresolved wrapper is only refused when a guarded verb could be hiding behind it; `env -x ls` stays ok.
 	if (extracted.some((e) => !e.confident && mentionsGuardedVerb(segmentTexts(e.invocation)))) return refused("unresolved-wrapper", command);
-	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], redirectReadTargets: scan.readTargets, commandCount: scan.commands.length };
+	const redirectTargets = { redirectReadTargets: scan.compoundReads, redirectWriteTargets: scan.compoundWrites };
+	return { kind: "ok", invocations, redirectOperators: [...scan.redirects], commandCount: scan.commands.length, ...redirectTargets };
 }

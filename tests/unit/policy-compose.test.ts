@@ -420,7 +420,7 @@ const ROWS: readonly Row[] = [
 		name: "a Windows absolute git -C replaces the env directory -- block",
 		toolName: "bash",
 		input: { command: "env -C 'D:\\x' git -C 'C:\\other' commit -m x" },
-		facts: { currentBranchFor: (dir: string) => (dir === "C:\\other" ? "main" : "feature/x") },
+		facts: { currentBranchFor: (dir: string) => (dir === "C:/other" ? "main" : "feature/x") },
 		expected: "block",
 	},
 	{
@@ -515,6 +515,51 @@ const ROWS: readonly Row[] = [
 	{ name: "read path is an array", toolName: "read", input: { path: [] }, expected: "block" },
 	{ name: "write path missing entirely", toolName: "write", input: {}, expected: "block" },
 	{ name: "edit path is empty string", toolName: "edit", input: { path: "" }, expected: "block" },
+	{
+		name: "cd home, then a relative secret path -- block, resolved against the cd target",
+		toolName: "bash",
+		input: { command: "cd ~ && cat .ssh/id_rsa" },
+		expected: "block",
+		reasonIncludes: ".ssh",
+	},
+	{
+		name: "env -C home, then a relative credential store -- block",
+		toolName: "bash",
+		input: { command: "env -C ~ cat .pi/agent/auth.json" },
+		expected: "block",
+		reasonIncludes: "auth.json",
+	},
+	{
+		name: "a bare cd goes home -- block",
+		toolName: "bash",
+		input: { command: "cd; cat .ssh/id_rsa" },
+		expected: "block",
+	},
+	{
+		name: "cd to an absolute home path, then an input redirect -- block",
+		toolName: "bash",
+		input: { command: "cd /c/Users/tester; cat < .ssh/id_rsa" },
+		expected: "block",
+	},
+	{
+		name: "cd to an unreadable target, then a relative path -- block, it cannot be resolved",
+		toolName: "bash",
+		input: { command: 'cd "$D" && cat id_rsa' },
+		expected: "block",
+		reasonIncludes: "absolute path",
+	},
+	{
+		name: "cd to an unreadable target, then an absolute path -- allow (negative control)",
+		toolName: "bash",
+		input: { command: 'cd "$D" && cat /c/repo/README.md' },
+		expected: "allow",
+	},
+	{
+		name: "cd into a project directory, then a relative read -- allow (negative control)",
+		toolName: "bash",
+		input: { command: "cd src && cat index.ts" },
+		expected: "allow",
+	},
 ];
 
 describe("SAFE-03/SAFE-10 -- policy-compose.test.ts: table is non-empty (vacuous-pass guard)", () => {

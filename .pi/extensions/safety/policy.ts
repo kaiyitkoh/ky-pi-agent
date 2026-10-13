@@ -4,7 +4,7 @@
  * Pure: no ctx, process.env, node:fs or default export; the one impure fact (current branch) arrives via PolicyFacts.
  */
 import type { CanonicalInvocation } from "./shell.ts";
-import { canonicalise, foldDirectories, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable } from "./shell.ts";
+import { canonicalise, GIT_GLOBAL_VALUE_OPTIONS, normaliseExecutable } from "./shell.ts";
 import type { PathPolicyFacts } from "./paths.ts";
 import { canonicalisePathArg, classifyPathRead, classifyPathWrite, classifyReadGlob, isSensitiveSearchRoot } from "./paths.ts";
 import type { PathVerdict } from "./paths.ts";
@@ -92,8 +92,14 @@ const pathFactsOf = (facts: PolicyFacts): PathPolicyFacts => ({
 	kubeconfigEnv: facts.kubeconfigEnv,
 });
 
-const canonicalOf = (text: string, facts: PolicyFacts): string =>
-	canonicalisePathArg({ text, value: text }, { cwd: facts.cwd, home: facts.home });
+const canonicalOf = (text: string, facts: PolicyFacts, cwd = facts.cwd): string => canonicalisePathArg({ text, value: text }, { cwd, home: facts.home });
+
+/** The directory an invocation runs in: each `cd`/`env -C`/`git -C` target resolved against the one before, `~` expanded. */
+const invocationDir = (invocation: CanonicalInvocation, facts: PolicyFacts): string =>
+	(invocation.cwdChain ?? []).reduce((dir, next) => canonicalOf(next, facts, dir), facts.cwd);
+
+/** Independent of the cwd: a drive or root path, `~`, or `$HOME`. */
+const CWD_INDEPENDENT = /^(([A-Za-z]:)?[/\\]|~([/\\]|$)|\$\{?HOME\}?([/\\]|$))/;
 
 function fromGitVerdict(verdict: GitVerdict, requestKey: string): Verdict {
 	// No approval path for a git/glab block.
@@ -211,11 +217,11 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 		if (envWord !== undefined) {
 			return { kind: "block", reason: `"${envWord.split("=")[0]}" in the environment of a git command can make git run a program or use other config` };
 		}
-		const branchIn = (dir?: string): string => facts.currentBranchFor(foldDirectories([facts.cwd, dir ?? "."]) ?? facts.cwd);
+		const gitDir = invocationDir(invocation, facts);
 		// A subshell's `cd` does not persist, so the session cwd counts too; an unreadable `cd` target counts as protected.
-		const afterCd = invocation.afterCd === "unknown" ? [facts.protectedBranches[0] ?? ""] : invocation.afterCd === "known" ? [branchIn()] : [];
-		const branches = [branchIn(invocation.cwdOverride), ...afterCd];
-		const gitDir = foldDirectories([facts.cwd, invocation.cwdOverride ?? "."]) ?? facts.cwd;
+		const afterCd =
+			invocation.afterCd === "unknown" ? [facts.protectedBranches[0] ?? ""] : invocation.afterCd === "known" ? [facts.currentBranchFor(facts.cwd)] : [];
+		const branches = [facts.currentBranchFor(gitDir), ...afterCd];
 		const { gitConfigFor, gitBranchFor } = facts;
 		const gitFacts: GitPolicyFacts = {
 			currentBranch: branches.find((b) => facts.protectedBranches.includes(b)) ?? branches[0],
@@ -241,21 +247,30 @@ function evaluateInvocation(rawInvocation: CanonicalInvocation, facts: PolicyFac
 
 	strongest = strongerOf(strongest, fromInfraVerdict(classifyInfraInvocation(invocation), requestKey));
 
+	return strongerOf(strongest, classifyInvocationPaths(invocation, executable, facts));
+}
+
+/** Every path an invocation names, read-classified in the session cwd and in the directory its `cd`s lead to (a subshell `cd` does not persist). */
+function classifyInvocationPaths(invocation: CanonicalInvocation, executable: string, facts: PolicyFacts): Verdict {
+	const relative = [...invocation.args.filter((a) => !a.startsWith("-")), ...(invocation.redirectReads ?? []), ...(invocation.redirectWrites ?? [])];
+	if (invocation.afterCd === "unknown" && executable !== "git" && executable !== "glab" && relative.some((a) => !CWD_INDEPENDENT.test(a))) {
+		return { kind: "block", reason: `"${invocation.rawSegment}" names a relative path after a cd/pushd/popd whose target is not a literal directory -- use an absolute path` };
+	}
 	const pathFacts = pathFactsOf(facts);
-	// Bash args use classifyPathRead, not Write: write containment would block nearly every absolute path a command mentions.
+	const dir = invocationDir(invocation, facts);
+	const dirs = dir === facts.cwd ? [facts.cwd] : [facts.cwd, dir];
+	const reads = [...invocation.args.flatMap(fileOperandsOf), ...(invocation.redirectReads ?? [])];
 	// Args are Word.value-resolved, so an unquoted Windows path through bash may mangle (docs/SAFETY.md known bypasses).
-	for (const arg of invocation.args) {
-		for (const candidate of fileOperandsOf(arg)) {
-			const canonical = canonicalOf(candidate, facts);
+	for (const cwd of dirs) {
+		for (const candidate of reads) {
+			const canonical = canonicalOf(candidate, facts, cwd);
 			const pathVerdict = classifyPathRead(canonical, pathFacts);
 			const globVerdict = GLOB_CHARS.test(candidate) && !candidate.startsWith("-") ? classifyGlobArg(canonical, pathFacts) : pathVerdict;
-			for (const verdict of [pathVerdict, globVerdict]) {
-				if (verdict.kind === "block") strongest = strongerOf(strongest, { kind: "block", reason: verdict.reason });
-			}
+			const blocked = [pathVerdict, globVerdict].find((v) => v.kind === "block");
+			if (blocked?.kind === "block") return { kind: "block", reason: blocked.reason };
 		}
 	}
-
-	return strongest;
+	return { kind: "allow" };
 }
 
 /** canonicalise() refusal blocks first; then each invocation is classified and the strongest verdict wins, so one blocked segment blocks the whole command. */
@@ -278,9 +293,13 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 	for (const invocation of shellVerdict.invocations) {
 		strongest = strongerOf(strongest, evaluateInvocation(invocation, facts, requestKey, shellVerdict.commandCount === 1));
 	}
-	for (const target of shellVerdict.redirectReadTargets) {
-		const verdict = classifyPathRead(canonicalOf(target, facts), pathFactsOf(facts));
-		if (verdict.kind === "block") strongest = strongerOf(strongest, { kind: "block", reason: `input redirect: ${verdict.reason}` });
+	// A compound statement's redirect may run in any directory its commands reach.
+	const dirs = new Set([facts.cwd, ...shellVerdict.invocations.map((inv) => invocationDir(inv, facts))]);
+	for (const cwd of dirs) {
+		for (const target of shellVerdict.redirectReadTargets) {
+			const verdict = classifyPathRead(canonicalOf(target, facts, cwd), pathFactsOf(facts));
+			if (verdict.kind === "block") strongest = strongerOf(strongest, { kind: "block", reason: `input redirect: ${verdict.reason}` });
+		}
 	}
 	return strongest;
 }

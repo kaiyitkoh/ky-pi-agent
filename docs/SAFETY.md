@@ -69,8 +69,12 @@ docstring for the structural argument). Concretely, it catches:
   the one before and an absolute one starting over (`env -C /other git -C .
   commit` reads `/other`). After a `cd` the session directory is checked
   too, because a `cd` in a subshell does not persist, and a `cd` whose target
-  is not a literal directory (`cd "$D"`, `cd -`, `cd ~/x`, `popd`) makes the
-  branch count as protected. `command -v X` is a lookup and runs
+  is not a literal directory (`cd "$D"`, `cd -`, `cd ~user`, `popd`) makes the
+  branch count as protected. `cd ~`, `cd ~/x` and a bare `cd` go home. The
+  same directory resolves every path argument and redirect: a path is
+  classified in the session directory and in the `cd`/`pushd`/`env -C`
+  target, so `cd ~ && cat .ssh/id_rsa` blocks, and after a `cd` that cannot
+  be resolved any relative path argument (except to git and glab) is refused. `command -v X` is a lookup and runs
   nothing. `watch` joins its operands into an `sh -c` string, so it is
   treated as a shell runner.
 - **Heredoc-to-script smuggling** (`<<EOF`, `<<-EOF`, `<<<`) — denied on the
