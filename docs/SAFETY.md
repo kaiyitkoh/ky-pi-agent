@@ -370,7 +370,9 @@ on that branch, so `git switch main && git commit` blocks.
 
 ### Reads that do not arrive as a plain argument
 
-Read classification also covers:
+Read classification also covers the following. A destination that `cp`,
+`mv`, `install`, `ln`, `tee` or `touch` only writes is not read-classified,
+so `cp .env.example .env` is allowed; the write classifier still checks it.
 
 - redirect targets: `cat < .env`, `cat <> .env`, and `<&` onto a file;
 - `@file` operands and `key=@file` values (`curl -F file=@.env`,

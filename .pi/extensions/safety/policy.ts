@@ -359,6 +359,8 @@ function patternOperands(executable: string, args: readonly string[]): Set<numbe
 
 const INPUT_NAME = "\u0000input";
 
+const WRITE_ONLY_DESTINATIONS = new Set(["cp", "mv", "install", "ln", "tee", "touch"]);
+
 const PATH_SHAPED = /[./\\*?[~]/;
 const SECRET_BARE_NAME = /^(id_\w+|credentials|config|known_hosts|authorized_keys|environ|netrc|npmrc)$/i;
 
@@ -377,7 +379,10 @@ function classifyInvocationPaths(invocation: CanonicalInvocation, executable: st
 	const pathFacts = pathFactsOf(facts);
 	const dir = invocationDir(invocation, facts);
 	const dirs = dir === facts.cwd ? [facts.cwd] : [facts.cwd, dir];
-	const reads = [...invocation.args.filter((_, i) => !patterns.has(i)).flatMap(fileOperandsOf), ...(invocation.redirectReads ?? [])];
+	// A destination these commands only write (`cp .env.example .env`) exposes nothing; it is write-classified below.
+	const destinations = new Set(WRITE_ONLY_DESTINATIONS.has(executable) ? writeOperands(invocation) : []);
+	const operands = invocation.args.filter((a, i) => !patterns.has(i) && !destinations.has(a));
+	const reads = [...operands.flatMap(fileOperandsOf), ...(invocation.redirectReads ?? [])];
 	// git arguments are revisions as often as paths, and `HEAD~1` has the 8.3 shape; protected-name aliases still block.
 	const ignore = executable === "git" ? ["short-name-alias"] : [];
 	// Args are Word.value-resolved, so an unquoted Windows path through bash may mangle (docs/SAFETY.md known bypasses).

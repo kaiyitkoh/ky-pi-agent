@@ -688,6 +688,11 @@ const ROWS: readonly Row[] = [
 	{ name: "git checkout -- a source file -- allow", toolName: "bash", input: { command: "git checkout -- src/x.ts" }, expected: "allow" },
 	{ name: "git apply --check -- allow, a dry run", toolName: "bash", input: { command: "git apply --check x.patch" }, expected: "allow" },
 	{ name: "xargs grep -- allow, no writer", toolName: "bash", input: { command: "rg -l TODO | xargs grep -n FIXME" }, expected: "allow" },
+	{ name: "cp .env.example .env -- allow, writing .env reads no secret", toolName: "bash", input: { command: "cp .env.example .env" }, expected: "allow" },
+	{ name: "echo into tee .env -- allow", toolName: "bash", input: { command: "echo A=1 | tee .env" }, expected: "allow" },
+	{ name: "touch .env.local -- allow", toolName: "bash", input: { command: "touch .env.local" }, expected: "allow" },
+	{ name: "cp .env out -- block, the source is a secret read", toolName: "bash", input: { command: "cp .env /tmp/x" }, expected: "block" },
+	{ name: "cat .env -- block (control)", toolName: "bash", input: { command: "cat .env" }, expected: "block" },
 ];
 
 describe("SAFE-03/SAFE-10 -- policy-compose.test.ts: table is non-empty (vacuous-pass guard)", () => {
