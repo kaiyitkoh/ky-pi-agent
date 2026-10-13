@@ -525,7 +525,8 @@ tree and the model writes SPEC.md and PLAN.md during `/grill` and `/plan`, so
 it cannot be a protected path; instead `/execute` and `/review` refuse when
 PLAN.md's tasks or SPEC.md differ from the pin (a later task's description
 rewritten, a requirement id moved, a verification command changed, a task
-deleted or added, any SPEC edit). The next brief is therefore only ever built
+deleted or added, any SPEC edit). A task's checkbox is not pinned, so ticking
+a finished task `- [x]` is not a change. The next brief is therefore only ever built
 from pinned content, and the verification command an attempt is checked
 against is the pinned one, fixed when the run is armed.
 

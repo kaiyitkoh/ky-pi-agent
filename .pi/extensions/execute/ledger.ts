@@ -122,8 +122,11 @@ export function pinnedTasks(rows: readonly LedgerRow[]): readonly PinnedTask[] |
 	return pinnedPlan(rows)?.tasks;
 }
 
+// Ticking a task done is not a change to what was pinned.
+const withoutCheckbox = (line: string | undefined): string | undefined => line?.replace(/^- \[[ xX]\] /, "");
+
 export function tasksOf(tasks: readonly { readonly id: string; readonly path?: string; readonly verificationCommand?: string; readonly requirementIds: readonly string[]; readonly rawLine: string }[]): readonly PinnedTask[] {
-	return tasks.map((t) => ({ id: t.id, path: t.path ?? null, verificationCommand: t.verificationCommand ?? null, requirementIds: t.requirementIds, line: t.rawLine }));
+	return tasks.map((t) => ({ id: t.id, path: t.path ?? null, verificationCommand: t.verificationCommand ?? null, requirementIds: t.requirementIds, line: withoutCheckbox(t.rawLine) }));
 }
 
 export function specDigest(specMarkdown: string): string {
@@ -133,7 +136,8 @@ export function specDigest(specMarkdown: string): string {
 /** Which pinned file the live SPEC/PLAN content departs from, or undefined when it matches or nothing is pinned yet. */
 export function pinMismatch(pin: PlanPin | undefined, now: { readonly tasks: readonly PinnedTask[]; readonly specHash: string }): string | undefined {
 	if (pin === undefined) return undefined;
-	if (JSON.stringify(pin.tasks) !== JSON.stringify(now.tasks)) return "PLAN.md's tasks (text, requirement ids, paths or verification commands)";
+	const text = (tasks: readonly PinnedTask[] | undefined) => JSON.stringify(tasks?.map((t) => ({ ...t, line: withoutCheckbox(t.line) })));
+	if (text(pin.tasks) !== text(now.tasks)) return "PLAN.md's tasks (text, requirement ids, paths or verification commands)";
 	return pin.specHash === now.specHash ? undefined : "SPEC.md";
 }
 

@@ -642,6 +642,21 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(h.sent).toHaveLength(1);
 	});
 
+	it("ticking a finished task's checkbox is not drift: the next /execute runs T002", async () => {
+		const two = `${PLAN}- [ ] T002 [R1] Extend the a module in src/a.ts | verify: npm test\n`;
+		const h = harness({ plan: two });
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		verify(h);
+		await h.fire("agent_settled", { aborted: false });
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), two.replace("- [ ] T001", "- [x] T001"));
+		await h.command(SLUG);
+		expect(h.notes.at(-1)?.text ?? "").not.toContain("changed since");
+		expect(h.sent).toHaveLength(2);
+		expect(h.sent.at(-1)).toContain("T002");
+		await h.fire("agent_settled", { aborted: true });
+	});
+
 	it("a SPEC.md edited after the pin is refused", async () => {
 		const h = harness();
 		await h.command(SLUG);
