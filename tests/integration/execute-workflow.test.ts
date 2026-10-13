@@ -476,6 +476,18 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(bytes(progressFile(h))).toBe(before);
 	});
 
+	it("a rejected attempt leaves exactly one evidence row, and it is a reject", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");
+		bash(h, "npm test", "1 failed", 1);
+		await h.fire("agent_settled", { aborted: false });
+		const rows = readJsonl(logPath(h.repo, EVIDENCE_LOG_BASE)) as { verdict?: string; reason?: string }[];
+		expect(rows, JSON.stringify(rows)).toHaveLength(1);
+		expect(rows[0]?.verdict).toBe("reject");
+		expect(rows[0]?.reason).toContain("exited 1");
+	});
+
 	it("a reset back to an earlier commit moves HEAD and changes the tree, but is not a commit: rejected, file unchanged", async () => {
 		const h = harness();
 		commitIn(h.repo, "src/a.ts", "export const a = 1;\n");

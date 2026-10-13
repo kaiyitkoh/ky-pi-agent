@@ -9,7 +9,7 @@ import { getModeState, planRoleCall } from "../routing/modes.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
 import { armQuickSettle, clearQuickSettle, settleQuickRun } from "./settle.ts";
-import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun } from "./evidence.ts";
+import { armedCwd, endRun, isRunArmed, pruneEvidenceLogs, recordCaptureFailure, recordFromToolResult, recordToolResult, startRun, writeRunEvidence } from "./evidence.ts";
 import { disarmExecuteRun, ensureHarnessIgnored, executeRunContext } from "../execute/progress.ts";
 import { claimWorkflow } from "../../lib/active-workflow.ts";
 
@@ -79,5 +79,10 @@ export default function (pi: ExtensionAPI): void {
 	});
 
 	// An orphaned run (no agent_settled arrived) is disarmed before pruning.
-	pi.on("session_start", (_event, ctx) => { clearQuickSettle(); endRun("", ""); pruneEvidenceLogs(ctx.cwd); });
+	pi.on("session_start", (_event, ctx) => {
+		clearQuickSettle();
+		const orphan = endRun("", "");
+		if (orphan !== undefined) writeRunEvidence(orphan.run, "reject", "the run was orphaned: no agent_settled arrived before a new session started");
+		pruneEvidenceLogs(ctx.cwd);
+	});
 }

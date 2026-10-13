@@ -14,7 +14,7 @@ import { gateDepthFor } from "../quality/gates.ts";
 import { registeredToolNames, runChangeGateStage, runTypecheckAt } from "../quality/index.ts";
 import { classifyGitInvocation, currentBranch, currentSha, currentTree } from "../safety/git.ts";
 import { PROTECTED_BRANCHES } from "../safety/index.ts";
-import { disarmRun, endRun, isRunArmed, startRun } from "../workflows/evidence.ts";
+import { acceptedReason, disarmRun, endRun, isRunArmed, startRun, writeRunEvidence } from "../workflows/evidence.ts";
 import { HANDOFF_AGENT, buildHandoffPacket, probeSubagentAvailability, renderHandoffPacket } from "./handoff.ts";
 import { acceptedEntries, allowanceOf, appendLedger, attemptState, ledgerBase, pinnedAllowance, pinnedTasks, readLedger, renderTasks, tasksOf } from "./ledger.ts";
 import {
@@ -165,6 +165,12 @@ export default function (pi: ExtensionAPI): void {
 			// An unknown tree never matches, so the gate rejects; ending the run here is what keeps it from staying armed.
 		}
 		const ended = endRun(headShaOrEmpty(cwd), tree);
+		let written = false;
+		// Exactly one evidence row per run, carrying the final verdict.
+		const evidence = (verdict: "accept" | "reject", reason: string) => {
+			if (ended !== undefined && !written) writeRunEvidence(ended.run, verdict, reason);
+			written = true;
+		};
 		try {
 			const checked = ended?.ok === true ? checkVerification(verification, run.verificationCommand, ended.sha) : undefined;
 			const verdict = ended?.ok === true && checked?.ok === false ? { ok: false as const, reason: checked.reason } : ended;
@@ -172,6 +178,7 @@ export default function (pi: ExtensionAPI): void {
 			if (verdict === undefined) return void ctx.ui.notify(`execute: ${run.taskId} had no evidence verdict -- nothing written`, "error");
 			// Only a gate rejection has a count that can show progress; any other is unknown and never reads as a stall.
 			const reject = (reason: string, findings: number | null = null) => {
+				evidence("reject", reason);
 				appendLedger(cwd, run.slug, { kind: "rejected", taskId: run.taskId, count: findings });
 				const state = attemptState(readLedger(cwd, run.slug), run.taskId);
 				const next = state.attempts > REVISION_CAP || state.stalled ? "escalated: further attempts are refused until /execute --reset" : "fix and run /execute again";
@@ -182,7 +189,7 @@ export default function (pi: ExtensionAPI): void {
 			if (dirty !== "") return reject(`the working tree is not the commit (uncommitted or untracked: ${dirty}), so the gate would not check what was committed`);
 			const changed = changedFiles(cwd, baseSha, verdict.sha);
 			const drift = driftAbort({ attemptedPaths: changed, specExpectedFiles: allowance.spec, planFilesTouched: allowance.plan });
-			if (!drift.ok) return void ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error");
+			if (!drift.ok) return void (evidence("reject", `HALT -- ${drift.reason}`), ctx.ui.notify(`execute: HALT ${run.taskId} -- ${drift.reason}`, "error"));
 			let gateLine = "outside this workflow's gate depth";
 			if (gateDepthFor("execute").mechanisms.includes("deterministic")) {
 				const gate = runChangeGateStage({ cwd, projectTrusted: ctx.isProjectTrusted(), baseSha, changed, baseTypecheckFailed });
@@ -190,16 +197,19 @@ export default function (pi: ExtensionAPI): void {
 				if (failed.length > 0) return reject(`the deterministic gate fails on the committed change:\n${gate.report}`, failed.reduce((a, b) => a + b, 0));
 				// Awaited only when nothing ran, so an ordinary settle stays synchronous.
 				if (!gate.ranAny && !(await ctx.ui.confirm("Record with no deterministic check?", `No deterministic check applies to ${run.taskId}:\n${gate.report}`))) {
+					evidence("reject", "no deterministic check ran and recording without one was not approved");
 					return void ctx.ui.notify(`execute: ${run.taskId} not recorded -- no deterministic check ran and recording without one was not approved`, "error");
 				}
 				gateLine = `${gate.report.replace(/\n/g, "; ")}${gate.ranAny ? "" : " -- no check ran; recorded with the user's approval"}`;
 			}
+			evidence("accept", `${acceptedReason(verdict.run)}; verification passed at that commit; gate: ${gateLine}`);
 			const rendered = renderProgressAppend({ taskId: run.taskId, commitSha: verdict.sha, verificationCommand: `${run.verificationCommand} [${run.mode}]`, gate: gateLine, output: verification?.output ?? "", exitCode: verification?.exitCode ?? 0, recordedAt: Date.now() });
 			// The ledger row is the record; PROGRESS.md is the readable copy.
 			appendLedger(cwd, run.slug, { kind: "accepted", taskId: run.taskId, sha: verdict.sha, entry: rendered });
 			appendProgress(cwd, run.slug, rendered);
 			ctx.ui.notify(`execute: ${run.taskId} recorded at ${verdict.sha} (${run.mode}); ${verdict.failedToolCalls} failed tool call(s) logged`, "info");
 		} catch (err) {
+			evidence("reject", `not recorded -- ${err instanceof Error ? err.message : String(err)}`);
 			ctx.ui.notify(`execute: ${run.taskId} not recorded -- ${err instanceof Error ? err.message : String(err)}`, "error");
 		}
 	});

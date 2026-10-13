@@ -268,7 +268,7 @@ function captureNotify(ctx: ExtensionCommandContext): { notifications: Notificat
 interface EvidenceRowShape {
 	ts?: number;
 	event?: string;
-	verdict?: "accept" | "reject";
+	verdict?: "accept" | "reject" | "unverified";
 	reason?: string;
 	baseSha?: string;
 	headSha?: string;
@@ -638,7 +638,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 		// byte-identical to its parent's and now correctly REJECTS (branch (6)) --
 		// this case's own point is an ACCEPT, so the fixture must make a genuine
 		// tree change, same as any other test in this file asserting "accept".
-		const COMMIT_COMMAND = 'echo skeleton >> skeleton.txt && git add skeleton.txt && git commit -m "quick: skeleton commit"';
+		const COMMIT_COMMAND = 'echo "export const v = 1;" >> skeleton.ts && git add skeleton.ts && git commit -m "quick: skeleton commit"';
 
 		await withFauxSession(
 			{
@@ -844,7 +844,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					// and this test still exercises branch (3)'s CR-01 anti-aging behaviour
 					// rather than accidentally passing via the tree-comparison branch instead.
 					fauxAssistantMessage(
-						[fauxToolCall("bash", { command: 'echo probe-f >> probe-f.txt && git add probe-f.txt && git commit -m "quick: PROBE F"' })],
+						[fauxToolCall("bash", { command: 'echo "export const v = 1;" >> probe-f.ts && git add probe-f.ts && git commit -m "quick: PROBE F"' })],
 						{ stopReason: "toolUse" },
 					),
 					fauxAssistantMessage([fauxText("tests pass, done")], { stopReason: "stop" }),
@@ -921,7 +921,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					// the earlier BLOCKED push must still surface in the rejection, not be
 					// silently superseded by the (here, irrelevant) tree-comparison branch.
 					fauxAssistantMessage(
-						[fauxToolCall("bash", { command: 'echo probe-p4 >> probe-p4.txt && git add probe-p4.txt && git commit -m "quick: PROBE P4"' })],
+						[fauxToolCall("bash", { command: 'echo "export const v = 1;" >> probe-p4.ts && git add probe-p4.ts && git commit -m "quick: PROBE P4"' })],
 						{ stopReason: "toolUse" },
 					),
 					fauxAssistantMessage([fauxText("pushed and verified, tests pass")], { stopReason: "stop" }),
@@ -1008,7 +1008,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					fauxAssistantMessage(
 						[
 							fauxToolCall("bash", {
-								command: 'mv .gitx .git && echo probe-p7 >> probe-p7.txt && git add probe-p7.txt && git commit -m "quick: PROBE P7"',
+								command: 'mv .gitx .git && echo "export const v = 1;" >> probe-p7.ts && git add probe-p7.ts && git commit -m "quick: PROBE P7"',
 							}),
 						],
 						{ stopReason: "toolUse" },
@@ -1161,7 +1161,7 @@ describe("FLOW-01/GATE-07 -- /quick walking skeleton: two refusal seams, fabrica
 					// point is that run 1 is still accepted, which now requires a genuinely
 					// changed tree.
 					fauxAssistantMessage(
-						[fauxToolCall("bash", { command: 'echo run-one >> run-one.txt && git add run-one.txt && git commit -m "quick: run one"' })],
+						[fauxToolCall("bash", { command: 'echo "export const v = 1;" >> run-one.ts && git add run-one.ts && git commit -m "quick: run one"' })],
 						{ stopReason: "toolUse" },
 					),
 					fauxAssistantMessage([fauxText("done")], { stopReason: "stop" }),
@@ -1454,8 +1454,9 @@ describe("/quick gates its own change at agent_settled, in the target repo", () 
 
 	it("a commit that adds a new error-tier anti-pattern is rejected, naming the finding", async () => {
 		await quickRun(
-			{ responses: [bashCall(commitCommand("src/x.ts", SWALLOW)), stop()], expectRows: 2 },
+			{ responses: [bashCall(commitCommand("src/x.ts", SWALLOW)), stop()] },
 			({ rows, notifications }) => {
+				expect(rows, "one row per run, carrying the final verdict").toHaveLength(1);
 				expect(rows.at(-1)?.verdict, JSON.stringify(rows)).toBe("reject");
 				expect(rows.at(-1)?.reason).toContain("swallowed-exception");
 				const last = notifications.at(-1);
@@ -1489,14 +1490,24 @@ describe("/quick gates its own change at agent_settled, in the target repo", () 
 
 	it("a commit that fails the gate, then fixed on disk without amending, is rejected: the gate checks the commit, not the working tree", async () => {
 		await quickRun(
-			{ responses: [bashCall(commitCommand("src/x.ts", SWALLOW)), bashCall('echo "export const ok = 1;" > src/x.ts'), stop()], expectRows: 2 },
+			{ responses: [bashCall(commitCommand("src/x.ts", SWALLOW)), bashCall('echo "export const ok = 1;" > src/x.ts'), stop()] },
 			({ rows, notifications }) => {
+				expect(rows, "one row per run, carrying the final verdict").toHaveLength(1);
 				expect(rows.at(-1)?.verdict, JSON.stringify(rows)).toBe("reject");
 				expect(rows.at(-1)?.reason).toContain("not the commit");
 				expect(notifications.at(-1)?.level).toBe("error");
 				expect(notifications.at(-1)?.text).toContain("src/x.ts");
 			},
 		);
+	});
+
+	it("a change no deterministic leg can check is recorded as unverified, at warning level, never as accept", async () => {
+		await quickRun({ responses: [bashCall(commitCommand("src/main.tf", ["resource x y {}"])), stop()] }, ({ rows, notifications }) => {
+			expect(rows).toHaveLength(1);
+			expect(rows[0]?.verdict, JSON.stringify(rows)).toBe("unverified");
+			expect(notifications.at(-1)?.level).toBe("warning");
+			expect(notifications.at(-1)?.text).toContain("UNVERIFIED");
+		});
 	});
 
 	it("a retried turn gates once, on the final HEAD", async () => {

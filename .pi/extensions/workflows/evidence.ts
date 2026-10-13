@@ -175,35 +175,57 @@ export function disarmRun(): void {
 	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = undefined;
 }
 
-/** Compute the verdict for the armed run, write one evidence row, disarm. Returns `undefined` when unarmed. */
-export function endRun(headSha: string, headTree: string): EvidenceVerdict | undefined {
+/** What a settled run carries into its single evidence row. */
+export interface RunSummary {
+	readonly cwd: string;
+	readonly baseSha: string;
+	readonly headSha: string;
+	readonly recordCount: number;
+	readonly tools: readonly string[];
+	readonly failedToolCalls: number;
+}
+
+export type EndedRun = EvidenceVerdict & { readonly run: RunSummary };
+
+/**
+ * Compute the commit verdict for the armed run and disarm it. Writes nothing: the caller writes exactly one row with
+ * {@link writeRunEvidence} once every later check (verification, clean tree, drift, gate) has decided. `undefined` when unarmed.
+ */
+export function endRun(headSha: string, headTree: string): EndedRun | undefined {
 	const state = runSlot();
 	if (state === undefined) {
 		return undefined;
 	}
 	const descends = isStrictDescendant(state.cwd, state.baseSha, headSha);
 	const verdict = gateCompletion(state.records, headSha, state.baseSha, headTree, state.baseTree, descends);
-	writeEvidenceRow(state.cwd, {
-		verdict: verdict.ok ? "accept" : "reject",
-		// States what was checked, not an endorsement.
-		reason: verdict.ok
-			? `HEAD moved to ${headSha}, a new commit on the base with a changed tree; ${verdict.failedToolCalls} failed tool call(s) logged -- whether the commit contains the work is unverified`
-			: verdict.reason,
-		failedToolCalls: verdict.ok ? verdict.failedToolCalls : state.records.filter((r) => r.isError).length,
+	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = undefined;
+	const run: RunSummary = {
+		cwd: state.cwd,
 		baseSha: state.baseSha,
 		headSha,
 		recordCount: state.records.length,
 		tools: Array.from(new Set(state.records.map((r) => r.toolName))),
-	});
-	(globalThis as Record<string, unknown>)[RUN_STATE_KEY] = undefined;
-	return verdict;
+		failedToolCalls: state.records.filter((r) => r.isError).length,
+	};
+	return { ...verdict, run };
+}
+
+/** What an accepted commit verdict states: what was checked, never an endorsement of the work. */
+export function acceptedReason(run: RunSummary): string {
+	return `HEAD moved to ${run.headSha}, a new commit on the base with a changed tree; ${run.failedToolCalls} failed tool call(s) logged -- whether the commit contains the work is unverified`;
+}
+
+/** The one evidence row for a settled run, carrying its final verdict. */
+export function writeRunEvidence(run: RunSummary, verdict: EvidenceRowInput["verdict"], reason: string): void {
+	writeEvidenceRow(run.cwd, { verdict, reason, baseSha: run.baseSha, headSha: run.headSha, recordCount: run.recordCount, tools: run.tools, failedToolCalls: run.failedToolCalls });
 }
 
 // JSONL binding: a thin copy of safety/audit.ts's shape over .pi/lib/jsonl.ts.
 
 /** What a caller supplies to {@link writeEvidenceRow}. */
 export interface EvidenceRowInput {
-	readonly verdict: "accept" | "reject";
+	/** "unverified": a commit landed but no deterministic check could run on it, and nobody approved recording it. */
+	readonly verdict: "accept" | "reject" | "unverified";
 	readonly reason: string;
 	readonly baseSha: string;
 	readonly headSha: string;

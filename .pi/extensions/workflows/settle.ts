@@ -5,7 +5,7 @@
 import { runChangeGateStage } from "../quality/index.ts";
 import { changedFiles, uncommittedPaths } from "../execute/progress.ts";
 import { currentSha, currentTree } from "../safety/git.ts";
-import { armedCwd, disarmRun, endRun, writeEvidenceRow } from "./evidence.ts";
+import { acceptedReason, armedCwd, disarmRun, endRun, writeRunEvidence } from "./evidence.ts";
 
 const SETTLE_KEY = "__kypiQuickSettle";
 
@@ -27,10 +27,10 @@ export interface QuickSettleInput {
 	readonly fallbackCwd: string;
 	readonly projectTrusted: boolean;
 	readonly aborted: boolean;
-	readonly notify: (text: string, level: "info" | "error") => void;
+	readonly notify: (text: string, level: "info" | "warning" | "error") => void;
 }
 
-/** Ends the armed `/quick` run. An aborted run is disarmed with no verdict, no evidence row and nothing else recorded. */
+/** Ends the armed `/quick` run with exactly one evidence row. An aborted run is disarmed with no verdict and no row. */
 export function settleQuickRun(input: QuickSettleInput): void {
 	const base = (globalThis as Record<string, unknown>)[SETTLE_KEY] as QuickBase | undefined;
 	if (base === undefined) return;
@@ -45,27 +45,34 @@ export function settleQuickRun(input: QuickSettleInput): void {
 	} catch {
 		// An unknown SHA or tree never matches, so the evidence gate rejects.
 	}
-	const verdict = endRun(sha, tree);
-	if (verdict === undefined) return;
-	if (!verdict.ok) return input.notify(verdict.reason, "error");
+	const ended = endRun(sha, tree);
+	if (ended === undefined) return;
+	const finish = (verdict: "accept" | "reject" | "unverified", reason: string, text: string, level: "info" | "warning" | "error") => {
+		writeRunEvidence(ended.run, verdict, reason);
+		input.notify(text, level);
+	};
+	if (!ended.ok) return finish("reject", ended.reason, ended.reason, "error");
 	try {
 		// The gate legs read files from disk, so a tree that differs from the commit would gate the wrong content.
 		const dirty = uncommittedPaths(cwd);
 		if (dirty !== "") {
 			const reason = `the working tree is not the commit (uncommitted or untracked: ${dirty}), so the gate would not check what was committed`;
-			writeEvidenceRow(cwd, { verdict: "reject", reason, baseSha: base.baseSha, headSha: verdict.sha, recordCount: 0, tools: [], failedToolCalls: verdict.failedToolCalls });
-			return input.notify(`quick: ${reason}`, "error");
+			return finish("reject", reason, `quick: ${reason}`, "error");
 		}
-		const changed = changedFiles(cwd, base.baseSha, verdict.sha);
+		const changed = changedFiles(cwd, base.baseSha, ended.sha);
 		const gate = runChangeGateStage({ cwd, projectTrusted: input.projectTrusted, baseSha: base.baseSha, changed, baseTypecheckFailed: base.baseTypecheckFailed });
 		if (gate.failed) {
 			const reason = `the deterministic gate fails on the change:\n${gate.report}`;
-			writeEvidenceRow(cwd, { verdict: "reject", reason, baseSha: base.baseSha, headSha: verdict.sha, recordCount: 0, tools: [], failedToolCalls: verdict.failedToolCalls });
-			return input.notify(`quick: ${reason}`, "error");
+			return finish("reject", reason, `quick: ${reason}`, "error");
 		}
-		const scope = gate.ranAny ? gate.report.replace(/\n/g, "; ") : "no deterministic check applied to this change";
-		input.notify(`quick: HEAD moved to ${verdict.sha}, a new commit on the base with a changed tree; ${verdict.failedToolCalls} failed tool call(s) logged; ${scope} -- the work itself is NOT verified`, "info");
+		if (!gate.ranAny) {
+			const reason = `${acceptedReason(ended.run)}; no deterministic check applied to this change, so nothing verified it`;
+			return finish("unverified", reason, `quick: UNVERIFIED -- ${reason}:\n${gate.report}`, "warning");
+		}
+		const legs = gate.report.replace(/\n/g, "; ");
+		finish("accept", acceptedReason(ended.run), `quick: HEAD moved to ${ended.sha}, a new commit on the base with a changed tree; ${ended.failedToolCalls} failed tool call(s) logged; ${legs} -- the work itself is NOT verified`, "info");
 	} catch (err) {
-		input.notify(`quick: gate could not run on the change -- ${err instanceof Error ? err.message : String(err)}`, "error");
+		const reason = `gate could not run on the change -- ${err instanceof Error ? err.message : String(err)}`;
+		finish("reject", reason, `quick: ${reason}`, "error");
 	}
 }
