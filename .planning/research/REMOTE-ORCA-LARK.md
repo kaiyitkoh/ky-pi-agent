@@ -15,3 +15,9 @@
 - MUST be a separate dev account/VPC, not the auto-deploy account; least-privilege instance role; zero inbound (SSM + Tailscale / Lark long-connection). Needs company approval; changes "zero spend" if company-billed.
 - Orca: `orca serve` headless on Linux; LAN/Tailscale pairing needs no account; relay optional (`ORCA_RELAY_URL`, unofficial self-host); push always via push.onorca.dev (`ORCA_PUSH_GATEWAY_URL`, no self-host); telemetry off via `ORCA_TELEMETRY_DISABLED=1`. Verdict: self-hosted enough with Tailscale pairing + telemetry off + push off/accepted.
 - Lark (Singapore entity, larksuite.com, open.larksuite.com) vs Feishu (Beijing, feishu.cn, open.feishu.cn); separate tenants. Node SDK defaults to Feishu; Lark needs `domain: Domain.Lark`. Check: app name / login URL / admin console domain.
+
+## Hermes Lark design + bridge recommendation (2026-10-13)
+- Hermes: `plugins/platforms/feishu/adapter.py` (Python, lark-oapi), long-connection default, `FEISHU_DOMAIN=lark`, `FEISHU_ALLOWED_USERS` allowlist, approval cards (Allow once/session/always/deny) verified by clicker+chat, 5-min timeout=deny, per-chat sessions, secrets in env.
+- Existing Pi bridges unsuitable: `pi-feishu-connector` (~10k lines, empty allowlist + first-DM-becomes-owner, regex approvals bypassing Pi confirm) ; `pi-feishu` (~1.9k lines, no allowlist).
+- Recommendation: author ~400-600-line bridge on `@larksuiteoapi/node-sdk` (pinned), Hermes design. Must-haves: long-connection only; fixed allowlist, empty=deny; DMs only; approval cards wired to Pi ctx.ui.confirm/select (guard stays sole gate) with clicker/chat/dedupe/5-min-deny; no "always" from phone; secrets via env; per-chat session + /stop kill switch; secret redaction + rate/size limits; audit log of approvals.
+- Orca over company VPN: likely works (any reachable address, port 6768, ws://) unless VPN client isolation; check IT policy.
