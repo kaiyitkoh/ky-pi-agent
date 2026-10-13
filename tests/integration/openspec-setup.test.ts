@@ -17,7 +17,7 @@ import {
 } from "node:fs";
 import { basename, delimiter, dirname, join } from "node:path";
 
-import { afterEach, beforeAll, describe, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 
 import { OPENSPEC_SKILL_NAMES, OPENSPEC_WORKFLOWS, openspecPromptMd, openspecSkillMd } from "../fixtures/openspec-skills.ts";
 import { repoRoot } from "../helpers/git.ts";
@@ -107,8 +107,8 @@ function defaultPrompts(): Record<string, string> {
 	return Object.fromEntries(OPENSPEC_WORKFLOWS.map((w) => [`opsx-${w.workflow}.md`, openspecPromptMd(w.workflow)]));
 }
 
-function makeFake(opts: FakeOpts = {}): Fake {
-	const root = tempDir("kypi-ospec-");
+function makeFake(opts: FakeOpts = {}, make: (prefix: string) => string = tempDir): Fake {
+	const root = make("kypi-ospec-");
 	const agent = join(root, "agent");
 	const realXdg = join(root, "real-xdg");
 	const cwd = join(root, "cwd");
@@ -227,14 +227,19 @@ const repoPiStatus = () =>
 describe("scripts/openspec-setup.sh", () => {
 	// Compared against a pre-run snapshot, not an empty porcelain, so in-progress edits under .pi do not fail this file.
 	let piStatusBefore = "";
+	// One default install, shared by the tests that only read its result.
+	const sharedDirs = scratchDirs();
+	let fake: Fake;
+	let first: ReturnType<typeof run>;
 	beforeAll(() => {
 		piStatusBefore = repoPiStatus();
+		fake = makeFake({}, sharedDirs.make);
+		first = run(fake);
 	});
+	afterAll(sharedDirs.cleanup);
 
 	it("installs 12 flagged skills and 12 prompts", () => {
-		const fake = makeFake();
-		const r = run(fake);
-		expect(r.status, r.stderr).toBe(0);
+		expect(first.status, first.stderr).toBe(0);
 		for (const { workflow, skill } of OPENSPEC_WORKFLOWS) {
 			const content = readFileSync(skillPath(fake, skill), "utf-8");
 			expect(frontmatterFlagLines(content)).toEqual([FLAG]);
@@ -244,8 +249,6 @@ describe("scripts/openspec-setup.sh", () => {
 	});
 
 	it("generates in an isolated project with the isolated config and the four opt-outs", () => {
-		const fake = makeFake();
-		expect(run(fake).status).toBe(0);
 		const init = logLines(fake).find((l) => l.kind === "init");
 		expect(init).toBeDefined();
 		expect(init!.argv).toEqual(["init", "--tools", "pi", "--profile", "custom", "."]);
@@ -264,8 +267,6 @@ describe("scripts/openspec-setup.sh", () => {
 	});
 
 	it("sets telemetry off on the real config with the user's own XDG_CONFIG_HOME", () => {
-		const fake = makeFake();
-		expect(run(fake).status).toBe(0);
 		const set = logLines(fake).find((l) => l.kind === "config-set");
 		expect(set).toBeDefined();
 		expect(set!.argv).toEqual(["config", "set", "telemetry.enabled", "false"]);
@@ -277,9 +278,7 @@ describe("scripts/openspec-setup.sh", () => {
 	});
 
 	it("warns when telemetry.enabled does not read back as false", () => {
-		const ok = run(makeFake());
-		expect(ok.status).toBe(0);
-		expect(ok.stderr).not.toContain("telemetry.enabled reads back");
+		expect(first.stderr).not.toContain("telemetry.enabled reads back");
 
 		const bad = run(makeFake({ telemetryGet: "true" }));
 		expect(bad.status).toBe(0);
@@ -287,12 +286,10 @@ describe("scripts/openspec-setup.sh", () => {
 	});
 
 	it("is byte-identical on a second run", () => {
-		const fake = makeFake();
+		const installed = snapshot(fake.agent);
+		expect(Object.keys(installed)).toHaveLength(24);
 		expect(run(fake).status).toBe(0);
-		const first = snapshot(fake.agent);
-		expect(Object.keys(first)).toHaveLength(24);
-		expect(run(fake).status).toBe(0);
-		expect(snapshot(fake.agent)).toEqual(first);
+		expect(snapshot(fake.agent)).toEqual(installed);
 	});
 
 	it("does not duplicate an existing true flag and rewrites false to true", () => {
