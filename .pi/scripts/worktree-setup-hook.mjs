@@ -20,7 +20,7 @@
  * repository's `.env`, and the node_modules junction points at the parent's real dependency tree.
  */
 
-import { chmodSync, copyFileSync, existsSync, realpathSync, symlinkSync } from "node:fs";
+import { chmodSync, constants, copyFileSync, existsSync, lstatSync, realpathSync, symlinkSync } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 
 /** Read the whole of stdin as a UTF-8 string. */
@@ -164,7 +164,14 @@ async function main() {
 	// seen by all of them or by the parent.
 	const envSrc = resolve(resolvedRepoRoot, ".env");
 	const envDst = resolve(resolvedWorktreePath, ".env");
-	if (existsSync(envDst)) {
+	// lstat, not exists: a dangling tracked `.env` symlink must count as present, or the copy would write through it.
+	let envDstPresent = true;
+	try {
+		lstatSync(envDst);
+	} catch {
+		envDstPresent = false;
+	}
+	if (envDstPresent) {
 		// A tracked `.env` is checked out by `git worktree add`; overwriting it and declaring it synthetic would
 		// make pi-subagents delete it. It is the worktree's own content, so it is left alone.
 		console.error(
@@ -173,7 +180,7 @@ async function main() {
 		);
 	} else if (existsSync(envSrc)) {
 		try {
-			copyFileSync(envSrc, envDst);
+			copyFileSync(envSrc, envDst, constants.COPYFILE_EXCL);
 			// The parent's `.env` may hold secrets and `copyFileSync` propagates the
 			// source's mode, which on Windows is effectively meaningless and on POSIX
 			// is whatever the source happened to carry. Set it explicitly.

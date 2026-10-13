@@ -142,7 +142,7 @@ export default function (pi: ExtensionAPI): void {
 				pi.setActiveTools(pi.getActiveTools().filter((name) => name !== "qoder_delegate"));
 			}
 		} catch {
-				// Swallowed deliberately; execute() still refuses.
+			// Swallowed deliberately; execute() still refuses.
 		}
 	});
 }

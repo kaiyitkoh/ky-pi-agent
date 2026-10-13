@@ -430,6 +430,22 @@ describe("EXT-02 / WR-08 -- the hook fails closed on every invalid payload", () 
 		).toBe(false);
 	});
 
+	it("a dangling .env symlink in the worktree is left alone, never written through", (ctx) => {
+		const repo = scratch("kypi-hook-dangle-");
+		writeFileSync(join(repo, ".env"), "SECRET=parent\n", "utf-8");
+		const worktree = scratch("kypi-hook-dangle-wt-");
+		const outside = join(scratch("kypi-hook-dangle-target-"), "leaked.env");
+		try {
+			symlinkSync(outside, join(worktree, ".env"), "file");
+		} catch {
+			ctx.skip();
+		}
+		const run = runHook({ version: 1, repoRoot: repo, worktreePath: worktree });
+		expect(run.status, run.stderr).toBe(0);
+		expect(existsSync(outside), "the parent's secrets were copied through the symlink").toBe(false);
+		expect(run.syntheticPaths).not.toContain(".env");
+	});
+
 	it("WR-05/WR-07 -- every declined provisioning step says so, and declares the right synthetic paths", () => {
 		// Case A: parent has no node_modules and no .env. Exits 0 (a repository
 		// with no dependencies is legitimate) but must NOT be silent.
