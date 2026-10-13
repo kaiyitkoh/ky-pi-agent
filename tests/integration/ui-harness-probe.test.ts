@@ -1,6 +1,7 @@
 import { fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, describe, expect, it } from "vitest";
 
+import { GIT_STATUS_ARGS } from "../../.pi/extensions/ui/git-probe.ts";
 import { createHarnessSession, type HarnessHandle, type HarnessSessionOptions } from "../helpers/harness-session.ts";
 import { createRecordingUI } from "../helpers/recording-ui.ts";
 
@@ -83,5 +84,12 @@ describe("headless faux session with a recording UI", () => {
 		};
 		stashed.events.emit("ky.probe", { n: 1 });
 		expect(rec.statuses("ky-probe-bus")).toEqual(["n:1"]);
+	});
+});
+
+describe("git status probe arguments", () => {
+	it("excludes untracked files so the probe stays cheap in large trees", () => {
+		expect(GIT_STATUS_ARGS).toContain("--untracked-files=no");
+		expect(GIT_STATUS_ARGS).toContain("--porcelain");
 	});
 });

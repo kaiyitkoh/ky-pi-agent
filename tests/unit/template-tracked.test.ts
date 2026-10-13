@@ -34,9 +34,12 @@
  * names matched `.gitignore:46:auth.json` and `.gitignore:47:auth.*.json`
  * respectively.]
  */
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
 import { describe, expect, it } from "vitest";
 
-import { isIgnored, trackedFiles } from "../helpers/git.ts";
+import { isIgnored, repoRoot, trackedFiles } from "../helpers/git.ts";
 
 /** The directory whose tracked contents the positive half is drawn from. */
 const TEMPLATE_DIR = ".pi/templates";
@@ -138,5 +141,39 @@ describe("PROV-01 / Trap T1 — the rejected filenames really are swallowed", ()
 				"-- a wrong cwd, a misread exit code, a failed spawn -- and every `toBe(true)` above is " +
 				"meaningless rather than reassuring",
 		).toBe(false);
+	});
+});
+
+describe("the env templates list what the code reads", () => {
+	const templates = [".pi/templates/env.example", ".env.example"] as const;
+	const variableNames = (text: string): string[] =>
+		[...text.matchAll(/^([A-Z][A-Z0-9_]*)=/gm)].map((match) => match[1] ?? "");
+	const read = (path: string): string => readFileSync(join(repoRoot(), path), "utf-8");
+
+	const qoderNamesRead = (): string[] => {
+		const found = new Set<string>();
+		for (const path of trackedFiles(".pi")) {
+			if (!path.endsWith(".ts")) continue;
+			for (const match of read(path).matchAll(/"(QODER_[A-Z0-9_]+)"/g)) found.add(match[1] ?? "");
+		}
+		return [...found].sort();
+	};
+
+	it("finds the Qoder variables the code reads", () => {
+		expect(qoderNamesRead().length).toBeGreaterThanOrEqual(4);
+	});
+
+	it.each(templates)("%s lists every Qoder variable read under .pi", (path) => {
+		const declared = variableNames(read(path));
+		expect(qoderNamesRead().filter((name) => !declared.includes(name))).toEqual([]);
+	});
+
+	it.each(templates)("%s does not call Qoder ruled out", (path) => {
+		expect(read(path)).not.toMatch(/ruled out/i);
+	});
+
+	it("both files declare the same variable names", () => {
+		const [a, b] = templates.map((path) => variableNames(read(path)).sort());
+		expect(a).toEqual(b);
 	});
 });

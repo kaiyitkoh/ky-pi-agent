@@ -1,7 +1,8 @@
 import { parsePorcelain } from "./statusline.ts";
 
 // --no-optional-locks keeps a status probe from taking index.lock and racing the agent's own git commands.
-export const GIT_STATUS_ARGS: readonly string[] = ["--no-optional-locks", "status", "--porcelain"];
+// --untracked-files=no skips the untracked-file walk, which dominates status time in large trees.
+export const GIT_STATUS_ARGS: readonly string[] = ["--no-optional-locks", "status", "--porcelain", "--untracked-files=no"];
 
 export interface ProbeResult {
   stdout: string;
