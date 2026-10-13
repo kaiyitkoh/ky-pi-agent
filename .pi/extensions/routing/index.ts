@@ -356,8 +356,8 @@ export default function (pi: ExtensionAPI, testOverrides?: RoutingTestOptions): 
 	pi.on("input", (event, ctx) => {
 		// NEVER THROWS: a guard bug must not block a prompt.
 		try {
-			// A workflow prompt was routed and guarded by its command, and refusing it here would leak the run it armed.
-			if (ctx.model === undefined || event.source === "extension") return;
+			// Extension prompts are checked too: /grill and /plan run no guard of their own, and a refused /quick or /execute run stays pending and records nothing.
+			if (ctx.model === undefined) return;
 			const need = deriveNeed(ctx, { usesToolLoop: true, promptChars: event.text.length, image: (event.images?.length ?? 0) > 0 });
 			// An overfull context is left to Pi's own compaction and retry; only the other three blocks refuse a prompt.
 			const verdict = guardRoute(ctx.model, "executor", { ...need, estimatedInputTokens: undefined });

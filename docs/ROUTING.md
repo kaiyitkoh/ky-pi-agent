@@ -235,10 +235,12 @@ therefore undo plus refuse:
   whenever the current model fails the image, thinking or R1 block, which
   covers a restored session and any switch the revert could not undo. A
   context larger than the window only warns and points at `/compact`; Pi's
-  own compaction and retry handle it. Prompts a workflow command sends itself
-  (`source: "extension"`) pass, because the command already guarded them and
-  refusing one would leak the run it armed; `/execute` runs the executor
-  guard before it arms anything. Slash commands run before `input`, so
+  own compaction and retry handle it. Prompts an extension sends
+  (`source: "extension"`) are checked the same way: `/grill`, `/plan` and
+  third-party follow-ups run no guard of their own. `/quick` and `/execute`
+  guard before they arm, so the backstop only refuses their prompt when the
+  model changed in between; the run then stays pending, records nothing, and
+  the next prompt disarms it. Slash commands run before `input`, so
   `/cheap`, `/balanced` and `/max` always remain available to recover.
 - An internal error in either handler is swallowed: a guard bug must not
   brick a session.

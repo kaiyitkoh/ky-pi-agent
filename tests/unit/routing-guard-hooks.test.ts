@@ -97,9 +97,16 @@ describe("model_select", () => {
 });
 
 describe("input backstop", () => {
-	it("lets a workflow's own prompt through, so the run it armed is not leaked", async () => {
+	it("refuses a prompt an extension sends on R1, as /grill and /plan do with no guard of their own", async () => {
+		const { fire, notes } = load();
+		const results = await fire("input", { text: "Interview me about the spec", source: "extension" }, { model: R1 });
+		expect(results).toContainEqual({ action: "handled" });
+		expect(notes.map((n) => n.text).join("\n")).toContain("Prompt not sent");
+	});
+
+	it("lets an extension prompt through on a capable model", async () => {
 		const { fire } = load();
-		const results = await fire("input", { text: "do the task", source: "extension" }, { model: R1 });
+		const results = await fire("input", { text: "do the task", source: "extension" }, { model: CAPABLE });
 		expect(results).not.toContainEqual({ action: "handled" });
 	});
 
