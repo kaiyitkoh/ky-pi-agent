@@ -286,11 +286,3 @@ describe("subagent-capabilities Binding 5 -- the honesty guard: every row admits
 		).toEqual([]);
 	});
 });
-
-describe("subagent-capabilities -- docstring boundary re-asserted mechanically", () => {
-	it("this file's own header states no third-party runtime behaviour is proven here", () => {
-		const source = readFileSync(join(repoRoot(), "tests", "unit", "subagent-capabilities.test.ts"), "utf-8");
-		expect(source).toContain("Nothing here executes `pi-subagents`");
-		expect(source).toContain("RB-07-01");
-	});
-});

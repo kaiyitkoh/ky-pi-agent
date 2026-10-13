@@ -143,11 +143,11 @@ describe("BOOT-08.2 -- the resolved tree is under version control", () => {
 	);
 	// No dev filter: without a Pi shrinkwrap npm marks every Pi-family entry dev:true, yet they remain the only pin.
 
-	it("locks at least one non-dev @earendil-works entry", () => {
+	it("locks at least one @earendil-works entry", () => {
 		// Without this the loop below could pass over an empty set.
 		expect(
 			runtimePiEntries.length,
-			"no non-dev @earendil-works entry in package-lock.json; either the lock " +
+			"no @earendil-works entry in package-lock.json; either the lock " +
 				"format changed or `npm install --omit=dev` no longer installs the peers, " +
 				"and in both cases the claim in CONTRIBUTING.md needs re-verifying",
 		).toBeGreaterThan(0);
