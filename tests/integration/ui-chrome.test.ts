@@ -8,6 +8,7 @@ import { visibleWidth } from "@earendil-works/pi-tui";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { createHeaderComponent, formatHeaderLines } from "../../.pi/extensions/ui/header.ts";
+import { repoRoot } from "../helpers/git.ts";
 import { createHarnessSession, type HarnessHandle, type HarnessSessionOptions } from "../helpers/harness-session.ts";
 import { createRecordingUI } from "../helpers/recording-ui.ts";
 
@@ -53,6 +54,7 @@ const sessions: HarnessHandle[] = [];
 
 afterEach(async () => {
 	delete (globalThis as Record<string, unknown>)[STASH_KEY];
+	delete (globalThis as Record<string, unknown>)[EXEC_KEY];
 	while (sessions.length > 0) await sessions.pop()!.dispose();
 });
 
@@ -67,6 +69,48 @@ export default function (pi) {
     async execute() { return { content: [{ type: "text", text: "done" }], details: {} }; },
   });
 }`;
+
+// Loads the ui extension behind a pi whose exec records every spawn and its exit code.
+const EXEC_KEY = "__kyUiTestExec";
+const UI_ABS = `${repoRoot().split("\\").join("/")}/${UI_ENTRY}`;
+const EXEC_SPY_SRC = `
+export default async function (pi) {
+  const log = (globalThis.${EXEC_KEY} = []);
+  const spy = new Proxy(pi, {
+    get(target, key) {
+      if (key === "exec") {
+        return async (command, args, options) => {
+          const call = { command, args, code: undefined };
+          log.push(call);
+          const result = await target.exec(command, args, options);
+          call.code = result.code;
+          return result;
+        };
+      }
+      const value = Reflect.get(target, key);
+      return typeof value === "function" ? value.bind(target) : value;
+    },
+  });
+  await (await import(${JSON.stringify(UI_ABS)})).default(spy);
+}`;
+
+type ExecCall = { command: string; args: string[]; code: number | undefined };
+const execCalls = (): ExecCall[] => ((globalThis as Record<string, unknown>)[EXEC_KEY] as ExecCall[] | undefined) ?? [];
+const gitCalls = (): ExecCall[] => execCalls().filter((c) => c.command === "git");
+
+async function openSpied(mode: "tui" | "print") {
+	const rec = createRecordingUI();
+	const handle = await createHarnessSession({
+		entryPoints: [],
+		skills: false,
+		agentsMd: false,
+		extraExtensionSource: EXEC_SPY_SRC,
+		...(mode === "tui" ? { uiContext: rec.ui } : {}),
+		mode,
+	});
+	sessions.push(handle);
+	return { rec, handle };
+}
 
 type Bus = { events: { emit(channel: string, data: unknown): void } };
 const bus = (): Bus => (globalThis as Record<string, unknown>)[STASH_KEY] as Bus;
@@ -203,9 +247,16 @@ describe("ui extension in a session", () => {
 		expect(rec.calls.filter((c) => c.method === "setHeader")).toHaveLength(0);
 	});
 
-	it("runs a prompt in print mode with the default no-op UI", async () => {
-		const handle = await createHarnessSession({ entryPoints: [UI_ENTRY], mode: "print", agentsMd: false });
-		sessions.push(handle);
-		await expect(handle.session.prompt("hi")).resolves.toBeUndefined();
+	it("spawns no git probe in print mode, where nothing displays it", async () => {
+		const { handle } = await openSpied("print");
+		await handle.session.prompt("hi");
+		await handle.session.prompt("again");
+		expect(gitCalls()).toEqual([]);
+	});
+
+	it("spawns the git probe when a UI is bound", async () => {
+		const { handle } = await openSpied("tui");
+		await handle.session.prompt("hi");
+		expect(gitCalls().length).toBeGreaterThan(0);
 	});
 });

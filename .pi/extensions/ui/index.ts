@@ -76,14 +76,17 @@ export default function (pi: ExtensionAPI): void {
 			probe?.dispose();
 			const route = restoreRoute(ctx);
 			state = { mode: route.mode, escalated: route.escalated, provider: ctx.model?.provider };
-			probe = createGitProbe({
-				exec: (args) => pi.exec("git", [...args], { cwd: ctx.cwd, timeout: 5000 }),
-				onResult: (changed) => {
-					if (gen !== generation) return;
-					state.changedFiles = changed;
-					refresh();
-				},
-			});
+			// Without a UI nothing shows the count, so headless and child sessions spawn no git at all.
+			probe = ctx.hasUI
+				? createGitProbe({
+						exec: (args) => pi.exec("git", [...args], { cwd: ctx.cwd, timeout: 5000 }),
+						onResult: (changed) => {
+							if (gen !== generation) return;
+							state.changedFiles = changed;
+							refresh();
+						},
+					})
+				: undefined;
 			if (ctx.mode === "tui" && ctx.hasUI) {
 				let interruptKey = "esc";
 				try {
@@ -99,7 +102,7 @@ export default function (pi: ExtensionAPI): void {
 				);
 			}
 			refresh();
-			probe.trigger();
+			probe?.trigger();
 		} catch {
 			// Swallowed deliberately.
 		}
