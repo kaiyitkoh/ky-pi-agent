@@ -1,8 +1,9 @@
 ---
 phase: 11-terminal-ui
-reviewed: 2026-10-13T02:45:16Z
+reviewed: 2026-10-13T11:25:00Z
 depth: deep
-files_reviewed: 25
+iteration: 3
+files_reviewed: 23
 files_reviewed_list:
   - .pi/extensions/ui/agents.ts
   - .pi/extensions/ui/git-probe.ts
@@ -27,265 +28,118 @@ files_reviewed_list:
   - tests/unit/ui-statusline.test.ts
   - tests/unit/ui-theme.test.ts
   - tests/unit/ui-wire-check.test.ts
-  - AGENTS.md
-  - CLAUDE.md
 findings:
-  critical: 2
-  warning: 6
-  info: 9
-  total: 17
+  critical: 0
+  warning: 2
+  info: 4
+  total: 6
 status: issues_found
 ---
 
-# Phase 11: Code Review Report
+# Phase 11: Code Review Report (iteration 3)
 
-**Reviewed:** 2026-10-13T02:45:16Z
+**Reviewed:** 2026-10-13T11:25:00Z
 **Depth:** deep
-**Files Reviewed:** 25
+**Files Reviewed:** 23
 **Status:** issues_found
 
 ## Summary
 
-I reviewed the `ui` extension, the wire-check tooling, the theme, the docs and runbook entries, and the Phase 11 tests. I checked claims against Pi 1.1.0 dist and against a read-only extraction of `pi-subagents@0.76.1`. Sources:
+This is a re-review after fix iteration 2 (commits f3eeb81, d2d266a, a1589da, ae1986b). I checked each fix against the read-only `pi-subagents@0.76.1` extraction in the scratchpad (`x-pi-subagents_0.76.1/package/src`). I ran one targeted test file once: `tests/unit/ui-wire-check.test.ts`, 43 passed.
 
-- Pi: `core/extensions/loader.js`, `core/event-bus.js`, `core/exec.js`, `modes/interactive/components/footer.js`, `core/settings-manager.js`, `core/system-prompt.js`.
-- pi-subagents: `src/shared/types.js`, `runs/background/*.js`, `runs/foreground/subagent-executor.js`.
+**Fixes verified correct:**
 
-**What holds up:**
+- **WR-01 (async workflow envelope).** The in-process envelope is emitted with `mode: "workflow"` and `pid: process.pid` (`subagent-executor.js:5148-5160`). Runner-spawned launches only ever carry `"single"`, `"chain"` or `"parallel"` (`async-execution.js:665`, `:1138`, `:1415`, `:1992`), so the new check cannot drop a real runner. A residual is in WR-01 below.
+- **WR-02 (verdict ordering).** Failing evidence is now collected before either INSUFFICIENT branch. A single request with a probe hit, and a changed prompt with no ratios, both return FAIL. `missing > 0` still never yields PASS.
+- **WR-03 (truncated tool list and escaped probes).** A truncated tool list sets `truncated`, and probes are also matched in JSON-escaped form. Both are covered by tests.
+- **IN-01 (default-async counting).** `isForegroundLaunch` matches the dispatch rule `clarify === true || (async ?? asyncByDefault) !== true` (`subagent-executor.js:7424`) under the default `asyncByDefault = true` (`config.js:233`). The tests now pass `async: false` explicitly. The integration test for a default-async call would fail if the call were counted as foreground.
 
-- **Stale context after `/reload` or session replacement.** Pi's `runtime.invalidate()` unsubscribes every `pi.events` handler. The extension's `generation` counter and `lastCtx = undefined` on `session_shutdown` stop a stale probe or context from writing.
-- **No volatile value reaches the system prompt.** The `ui` extension has no system-prompt, tool or message surface. The prompt-stability test has real negative controls.
-- **Git probe.** It uses `--no-optional-locks`, runs single-flight, and checks `killed`. That check matters because `execCommand` turns a signal-killed exit into `code: 0`.
-
-**Main defects:**
-
-1. The subagent counter counts the wrong things. Every `subagent` tool call counts as a running agent, including about 60 management actions, and async completion is gated on delivery.
-2. The live wire check can report PASS without having read a system prompt.
-3. The RB-11-03 procedure gives a false FAIL on `main`.
-4. The git probe spawns processes in headless and subagent sessions where nothing displays the result.
-5. The statusline duplicates Pi's provider field, which locked decision 4 forbids.
-
-## Critical Issues
-
-### CR-01: The subagent count includes management calls, double-counts async launches, and can get stuck
-
-**File:** `.pi/extensions/ui/agents.ts:33-42`, `.pi/extensions/ui/index.ts:138-155`
-
-**Issue:** `onToolStart` counts every `tool_execution_start` with `toolName === "subagent"` as a running foreground agent. In `pi-subagents@0.76.1` the `subagent` tool also serves about 60 management actions (`SUBAGENT_ACTIONS` in `src/shared/types.js:129`): `list`, `status`, `get`, `doctor`, `steer`, `interrupt`, `stop`, `schedule.*`, `watchdog.*`, `inspector.*` and more.
-
-- **Management calls count as agents.** `subagent({action:"status"})` shows "1 agent" while it runs, even when nothing is running.
-- **Steering double-counts.** Steering or stopping a running async run shows "2 agents".
-- **Async launches double-count.** An async launch (`async: true`) fires `tool_execution_start` and also `subagent:async-started` (`async-execution.js:1409`, `:1986`; `subagent-executor.js:5148` for async workflows). Both are counted until the tool returns.
-- **Parallel calls undercount.** A foreground `tasks:[...]` call that runs N children counts as 1.
-
-**The decrement is gated on delivery.** `subagent:async-complete` is emitted by `result-watcher.js:528` only after `notifier.deliver()` is accepted and `ownsCompletion(...)` passes. Two branches return early without emitting it:
-
-- the `alreadyDelivered` branch (`:444-461`)
-- the not-owner branch
-
-`pi-subagents` tracks job liveness itself through status polling and `subagent:process-terminal` (`extension/index.js:794`), and the tracker listens to neither. A run whose completion is not delivered to this session therefore stays counted until the next `session_start`.
-
-The only success criterion for this segment is to show running subagents and their status. As written, the count is wrong in normal use. The offline stub test (`ui-chrome.test.ts:157-168`) uses a tool call with empty args, so it cannot see this.
-
-**Fix:** Count a foreground call only when it is a launch, not a management action or an async launch. Also decrement on the terminal process event:
-```ts
-onToolStart(toolName: unknown, toolCallId: unknown, args: unknown): boolean {
-  if (toolName !== "subagent" || typeof toolCallId !== "string" || toolCallId === "") return false;
-  const a = (typeof args === "object" && args !== null ? args : {}) as { action?: unknown; async?: unknown };
-  if (a.action !== undefined || a.async === true) return false; // management call or async launch (counted via the bus)
-  ...
-}
-// and add "subagent:process-terminal" to SUBAGENT_BUS_TOPICS, deleting by its run id
-```
-Pass `event.args` from `index.ts:141`. Add tests with `{action:"status"}` and `{async:true}` args.
-
-### CR-02: `ui-wire-check` reports PASS when it extracted no system text
-
-**File:** `scripts/ui-wire-check-core.ts:97-108`, `scripts/ui-wire-check-core.ts:166-170`
-
-**Issue:** When `extractSystemText` returns `undefined`, `analyseWire` hashes `""`. That happens for a payload shape it does not recognise, a fully truncated payload, or a payload where redaction replaced the system subtree.
-
-- Every request then has the same hash, so `stable` is `true`.
-- No probe can hit, because `text?.includes(probe)` is falsy.
-- `truncated` is set, but `verdict` filters that reason out of `failed`.
-
-The script therefore exits 0 with `PASS`, the verdict that is supposed to prove "no volatile value reached the system prompt" (RB-11-03, Phase 11 criterion 3), without having read a single byte of any system prompt. The tests also lock in the "best-effort" behaviour: `flags truncation by redaction` asserts only the flag, never the verdict.
-
-**Fix:** Treat "no system text found" as INSUFFICIENT, never PASS:
-```ts
-// analyseWire: track how many requests yielded text
-let missing = 0;
-mine.forEach((rec, i) => {
-  const text = extractSystemText(rec.payload);
-  if (text === undefined) { missing += 1; return; }
-  if (text.includes(TRUNCATED_MARKER)) truncated = true;
-  hashes.push(sha256(text));
-  ...
-});
-// verdict
-if (wire.missing > 0) return { status: "INSUFFICIENT", reasons: [`${wire.missing} request(s) had no extractable system text`] };
-```
-Add a verdict test where the system text is absent, asserting the status is not PASS.
+**Still open from earlier iterations (Info, not re-counted):** IN-02 (dead `reset()`), IN-03 (log rotation), IN-05, IN-06, IN-08, and the redundant `bindExtensions` branch. Iteration-1 IN-07 (wrong default session) is escalated to WR-02 below, with new source evidence.
 
 ## Warnings
 
-### WR-01: RB-11-03's branch-name probe gives a false FAIL on `main` and silently probes nothing on a detached HEAD
+### WR-01: A foreground workflow is counted once for its tool call and again for every child, and the tracker JSDoc says the opposite
 
-**File:** `docs/RUNBOOK.md:1734`, `scripts/ui-wire-check.mjs:31`, `scripts/ui-wire-check-core.ts:92`
+**File:** `.pi/extensions/ui/agents.ts:20-24`, `:26-31`, `:40-46`
 
-**Issue:** Step 4 runs `--probe "$(git branch --show-current)"`. Pi renders AGENTS.md and CLAUDE.md into the system prompt as `<project_instructions>` (`core/system-prompt.js:25-28`, candidates at `core/resource-loader.js:116`). This repo's AGENTS.md:25 contains `` `main` ``. On `main`, the probe therefore always hits and the check FAILs although nothing leaked.
+**Issue:** `subagent({ workflow | workflowScript, async: false })` passes `isForegroundLaunch`, so its tool call counts as 1. Its children are then launched as real async runners:
 
-On a detached HEAD the substitution is `""`, which `analyseWire` silently drops. The run then reports PASS with no probe at all. The suggested `--probe <changed-file-name>` collides in the same way with names that the instructions mention (`index.ts`, `README.md`, and so on).
+- **Children launch async.** When a child omits `async`, `prepareWorkflowLaunchParams` sets `workflowAwaitAsync: true` (`subagent-executor.js:4433-4435`). The child request then resolves through `params.async ?? asyncByDefault`, which is `true` by default (`:3978`, `:5954`).
+- **Each child is counted.** `runAsyncPath` spawns a runner and waits on it (`:3140-3158`, `:3006-3018`). The runner emits `subagent:async-started` with `mode: "single"` and `parentWorkflowRunId` (`async-execution.js:1986-1998`). The tracker counts it, because only `mode: "workflow"` is skipped.
 
-**Fix:** In the runbook, require a uniquely named throwaway branch and file, for example `ky-probe-$(date +%s)`. Make the script exit 64 on an empty `--probe` value instead of dropping it.
+So a foreground workflow with 3 children shows "4 agents" for the whole run, which can last minutes. This is the same over-count the previous WR-01 removed for async workflows, now on the foreground path.
 
-### WR-02: The git probe spawns `git status` in sessions with no UI, including print, json and subagent child sessions
+**The comments are wrong.** The JSDoc at `:27-28` says "children belong to a run already counted". After the async-workflow change, that is false for async workflows, whose children are the only thing counted, and it is the bug for foreground workflows. The JSDoc is also four lines with a 150-plus-character line, against AGENTS.md's "one sentence plus non-obvious params".
 
-**File:** `.pi/extensions/ui/index.ts:79-86`, `:102`, `:122`, `:151`
+**Related gap.** Inside an async workflow, a child that sets `async: false` (or inherits it from workflow defaults) runs in-process. It gets no `async-started` and no tool call, so it is invisible.
 
-**Issue:** `refresh()` returns early when `!ctx.hasUI`, but the probe is still created and triggered on every `session_start`, `turn_end` and edit/write/bash `tool_execution_end`. In `-p` and `--mode json` runs, and in any pi-subagents child process that loads project extensions, each turn spawns a `git status` whose result nothing ever displays.
-
-On Windows a process spawn is expensive. With N concurrent subagents in the same worktree, this becomes N × per-turn `git status` runs against the same index. It is cost with no consumer, and it contradicts the "never blocking, throttled" intent.
-
-**Fix:** Create and trigger the probe only when there is a UI:
+**Fix:** The foreground workflow run id is derived from the tool-call id (`foregroundWorkflowRunId = encodeIndexSegment(_id)`, `subagent-executor.js:4759`). The simplest correct rule is to count a workflow only through its children:
 ```ts
-probe = ctx.hasUI ? createGitProbe({...}) : undefined;
-...
-refresh();
-probe?.trigger();
+function isForegroundLaunch(args: unknown): boolean {
+  if (typeof args !== "object" || args === null) return false;
+  const a = args as { action?: unknown; async?: unknown; clarify?: unknown; workflow?: unknown; workflowScript?: unknown };
+  // A workflow is counted through its runner children (subagent-executor.js:4433), never its own call.
+  if (a.workflow !== undefined || a.workflowScript !== undefined) return false;
+  return a.action === undefined && (a.async === false || a.clarify === true);
+}
 ```
+Then rewrite the JSDoc as one sentence, for example: "Counts async runners by bus event and blocking subagent calls by tool call; workflows are counted through their runner children." Add a unit test: `onToolStart("subagent", "c1", { workflow: "x", async: false })` returns `false`.
 
-### WR-03: The statusline duplicates the provider that Pi's footer already shows, and the comments claim otherwise
+### WR-02: The wire check's default session can be a subagent child, and RB-11-03's own procedure creates that case
 
-**File:** `.pi/extensions/ui/statusline.ts:57`, `:60`, `:68`; `.pi/extensions/ui/index.ts:1-2`; `docs/UI.md:129-135`
+**File:** `scripts/ui-wire-check-core.ts:100-102`; `scripts/ui-wire-check.mjs:272-273`; `docs/RUNBOOK.md` (RB-11-03 steps 4-5)
 
-**Issue:** Pi's footer already shows `(provider)` whenever `getAvailableProviderCount() > 1` (`footer.js:213-216`). This harness always configures several providers (deepseek, dashscope, amazon-bedrock). Locked decision 4 says not to duplicate a field Pi already renders unless the custom version replaces it, and here it does not.
+**Issue:** Without `--session`, `analyseWire` uses the session of the **last** `main.request` in `<cwd>/.pi/logs/wire-<date>.jsonl`. Async subagent children write to that same file:
 
-The file header in `index.ts` ("adds just what it lacks (route, provider, ...)") and the `formatStatusline` JSDoc ("Renders only what Pi's default footer lacks") are factually wrong. AGENTS.md says a wrong comment is worse than none. UI.md's own table lists provider in both columns.
+- **Children load project extensions.** A runner-hosted child gets `ambientExtensions = input.host === "runner" && !toolPlan.disableAmbientExtensions` (`runs/shared/child-launch.js:199`). That is true by default, so the loader is built with `noExtensions: false` (`child-session.js:357`).
+- **Same log file, different session id.** The child runs with `cwd` set to the repo. The diagnostics wire hook records `main.request` with `ctx.sessionManager.getSessionId()` and appends under `ctx.cwd` (`diagnostics/wire.ts:136-147`).
 
-**Fix:** Remove the provider segment, or document it as a deliberate exception: Pi drops the provider when the line is too narrow, as noted in RESEARCH. If you keep it, record that exception in CONTEXT and correct both comments.
+RB-11-03 step 4 says "run a subagent, and send one more turn". The default call is async, so the child is often still issuing requests after the parent's last turn. Step 5 then runs the check with no `--session`. The check analyses the child: a short session with its own system prompt and its own turn ratios. It can report PASS or INSUFFICIENT for a session the UI never touched, and a probe leak in the parent goes unseen. The only signal is the `session:` line, and the runbook never asks the user to check it.
 
-### WR-04: The live wire check ignores the tool list, although the docs say the whole request is checked
+This was iteration-1 IN-07 (Info). It is raised to Warning because the shipped procedure for the phase's own live acceptance check triggers it.
 
-**File:** `scripts/ui-wire-check-core.ts:97-108`; `docs/UI.md:165-175`
-
-**Issue:** UI.md says no UI value reaches "the system prompt or the tool list", and that the script "searches the requests for probe text". The script hashes and probes only the extracted system text. A volatile value in a tool description or parameter schema would change the cached prefix (on the providers this repo uses, tools sit before or alongside the system prompt in the cache key) and would not be detected live. The offline test checks only tool names, not descriptions.
-
-**Fix:** Include the request's tool declarations in the hash, and search them for probes. For example, hash `JSON.stringify(payload.tools ?? payload.toolConfig ?? null)` next to the system text. Alternatively, correct the UI.md wording to say "system text only".
-
-### WR-05: The "outside a git checkout" test races and does not exercise the exit-128 path
-
-**File:** `tests/integration/ui-chrome.test.ts:178-182`
-
-**Issue:** The test asserts right after `prompt()` resolves, while the git probe started at `session_start` and `turn_end` is still asynchronous. If someone broke the extension to render `0 changed` outside a repo (for example `onResult(changed ?? 0)`), the assertion could run before the probe resolves and still pass.
-
-The test also cannot tell the dedicated `code === 128` disable branch (`git-probe.ts:54-58`) from the generic non-zero branch. Both produce `undefined`, so deleting the 128 handling leaves it green. This breaks CONTEXT's "each new test must fail when its subject is removed".
-
-**Fix:** Wait for the probe to settle before asserting, for example with `vi.waitFor` on an exec spy or a second `turn_end`. Then assert that a second trigger spawns no further git process, which proves the disable latch.
-
-### WR-06: The statusline goes stale after compaction and `/tree` navigation
-
-**File:** `.pi/extensions/ui/index.ts:70-168`
-
-**Issue:** `refresh()` runs only on `session_start`, `turn_end`, `model_select`, subagent tool events and bus events. After `/compact`, `ctx.getContextUsage()` changes sharply (Pi documents `tokens: null` right after compaction), but the "N left" segment keeps its pre-compaction value until the next turn ends. Pi's own footer re-renders immediately, so the two disagree.
-
-`/tree` navigation to a branch with a different `ky:mode` entry likewise leaves the header and statusline showing the old mode.
-
-**Fix:** Subscribe to `session_compact` and `session_tree`, re-run `restoreRoute(ctx)` on `session_tree`, and then call `refresh()`.
+**Fix:**
+- In `analyseWire`, collect the distinct `sessionId`s. When there is more than one and no `--session` was given, return them, and make the CLI print them and exit 2 (INSUFFICIENT) asking for `--session`.
+- Alternatively, default to the session with the most `main.request` rows instead of the last one.
+- Either way, update RB-11-03 step 5 to pass `--session <id>`, using the id Pi shows for the parent session (`/session`).
+- Add a unit test: interleaved records from two sessions, with the child last, must not silently analyse the child.
 
 ## Info
 
-### IN-01: `restoreRoute` uses different rules from the router it mirrors
+### IN-01: Both INSUFFICIENT branches drop the truncation caveat
 
-**File:** `.pi/extensions/ui/index.ts:16`, `:30-41`
+**File:** `scripts/ui-wire-check-core.ts:197-202`
 
-**Issue:** `routing/index.ts:253-271` takes the latest `ky:mode` entry only, and maps an invalid mode to `DEFAULT_MODE`. The UI accepts any string, and it skips a malformed latest entry to fall back to an older valid one.
+**Issue:** `reasons` already holds the "truncated by redaction" caveat when `wire.truncated` is set. The `requests < 2` and `ratios.length === 0` branches return a fresh `reasons` array, so the caveat is lost. The `missing > 0` branch keeps it with `[...reasons, ...]`, so the three branches are inconsistent.
 
-A hand-edited or corrupt entry can therefore make the header and statusline show a mode the router is not in. `DEFAULT_ROUTE = "cheap"` duplicates `DEFAULT_MODE`, and it shows "cheap" even when routing is not loaded.
+**Fix:** Use `reasons: [...reasons, "fewer than two main requests in this session"]`, and do the same in the ratios branch.
 
-**Fix:** Apply the same rule: use only the last entry, validate it against `cheap|balanced|max`, and fall back to the default.
+### IN-02: A request with no extractable system text is also skipped for the tool-list hash and the probe search
 
-### IN-02: `sanitizeLabel` truncates by UTF-16 code units and leaves bidi and zero-width characters
+**File:** `scripts/ui-wire-check-core.ts:117-131`
 
-**File:** `.pi/extensions/ui/statusline.ts:22-32`
+**Issue:** The `missing` branch returns before `extractToolText` runs. A probe that appears in that request's tool list is never searched, and its tool hash is never compared. The verdict ends as INSUFFICIENT rather than FAIL, even though FAIL evidence was present.
 
-**Issue:** `slice(0, max - 1)` can split a surrogate pair, leaving a lone surrogate. Length is measured in code units, not terminal columns. Bidi overrides (U+202A–U+202E, U+2066–U+2069) and zero-width characters survive, so a crafted mode or provider string could visually reorder the footer.
+**Fix:** Compute `tools`, hash it and search probes before the `missing` early return. Skip only the system-text hash for that request.
 
-**Fix:** Strip `\p{Cf}`, and truncate with `truncateToWidth` from pi-tui, as `header.ts` already does.
+### IN-03: RB-11-02 asks for a foreground subagent run, but a plain call is now async
 
-### IN-03: The prompt-surface lint can be bypassed and misses some context-rewriting hooks
+**File:** `docs/RUNBOOK.md` (RB-11-02 step 1)
 
-**File:** `tests/unit/ui-prompt-surface-lint.test.ts:11`, `:13-26`
+**Issue:** "Run one foreground and one async subagent" gives no way to get a foreground run. After the IN-01 change, only `async: false` or `clarify: true` counts through the tool call, and under the default `asyncByDefault` a model's plain call is async. A tester will probably run two async subagents and record the foreground path as checked.
 
-**Issue:**
+**Fix:** State it explicitly, for example: "ask for a subagent with `async: false` (blocking), then one with no `async` argument (background)". Also record which path each run took.
 
-- `UI_CUSTOM` misses `const { custom } = ctx.ui` and `ctx.ui["custom"]`.
-- The hook regex misses template-literal event names.
-- Hooks that also change what the model sees are not forbidden: `tool_result` (patches results into context), `message_end` (replaces messages) and `input` (transforms user text).
+### IN-04: A whitespace-only `action` is classified differently from pi-subagents
 
-**Fix:** Add `tool_result|message_end|input` to the forbidden hook alternation, and match on `\bcustom\b` inside `ui/`.
+**File:** `.pi/extensions/ui/agents.ts:23`
 
-### IN-04: Comments that only repeat "Swallowed deliberately."
+**Issue:** pi-subagents trims `action` and treats an empty result as a launch (`subagent-executor.js:7419-7422`). The tracker checks `a.action === undefined`, so `{ action: " ", async: false }` is a blocking launch that is not counted. This is a model-error edge case and is harmless in practice.
 
-**File:** `.pi/extensions/ui/index.ts:104`, `:114`, `:124`, `:134`, `:143`, `:153`, `:166`, `:175`
-
-**Issue:** The same comment appears eight times and gives no reason; the reason is stated only once, at `:66`. AGENTS.md: comment only a non-obvious WHY, and never narrate.
-
-**Fix:** Wrap the handlers in a single `guard(fn)` helper with one WHY comment, and delete the repeats.
-
-### IN-05: Inconsistent indentation inside one extension
-
-**File:** `.pi/extensions/ui/agents.ts`, `git-probe.ts`, `statusline.ts` (2 spaces) versus `index.ts`, `header.ts` (tabs); `tests/unit/ui-statusline.test.ts` (2 spaces)
-
-**Fix:** Use tabs throughout, to match the rest of the repo.
-
-### IN-06: Git probe on Windows
-
-**File:** `.pi/extensions/ui/index.ts:80`; `.pi/extensions/ui/git-probe.ts:98`
-
-**Issue:**
-
-- **Possible orphan on timeout.** `execCommand` kills only the direct child (`proc.kill("SIGTERM")`, `core/exec.js:20-29`). On Git for Windows, `git` on PATH is often the `cmd\git.exe` redirector. If the 5 s timeout fires, the real `mingw64\bin\git.exe` may keep running. I have not verified this live.
-- **Silent retry loop.** A repo that always times out retries every 20 s (`4 × 5000`) indefinitely, with no indication of why the segment never appears.
-
-**Fix:** After two consecutive timeouts, disable the probe the same way exit 128 does.
-
-### IN-07: The wire check's session and ratio selection
-
-**File:** `scripts/ui-wire-check-core.ts:89-91`, `:121-141`
-
-**Issue:**
-
-- **Wrong default session.** The default session is the last `main.request` in a per-cwd log. A second Pi session in the same repo, or a subagent child that loads the diagnostics extension, can make the script analyse the wrong session.
-- **Ratio window.** `turnRatios` ignores `--last`, so it covers a different window from the hashes.
-- **Overstated ratio.** `turnRatios` omits `cacheWrite` from the denominator, which overstates the ratio on Anthropic/Bedrock.
-
-**Fix:** Print every session id found and require `--session` when there is more than one. Apply the same window to the ratios.
-
-### IN-08: Launcher exit codes and the test's shell discovery
-
-**File:** `scripts/ui-wire-check.sh:9-12`; `tests/unit/ui-wire-check.test.ts:125-129`
-
-**Issue:**
-
-- **Exit-code collision.** `die` exits 1, which is the same code as a FAIL verdict.
-- **Shell discovery can break the whole file.** The test resolves `sh` with a non-null assertion inside `describe`. A missing `sh` throws during collection and takes the pure unit tests in the same file down with it.
-
-**Fix:** Have `die` exit 3. Use `it.skipIf` when `sh` cannot be found.
-
-### IN-09: Test-helper redundancy and a vacuous smoke test
-
-**File:** `tests/helpers/harness-session.ts` (bindExtensions branch); `tests/integration/ui-chrome.test.ts:195-199`
-
-**Issue:**
-
-- **Redundant branch.** The `uiContext === undefined && mode === undefined` branch is unnecessary, because spreading two empty objects already gives `{}`.
-- **Vacuous smoke test.** The print-mode test passes with the `ui` extension removed or completely broken: `hasUI` is false and every handler swallows errors.
-
-**Fix:** Collapse the branch. Either delete the print-mode test, or assert something about the subject, such as no `git` spawn once WR-02 is fixed.
+**Fix:** Use `typeof a.action === "string" ? a.action.trim() === "" : a.action === undefined`, or leave it and accept the edge case.
 
 ---
 
-_Reviewed: 2026-10-13T02:45:16Z_
+_Reviewed: 2026-10-13T11:25:00Z_
 _Reviewer: Claude (gsd-code-reviewer)_
 _Depth: deep_
