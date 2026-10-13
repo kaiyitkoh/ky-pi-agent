@@ -11,7 +11,8 @@
  *   `walkableKeys()` forces them or the walker never descends into substitutions inside a Word.
  * - Command position includes a guarded verb's arguments: `g=push; git $g` has a literal
  *   `git` name and the expansion in `suffix[0]`. Refuse expansion in `Command.name` always, and
- *   in `suffix[]` when the name is literally a guarded verb (`echo "$HOME"` stays allowed).
+ *   in `suffix[]` when the name is literally a guarded verb (`echo "$HOME"` stays allowed). Behind
+ *   a wrapper the same rule applies to the resolved word, and any expansion in a wrapper word is refused.
  * - `git $((1+1))` does not yield `ArithmeticCommandExpansion`; the fixture is `echo $(( $(echo 1) ))`.
  * - Every wrapper's option arity is tabulated: a wrong flag arity silently mis-resolves
  *   (`sudo -u root git push` must not resolve to `root`); shell-parse.test.ts pins `-u` and `-C`.
@@ -613,6 +614,21 @@ function extractGitCwdOverride(executable: string, args: readonly string[]): str
 interface ExtractedInvocation {
 	readonly invocation: CanonicalInvocation;
 	readonly confident: boolean;
+	readonly expansionInCommandPosition: boolean;
+}
+
+/**
+ * The command-position rule applied past the wrappers. Any expansion among the wrapper words is
+ * refused too, because word splitting can turn `timeout $T apply` into `timeout 5 terraform apply`.
+ */
+function hasExpansionBehindWrappers(words: readonly Word[], index: number): boolean {
+	if (index === 0) {
+		return false;
+	}
+	if (words.slice(0, index + 1).some(hasExpansionPart)) {
+		return true;
+	}
+	return isLiteralGuardedExecutable(words[index]) && words.slice(index + 1).some(hasExpansionPart);
 }
 
 /** One entry per `Command` node, wrapper indirection resolved. */
@@ -630,7 +646,8 @@ function extractInvocations(
 			// Assignment-only statement (`g=push`): nothing executes.
 			continue;
 		}
-		const values = [node.name.value, ...node.suffix.map((w) => w.value)];
+		const words = [node.name, ...node.suffix];
+		const values = words.map((w) => w.value);
 		const resolved = resolveWrappers(values);
 		const executable = values[resolved.index] ?? "";
 		const args = values.slice(resolved.index + 1);
@@ -645,6 +662,7 @@ function extractInvocations(
 				...(cwdOverride !== undefined ? { cwdOverride } : {}),
 			},
 			confident: resolved.confident,
+			expansionInCommandPosition: hasExpansionBehindWrappers(words, resolved.index),
 		});
 	}
 	return extracted;
@@ -681,6 +699,11 @@ export function canonicalise(command: string): ShellVerdict {
 
 	const extracted = extractInvocations(script, command, commandNodes);
 	const invocations = extracted.map((e) => e.invocation);
+
+	if (extracted.some((e) => e.expansionInCommandPosition)) {
+		const expansionCause = "unresolved-expansion-in-command-position";
+		return { kind: "refused", cause: expansionCause, detail: describeCause(expansionCause, command) };
+	}
 
 	const shellRunnerHit = findShellRunnerDenial(invocations);
 	if (shellRunnerHit !== undefined) {

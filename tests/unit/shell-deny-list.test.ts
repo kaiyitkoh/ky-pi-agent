@@ -127,6 +127,33 @@ const TABLE: readonly DenyRow[] = [
 		why: "a dynamic EXECUTABLE (not just a dynamic argument) must also be refused -- Command.name itself carries the expansion here",
 	},
 	{
+		label: "unresolved expansion as the executable behind a wrapper",
+		cmd: "g=git; env $g push origin main",
+		expected: "refused",
+		cause: "unresolved-expansion-in-command-position",
+		why: "the resolved word after env is the real command position, so the plain `$g push` rule must apply there too",
+	},
+	{
+		label: "unresolved expansion as a wrapper operand",
+		cmd: 'T="5 terraform"; timeout $T apply',
+		expected: "refused",
+		cause: "unresolved-expansion-in-command-position",
+		why: "word splitting turns the operand into `5 terraform`, so an expansion among the wrapper words can supply the executable",
+	},
+	{
+		label: "literal guarded verb behind a wrapper with an expanded subcommand",
+		cmd: "g=push; sudo git $g origin main",
+		expected: "refused",
+		cause: "unresolved-expansion-in-command-position",
+		why: "same as `git $g` typed plainly: the subcommand comes from a variable",
+	},
+	{
+		label: "wrapper with an expansion only in an ordinary argument",
+		cmd: 'env A=1 echo "$HOME"',
+		expected: "ok",
+		why: "the rule covers command position and guarded subcommands, not every argument",
+	},
+	{
 		label: "unknown wrapper option in front of a guarded verb",
 		cmd: "env --frobnicate git push",
 		expected: "refused",

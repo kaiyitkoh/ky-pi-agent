@@ -349,6 +349,24 @@ export const EVASION_CORPUS: readonly EvasionCase[] = [
 		why: "-S hands env a command string with no separable executable; an unresolvable wrapper in front of a guarded verb is refused, not allowed.",
 		reference: "shell.ts unresolved-wrapper refusal",
 	},
+	{
+		id: "EV-101",
+		class: "variable-indirection",
+		tool: "bash",
+		input: { command: "g=git; env $g push origin main" },
+		expect: "BLOCKED",
+		why: "the word env would run comes from a variable; the command-position rule applies to the resolved word, not only the first word.",
+		reference: "shell.ts#hasExpansionBehindWrappers",
+	},
+	{
+		id: "EV-102",
+		class: "variable-indirection",
+		tool: "bash",
+		input: { command: "g=git; timeout 5 $g push origin main" },
+		expect: "BLOCKED",
+		why: "same as EV-101 behind a wrapper with an operand.",
+		reference: "shell.ts#hasExpansionBehindWrappers",
+	},
 
 	// -------------------------------------------------------------------------
 	// CR-03: exact-string executable matching -- `git.exe`, path-qualified and
