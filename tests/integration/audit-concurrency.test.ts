@@ -68,29 +68,15 @@
  * a quantitative result into a stack trace.
  *
  * ---------------------------------------------------------------------------
- * Rotation under concurrency (case 2) -- retention window, not a data-loss bug
+ * Rotation under concurrency (cases 2 and 3)
  * ---------------------------------------------------------------------------
- * `.pi/lib/jsonl.ts`'s own docstring names the classic hazard: a held file
- * descriptor would keep writing into a file that a SIBLING process just
- * renamed away, so every record after that rotation would land in the
- * rotated file and be lost from the live one. The real writer avoids this by
- * opening, writing and closing per record (`appendFileSync`, never a
- * stream), and by NEVER losing a record even when its own `renameSync`
- * throws -- "Rotation failed; the next append will simply keep growing the
- * live file rather than losing the record" (`.pi/lib/jsonl.ts` `rotate()`
- * docstring). CONFIRMED BY EXECUTION while building the WR-04 fix: four real
- * concurrent processes racing `rotate()` on the same file lose NO records,
- * PROVIDED the total number of rotations stays within `rotate()`'s own
- * documented retention window -- `maxRotated` (10, `DEFAULT_MAX_ROTATED_FILES`;
- * not configurable through `writeAuditRow`'s own `WriteAuditRowOptions`,
- * which exposes only `now`/`rotateBytes`) correctly UNLINKS a rotated
- * fragment once its index reaches that bound, exactly as documented -- a
- * record count/cap combination that triggers MORE than ~10 total rotations
- * across every process legitimately loses its OLDEST records to that
- * by-design purge, which is retention working as intended, not a bug. This
- * case's numbers are chosen to produce several rotations (proving the race
- * is real) while staying comfortably under that boundary, confirmed reliable
- * across five repeated executions while building this fix.
+ * The writer opens, writes and closes per record (`appendFileSync`, never a
+ * held descriptor), serialises rotation with a lock file and moves fragments
+ * by link then unlink, so no rotation can replace another's fragment. Case 2
+ * keeps the rotation count under `maxRotated` (10, not configurable through
+ * `writeAuditRow`), whose by-design purge of the oldest fragment would
+ * otherwise lose records legitimately. Case 3 drives the writer directly with
+ * a retention far above its rotation count, so any shortfall is a race.
  *
  * `.pi/lib/jsonl.ts#rotatedPath` names a rotated fragment `<stem>.<n>.jsonl`
  * -- the index is inserted BEFORE the `.jsonl` extension, not appended after

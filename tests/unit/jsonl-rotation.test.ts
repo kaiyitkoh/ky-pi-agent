@@ -22,7 +22,7 @@
  * manipulation behaves differently on Windows and macOS and the requirement is
  * about the date stamp in the file name anyway.
  */
-import { existsSync, mkdirSync, renameSync, rmdirSync, statSync, utimesSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, renameSync, rmSync, statSync, utimesSync, writeFileSync } from "node:fs";
 import { basename, join } from "node:path";
 
 import { describe, expect, it } from "vitest";
@@ -35,7 +35,7 @@ import {
 	rotate,
 	type AppendOptions,
 } from "../../.pi/extensions/diagnostics/jsonl.ts";
-import { appendJsonl as libAppendJsonl } from "../../.pi/lib/jsonl.ts";
+import { appendJsonl as libAppendJsonl, moveNoReplace } from "../../.pi/lib/jsonl.ts";
 import { TURNS_LOG_BASE } from "../../.pi/extensions/diagnostics/schema.ts";
 import { logFilesIn, readTornSafe, withTempLogCwd } from "../helpers/logs.ts";
 
@@ -553,7 +553,7 @@ describe("concurrent rotation never replaces another process's rotated file", ()
 	});
 });
 
-describe("rotation is serialised by a lock directory", () => {
+describe("rotation is serialised by a lock file and never replaces a rotated file", () => {
 	const over = (cwd: string, now: Date): string => {
 		for (let i = 1; i <= 2; i += 1) libAppendJsonl(cwd, "lockedlog", makeRecord(i), { rotateBytes: RECORD_BYTES * 2, now });
 		return logPath(cwd, "lockedlog", now);
@@ -563,12 +563,12 @@ describe("rotation is serialised by a lock directory", () => {
 		await withTempLogCwd(async (cwd) => {
 			const now = new Date(2026, 7, 13, 9, 0, 0);
 			const live = over(cwd, now);
-			mkdirSync(`${live}.lock`);
+			writeFileSync(`${live}.lock`, "other-holder");
 			libAppendJsonl(cwd, "lockedlog", makeRecord(3), { rotateBytes: RECORD_BYTES * 2, now });
 			expect(existsSync(rotatedPath(live, 1)), "a held lock must stop this process renaming").toBe(false);
 			expect(readIntact(live, "the live file")).toHaveLength(3);
 
-			rmdirSync(`${live}.lock`);
+			rmSync(`${live}.lock`);
 			libAppendJsonl(cwd, "lockedlog", makeRecord(4), { rotateBytes: RECORD_BYTES * 2, now });
 			expect(readIntact(rotatedPath(live, 1), "the rotation after release")).toHaveLength(3);
 			expect(existsSync(`${live}.lock`), "the lock is released after rotating").toBe(false);
@@ -594,11 +594,31 @@ describe("rotation is serialised by a lock directory", () => {
 		});
 	});
 
+	it("two processes that both believe they hold the lock still cannot replace each other's rotated file", async () => {
+		await withTempLogCwd(async (cwd) => {
+			const now = new Date(2026, 7, 13, 9, 0, 0);
+			const live = over(cwd, now);
+			let raced = false;
+			// A sibling takes the lock over mid-rotation, rotates, and this process then moves onto its `.1`.
+			const takeover = (src: string, dst: string): void => {
+				if (!raced && src === live) {
+					raced = true;
+					rmSync(`${live}.lock`);
+					libAppendJsonl(cwd, "lockedlog", makeRecord(50), { rotateBytes: RECORD_BYTES * 2, now });
+				}
+				moveNoReplace(src, dst);
+			};
+			libAppendJsonl(cwd, "lockedlog", makeRecord(3), { rotateBytes: RECORD_BYTES * 2, now, renameFile: takeover });
+			const all = [live, rotatedPath(live, 1), rotatedPath(live, 2)].filter((p) => existsSync(p)).flatMap((p) => readIntact(p, p));
+			expect(all, "every record survives two simultaneous holders").toHaveLength(4);
+		});
+	});
+
 	it("takes over a lock a crashed holder left behind", async () => {
 		await withTempLogCwd(async (cwd) => {
 			const now = new Date(2026, 7, 13, 9, 0, 0);
 			const live = over(cwd, now);
-			mkdirSync(`${live}.lock`);
+			writeFileSync(`${live}.lock`, "other-holder");
 			const old = new Date(Date.now() - 60_000);
 			utimesSync(`${live}.lock`, old, old);
 			libAppendJsonl(cwd, "lockedlog", makeRecord(3), { rotateBytes: RECORD_BYTES * 2, now });

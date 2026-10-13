@@ -3,15 +3,27 @@
  * Lives in `.pi/lib/` because `safety/` may import nothing from `diagnostics/`, and Pi auto-discovers only `.pi/extensions`.
  *
  * `appendFileSync` per record, never a held descriptor: one would keep writing into the file rotation renamed away.
- * Appends take no lock (POSIX `O_APPEND` atomicity for very large writes is not guaranteed). Rotation is serialised by a `mkdir` lock and
- * re-checks the live size under it; an append that races the rename lands whole in one fragment or the other.
+ * Appends take no lock (POSIX `O_APPEND` atomicity for very large writes is not guaranteed). Rotation is serialised by a lock file, re-checks
+ * the live size under it, and on POSIX moves files by link then unlink, so no move can replace another rotated file.
  * `withFileMutationQueue` is per process (pi 1.1.0 `core/tools/file-mutation-queue.ts:4`); subagents are separate processes.
  *
  * Every path is confined to {@link logDir}, a `base` must match {@link BASE_RE}, and rotation and prune touch only
  * regular files, so a planted symlink is never renamed or unlinked. Mutable state lives on `globalThis` because jiti
  * can load this file twice through different import graphs.
  */
-import { appendFileSync, existsSync, lstatSync, mkdirSync, readdirSync, renameSync, rmdirSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import {
+	appendFileSync,
+	existsSync,
+	linkSync,
+	lstatSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	renameSync,
+	unlinkSync,
+	writeFileSync,
+} from "node:fs";
 import { basename, dirname, join, resolve, sep } from "node:path";
 
 import { CONFIG_DIR_NAME } from "@earendil-works/pi-coding-agent";
@@ -124,70 +136,111 @@ function escapeForRegExp(literal: string): string {
 	return literal.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** `held` when this process owns the lock, `busy` while a live holder has it, `failed` when it cannot be taken at all. */
+type LockState = "held" | "busy" | "failed";
+
 /**
- * Take the rotation lock for `file`: `mkdir` is atomic on every platform, so at most one process renames at a time.
- * A lock older than {@link ROTATE_LOCK_STALE_MS} is a crashed holder's and is taken over.
+ * Take the rotation lock: an exclusive create (`wx`) is atomic on every platform and holds an owner token, so a
+ * release never removes another process's lock. A lock older than {@link ROTATE_LOCK_STALE_MS} is a crashed holder's.
  */
-function tryLock(lock: string): boolean {
-	try {
-		mkdirSync(lock);
-		return true;
-	} catch (error) {
-		if ((error as NodeJS.ErrnoException).code !== "EEXIST") return false;
+function tryLock(lock: string, token: string): LockState {
+	for (let attempt = 0; attempt < 2; attempt++) {
+		try {
+			writeFileSync(lock, token, { flag: "wx" });
+			return "held";
+		} catch (error) {
+			if ((error as NodeJS.ErrnoException).code !== "EEXIST") return "failed";
+		}
+		let stat;
+		try {
+			stat = lstatSync(lock);
+		} catch {
+			continue;
+		}
+		if (!stat.isFile()) return "failed";
+		if (Date.now() - stat.mtimeMs < ROTATE_LOCK_STALE_MS) return "busy";
+		if (!unlinkQuietly(lock)) return "failed";
 	}
+	return "busy";
+}
+
+function releaseLock(lock: string, token: string): void {
 	try {
-		if (Date.now() - lstatSync(lock).mtimeMs < ROTATE_LOCK_STALE_MS) return false;
-		rmdirSync(lock);
-		mkdirSync(lock);
-		return true;
+		if (readFileSync(lock, "utf-8") === token) unlinkSync(lock);
 	} catch {
-		return false;
+		// A lock that cannot be released goes stale and is taken over; failing the append for it would lose the record.
 	}
 }
 
-/** `busy` when another process holds the rotation lock; nothing moved and the caller should simply append. */
-type RotateOutcome = "rotated" | "failed" | "busy";
+const NO_HARD_LINKS = new Set(["ENOTSUP", "ENOSYS", "EXDEV", "EPERM"]);
 
 /**
- * Shift `<stem>.<n>.jsonl` up, highest first, and rename the live file to `<stem>.1.jsonl`; indices at or past
- * `maxRotated` are unlinked, so a lowered cap also bounds what an older one left. Returns false only when the live
- * file could not be renamed. `due` is re-asked under the lock: a sibling may have rotated since the caller's check,
- * and rotating its near-empty successor again would evict a full file.
+ * Move without ever replacing `dst`: link fails on an existing target, so even two rotators that both believe they
+ * hold the lock cannot overwrite a rotated file. An appender racing the move writes into the same inode under
+ * either name. POSIX only: on Windows an unlinked file another process has open keeps its name delete-pending, and
+ * the next append to that name fails with EPERM.
+ */
+export function moveNoReplace(src: string, dst: string): void {
+	try {
+		linkSync(src, dst);
+	} catch (error) {
+		if (!NO_HARD_LINKS.has((error as NodeJS.ErrnoException).code ?? "")) throw error;
+		// A filesystem without hard links: the lock and the existence checks are the remaining guard.
+		if (existsSync(dst)) throw error;
+		renameSync(src, dst);
+		return;
+	}
+	try {
+		unlinkSync(src);
+	} catch (error) {
+		// Undo the extra name so the records are not duplicated; they stay under `src`.
+		unlinkQuietly(dst);
+		throw error;
+	}
+}
+
+// Windows keeps rename, guarded by the lock and the free-target checks; only a stale-lock takeover can race it.
+const defaultMove: Move = process.platform === "win32" ? renameSync : moveNoReplace;
+
+type RotateOutcome = "rotated" | "failed" | "busy";
+type Move = (src: string, dst: string) => void;
+
+/**
+ * Shift `<stem>.<n>.jsonl` up, highest first, and move the live file to `<stem>.1.jsonl`; indices at or past
+ * `maxRotated` are unlinked, so a lowered cap also bounds what an older one left. Returns false only when the lock
+ * or the live-file move failed. `due` is re-asked under the lock: a sibling may have rotated since the caller's
+ * check, and rotating its near-empty successor again would evict a full file.
  */
 export function rotate(
 	cwd: string,
 	file: string,
 	maxRotated: number = DEFAULT_MAX_ROTATED_FILES,
-	renameFile: typeof renameSync = renameSync,
+	renameFile: Move = defaultMove,
 	due: () => boolean = () => true,
 ): boolean {
 	return rotateLocked(cwd, file, maxRotated, renameFile, due) !== "failed";
 }
 
-// Without the lock two processes can both see `.1` free and rename onto it in turn; POSIX rename replaces the
-// target silently, so the first rotation's records are lost.
 function rotateLocked(
 	cwd: string,
 	file: string,
 	maxRotated: number,
-	renameFile: typeof renameSync,
+	renameFile: Move,
 	due: () => boolean,
 ): RotateOutcome {
 	assertInsideLogDir(cwd, file);
 	const lock = `${file}.lock`;
-	if (!tryLock(lock)) return "busy";
+	const token = `${process.pid}-${randomUUID()}`;
+	const state = tryLock(lock, token);
+	if (state !== "held") return state;
 	try {
 		return due() ? shiftAndRotate(file, maxRotated, renameFile, due) : "rotated";
 	} finally {
-		try {
-			rmdirSync(lock);
-		} catch {
-			// A lock left behind goes stale and is taken over; failing the append for it would lose the record.
-		}
+		releaseLock(lock, token);
 	}
 }
 
-function shiftAndRotate(file: string, maxRotated: number, renameFile: typeof renameSync, due: () => boolean): RotateOutcome {
+function shiftAndRotate(file: string, maxRotated: number, renameFile: Move, due: () => boolean): RotateOutcome {
 	const dir = dirname(file);
 	const stale = new RegExp(`^${escapeForRegExp(basename(file, EXT))}\\.(\\d+)\\${EXT}$`);
 	for (const name of listDir(dir)) {
@@ -198,7 +251,6 @@ function shiftAndRotate(file: string, maxRotated: number, renameFile: typeof ren
 	for (let n = maxRotated - 1; n >= 1; n--) {
 		const src = rotatedPath(file, n);
 		const dst = rotatedPath(file, n + 1);
-		// renameSync replaces an existing target on every platform, so another process's rotation is skipped, not overwritten.
 		if (!isRegularFile(src) || existsSync(dst)) continue;
 		try {
 			renameFile(src, dst);
@@ -210,7 +262,7 @@ function shiftAndRotate(file: string, maxRotated: number, renameFile: typeof ren
 
 	if (maxRotated >= 1 && isRegularFile(file) && due()) {
 		const dst = rotatedPath(file, 1);
-		// `.1` could not shift (a holder has it open on Windows); renaming onto it would replace it.
+		// `.1` could not shift (a holder has it open on Windows), so the live file cannot move this time.
 		if (existsSync(dst)) return "rotated";
 		try {
 			renameFile(file, dst);
@@ -241,7 +293,7 @@ export interface AppendOptions {
 	maxRotated?: number;
 	now?: Date;
 	/** Rename used by rotation; injectable so tests can make the live file refuse to move. */
-	renameFile?: typeof renameSync;
+	renameFile?: Move;
 }
 
 /**
@@ -264,7 +316,7 @@ export function appendJsonl(cwd: string, base: string, record: unknown, opts: Ap
 		const backoff = rotateBackoff();
 		const state = backoff.get(file);
 		if (state === undefined || nowMs >= state.retryAt) {
-			const outcome = rotateLocked(cwd, file, opts.maxRotated ?? DEFAULT_MAX_ROTATED_FILES, opts.renameFile ?? renameSync, () =>
+			const outcome = rotateLocked(cwd, file, opts.maxRotated ?? DEFAULT_MAX_ROTATED_FILES, opts.renameFile ?? defaultMove, () =>
 				overCap(regularFileSize(file) ?? 0),
 			);
 			const fresh = regularFileSize(file) ?? 0;
