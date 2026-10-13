@@ -999,7 +999,12 @@ and completes a delegation is a fact about Qoder's own service.
 a non-empty folded `agent.message` result returned as tool content. The
 transcript's `qoder.delegate.result` record shows `done: true`, and the
 stream terminated because a `session.status_idle` frame arrived with
-`stop_reason.type === "end_turn"`. **The failure signal that matters most:**
+`stop_reason.type === "end_turn"`. Completion counts only an idle frame that follows a
+`session.status_running` or `event_start` frame, so also confirm in the live
+stream that one of those arrives before the final idle (a new session's own
+idle status before the task starts is ignored). Any failure after the task
+was sent leaves a `qoder.session.cancel` record: the remote session is
+cancelled rather than left running. **The failure signal that matters most:**
 a `401` or `403` on any of the three requests (visible in the transcript's
 `*.response` records, by HTTP status) means the personal access token is
 wrong, expired, or the agent/environment ids belong to a different account —

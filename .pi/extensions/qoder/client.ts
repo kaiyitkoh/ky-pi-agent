@@ -132,7 +132,7 @@ export interface ParseSseResult {
 function splitField(line: string): { readonly field: string; readonly value: string } | undefined {
 	const idx = line.indexOf(":");
 	if (idx === -1) {
-			// No colon: no defined value, ignored.
+		// No colon: no defined value, ignored.
 		return undefined;
 	}
 	const field = line.slice(0, idx);
@@ -168,7 +168,7 @@ function parseOneFrame(block: string): SseFrame {
 				dataLines.push(split.value);
 				break;
 			default:
-					// Other fields (`retry:`, future Qoder fields) are ignored.
+				// Other fields (`retry:`, future Qoder fields) are ignored.
 				break;
 		}
 	}
@@ -178,7 +178,7 @@ function parseOneFrame(block: string): SseFrame {
 	try {
 		data = rawData.length > 0 ? JSON.parse(rawData) : undefined;
 	} catch {
-			// Malformed data is data to the caller; this parser never throws on untrusted input.
+		// Malformed data is data to the caller; this parser never throws on untrusted input.
 		data = undefined;
 	}
 
@@ -244,6 +244,7 @@ export function createResultFolder(): ResultFolder {
 	const textChunks: string[] = [];
 	let thinkingText = "";
 	let done = false;
+	let started = false;
 	let stopReason: string | undefined;
 	const kindByEventId = new Map<string, EventKind>();
 
@@ -254,7 +255,13 @@ export function createResultFolder(): ResultFolder {
 		}
 		const type = readString(record.type);
 
+		if (type === "session.status_running") {
+			started = true;
+			return;
+		}
+
 		if (type === "event_start") {
+			started = true;
 			const inner = readRecord(record.event);
 			const innerId = inner === undefined ? undefined : readString(inner.id);
 			const innerType = inner === undefined ? undefined : readString(inner.type);
@@ -285,7 +292,8 @@ export function createResultFolder(): ResultFolder {
 			return;
 		}
 
-		if (type === "session.status_idle") {
+		// A new session's own idle status, or a replayed one, arrives before the agent has started on the task.
+		if (type === "session.status_idle" && started) {
 			done = true;
 			const sr = readRecord(record.stop_reason);
 			const srType = sr === undefined ? undefined : readString(sr.type);
@@ -368,7 +376,7 @@ async function cancelReaderQuietly(reader: ReadableStreamDefaultReader<Uint8Arra
 	try {
 		await reader.cancel(reason);
 	} catch {
-			// Best-effort.
+		// Best-effort.
 	}
 }
 
@@ -404,7 +412,7 @@ async function cancelRemoteSession(
 
 /**
  * Run the three-step sequence: create a session, open the event stream, send the task as `user.message`, fold until `session.status_idle`.
- * A stop_reason other than `end_turn` throws; an abort cancels the remote turn.
+ * A stop_reason other than `end_turn`, an empty answer, a timeout or a broken stream throws, and every failure after the task was sent cancels the remote turn.
  * The task is validated (non-empty, bounded) first; the token goes only in the Authorization header, never in a transcript.
  */
 export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedResult> {
@@ -466,7 +474,7 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 
 	const streamResponse = await fetch(`${config.baseUrl}/sessions/${encodedSessionId}/events/stream`, {
 		method: "GET",
-		headers: { Authorization: headers.Authorization },
+		headers: { Authorization: headers.Authorization, Accept: "text/event-stream" },
 		signal,
 	});
 	writeQoderTranscript(cwd, { event: "qoder.stream.open.response", status: streamResponse.status });
@@ -503,6 +511,23 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 		throw error;
 	}
 
+	// From here the hosted agent is working with its own tools, so every exit but a completed answer cancels it.
+	let succeeded = false;
+	try {
+		const result = await readDelegatedResult(reader, signal, cwd, opts);
+		succeeded = true;
+		return result;
+	} finally {
+		if (!succeeded) await cancelRemoteSession(config, headers, encodedSessionId, cwd);
+	}
+}
+
+async function readDelegatedResult(
+	reader: ReadableStreamDefaultReader<Uint8Array>,
+	signal: AbortSignal | undefined,
+	cwd: string,
+	opts: DelegateTaskOptions,
+): Promise<FoldedResult> {
 	const decoder = new TextDecoder();
 	let buffer = "";
 	const folder = createResultFolder();
@@ -583,7 +608,6 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 	} catch (error) {
 		if (signal?.aborted) {
 			await cancelReaderQuietly(reader, "aborted");
-			await cancelRemoteSession(config, headers, encodedSessionId, cwd);
 			throw abortedError();
 		}
 		throw error;
@@ -624,6 +648,9 @@ export async function delegateTask(opts: DelegateTaskOptions): Promise<FoldedRes
 				`${folded.text.length} characters -- the delegated result is incomplete and must not be ` +
 				"treated as an answer.",
 		);
+	}
+	if (folded.text.trim().length === 0) {
+		throw new Error("Qoder delegate: the remote session went idle without any message text -- an empty result is not an answer.");
 	}
 
 	return folded;

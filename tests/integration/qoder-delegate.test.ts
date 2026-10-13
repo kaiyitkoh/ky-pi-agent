@@ -425,6 +425,34 @@ describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a 
 		expect(folded.text).toBe("Hello world");
 	});
 
+	it("an idle frame before the agent started is not completion, and an idle with no text is an error", async () => {
+		const idleOnly = `${STATUS_IDLE}\n`;
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: idleOnly }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(/without a session\.status_idle frame/);
+				expect(loop.received.at(-1)?.url).toMatch(/\/cancel$/);
+			});
+		});
+		const running = 'event: session.status_running\ndata: {"type":"session.status_running"}\n';
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({ frames: `${running}\n${STATUS_IDLE}\n` }, async (loop) => {
+				const config = resolveFixtureConfig(loop.baseUrl);
+				await expect(delegateTask({ config, task: DELEGATED_TASK_TEXT, cwd })).rejects.toThrow(/without any message text/);
+			});
+		});
+	});
+
+	it("asks for an event stream", async () => {
+		await withTempLogCwd(async (cwd) => {
+			await withQoderLoopback({}, async (loop) => {
+				await delegateTask({ config: resolveFixtureConfig(loop.baseUrl), task: DELEGATED_TASK_TEXT, cwd });
+				const stream = loop.received.find((req) => req.method === "GET");
+				expect(stream?.headers?.accept).toBe("text/event-stream");
+			});
+		});
+	});
+
 	it("a stream closed before session.status_idle throws, naming the accumulated character count, rather than returning a truncated result", async () => {
 		// No STATUS_IDLE frame at all -- the server closes the connection after
 		// the message deltas, simulating a dropped connection, a server-side
@@ -445,10 +473,10 @@ describe("qoder-delegate -- CR-03: a truncated stream is never handed back as a 
 					/event stream ended without a session\.status_idle frame/,
 				);
 
-				// Non-vacuity: the stream endpoint really was reached, and the two
-				// prior requests (session create, event send) both completed.
-				expect(loop.received.length).toBeGreaterThan(0);
-				expect(loop.received).toHaveLength(3);
+				// Session create, stream open and event send all completed, then the
+				// still-running remote session was cancelled.
+				expect(loop.received).toHaveLength(4);
+				expect(loop.received[3]?.url).toMatch(/\/cancel$/);
 			});
 		});
 	});
@@ -559,10 +587,10 @@ describe("qoder-delegate -- WR-07: a stalled stream (no bytes at all) is reporte
 					loop.releaseSecondChunk();
 				}
 
-				// Non-vacuity: the stream endpoint really was reached (all
-				// three requests happened) before the timeout fired.
-				expect(loop.received.length).toBeGreaterThan(0);
-				expect(loop.received).toHaveLength(3);
+				// All three requests happened before the timeout fired, and the
+				// still-running remote session was then cancelled.
+				expect(loop.received).toHaveLength(4);
+				expect(loop.received[3]?.url).toMatch(/\/cancel$/);
 			});
 
 			// WR-06: a terminal transcript record for the inactivity-timeout path.
