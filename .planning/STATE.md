@@ -31,7 +31,7 @@ Status: Ready to plan
         Three code-review iterations ran; 4 Critical + 19 Warning findings fixed across three
         fix rounds, WR3-05 + 6 Info accepted-and-documented. Residual is RB-08-01/02/03 only,
         all OUTSTANDING by design (live inference / installed LSP package required).
-Last activity: 2026-10-13
+Last activity: 2026-10-13 - Completed quick task 261013-sit: safety and mode follow-ups
 
 Progress: [██████████] 100%
 
@@ -510,6 +510,7 @@ None yet.
 | # | Description | Date | Commit | Directory |
 |---|-------------|------|--------|-----------|
 | 261013-grs | git push policy: block protected/force, confirm feature-branch pushes in TUI, refuse headless | 2026-10-13 | a109822 | [261013-grs-safety-guard-git-push-confirm-policy](./quick/261013-grs-safety-guard-git-push-confirm-policy/) |
+| 261013-sit | Safety and mode follow-ups: stdin-is-code pipe rule, add-only protected branches, unified question budget, deferred v1.0 findings | 2026-10-13 | cf5c5db | [261013-sit-safety-and-mode-follow-ups-pipe-rule-con](./quick/261013-sit-safety-and-mode-follow-ups-pipe-rule-con/) |
 
 ## Deferred Items
 
