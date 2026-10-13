@@ -10,9 +10,6 @@ import type { Command, ParsedScript, Redirect, Word } from "unbash";
 
 const wordSet = (words: string): Set<string> => new Set(words.split(" ").filter((w) => w !== ""));
 
-/** Runtime `.type` strings unbash emits; iteration order is the refusal-cause priority. */
-export const DENIED_PART_TYPES = new Set(["CommandExpansion", "ProcessSubstitution", "ArithmeticCommandExpansion"]);
-
 /** Redirect operators that write a heredoc/herestring body — refuse all three. */
 export const HEREDOC_OPERATORS = new Set(["<<", "<<-", "<<<"]);
 
@@ -47,28 +44,21 @@ const FIND_EXEC_PRIMARIES = new Map([
 
 /** Every cause {@link canonicalise} can return. */
 export const SHELL_REFUSAL_CAUSES = [
-	"command-substitution",
-	"process-substitution",
-	"arithmetic-expansion",
-	"heredoc",
-	"background",
-	"unresolved-expansion-in-command-position",
-	"non-literal-command-name",
-	"shell-runner",
-	"generated-script",
-	"command-string-program",
-	"inline-code-effect",
-	"unresolved-wrapper",
-	"parse-error",
+	"command-substitution", "process-substitution", "arithmetic-expansion", "heredoc", "background",
+	"unresolved-expansion-in-command-position", "non-literal-command-name", "shell-runner", "generated-script",
+	"command-string-program", "inline-code-effect", "unresolved-wrapper", "parse-error",
 ] as const;
 
 export type ShellRefusalCause = (typeof SHELL_REFUSAL_CAUSES)[number];
 
-const CAUSE_BY_DENIED_TYPE: Record<string, ShellRefusalCause> = {
+const CAUSE_BY_DENIED_TYPE: Readonly<Record<string, ShellRefusalCause>> = {
 	CommandExpansion: "command-substitution",
 	ProcessSubstitution: "process-substitution",
 	ArithmeticCommandExpansion: "arithmetic-expansion",
 };
+
+/** Runtime `.type` strings unbash emits; iteration order is the refusal-cause priority. */
+export const DENIED_PART_TYPES: ReadonlySet<string> = new Set(Object.keys(CAUSE_BY_DENIED_TYPE));
 
 // One wrapper's option grammar; a word outside it makes resolution unconfident. A wrong arity silently mis-resolves.
 interface WrapperGrammar {
@@ -641,17 +631,9 @@ export function writeOperands(inv: Pick<CanonicalInvocation, "executable" | "arg
 	const args = inv.args;
 	const positionals = positionalOperands(executable, args);
 	switch (executable) {
-		case "tee":
-		case "rm":
-		case "rmdir":
-		case "touch":
-		case "truncate":
-		case "shred":
+		case "tee": case "rm": case "rmdir": case "touch": case "truncate": case "shred":
 			return positionals.filter((p) => p !== "-");
-		case "cp":
-		case "mv":
-		case "install":
-		case "ln": {
+		case "cp": case "mv": case "install": case "ln": {
 			const dir = optionValue(args, ["-t", "--target-directory"]);
 			if (dir !== undefined) return [dir];
 			return positionals.length >= 2 ? [positionals[positionals.length - 1]] : [];
@@ -665,8 +647,7 @@ export function writeOperands(inv: Pick<CanonicalInvocation, "executable" | "arg
 		}
 		case "perl":
 			return args.some((a) => /^-[a-zA-Z]*i/.test(a)) ? positionals : [];
-		case "curl":
-		case "wget": {
+		case "curl": case "wget": {
 			const out = optionValue(args, executable === "curl" ? ["-o", "--output"] : ["-O", "--output-document"]);
 			return out === undefined || out === "-" ? [] : [out];
 		}
@@ -955,10 +936,7 @@ function commandStringProgram(inv: Pick<CanonicalInvocation, "executable" | "arg
 	const args = inv.args;
 	if (INTERACTIVE_COMMAND_RUNNERS.has(executable)) return "is interactive and runs commands from its prompt or options";
 	switch (executable) {
-		case "awk":
-		case "gawk":
-		case "mawk":
-		case "nawk":
+		case "awk": case "gawk": case "mawk": case "nawk":
 			return args.some((a) => AWK_RUNS_COMMAND.test(a)) ? "runs an awk program that starts a command" : undefined;
 		case "sed":
 			return sedScripts(args).some(sedRunsCommand) ? "runs a sed script with the e command or flag, or one that writes to a device" : undefined;

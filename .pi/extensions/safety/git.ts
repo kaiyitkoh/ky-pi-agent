@@ -1,34 +1,10 @@
 /**
- * git and glab decision layer: two separate questions, deny only when both hold.
- *
- * - Is `HEAD` currently a protected branch? Answered by {@link currentBranch}, the only impure
- *   function here. Asking "does the command mention `main`" instead would block
- *   `git worktree add -b feat main`, `git fetch origin main`, `git diff main`.
- * - Is this subcommand a WRITE given its args? A pure table of per-subcommand predicates
- *   (`{ subcommand, matches(args), why }`); `apply` appears in both tables with complementary
- *   predicates. `push` and every `rebase` are writes while `HEAD` is protected.
- *
- * `push` on any branch: force, every-branch and protected or ambiguous destinations block. Otherwise the destination is
- * resolved (explicit `src:dst`, or from config via {@link GitPolicyFacts.readConfig} only when nothing earlier in the
- * command can change it) and the verdict is `ask`, so a human sees the resolved branch; unresolvable blocks.
- *
- * With `HEAD` protected: a matching write entry blocks; else a matching read entry allows; else a
- * subcommand in either table with no matching shape (`git stash drop`) or an unknown one blocks
- * (fail closed). Fix a false positive by adding a fixture-backed row, never by widening a predicate.
- *
- * `glab mr merge` blocks on every branch: an MR merge is the deploy trigger on GitLab's server,
- * regardless of local `HEAD`. `mr create` is a conditional allow only with one explicit,
- * non-protected `--target-branch`/`-b` given first (GitLab defaults an omitted target to the protected default
- * branch, so silence is the trigger). The blocked table is consulted first so `create` can never
- * admit a `merge`.
- *
- * `currentBranch` runs `git symbolic-ref --short HEAD` with `shell: false`. A non-zero exit returns
- * {@link DETACHED_HEAD}, a named sentinel never equal to a protected name, not `undefined`, which a
- * caller's `=== "main"` would read as falsy and fail open. Callers resolve the cwd first: the
- * directory a command's `cd`, `env -C` and `git -C` lead to beats `ctx.cwd`, so
- * `git -C /other/repo push` evaluates that repo's HEAD.
- *
- * Registers nothing and never spells the tool-registration call, which a lint matches as a substring.
+ * git and glab decision layer. Two separate questions, denying only when both hold: is HEAD a protected branch
+ * ({@link currentBranch}, the only impure part; "does the command mention main" would block `git fetch origin main`),
+ * and is this subcommand a write given its args (pure per-subcommand tables; an unknown form blocks, and a false positive
+ * is fixed by a fixture-backed row, never by widening a predicate). A push is checked on every branch: force, every-branch
+ * and protected or ambiguous destinations block, and a resolvable destination asks. `glab mr merge` is the deploy trigger
+ * and blocks everywhere. Never spells the tool-registration call, which a lint matches as a substring.
  */
 import { spawnSync } from "node:child_process";
 
@@ -122,6 +98,9 @@ interface GitSubcommandRule {
 	readonly why: string;
 }
 
+/** `git apply` with one of these only reports and writes nothing. */
+export const isApplyDryRun = (args: readonly string[]): boolean => args.some((a) => a === "--check" || a === "--stat" || a === "--numstat");
+
 /** Subcommands that WRITE to the checked-out branch for at least some argument shapes. */
 export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "push", matches: () => true, why: "a write regardless of refspec, since an implicit destination is the checked-out branch" },
@@ -132,16 +111,8 @@ export const GIT_WRITE_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "revert", matches: () => true, why: "writes a new commit onto the checked-out branch" },
 	{ subcommand: "am", matches: () => true, why: "applies patches as commits onto the checked-out branch" },
 	{ subcommand: "pull", matches: () => true, why: "merges or rebases the fetched branch into the checked-out branch; git fetch, then branch from origin/<branch>" },
-	{
-		subcommand: "apply",
-		matches: (args) => !args.includes("--check") && !args.includes("--stat") && !args.includes("--numstat"),
-		why: "writes the tree unless --check/--stat/--numstat makes it a dry run",
-	},
-	{
-		subcommand: "rebase",
-		matches: () => true,
-		why: "rewrites the checked-out branch, or the branch it switches to first",
-	},
+	{ subcommand: "apply", matches: (args) => !isApplyDryRun(args), why: "writes the tree unless --check/--stat/--numstat makes it a dry run" },
+	{ subcommand: "rebase", matches: () => true, why: "rewrites the checked-out branch, or the branch it switches to first" },
 ];
 
 /** Subcommands safe even when `HEAD` is protected; each is a named allow, never a default. */
@@ -158,29 +129,11 @@ export const GIT_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 		matches: (args) => args.length === 0 || ["push", "save", "list", "show", "pop", "apply"].includes(args[0]),
 		why: "stashing and applying a stash change the working tree, never the checked-out branch; drop, clear and branch stay unclassified",
 	},
-	{
-		subcommand: "checkout",
-		matches: () => true,
-		why: "moves HEAD or rewrites working-tree files, never the checked-out branch; a protected -B target and a later write are checked separately",
-	},
-	{
-		subcommand: "switch",
-		matches: () => true,
-		why: "moves HEAD, never the checked-out branch; a protected -C target and a later write are checked separately",
-	},
+	{ subcommand: "checkout", matches: () => true, why: "moves HEAD or rewrites working-tree files, never the checked-out branch; a protected -B target and a later write are checked separately" },
+	{ subcommand: "switch", matches: () => true, why: "moves HEAD, never the checked-out branch; a protected -C target and a later write are checked separately" },
 	{ subcommand: "restore", matches: () => true, why: "restores the index or working tree, never the checked-out branch" },
-	{
-		subcommand: "worktree",
-		matches: () => true,
-		why:
-			"reads the named ref to populate a SECOND working directory -- with or without -b/-B, neither form " +
-			"mutates the named ref itself (the pinned answer for the without--b case)",
-	},
-	{
-		subcommand: "apply",
-		matches: (args) => args.includes("--check") || args.includes("--stat") || args.includes("--numstat"),
-		why: "--check/--stat/--numstat is a dry run -- does not write the tree",
-	},
+	{ subcommand: "worktree", matches: () => true, why: "reads the named ref to populate a second working directory; neither form, with or without -b/-B, mutates that ref" },
+	{ subcommand: "apply", matches: isApplyDryRun, why: "--check/--stat/--numstat is a dry run -- does not write the tree" },
 ];
 
 /** Every subcommand that may run on any branch; an alias or an unlisted name is not one, because an alias can expand to a push. */
@@ -258,10 +211,11 @@ const BRANCH_MUTATING_FLAGS = new Set(
 	"-f --force -M -m --move -C -c --copy -D -d --delete -u --set-upstream-to --unset-upstream --edit-description".split(" "),
 );
 
-const isProtectedName = (ref: string, protectedBranches: readonly string[]): boolean => {
-	const leaf = ref.replace(/^\+/, "").replace(/^(refs\/)?heads\//i, "");
-	return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
-};
+const listsBranch = (branches: readonly string[], name: string): boolean => branches.some((b) => b.toLowerCase() === name.toLowerCase());
+
+// git DWIMs a short ref, so `heads/main` and `refs/heads/main` both name main.
+const isProtectedName = (ref: string, protectedBranches: readonly string[]): boolean =>
+	listsBranch(protectedBranches, ref.replace(/^\+/, "").replace(/^(refs\/)?heads\//i, ""));
 
 const optionValue = (args: readonly string[], names: readonly string[]): string | undefined => {
 	const at = args.findIndex((a) => names.includes(a));
@@ -315,9 +269,7 @@ export function switchTarget(subcommand: string, args: readonly string[]): strin
 	return tracking && target !== undefined ? target.slice(target.indexOf("/") + 1) : target;
 }
 
-function isProtected(facts: GitPolicyFacts): boolean {
-	return facts.protectedBranches.some((b) => b.toLowerCase() === facts.currentBranch.toLowerCase());
-}
+const isProtected = (facts: GitPolicyFacts): boolean => listsBranch(facts.protectedBranches, facts.currentBranch);
 
 const PUSH_REFUSED_LONG: ReadonlyMap<string, string> = new Map([
 	["--all", "pushes every branch, protected ones included"],
@@ -348,10 +300,7 @@ const GIT_FALSE = /^(false|no|off|0)$/i;
 /** Destinations git resolves to more than one branch, or to the remote's default branch, count as every protected one. */
 function destinationIsProtected(dst: string, protectedBranches: readonly string[]): boolean {
 	const ref = dst.replace(/^\+/, "");
-	if (ref === "" || ref.includes("*") || /^(head|@)$/i.test(ref)) return true;
-	// git DWIMs a short destination against the remote's refs, so `heads/main` reaches refs/heads/main.
-	const leaf = ref.replace(/^(refs\/)?heads\//i, "");
-	return protectedBranches.some((b) => b.toLowerCase() === leaf.toLowerCase());
+	return ref === "" || ref.includes("*") || /^(head|@)$/i.test(ref) || isProtectedName(ref, protectedBranches);
 }
 
 const branchOf = (ref: string): string => ref.replace(/^refs\/heads\//i, "");
@@ -551,9 +500,11 @@ function planPush(args: readonly string[], configOverrides: readonly string[], f
 	return plan;
 }
 
+const displayOf = (tool: string, invocation: GitInvocation): string => [tool, invocation.subcommand, ...invocation.args].join(" ");
+
 /** Refuse a push that is forced or may reach a protected destination regardless of `HEAD`, or any write while `HEAD` is protected; a resolvable feature-branch push asks. */
 export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolicyFacts): GitVerdict {
-	const display = `git ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
+	const display = displayOf("git", invocation);
 
 	if (invocation.unparsed !== undefined) {
 		return { kind: "block", reason: `"${display}" ${invocation.unparsed} -- blocked on every branch because git options can turn git into a program runner` };
@@ -599,46 +550,22 @@ export function classifyGitInvocation(invocation: GitInvocation, facts: GitPolic
 		};
 	}
 
-	if (!isProtected(facts)) {
-		return { kind: "allow" };
-	}
-
-	const writeRule = GIT_WRITE_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
-	if (writeRule !== undefined && writeRule.matches(invocation.args)) {
-		return {
-			kind: "block",
-			reason: `HEAD is "${facts.currentBranch}" (protected) and "${display}" writes to the checked-out branch: ${writeRule.why}; run "git switch -c <new-branch>" as its own command first`,
-		};
-	}
-
-	const readRule = GIT_READ_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
-	if (readRule !== undefined && readRule.matches(invocation.args)) {
-		return { kind: "allow" };
-	}
-
-	if (writeRule !== undefined || readRule !== undefined) {
-		return {
-			kind: "block",
-			reason:
-				`HEAD is "${facts.currentBranch}" (protected) and "${display}" does not match a named allow form ` +
-				`for subcommand "${invocation.subcommand}" -- defaults to block; run "git switch -c <new-branch>" as its own command first`,
-		};
-	}
-
-	return {
+	if (!isProtected(facts)) return { kind: "allow" };
+	const onProtected = (what: string): GitVerdict => ({
 		kind: "block",
-		reason:
-			`HEAD is "${facts.currentBranch}" (protected) and "${display}" is an unclassified subcommand -- defaults ` +
-			`to block; run "git switch -c <new-branch>" as its own command first`,
-	};
+		reason: `HEAD is "${facts.currentBranch}" (protected) and "${display}" ${what}; run "git switch -c <new-branch>" as its own command first`,
+	});
+	const writeRule = GIT_WRITE_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
+	if (writeRule?.matches(invocation.args) === true) return onProtected(`writes to the checked-out branch: ${writeRule.why}`);
+	const readRule = GIT_READ_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
+	if (readRule?.matches(invocation.args) === true) return { kind: "allow" };
+	return writeRule !== undefined || readRule !== undefined
+		? onProtected(`does not match a named allow form for subcommand "${invocation.subcommand}" -- defaults to block`)
+		: onProtected("is an unclassified subcommand -- defaults to block");
 }
 
 const GLAB_BLOCKED_SUBCOMMANDS: readonly GitSubcommandRule[] = [
-	{
-		subcommand: "mr",
-		matches: (args) => args[0] === "merge",
-		why: "an MR merge is the deploy trigger in the user's work repo",
-	},
+	{ subcommand: "mr", matches: (args) => args[0] === "merge", why: "an MR merge is the deploy trigger in the user's work repo" },
 ];
 
 const GLAB_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
@@ -646,14 +573,10 @@ const GLAB_READ_SUBCOMMANDS: readonly GitSubcommandRule[] = [
 	{ subcommand: "ci", matches: (args) => args[0] === "status", why: "read-only pipeline status" },
 ];
 
-const MR_TARGET_FLAG = "--target-branch";
-const MR_TARGET_SHORT = "-b";
-const MR_TARGET_EQ = `${MR_TARGET_FLAG}=`;
+const MR_TARGET_EQ = "--target-branch=";
 
 /** Strip a `refs/heads/` prefix and surrounding whitespace, lower-cased, so every spelling of a branch compares equal. */
-function normaliseBranch(raw: string): string {
-	return raw.trim().replace(/^refs\/heads\//i, "").toLowerCase();
-}
+const normaliseBranch = (raw: string): string => raw.trim().replace(/^refs\/heads\//i, "").toLowerCase();
 
 type MrTargetScan =
 	| { readonly kind: "ok"; readonly target: string }
@@ -664,11 +587,12 @@ type MrTargetScan =
  * even when it looks like a flag, and short flags cluster (`-db x`). So allow only one target, given first.
  */
 function scanMrCreateTarget(argsAfterCreate: readonly string[]): MrTargetScan {
+	const refused = (why: string): MrTargetScan => ({ kind: "refused", why });
 	let target: string | undefined;
 	let occurrences = 0;
 	for (let i = 0; i < argsAfterCreate.length; i++) {
 		const a = argsAfterCreate[i];
-		if (a === MR_TARGET_FLAG || a === MR_TARGET_SHORT) {
+		if (a === "--target-branch" || a === "-b") {
 			occurrences++;
 			const value = argsAfterCreate[i + 1];
 			if (i === 0 && value !== undefined && !value.startsWith("-")) target = value;
@@ -680,52 +604,31 @@ function scanMrCreateTarget(argsAfterCreate: readonly string[]): MrTargetScan {
 			if (i === 0) target = a.slice(MR_TARGET_EQ.length);
 			continue;
 		}
-		if (/^-[^-]/.test(a) && a.includes("b")) {
-			return { kind: "refused", why: `short-flag form "${a}" may set the target and is not parsed` };
-		}
+		if (/^-[^-]/.test(a) && a.includes("b")) return refused(`short-flag form "${a}" may set the target and is not parsed`);
 	}
-	if (occurrences === 0) {
-		return { kind: "refused", why: "names no explicit --target-branch/-b, and GitLab defaults an omitted target to the protected default branch" };
-	}
-	if (occurrences > 1) {
-		return { kind: "refused", why: "repeats the target flag, and glab honours the last one" };
-	}
+	if (occurrences === 0) return refused("names no explicit --target-branch/-b, and GitLab defaults an omitted target to the protected default branch");
+	if (occurrences > 1) return refused("repeats the target flag, and glab honours the last one");
 	if (target === undefined || normaliseBranch(target) === "") {
-		return { kind: "refused", why: "the target flag must come straight after `create` with a value, so no earlier flag can swallow it" };
+		return refused("the target flag must come straight after `create` with a value, so no earlier flag can swallow it");
 	}
 	return { kind: "ok", target: normaliseBranch(target) };
 }
 
 /** `glab mr merge` blocks on every branch; `mr list`/`view`/`ci status` stay allowed; `mr create` is the conditional allow; unknown forms fail closed. Takes `protectedBranches` rather than `GitPolicyFacts` because the destination check does not depend on `HEAD`. */
 export function classifyGlabInvocation(invocation: GitInvocation, protectedBranches: readonly string[]): GitVerdict {
-	const display = `glab ${invocation.subcommand}${invocation.args.length > 0 ? ` ${invocation.args.join(" ")}` : ""}`;
-
+	const display = displayOf("glab", invocation);
+	const block = (why: string): GitVerdict => ({ kind: "block", reason: `"${display}"${why}` });
 	const blockRule = GLAB_BLOCKED_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
-	if (blockRule !== undefined && blockRule.matches(invocation.args)) {
-		return { kind: "block", reason: `"${display}": ${blockRule.why}` };
-	}
-
+	if (blockRule?.matches(invocation.args) === true) return block(`: ${blockRule.why}`);
 	const readRule = GLAB_READ_SUBCOMMANDS.find((r) => r.subcommand === invocation.subcommand);
-	if (readRule !== undefined && readRule.matches(invocation.args)) {
-		return { kind: "allow" };
+	if (readRule?.matches(invocation.args) === true) return { kind: "allow" };
+	if (invocation.subcommand !== "mr" || invocation.args[0] !== "create") {
+		return block(" is an unclassified glab form -- defaults to block (fail closed, same posture as git)");
 	}
-
-	if (invocation.subcommand === "mr" && invocation.args[0] === "create") {
-		const scan = scanMrCreateTarget(invocation.args.slice(1));
-		if (scan.kind === "refused") {
-			return { kind: "block", reason: `"${display}" ${scan.why} -- defaults to block (fail closed)` };
-		}
-		if (protectedBranches.some((b) => b.toLowerCase() === scan.target)) {
-			return {
-				kind: "block",
-				reason: `"${display}" targets "${scan.target}", a protected branch (${protectedBranches.join(", ")}) -- defaults to block (fail closed)`,
-			};
-		}
-		return { kind: "allow" };
+	const scan = scanMrCreateTarget(invocation.args.slice(1));
+	if (scan.kind === "refused") return block(` ${scan.why} -- defaults to block (fail closed)`);
+	if (listsBranch(protectedBranches, scan.target)) {
+		return block(` targets "${scan.target}", a protected branch (${protectedBranches.join(", ")}) -- defaults to block (fail closed)`);
 	}
-
-	return {
-		kind: "block",
-		reason: `"${display}" is an unclassified glab form -- defaults to block (fail closed, same posture as git)`,
-	};
+	return { kind: "allow" };
 }

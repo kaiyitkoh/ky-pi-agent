@@ -298,7 +298,7 @@ For example, `{ "safety": { "protectedBranches": ["release"] } }` protects
 Every `git push` resolves to one of three outcomes, checked on any branch:
 
 - **Block** (no approval path): a destination of `main`, `master` or
-  `staging` (`PUSH_PROTECTED_BRANCHES` in `safety/index.ts`, compared
+  `staging` (`BUILTIN_PROTECTED` and `BUILTIN_PUSH_ONLY` in `safety/branches.ts`, compared
   case-insensitively, with `refs/heads/` and `heads/` stripped); any force
   (`--force`, `-f` alone or clustered, `--force-with-lease`,
   `--force-if-includes`, a `+refspec`, `remote.<r>.mirror`); every-ref and

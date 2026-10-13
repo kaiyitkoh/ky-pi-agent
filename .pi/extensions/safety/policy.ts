@@ -9,7 +9,7 @@ import type { PathPolicyFacts } from "./paths.ts";
 import { canonicalisePathArg, classifyPathRead, classifyPathWrite, classifyReadGlob, isSensitiveSearchRoot } from "./paths.ts";
 import type { PathVerdict } from "./paths.ts";
 import type { GitInvocation, GitPolicyFacts, GitVerdict } from "./git.ts";
-import { classifyGitInvocation, classifyGlabInvocation, switchTarget } from "./git.ts";
+import { classifyGitInvocation, classifyGlabInvocation, isApplyDryRun, switchTarget } from "./git.ts";
 import type { InfraVerdict } from "./infra.ts";
 import { classifyInfraInvocation } from "./infra.ts";
 
@@ -64,12 +64,16 @@ function describeShape(value: unknown): string {
 	return Array.isArray(value) ? "an array" : typeof value;
 }
 
+const asRecord = (input: unknown): Readonly<Record<string, unknown>> | undefined =>
+	input !== null && typeof input === "object" && !Array.isArray(input) ? (input as Record<string, unknown>) : undefined;
+
+const notAnObject = (input: unknown): string => `input is not an object (received ${describeShape(input)})`;
+
 // Missing, non-string and empty are one malformed shape; no classifier ever sees undefined or "".
 function extractStringField(input: unknown, field: string): FieldExtraction {
-	if (input === null || typeof input !== "object" || Array.isArray(input)) {
-		return { kind: "missing", reason: `input is not an object (received ${describeShape(input)})` };
-	}
-	const value = (input as Record<string, unknown>)[field];
+	const record = asRecord(input);
+	if (record === undefined) return { kind: "missing", reason: notAnObject(input) };
+	const value = record[field];
 	if (typeof value !== "string") return { kind: "missing", reason: `"${field}" is missing or not a string (received ${describeShape(value)})` };
 	if (value === "") return { kind: "missing", reason: `"${field}" is an empty string` };
 	return { kind: "ok", value };
@@ -97,7 +101,7 @@ const pathFactsOf = (facts: PolicyFacts): PathPolicyFacts => ({
 
 // Write facts add `core.hooksPath`, read lazily because only a write needs it; an unreadable config adds nothing.
 function writeFactsOf(facts: PolicyFacts): PathPolicyFacts {
-	let values: readonly string[] = [];
+	let values: readonly string[];
 	try {
 		values = facts.gitConfigFor?.(facts.cwd, "core.hooksPath") ?? [];
 	} catch {
@@ -410,7 +414,7 @@ const GIT_PATH_VALUE_OPTIONS = new Set(["-s", "--source", "-b", "-B", "--orphan"
 // Working-tree paths a git subcommand rewrites, or `"unnamed"` when a patch or a pathspec file names them instead.
 function gitPathWrites(git: GitInvocation): string[] | "unnamed" {
 	const { subcommand, args } = git;
-	if (subcommand === "am" || (subcommand === "apply" && !args.some((a) => a === "--check" || a === "--stat" || a === "--numstat"))) return "unnamed";
+	if (subcommand === "am" || (subcommand === "apply" && !isApplyDryRun(args))) return "unnamed";
 	if (!["checkout", "restore", "rm", "mv"].includes(subcommand)) return [];
 	if (args.some((a) => a.startsWith("--pathspec-from-file"))) return "unnamed";
 	const dashes = args.indexOf("--");
@@ -458,10 +462,7 @@ function evaluateBash(input: unknown, facts: PolicyFacts): Verdict {
 
 	const shellVerdict = canonicalise(command);
 	if (shellVerdict.kind === "refused") {
-		return {
-			kind: "block",
-			reason: `shell.ts refused "${command}" (cause: ${shellVerdict.cause}): ${shellVerdict.detail}`,
-		};
+		return { kind: "block", reason: `shell.ts refused "${command}" (cause: ${shellVerdict.cause}): ${shellVerdict.detail}` };
 	}
 
 	const requestKey = computeRequestKey("bash", { command }, facts.cwd);
@@ -555,10 +556,8 @@ function evaluateGlobField(extraction: OptionalFieldExtraction, facts: PolicyFac
 
 // grep returns file content, so only path and glob are checked; pattern is never inspected (the contract is which file is read).
 function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
-	if (input === null || typeof input !== "object" || Array.isArray(input)) {
-		return { kind: "block", reason: `grep input is malformed: input is not an object (received ${describeShape(input)})` };
-	}
-	const record = input as Record<string, unknown>;
+	const record = asRecord(input);
+	if (record === undefined) return { kind: "block", reason: `grep input is malformed: ${notAnObject(input)}` };
 	const pathVerdict = evaluateSearchRootField(extractOptionalStringField(record, "path"), facts, `grep "path"`);
 	if (pathVerdict.kind === "block") return pathVerdict;
 	return evaluateGlobField(extractOptionalStringField(record, "glob"), facts);
@@ -566,10 +565,9 @@ function evaluateGrep(input: unknown, facts: PolicyFacts): Verdict {
 
 // find/ls leak names, not contents; a path is evaluated as a search root like grep's (defense in depth).
 function evaluateFindOrLs(input: unknown, facts: PolicyFacts): Verdict {
-	if (input === null || typeof input !== "object" || Array.isArray(input)) {
-		return { kind: "block", reason: `find/ls input is malformed: input is not an object (received ${describeShape(input)})` };
-	}
-	return evaluateSearchRootField(extractOptionalStringField(input as Record<string, unknown>, "path"), facts, `find/ls "path"`);
+	const record = asRecord(input);
+	if (record === undefined) return { kind: "block", reason: `find/ls input is malformed: ${notAnObject(input)}` };
+	return evaluateSearchRootField(extractOptionalStringField(record, "path"), facts, `find/ls "path"`);
 }
 
 /** The whole decision for one tool call; an unrecognised tool NAME (not input shape) is the one case it allows. */
@@ -594,11 +592,7 @@ export function evaluate(toolName: string, input: unknown, facts: PolicyFacts): 
 		}
 	} catch (err) {
 		// A classifier throwing becomes a block, never an exception a caller could read as "nothing to block".
-		return {
-			kind: "block",
-			reason: `policy evaluation threw for tool "${toolName}": ${
-				err instanceof Error ? err.message : String(err)
-			} -- deny by construction, never allow on an exception`,
-		};
+		const message = err instanceof Error ? err.message : String(err);
+		return { kind: "block", reason: `policy evaluation threw for tool "${toolName}": ${message} -- deny by construction, never allow on an exception` };
 	}
 }
