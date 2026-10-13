@@ -1,41 +1,7 @@
 /**
- * Documentation policy — the README's honesty obligations and the runbook's
- * outstanding-status guard.
- *
- * THE RULE THIS FILE ENCODES. Per the standing operating policy for this
- * project, a `[RUNBOOK]`-shaped check is *built*, *unit-verified offline*, and
- * then *recorded as outstanding*. It is never reported as passed. Moving a
- * status to passed requires a human to have executed the command on the
- * machine that has the missing thing — the work laptop, a clean profile, a
- * TTY — and read the output. Because that is exactly the kind of claim that
- * decays into an assumption, the flip must be a deliberate edit that fails
- * this test until the test is updated in the same change. A status that can be
- * changed silently is not a status; it is a wish.
- *
- * WHY THE README IS IN SCOPE OF A TEST AT ALL. ROADMAP success criterion 1
- * makes the README load-bearing: the supply-chain control has real residual
- * gaps, and those gaps are mitigated *only* by the operator knowing about
- * them. An over-reassuring README is therefore not a documentation problem,
- * it is the vulnerability. Group A asserts the specific strings that carry the
- * honesty, so a tidy-up rewrite cannot quietly drop them.
- *
- * THE VACUOUS-PASS GUARD. Group B scans the runbook for test-file references
- * and asserts each one exists on disk. That scan is asserted non-empty first:
- * a regex that matches nothing would otherwise pass while proving nothing —
- * the failure shape this phase has already tripped over more than once.
- *
- * THE GUARD SPANS THREE PHASES. It was written in Phase 1 against a literal
- * `RB-01-\d{2}`, which meant appending Phase 2's entries would have left three
- * new statuses completely unguarded — the one outcome the policy above exists
- * to prevent, arriving quietly through a file that was never touched. The id
- * pattern is now `RB-<phase>-<n>` and {@link ALL_IDS} drives Group B and
- * Group C, so a future phase adds its ids to one array and inherits the whole
- * guard. Phase 3 is the first phase to collect on that promise: extending
- * {@link ALL_IDS} and adding five {@link ENTRY_COMMANDS} rows was the entire
- * change, and `ID_RE`, {@link runbookEntryStatuses} and both loops below were
- * left alone. Group C carries a synthetic `RB-02-01` fixture and a synthetic
- * `RB-03-01` fixture as well as the Phase 1 ones, because a generalisation
- * that only the real file exercises is a generalisation nobody has tested.
+ * Documentation policy: the README's honesty obligations and the runbook's status guard. A runbook check is recorded
+ * OUTSTANDING until a human runs it, and flipping a status must be a deliberate edit that fails here until this file
+ * changes too. The README is in scope because its stated gaps are the only mitigation those gaps have.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -59,116 +25,13 @@ const DIAGNOSTICS_PATH = join(ROOT, "docs", "DIAGNOSTICS.md");
 const QUALITY_PATH = join(ROOT, "docs", "QUALITY.md");
 const REDACT_SOURCE_PATH = join(ROOT, ".pi", "extensions", "diagnostics", "redact.ts");
 
-/** The Phase 1 entries this file governs. */
+/** Runbook entries this file governs; each needs a machine, credential or human this one does not have. */
 const PHASE_ONE_IDS = ["RB-01-01", "RB-01-02", "RB-01-03"] as const;
-
-/**
- * The Phase 2 entries this file governs.
- *
- * All three need the work laptop and live provider credentials: a real turn per
- * provider (RB-02-01), a real credential passing through the capture path
- * (RB-02-02), and a working day of real DeepSeek V4 Flash traffic (RB-02-03).
- */
 const PHASE_TWO_IDS = ["RB-02-01", "RB-02-02", "RB-02-03"] as const;
-
-/**
- * The Phase 3 entries this file governs.
- *
- * All five need the work laptop and a credential this machine does not hold: a
- * live DashScope key for the wire-level compat check (RB-03-01) and the
- * two-turn tool-calling check (RB-03-02), an IAM Identity Center session for
- * Bedrock (RB-03-03), a live DeepSeek-direct key for the R1 token counts
- * (RB-03-04), and a Model Studio console login for the real cap and price
- * (RB-03-05). Every one of them has a green offline proxy in this repository,
- * and not one of those proxies is the check — which is the entire reason this
- * array exists rather than a `[x]` in a requirements file.
- */
 const PHASE_THREE_IDS = ["RB-03-01", "RB-03-02", "RB-03-03", "RB-03-04", "RB-03-05"] as const;
-
-/**
- * The Phase 4 entry this file governs.
- *
- * SAFE-01 needs the work laptop specifically: this machine has no GitLab
- * access, no work-laptop credentials, and no network egress, so whether
- * GitLab's protected-branch rule is actually configured on `main` is a fact
- * about a server this machine cannot reach. `tests/integration/gitlab-push-protection.test.ts`
- * proves the harness reads and classifies a server-side rejection correctly
- * against a real local bare repo and a real `pre-receive` hook subprocess —
- * and that proof is not this check, which is exactly why the array exists
- * rather than a `[x]` in a requirements file.
- */
 const PHASE_FOUR_IDS = ["RB-04-01", "RB-04-02"] as const;
-
-/**
- * The Phase 5 entry this file governs.
- *
- * ROUTE-11 needs the work laptop specifically: this machine has no
- * `QODER_PERSONAL_ACCESS_TOKEN`, no pre-configured agent or environment, and
- * no network egress to `api.qoder.com`, so whether a real personal access
- * token authenticates and a real delegation completes is a fact about a
- * service this machine cannot reach. `tests/integration/qoder-delegate.test.ts`
- * proves the harness constructs the right requests and parses a response
- * shaped like Qoder's documented envelope, against a real local
- * `127.0.0.1` HTTP+SSE fixture — and that proof is not this check, which is
- * exactly why the array exists rather than a `[x]` in a requirements file.
- */
 const PHASE_FIVE_IDS = ["RB-05-01"] as const;
-
-/**
- * The Phase 7 entries this file governs.
- *
- * No `PHASE_SIX_IDS` exists between this array and {@link PHASE_FIVE_IDS} —
- * Phase 6 (Quality Gates walking skeleton) added no runbook entries, so this
- * is simply the next append, per "append, never renumber." An empty
- * placeholder array would add nothing but a stale-looking gap; its absence is
- * intentional and this comment is the record of why.
- *
- * EXT-09 needs the work laptop specifically, and for more of its four legs
- * than any prior single Phase 7 requirement: a real turn per provider
- * (`RB-02-01`/`RB-03-0x`, composed rather than restated), a real subagent
- * spawn against a real installed `pi-subagents` package, and a real wire
- * dump — only the blocked-command leg is fully provable offline
- * (`tests/integration/subagent-block.test.ts`,
- * `tests/unit/evasion-corpus.test.ts`). `RB-07-02` is a second, distinct
- * entry Phase 7 could not avoid: plan 07-10's blocking package-legitimacy
- * install gate was found NOT SATISFIED on this machine (its own
- * pre-authorisation ground — "no credentials on this machine" — is FALSE,
- * live AWS SSO / static admin keys are present), so no package has ever
- * been installed and `pi list` has never been reconciled against
- * `.pi/settings.json`. `RB-07-01`'s second and third legs presuppose
- * `RB-07-02` has already run.
- *
- * `RB-07-03` was appended by this phase's code-review fix pass (CR-01). The
- * real AWS account number, IAM principal ARN and admin profile name recorded
- * by plan 07-10 have been redacted from every tracked file and are guarded by
- * `tests/unit/secret-scan.test.ts` — but they remain in local, unpushed commit
- * objects, and the choice between rewriting 400-plus commits of history and
- * accepting the exposure is the account owner's to make, not an agent's. It is
- * OUTSTANDING for that reason and not because a machine could not do it.
- */
 const PHASE_SEVEN_IDS = ["RB-07-01", "RB-07-02", "RB-07-03"] as const;
-
-/** Entries a human has completed; each must carry a date-stamped PASSED instead of OUTSTANDING. */
-const PASSED_IDS: ReadonlySet<string> = new Set(["RB-07-03"]);
-
-/**
- * The Phase 8 entries this file governs.
- *
- * Three ids, each blocked by a fact already recorded in a PRIOR phase's own
- * runbook section rather than a new one this phase discovers: `RB-08-01`
- * (GATE-10's main-loop half) needs live provider credentials this machine
- * does not hold, exactly like `RB-02-01`, and is gated behind it directly.
- * `RB-08-02` (GATE-01's LSP leg) and `RB-08-03` (GATE-02/GATE-08's live
- * reviewer and live calibration run) are both gated behind `RB-07-02` —
- * nothing has ever been installed on this machine, so neither
- * `@narumitw/pi-lsp` nor a real `pi-subagents` spawn has ever run. All three
- * ids are cited BY NAME in code and test comments written before this phase's
- * closing plan (`quality/gates.ts`'s `probeLspAvailability` docstring names
- * `RB-08-02`; `tests/unit/subagent-agents-config.test.ts`'s
- * `UNROUTED_AGENT_ALLOWLIST` and `quality/calibration.ts`'s own header name
- * `RB-08-03`) — this array is what turns those forward references into
- * governed entries rather than dangling ones.
- */
 const PHASE_EIGHT_IDS = ["RB-08-01", "RB-08-02", "RB-08-03"] as const;
 const PHASE_EIGHT_TWO_IDS = ["RB-08-04"] as const;
 const PHASE_NINE_IDS = ["RB-09-01", "RB-09-02", "RB-09-03"] as const;
@@ -176,7 +39,10 @@ const PHASE_TEN_IDS = ["RB-10-01", "RB-10-02", "RB-10-03"] as const;
 const PHASE_ELEVEN_IDS = ["RB-11-01", "RB-11-02", "RB-11-03"] as const;
 const PHASE_TWELVE_IDS = ["RB-12-01", "RB-12-02", "RB-12-03", "RB-12-04", "RB-12-05", "RB-12-06", "RB-12-07", "RB-12-08"] as const;
 
-/** Every governed entry, in phase order. A later phase appends its array here. */
+/** Entries a human has completed; each must carry a date-stamped PASSED instead of OUTSTANDING. */
+const PASSED_IDS: ReadonlySet<string> = new Set(["RB-07-03"]);
+
+/** Every governed entry, in phase order. */
 const ALL_IDS = [
 	...PHASE_ONE_IDS,
 	...PHASE_TWO_IDS,
@@ -192,32 +58,12 @@ const ALL_IDS = [
 	...PHASE_TWELVE_IDS,
 ] as const;
 
-/**
- * Matches any runbook entry id, of any phase.
- *
- * Deliberately `RB-<2 digits>-<2 digits>` rather than a literal phase number:
- * the Phase 1 version was `RB-01-\d{2}`, so Phase 2's entries would have been
- * invisible to the parser and their statuses unguarded.
- */
+/** Any runbook id, of any phase: a literal phase number would leave later phases unguarded. */
 const ID_RE = /RB-\d{2}-\d{2}/g;
 
 /**
- * Extracts the recorded status token for every `RB-<phase>-<n>` id in a runbook.
- *
- * Two independent sources are read and required to agree:
- *
- *   - the summary table row  `| RB-01-01 | ... | OUTSTANDING |`
- *   - the detail subsection  `### RB-01-01 — ...` followed by `**Status:** X`
- *
- * Requiring agreement is the point. A partial flip — someone marks the table
- * passed and forgets the subsection, or vice versa — is the most likely way
- * this file goes wrong in practice, and it would leave a reader with two
- * contradictory answers and no signal. Disagreement is reported as
- * `INCONSISTENT`, which is never an acceptable status, so the suite fails
- * either way.
- *
- * Returns `MISSING` for an id that appears with no status at all: per the
- * runbook's own contract, an entry without a status line is a bug in the file.
+ * The status token of every `RB-<phase>-<n>` id, read from both the summary table and the `### <id>` subsection's
+ * `**Status:**` line. A disagreement (a half-done flip) reports `INCONSISTENT`; an id with no status reports `MISSING`.
  */
 export function runbookEntryStatuses(markdown: string): Record<string, string> {
 	const ids = Array.from(new Set(markdown.match(ID_RE) ?? []));
@@ -279,12 +125,7 @@ function sectionStatus(markdown: string, id: string): string | undefined {
 // Group A — README obligations
 // ---------------------------------------------------------------------------
 
-/**
- * Each entry is a string the README must contain, paired with the reason it is
- * load-bearing. The reason travels with the assertion so a future reader who
- * hits the failure knows what was being protected rather than just deleting
- * the row.
- */
+/** Strings the README must contain, each with the reason it is load-bearing. */
 const README_REQUIRED: readonly (readonly [string, string])[] = [
 	["ignore-scripts", "the name of the control itself; without it the README describes nothing"],
 	[
@@ -303,14 +144,7 @@ const README_REQUIRED: readonly (readonly [string, string])[] = [
 	["pi install git:github.com/kaiyitkoh/ky-pi-agent@", "the git install must carry a ref; an unrefed install is never moved by pi update"],
 ];
 
-/**
- * A run of 40+ characters drawn only from the token alphabet.
- *
- * This is a paste guard, not a secret scanner. The README is public and is
- * written on a machine holding live credentials; the realistic accident is a
- * terminal paste that carried a token along with the command. Ordinary prose,
- * paths and URLs break the run on a space, dot or slash long before 40.
- */
+/** A paste guard, not a secret scanner: 40+ token-alphabet characters, which prose, paths and URLs never reach. */
 const TOKEN_SHAPED = /[A-Za-z0-9+/=_-]{40,}/g;
 
 /** A Windows absolute path from this developer's machine. Assembled, not written. */
@@ -364,109 +198,52 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	"RB-01-01": ["sh scripts/check-gh-unauthenticated.sh", "gh auth logout"],
 	"RB-01-02": ["pi install git:github.com/kaiyitkoh/ky-pi-agent@v1.0.1", "pi --list-models"],
 	"RB-01-03": ["/reload"],
-	// Fragments, not whole command lines: each is short enough to survive a
-	// reflow of the surrounding markdown and specific enough that a rewrite
-	// dropping the command fails here.
+	// Fragments: short enough to survive a markdown reflow.
 	"RB-02-01": ["tail -n 1 .pi/logs/wire-"],
 	"RB-02-02": ["grep -rIEn", ".pi/logs/"],
-	// RB-02-03 pins the FOUR COUNTING COMMANDS IN FULL, not fragments of them.
-	//
-	// Fragments were not enough here. Each of these commands carries a fix for a
-	// specific defect -- the `grep -F '"kind":"turn"'` prefilter stops the numerator
-	// double-counting the standalone record beside the turn row (a detected prose turn
-	// can leave both, and they share the same `event` value), and the `cat ... |`
-	// prefix makes `grep -c` over a rotated glob yield one total instead of
-	// `file:count` per file -- and the runbook DESCRIBES those same fragments in the
-	// prose underneath the steps. A fragment pin therefore stayed green when the
-	// fragment was deleted from the command and left in the explanation, which is the
-	// whole failure this pin exists to catch. Pinning the complete line is safe
-	// because each command sits inside backticks on one line of a numbered list and is
-	// not subject to reflow.
-	//
-	// [WR-01R] The NUMERATOR counts TURN ROWS, not the kind-less action records. The
-	// verdict is stamped on the turn accumulator before the retry budget is consulted
-	// (`index.ts`), so every detected prose turn leaves a turn row; the kind-less
-	// record is written only when a retry was actually issued, and `MAX_PROSE_RETRIES`
-	// is 1 per agent run, so every prose turn after the first in a run is invisible to
-	// it. Measured on a fixture holding both shapes: the action count reports 1/3 where
-	// the turn-row count reports the true 2/3.
-	//
-	// Read against a published ~11% baseline, an inflated rate looks like loud
-	// confirmation of the leading root-cause hypothesis and a deflated one looks like
-	// refutation. Both directions are pinned rather than trusted, which is why the
-	// action commands are also here: steps 3 and 4 must sum to step 1.
+	// Pinned in full: the prefilter and `cat ... |` prefix each fix a counting defect, and the runbook prose describes
+	// them too, so a fragment pin stays green when the command loses its fix. Steps 3 and 4 must sum to step 1.
 	"RB-02-03": [
 		`cat .pi/logs/turns-*.jsonl | grep -F '"kind":"turn"' | grep -cF '"event":"prose_tool_call"'`,
 		`cat .pi/logs/turns-*.jsonl | grep -cF '"kind":"turn"'`,
 		`cat .pi/logs/turns-*.jsonl | grep -F '"event":"prose_tool_call"' | grep -v '"kind":' | wc -l`,
 		`cat .pi/logs/turns-*.jsonl | grep -cF '"event":"prose_tool_call_retry_exhausted"'`,
 	],
-	// PHASE 3 PINS WHOLE ONE-LINE COMMANDS, following RB-02-03's lesson above
-	// rather than RB-02-01/02's fragments. Every command below sits inside
-	// backticks on a single line of a numbered list, so it is not subject to
-	// reflow, and each is distinct from every other command in the file --
-	// verified once by counting occurrences in the runbook, because a pin that
-	// also matches a neighbouring entry's command stays green when the entry that
-	// owns it drops it, which is the same blindness the fragment pins had.
-	//
-	// Each of these five entries needs a credential this machine does not hold,
-	// so the commands are the only thing about them that CAN be checked here.
-	// Pinning them is what stops a documentation tidy-up leaving an operator to
-	// reconstruct the step -- and a step that gets reconstructed gets done
-	// differently every time, in a runbook whose whole value is that two runs are
-	// comparable.
+	// From here on, whole one-line commands, each distinct from every other in the runbook.
 
-	// The request record carries the compat block on the wire; the response
-	// record is the 200 that says DashScope accepted it. Both are needed: a 200
-	// with no `enable_thinking` is a finding, not a pass. The base-URL export is
-	// pinned whole because the remedy is worthless in halves -- exporting the
-	// variable without re-running bootstrap changes nothing on disk.
+	// The request record carries the compat block; the response record is DashScope's 200 accepting it.
 	"RB-03-01": [
 		`cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 1`,
 		`grep -F '"kind":"main.response"' .pi/logs/wire-$(date +%F).jsonl | tail -n 1`,
 		`export KYPI_DASHSCOPE_BASE_URL="https://<WorkspaceId>.ap-southeast-1.maas.aliyuncs.com/compatible-mode/v1" && sh bin/bootstrap.sh`,
 	],
 
-	// `tail -n 2`, not `-n 1`: the FIRST turn of a tool sequence always works, so
-	// a procedure that reads one record reads the turn that cannot fail. The
-	// turns command is what surfaces the provider's message when the second
-	// request 4xx'd and therefore left no response record at all.
+	// `tail -n 2`: the first turn of a tool sequence always works, so reading one record reads the wrong turn.
 	"RB-03-02": [
 		`cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 2`,
 		`cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"kind":"turn"' | tail -n 2`,
 	],
 
-	// The `&& echo` half is not decoration and must not be dropped: `aws sso
-	// login` sets no environment variable, so a successful login with an empty
-	// `AWS_PROFILE` is precisely the state in which Bedrock does not work and
-	// everything looks configured. The turns-row command is provider-filtered so
-	// it cannot be satisfied by some other provider's row.
+	// `&& echo $AWS_PROFILE` matters: `aws sso login` sets no variable, so an empty profile looks configured.
 	"RB-03-03": [
 		`aws sso login --profile X && echo $AWS_PROFILE`,
 		`cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"provider":"amazon-bedrock"' | tail -n 1`,
 	],
 
-	// Step 1 is the stop condition for the whole experiment -- a malformed
-	// `modelOverrides` edit invalidates every measurement below it -- and steps 4
-	// and 5 are the two records the four recorded fragments come from.
+	// Step 1 is the stop condition; steps 4 and 5 hold the recorded fragments.
 	"RB-03-04": [
 		"pi --list-models | grep deepseek-flash",
 		`tail -n 5 .pi/logs/wire-$(date +%F).jsonl`,
 		`cat .pi/logs/turns-$(date +%F).jsonl | grep -F '"kind":"turn"' | tail -n 1`,
 	],
 
-	// The vitest run is the step that makes the console reading land in the
-	// repository rather than in a note: the allowlist is asserted in both
-	// directions, so a price written into the template without the matching
-	// allowlist removal fails there and nowhere else.
+	// The vitest run asserts the price allowlist in both directions.
 	"RB-03-05": [
 		"npx vitest run tests/unit/model-metadata.test.ts",
 		`pi --list-models | grep -F 'deepseek-v4-pro'`,
 	],
 
-	// PHASE 4 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phase 3. The
-	// clean-up step is pinned alongside the check itself -- a runbook step that
-	// leaves a stray commit sitting on `main` locally is a step half-written.
+	// The clean-up step is pinned too: a check that leaves a stray commit on main is half-written.
 	"RB-04-01": [
 		"cd <work-repo> && git checkout main && git pull",
 		`echo "RB-04-01 push-protection check $(date -u +%FT%TZ)" >> RB-04-01-CHECK.md && git add RB-04-01-CHECK.md && git commit -m "RB-04-01: protected-branch push check (not meant to land)"`,
@@ -475,37 +252,18 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 	],
 	"RB-04-02": [`pi -p "run: git push -u origin rb-04-02"`, "git push origin --delete rb-04-02"],
 
-	// PHASE 5 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phases 3-4.
-	// The credential/id exports are pinned whole because a placeholder-only
-	// half (naming the env var but not the export line) is not something an
-	// operator can copy-paste, and the transcript-read command is the only
-	// step that surfaces the pass/fail signal without a live PAT to inspect
-	// interactively.
 	"RB-05-01": [
 		"export QODER_PERSONAL_ACCESS_TOKEN=pt-<paste the token from qoder.com/account/integrations>",
 		"export QODER_AGENT_ID=<agent-id> QODER_ENVIRONMENT_ID=<environment-id>",
 		`cat .pi/logs/qoder-$(date +%F).jsonl | tail -n 5`,
 	],
 
-	// PHASE 7 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phases 3-5.
-	// RB-07-01's second leg deliberately does NOT pin `pi list` -- that command
-	// belongs to RB-07-02 alone, and RB-07-01's own procedure text points at
-	// RB-07-02's reconciliation step by id instead of restating the command.
-	// Verified by grep before commit: `git status --porcelain` and the audit
-	// tail command below each occur exactly once in docs/RUNBOOK.md, and every
-	// `pi install -l npm:...` line plus `pi list` occur only inside RB-07-02's
-	// own section -- so an entry that drops its own copy cannot stay green on
-	// a neighbouring entry's.
+	// `pi list` belongs to RB-07-02 alone, so RB-07-01 cannot stay green on its neighbour's copy.
 	"RB-07-01": [
 		"git status --porcelain",
 		`tail -n 1 .pi/logs/audit-$(date +%F).jsonl`,
 	],
-	// RB-07-03 pins the two DISCOVERY commands, not the remedy: `git filter-repo`
-	// is named in prose as Option A but is deliberately NOT pinned here, because
-	// the operator may legitimately choose Option B (accept and rotate) and a
-	// pinned remedy command would imply one branch is the expected one. Both
-	// commands below were grepped before commit and occur exactly once in
-	// docs/RUNBOOK.md, inside RB-07-03's own section.
+	// Discovery commands only: the remedy is the operator's choice between two options.
 	"RB-07-03": [
 		"git ls-remote --heads origin",
 		'git log --all --oneline -S"$KYPI_REDACTED_ACCOUNT_ID"',
@@ -519,17 +277,7 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		"npx vitest run tests/unit/extension-pins.test.ts",
 	],
 
-	// PHASE 8 PINS WHOLE ONE-LINE COMMANDS TOO, same discipline as Phases 3-7.
-	// RB-08-01 deliberately does NOT re-pin RB-02-01's own
-	// `tail -n 1 .pi/logs/wire-$(date +%F).jsonl` fragment -- that exact whole
-	// line already sits inside RB-02-01's own procedure, and pinning it a
-	// second time here would make BOTH entries' pins go green if either one's
-	// step dropped its own copy. RB-08-01's own read command is a distinct
-	// three-provider form instead. RB-08-02 and RB-08-03 do not re-pin any of
-	// RB-07-02's five `pi install -l ...` lines or its `pi list` line, for the
-	// identical reason RB-07-01 already established for that command.
-	// Verified by grep before commit: every command below occurs exactly once
-	// in docs/RUNBOOK.md, inside its own entry's section.
+	// A pin already owned by another entry is not repeated, so either entry dropping its copy still fails.
 	"RB-08-01": [
 		`cat .pi/logs/wire-$(date +%F).jsonl | grep -F '"kind":"main.request"' | tail -n 3`,
 	],
@@ -539,7 +287,6 @@ const ENTRY_COMMANDS: Readonly<Record<string, readonly string[]>> = {
 		'echo "RB-08-03 live catch rate: <caught>/<total>, $(date -u +%FT%TZ)" >> RB-08-03-RESULT.md',
 	],
 
-	// Whole one-line commands, each occurring exactly once in the runbook (asserted in Group B).
 	"RB-09-01": [
 		"cat .pi/work/<slug>/PROGRESS.md",
 		"git diff --name-only $(git merge-base HEAD staging)..HEAD",
@@ -682,18 +429,7 @@ describe("Group B — the runbook is structurally complete", () => {
 	});
 
 	it("governs every entry the runbook declares — an id outside ALL_IDS is an unguarded status", () => {
-		// [Rule 2 — missing critical functionality, added by plan 03-11] Everything
-		// else in this file asserts that the ids in ALL_IDS are OUTSTANDING. Nothing
-		// asserted the converse: that ALL_IDS covers the file. Both loops iterate
-		// ALL_IDS, so DELETING `...PHASE_THREE_IDS` from it leaves five live checks
-		// with no assertion at all and the suite GREENER than before -- the same
-		// silent shape as Phase 1's literal `RB-01-\d{2}`, arriving through a
-		// one-token edit instead of through a new phase. A guard that can be
-		// disarmed by removing something is not a guard.
-		//
-		// This reads the ids OUT OF THE FILE, so a sixth Phase 3 entry appended
-		// without extending PHASE_THREE_IDS also fails here rather than landing
-		// unguarded.
+		// The converse of the loops above: an id the runbook declares but no phase array lists is asserted by nothing.
 		const declared = Object.keys(runbookEntryStatuses(runbook));
 
 		expect(
@@ -713,26 +449,7 @@ describe("Group B — the runbook is structurally complete", () => {
 	});
 
 	it("RB-03-03 describes the installer this repository actually ships [WR-04]", () => {
-		// THE ONLY DOC/BEHAVIOUR PAIR IN THIS FILE, AND IT EARNS ITS PLACE. Every
-		// other assertion here pins a COMMAND or a STATUS; this one pins prose,
-		// because the prose in question is reachable from a running session.
-		// `PROFILE_PLACEHOLDER_HINT` is
-		// " — no AWS profile is configured; see RB-03-03 in docs/RUNBOOK.md" and it
-		// is appended on exactly the path where the user has NO profile. So the
-		// operator who meets an expired SSO session is routed to this page — and it
-		// used to tell them bootstrap had written an `amazon-bedrock` entry with a
-		// placeholder to edit. They open the file, find no such key, and are left
-		// reconciling the runbook against reality at the worst possible moment.
-		//
-		// The claim was true when it was written and was invalidated by the CR-01
-		// fix, which made `merge_auth_json` WITHHOLD any entry still carrying a
-		// `REPLACE_WITH_` value. Nothing noticed: the ENTRY_COMMANDS pins cover
-		// this entry's commands and its OUTSTANDING status, not its explanation.
-		//
-		// BOTH SIDES ARE ASSERTED, which is what makes this a guard rather than a
-		// second copy of the sentence. If a later change makes bootstrap install
-		// the entry after all, the behaviour half goes red and the doc half is then
-		// the thing to update — in the same commit, which is the whole point.
+		// Doc and behaviour both asserted: the placeholder hint routes an operator with no AWS profile to this section.
 		const section = runbook.slice(
 			runbook.indexOf("### RB-03-03"),
 			runbook.indexOf("### RB-03-04"),
@@ -799,302 +516,46 @@ describe("Group B — the runbook is structurally complete", () => {
 // Group C — the outstanding-status guard
 // ---------------------------------------------------------------------------
 
-const FIXTURE_OUTSTANDING = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-01-01 | example check | OUTSTANDING |",
-	"",
-	"### RB-01-01 — example check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
+/** One runbook entry in the two-source shape: a summary-table row and a `### <id>` subsection. */
+function fixture(id: string, tableStatus: string, sectionStatus: string | undefined): string {
+	return [
+		"| ID | Check | Status |",
+		"|----|-------|--------|",
+		`| ${id} | example check | ${tableStatus} |`,
+		"",
+		`### ${id} — example check`,
+		"",
+		sectionStatus === undefined ? "Some prose and no status line." : `**Status:** ${sectionStatus}`,
+		"",
+	].join("\n");
+}
 
-const FIXTURE_PASSED = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-01-01 | example check | PASSED — 2026-08-13 |",
-	"",
-	"### RB-01-01 — example check",
-	"",
-	"**Status:** PASSED — 2026-08-13",
-	"",
-].join("\n");
-
-const FIXTURE_HALF_FLIPPED = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-01-01 | example check | OUTSTANDING |",
-	"",
-	"### RB-01-01 — example check",
-	"",
-	"**Status:** PASSED — 2026-08-13",
-	"",
-].join("\n");
-
-const FIXTURE_NO_STATUS = ["### RB-01-01 — example check", "", "Some prose and no status line.", ""].join("\n");
-
-/**
- * The same two-source shape carrying a PHASE 2 id.
- *
- * The Phase 1 fixtures above cannot tell a generalised `RB-\d{2}-\d{2}` apart
- * from the literal `RB-01-\d{2}` it replaced — both match `RB-01-01`. Without a
- * fixture whose id starts `RB-02`, the generalisation would be proven only by
- * the real runbook, i.e. by the very file the guard is supposed to police.
- */
-const FIXTURE_PHASE_TWO = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-02-01 | example phase 2 check | OUTSTANDING |",
-	"",
-	"### RB-02-01 — example phase 2 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-const FIXTURE_PHASE_TWO_HALF_FLIPPED = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-02-01 | example phase 2 check | PASSED — 2026-08-13 |",
-	"",
-	"### RB-02-01 — example phase 2 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-/**
- * The same two-source shape carrying a PHASE 3 id.
- *
- * Written for the reason {@link FIXTURE_PHASE_TWO} states and which has not
- * expired: the generalised parser is proven off the real runbook only, and the
- * real runbook is the file this guard exists to police. A phase array can be
- * extended while the parser silently fails to see the new shape, and that
- * failure is not a red suite — it is `statuses[id] === undefined`, which the
- * loop below would report as "RB-03-01 is recorded as undefined". These two
- * fixtures are what make that impossible.
- */
-const FIXTURE_PHASE_THREE = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-03-01 | example phase 3 check | OUTSTANDING |",
-	"",
-	"### RB-03-01 — example phase 3 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-const FIXTURE_PHASE_THREE_HALF_FLIPPED = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-03-01 | example phase 3 check | PASSED — 2026-08-14 |",
-	"",
-	"### RB-03-01 — example phase 3 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-/**
- * The same two-source shape carrying a PHASE 7 id.
- *
- * Written for the reason {@link FIXTURE_PHASE_TWO} states and which has not
- * expired: Phase 6 added no ids at all, so {@link PHASE_SEVEN_IDS} is the
- * first array appended since Phase 5 and the first proof that a phase gap in
- * {@link ALL_IDS}'s composition does not itself break the generalised parser.
- * Without this fixture, `RB-07-01`/`RB-07-02` would be proven only by the
- * real runbook — the file this guard exists to police.
- */
-const FIXTURE_PHASE_SEVEN = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-07-01 | example phase 7 check | OUTSTANDING |",
-	"",
-	"### RB-07-01 — example phase 7 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-const FIXTURE_PHASE_SEVEN_HALF_FLIPPED = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-07-01 | example phase 7 check | PASSED — 2026-08-15 |",
-	"",
-	"### RB-07-01 — example phase 7 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-/**
- * The same two-source shape carrying a PHASE 8 id.
- *
- * Written for the reason {@link FIXTURE_PHASE_TWO} states and which has not
- * expired: {@link PHASE_EIGHT_IDS} was appended on the promise that the
- * generalised parser already covers it. Without this fixture, `RB-08-01`
- * would be proven only by the real runbook — the file this guard exists to
- * police — and the disagreement guard below (the whole point of this plan's
- * own `test_integrity` obligation) would be exercised only against a file
- * this suite already asserts is consistent, which proves the parser can read
- * an agreeing pair but not that it CATCHES a disagreeing one.
- */
-const FIXTURE_PHASE_EIGHT = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-08-01 | example phase 8 check | OUTSTANDING |",
-	"",
-	"### RB-08-01 — example phase 8 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-const FIXTURE_PHASE_EIGHT_HALF_FLIPPED = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-08-01 | example phase 8 check | PASSED — 2026-08-15 |",
-	"",
-	"### RB-08-01 — example phase 8 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-const FIXTURE_PHASE_NINE_HALF_FLIPPED = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-09-01 | example phase 9 check | PASSED — 2026-10-13 |",
-	"",
-	"### RB-09-01 — example phase 9 check",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
-
-const FIXTURE_PHASE_NINE_BOTH_FLIPPED = FIXTURE_PHASE_NINE_HALF_FLIPPED.replace(
-	"**Status:** OUTSTANDING",
-	"**Status:** PASSED — 2026-10-13",
-);
-
-/**
- * A malformed id in the same two-source shape.
- *
- * Widening the pattern is one edit away from widening it too far — `RB-[\d-]+`
- * would match this, and then an id that corresponds to no entry in
- * {@link ALL_IDS} would be parsed, statused and silently ignored by both
- * loops. `RB-<2 digits>-<2 digits>` is the shape the file actually uses, and
- * this fixture is what holds the pattern to it.
- */
-const FIXTURE_MALFORMED_ID = [
-	"| ID | Check | Status |",
-	"|----|-------|--------|",
-	"| RB-2-1 | single-digit phase and index | OUTSTANDING |",
-	"",
-	"### RB-2-1 — single-digit phase and index",
-	"",
-	"**Status:** OUTSTANDING",
-	"",
-].join("\n");
+/** Ids from several phases, so the generalised pattern is proven off fixtures and not only off the real runbook. */
+const FIXTURE_IDS = ["RB-01-01", "RB-02-01", "RB-03-01", "RB-07-01", "RB-08-01", "RB-09-01"] as const;
 
 describe("Group C — the parser catches a status flip", () => {
-	it("reads OUTSTANDING", () => {
-		expect(runbookEntryStatuses(FIXTURE_OUTSTANDING)).toEqual({ "RB-01-01": "OUTSTANDING" });
+	it.each(FIXTURE_IDS)("reads %s as OUTSTANDING", (id) => {
+		expect(runbookEntryStatuses(fixture(id, "OUTSTANDING", "OUTSTANDING"))).toEqual({ [id]: "OUTSTANDING" });
 	});
 
-	it("reads PASSED, so the guard below is proven live rather than assumed", () => {
-		expect(
-			runbookEntryStatuses(FIXTURE_PASSED),
-			"if the parser could not see PASSED, asserting OUTSTANDING against the real file would be a " +
-				"tautology — it would pass no matter what the file said",
-		).toEqual({ "RB-01-01": "PASSED" });
+	it.each(FIXTURE_IDS)("reads %s as PASSED, so the guard below is live rather than a tautology", (id) => {
+		expect(runbookEntryStatuses(fixture(id, "PASSED — 2026-08-13", "PASSED — 2026-08-13"))).toEqual({ [id]: "PASSED" });
 	});
 
-	it("reports a half-flip as INCONSISTENT", () => {
-		expect(runbookEntryStatuses(FIXTURE_HALF_FLIPPED)).toEqual({ "RB-01-01": "INCONSISTENT" });
+	it.each(FIXTURE_IDS)("reports a half-flip of %s, in either source, as INCONSISTENT", (id) => {
+		expect(runbookEntryStatuses(fixture(id, "OUTSTANDING", "PASSED — 2026-08-13"))).toEqual({ [id]: "INCONSISTENT" });
+		expect(runbookEntryStatuses(fixture(id, "PASSED — 2026-08-13", "OUTSTANDING"))).toEqual({ [id]: "INCONSISTENT" });
 	});
 
 	it("reports an entry with no status line as MISSING", () => {
-		expect(runbookEntryStatuses(FIXTURE_NO_STATUS)).toEqual({ "RB-01-01": "MISSING" });
-	});
-
-	it("reads a Phase 2 id, so the generalised pattern is exercised off the real file", () => {
-		expect(
-			runbookEntryStatuses(FIXTURE_PHASE_TWO),
-			"the id pattern was widened from RB-01-\\d{2} to RB-\\d{2}-\\d{2}; if that widening had not " +
-				"landed, this fixture would parse to {} and the Phase 2 half of the guard below would " +
-				"assert OUTSTANDING against undefined",
-		).toEqual({ "RB-02-01": "OUTSTANDING" });
-	});
-
-	it("reports a Phase 2 half-flip as INCONSISTENT", () => {
-		expect(runbookEntryStatuses(FIXTURE_PHASE_TWO_HALF_FLIPPED)).toEqual({
-			"RB-02-01": "INCONSISTENT",
-		});
-	});
-
-	it("reads a Phase 3 id, so the third phase's statuses are parsed rather than assumed", () => {
-		expect(
-			runbookEntryStatuses(FIXTURE_PHASE_THREE),
-			"PHASE_THREE_IDS was added to ALL_IDS on the promise that the parser already generalises. " +
-				"If it does not, the loop below asserts OUTSTANDING against undefined for five entries " +
-				"that need a live credential — the exact silent gap this file exists to prevent",
-		).toEqual({ "RB-03-01": "OUTSTANDING" });
-	});
-
-	it("reports a Phase 3 half-flip as INCONSISTENT", () => {
-		expect(runbookEntryStatuses(FIXTURE_PHASE_THREE_HALF_FLIPPED)).toEqual({
-			"RB-03-01": "INCONSISTENT",
-		});
-	});
-
-	it("reads a Phase 7 id, so the parser survives a phase gap (Phase 6 added no ids)", () => {
-		expect(
-			runbookEntryStatuses(FIXTURE_PHASE_SEVEN),
-			"PHASE_SEVEN_IDS was appended straight after PHASE_FIVE_IDS, with no PHASE_SIX_IDS in " +
-				"between. If the parser or either loop below silently assumed phase arrays are " +
-				"numbered contiguously, this fixture — the first one exercised after that gap — is " +
-				"where it would show up as RB-07-01 recorded as undefined",
-		).toEqual({ "RB-07-01": "OUTSTANDING" });
-	});
-
-	it("reports a Phase 7 half-flip as INCONSISTENT", () => {
-		expect(runbookEntryStatuses(FIXTURE_PHASE_SEVEN_HALF_FLIPPED)).toEqual({
-			"RB-07-01": "INCONSISTENT",
-		});
-	});
-
-	it("reads a Phase 8 id, so the disagreement guard is proven off a fixture and not only off the real file", () => {
-		expect(
-			runbookEntryStatuses(FIXTURE_PHASE_EIGHT),
-			"PHASE_EIGHT_IDS was appended straight after PHASE_SEVEN_IDS. If the parser silently assumed " +
-				"phase arrays are numbered contiguously or capped at seven, this fixture is where it would " +
-				"show up as RB-08-01 recorded as undefined",
-		).toEqual({ "RB-08-01": "OUTSTANDING" });
-	});
-
-	it("reports a Phase 9 half-flip as INCONSISTENT, and a full flip as PASSED (which the live-check guard rejects)", () => {
-		expect(runbookEntryStatuses(FIXTURE_PHASE_NINE_HALF_FLIPPED)).toEqual({ "RB-09-01": "INCONSISTENT" });
-		expect(runbookEntryStatuses(FIXTURE_PHASE_NINE_BOTH_FLIPPED)).toEqual({ "RB-09-01": "PASSED" });
-	});
-
-	it("reports a Phase 8 half-flip as INCONSISTENT — the whole point of this plan's own test_integrity obligation", () => {
-		expect(
-			runbookEntryStatuses(FIXTURE_PHASE_EIGHT_HALF_FLIPPED),
-			"a docs-policy test that cannot detect a one-sided status flip on the very phase that introduced " +
-				"it is worthless — this is the disagreement fixture required to go red, and it must do so " +
-				"BEFORE this file is asserted consistent against the real, agreeing docs/RUNBOOK.md below",
-		).toEqual({ "RB-08-01": "INCONSISTENT" });
+		const noStatus = fixture("RB-01-01", "", undefined).split("\n").slice(4).join("\n");
+		expect(runbookEntryStatuses(noStatus)).toEqual({ "RB-01-01": "MISSING" });
 	});
 
 	it("does not recognise a malformed id, so the widened pattern stays a shape and not a wildcard", () => {
 		expect(
-			runbookEntryStatuses(FIXTURE_MALFORMED_ID),
-			"RB-2-1 is not the id shape docs/RUNBOOK.md uses. A pattern loose enough to match it would " +
-				"also parse ids that appear in no phase array, which the two loops below would then " +
-				"silently skip — a status that is read and never asserted is not guarded",
+			runbookEntryStatuses(fixture("RB-2-1", "OUTSTANDING", "OUTSTANDING")),
+			"a pattern loose enough to match RB-2-1 would parse ids no phase array lists, which nothing then asserts",
 		).toEqual({});
 	});
 });
@@ -1110,20 +571,9 @@ describe("Group C — every live check is still OUTSTANDING", () => {
 		it(`${id} is OUTSTANDING`, () => {
 			expect(
 				statuses[id],
-				`${id} is recorded as ${statuses[id]}. None of these three can be executed on the ` +
-					"development machine — they need the work laptop, a clean profile, or a TTY. Marking " +
-					"one passed is a claim that a human ran the command and read the output. If that " +
-					"genuinely happened, date-stamp the status in docs/RUNBOOK.md and update this test " +
-					"in the same commit, so the claim is reviewable. Never flip it to make a build green. " +
-					"The Phase 2 three need the work laptop and live provider credentials specifically: " +
-					"one real turn per provider (RB-02-01), a real credential passing through the capture " +
-					"path (RB-02-02), and a working day of real DeepSeek V4 Flash traffic (RB-02-03). " +
-					"The Phase 3 five need the work laptop, a live DashScope key and an IAM Identity " +
-					"Center session: what DashScope accepts on the wire (RB-03-01), its 200 on the second " +
-					"turn of a tool sequence (RB-03-02), Bedrock authenticating from a fresh shell " +
-					"(RB-03-03), the R1 reasoning-token counts (RB-03-04), and the real cap and price " +
-					"from the Model Studio console (RB-03-05). Each has a green offline proxy in this " +
-					"repository, and not one of those proxies is the check.",
+				`${id} is recorded as ${statuses[id]}. It needs a machine, credential or human this one lacks, and each ` +
+					"offline proxy is not the check. Flip it only after a human ran it: date-stamp the status in " +
+					"docs/RUNBOOK.md and add the id to PASSED_IDS in the same commit. Never flip it to make a build green.",
 			).toBe("OUTSTANDING");
 		});
 	}
@@ -1133,20 +583,7 @@ describe("Group C — every live check is still OUTSTANDING", () => {
 // Group D — the published redaction contract still describes the redactor
 // ---------------------------------------------------------------------------
 
-/**
- * `docs/DIAGNOSTICS.md`'s Redaction section.
- *
- * WHY THIS GROUP EXISTS [WR-02R]. `docs/DIAGNOSTICS.md` is the document a reader
- * consults to INTERPRET a dump, so a divergence here is not a stale comment — it
- * is a wrong reading of evidence. The redactor was changed to apply the key rule
- * inside payloads and to write `[redacted:truncated]` for two further causes, and
- * the published contract still named one cause and called rule 1 "By header key".
- * A reader who saw the sentinel would have concluded the payload was
- * pathologically deep when in fact a credential-named key was present.
- *
- * Group B pins runbook COMMANDS. Nothing pinned the contract, which is exactly
- * how it drifted.
- */
+/** docs/DIAGNOSTICS.md's Redaction section: the contract a reader uses to interpret a dump. */
 function redactionSection(): string {
 	const doc = readFileSync(DIAGNOSTICS_PATH, "utf-8");
 	const start = doc.indexOf("\n## Redaction");
@@ -1160,13 +597,7 @@ function redactionSection(): string {
 	return end === -1 ? rest : rest.slice(0, end);
 }
 
-/**
- * How many code paths in `redact.ts` can produce {@link TRUNCATION_PLACEHOLDER}.
- *
- * Counted out of the source rather than transcribed, so ADDING a fourth cause
- * fails this file instead of only diverging from it. That is the whole point:
- * WR-02R was a behaviour change that no test noticed.
- */
+/** Code paths in redact.ts that produce TRUNCATION_PLACEHOLDER, counted from source so a new cause fails here. */
 function truncationCauseCount(): number {
 	const source = readFileSync(REDACT_SOURCE_PATH, "utf-8");
 	return source.split(`return ${"TRUNCATION_PLACEHOLDER"};`).length - 1;
@@ -1228,8 +659,7 @@ describe("Group D — the redaction contract matches the redactor", () => {
 	});
 
 	it("names each of the three causes, not just their number", () => {
-		// Cue phrases, one per cause, chosen to survive a reflow of the prose while
-		// being specific enough that deleting a cause fails here.
+		// One cue per cause, short enough to survive a reflow.
 		for (const cue of ["depth", "node", "credential-named key", "not a plain object"]) {
 			expect(
 				section,
@@ -1271,25 +701,14 @@ describe("Group D — the redaction contract matches the redactor", () => {
 });
 
 // ---------------------------------------------------------------------------
-// Group E — docs/QUALITY.md cannot drift from RULE_IDS or DEFECT_CLASSES,
-// in EITHER direction — following the docs/ROUTING.md <-> ROLE_MAP precedent
-// (05-12, tests/unit/routing-map.test.ts). The CONVERSE direction is the one
-// that matters, per docs/SAFETY.md's own corpus-derived-limits discipline:
-// without it, docs/QUALITY.md could grow a rule id or defect-class id the
-// code does not have, which is exactly how a doc becomes a second, driftable
-// source of truth.
+// Group E — docs/QUALITY.md agrees with RULE_IDS and DEFECT_CLASSES in both directions, so the doc never becomes
+// a second source of truth
 // ---------------------------------------------------------------------------
 
-/** A lowercase, hyphenated, backtick-quoted token — the shape every rule id and defect-class id in this repository actually uses. */
+/** A backtick-quoted lowercase hyphenated token: the shape of every rule and defect-class id. */
 const HYPHENATED_CODE_SPAN_RE = /`([a-z]+(?:-[a-z]+)+)`/g;
 
-/**
- * Slice one numbered `## N. <title>` section out of `docs/QUALITY.md`,
- * mirroring `redactionSection()`'s and `routing-map.test.ts`'s own
- * `roleModelTableSection()` extraction discipline — scoped to the section so
- * a mention elsewhere in the document cannot accidentally satisfy or break
- * this check.
- */
+/** One `## N. <title>` section of docs/QUALITY.md, so a mention elsewhere cannot satisfy or break the check. */
 function qualitySection(doc: string, heading: string): string {
 	const start = doc.indexOf(heading);
 	expect(
@@ -1344,10 +763,7 @@ describe("Group E — docs/QUALITY.md agrees with RULE_IDS and DEFECT_CLASSES, i
 		expect(
 			invented,
 			"docs/QUALITY.md's rule table names these ids and RULE_IDS has no entry matching any of " +
-				"them — the document has grown a rule the code does not have, which is exactly how a " +
-				"doc becomes a second, driftable source of truth. Falsified by hand: adding a fake id " +
-				"(e.g. `unbounded-recursion`) to the rule table turns this exact case red, naming the " +
-				"invented id, before being reverted",
+				"them — the document has grown a rule the code does not have",
 		).toEqual([]);
 	});
 
@@ -1382,9 +798,7 @@ describe("Group E — docs/QUALITY.md agrees with RULE_IDS and DEFECT_CLASSES, i
 		expect(
 			invented,
 			"docs/QUALITY.md's calibration section names these ids and DEFECT_CLASSES has no entry " +
-				"matching any of them — the document has grown a defect class the code does not have. " +
-				"Falsified by hand: adding a fake id (e.g. `off-by-one`) to the calibration section " +
-				"turns this exact case red, before being reverted",
+				"matching any of them — the document has grown a defect class the code does not have",
 		).toEqual([]);
 	});
 });
