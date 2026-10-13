@@ -78,6 +78,8 @@ export default function (pi: ExtensionAPI): void {
 				const pinnedT = pinnedTasks(rows);
 				const specHash = specDigest(specText);
 				const pinShown = renderPinChanges(ctx.cwd, slug, rows, { allowance: union, tasks, specText });
+				// Pi runs commands mid-stream, so a re-pin must not accept an edit the running executor is still making.
+				if (isRunArmed() || !ctx.isIdle()) return fail(`execute: ${IN_FLIGHT}`);
 				if (tokens.includes("--repin")) {
 					// A PLAN or SPEC edit the user accepts: the drift base stays, so every recorded commit's ancestry is still checked.
 					if (from === undefined) return fail(`execute: ${slug} has nothing pinned yet -- run /execute ${slug} first`);
@@ -106,8 +108,7 @@ export default function (pi: ExtensionAPI): void {
 				const verificationCommand = (pinnedT ?? tasks).find((t) => t.id === task?.id)?.verificationCommand ?? undefined;
 				if (task === undefined || verificationCommand === undefined) return fail(task === undefined ? "execute: every PLAN task already has a PROGRESS entry" : `execute: ${task.id} has no verification command`);
 
-				if (isRunArmed() || !ctx.isIdle()) return fail(`execute: ${IN_FLIGHT}`);
-				// The routing input backstop lets this command's prompt through, so the executor guard runs here, before anything is armed.
+				// Guarded before arming, so a refusal arms nothing; the input backstop re-checks the prompt.
 				const guard = ctx.model === undefined ? { ok: true as const } : guardRoute(ctx.model, "executor", { ...deriveNeed(ctx, { usesToolLoop: true }), estimatedInputTokens: undefined });
 				if (!guard.ok) return fail(`execute: ${guard.reason}`);
 

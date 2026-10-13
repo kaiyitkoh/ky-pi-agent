@@ -695,6 +695,19 @@ describe("/execute -- PROGRESS.md only ever gains evidence-backed entries", () =
 		expect(shown, "an unchanged task is not listed as a change").not.toMatch(/^[-+] T001/m);
 	});
 
+	it("--repin and --rebase-base refuse while a run is in flight, so a mid-run PLAN edit cannot be accepted", async () => {
+		const h = harness();
+		await h.command(SLUG);
+		writeFileSync(join(h.repo, ".pi", "work", SLUG, "PLAN.md"), PLAN.replace("verify: npm test", "verify: true"));
+		h.approve = true;
+		for (const flag of ["--repin", "--rebase-base"]) {
+			await h.command(`${SLUG} ${flag}`);
+			expect(h.notes.at(-1)?.text).toContain("already in flight");
+		}
+		expect(h.confirms).toHaveLength(0);
+		await h.fire("agent_settled", { aborted: true });
+	});
+
 	it("--repin re-pins only with approval and never moves the drift base", async () => {
 		const h = harness();
 		await h.command(SLUG);
