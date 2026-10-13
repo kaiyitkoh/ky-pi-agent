@@ -8,11 +8,8 @@ export const SUBAGENT_BUS_TOPICS = [
 
 function idOf(payload: unknown): string | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
-  const p = payload as { id?: unknown; runId?: unknown };
-  for (const candidate of [p.id, p.runId]) {
-    if (typeof candidate === "string" && candidate !== "") return candidate;
-  }
-  return undefined;
+  const { id, runId } = payload as { id?: unknown; runId?: unknown };
+  return [id, runId].find((c): c is string => typeof c === "string" && c !== "");
 }
 
 // asyncByDefault is true (pi-subagents@0.76.1 config.js:233), so only clarify or async:false blocks the parent
@@ -36,8 +33,7 @@ export function createAgentTracker() {
       if (id === undefined) return false;
       if (topic === "subagent:async-started") {
         // A workflow runs in-process, so it never gets process-terminal; its children are counted instead.
-        if ((payload as { mode?: unknown }).mode === "workflow") return false;
-        if (asyncIds.has(id)) return false;
+        if ((payload as { mode?: unknown }).mode === "workflow" || asyncIds.has(id)) return false;
         asyncIds.add(id);
         return true;
       }
@@ -46,8 +42,7 @@ export function createAgentTracker() {
     },
     onToolStart(toolName: unknown, toolCallId: unknown, args?: unknown): boolean {
       if (toolName !== "subagent" || typeof toolCallId !== "string" || toolCallId === "") return false;
-      if (!isForegroundLaunch(args)) return false;
-      if (foreground.has(toolCallId)) return false;
+      if (!isForegroundLaunch(args) || foreground.has(toolCallId)) return false;
       foreground.add(toolCallId);
       return true;
     },

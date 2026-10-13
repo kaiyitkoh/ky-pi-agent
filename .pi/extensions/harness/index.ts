@@ -1,15 +1,12 @@
 /**
- * Load-path sentinel: a provider whose unique model id makes `pi --list-models` prove the extension loaded.
- * registerProvider calls in the factory are queued and flushed (pi 1.1.0 loader.js:163-166, runner.js:248-267), which makes them listable.
- * Ungated on purpose: registration is the observation. The id stays `ky-harness-selftest`; every load-path assertion greps it.
- * Registers commands and a provider, never a tool: tools[] is serialised into every request
- * (pi-ai src/api/openai-completions.ts), commands cost zero per-turn tokens.
- * No build step and no .gitignore under .pi/extensions/: package-manager.ts honours one, extensions/loader.ts does not.
+ * Load-path sentinel: the provider's unique model id makes `pi --list-models` prove the extension loaded,
+ * because factory registerProvider calls are queued and flushed (pi 1.1.0 loader.js:163-166, runner.js:248-267).
+ * Commands and a provider only, never a tool: tools[] is serialised into every request.
  */
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { COMMENT_RULES_SECTION, COMMENT_RULES_TEXT, hasCommentRulesHeading } from "./comment-rules.ts";
 
-/** The sentinel string every load-path assertion greps for; tests import it instead of duplicating it. */
+/** The sentinel string every load-path assertion greps for. */
 export const SELFTEST_MODEL_ID = "ky-harness-selftest";
 
 /** Provider name under which the sentinel model is registered. */

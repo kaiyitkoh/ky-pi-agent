@@ -1,7 +1,7 @@
 import type { Component } from "@earendil-works/pi-tui";
 import { truncateToWidth } from "@earendil-works/pi-tui";
 
-import { type Fg, sanitizeLabel } from "./statusline.ts";
+import { type Fg, formatMode, sanitizeLabel } from "./statusline.ts";
 
 const VERSION_MAX = 16;
 const LABEL_MAX = 12;
@@ -22,8 +22,8 @@ export function formatHeaderLines(info: HeaderInfo, fg: Fg): string[] {
 	parts.push(fg("accent", harnessVersion === undefined ? "ky-pi-agent" : `ky-pi-agent ${harnessVersion}`));
 	const piVersion = sanitizeLabel(info.piVersion, VERSION_MAX);
 	if (piVersion !== undefined) parts.push(fg("muted", `pi ${piVersion}`));
-	const mode = sanitizeLabel(info.mode, LABEL_MAX);
-	if (mode !== undefined) parts.push(fg("accent", mode) + (info.escalated ? fg("warning", "↑") : ""));
+	const mode = formatMode(info.mode, info.escalated, fg);
+	if (mode !== undefined) parts.push(mode);
 
 	const key = sanitizeLabel(info.interruptKey, LABEL_MAX) ?? "esc";
 	return [parts.join(sep), fg("dim", `/ commands · ! bash · ${key} interrupt`)];

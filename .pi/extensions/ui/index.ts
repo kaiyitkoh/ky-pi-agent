@@ -7,13 +7,14 @@ import { fileURLToPath } from "node:url";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { keyText, VERSION } from "@earendil-works/pi-coding-agent";
 
+import { DEFAULT_MODE, MODE_ENTRY_TYPE, ROUTING_EVENT } from "../routing/schema.ts";
 import { createAgentTracker, SUBAGENT_BUS_TOPICS } from "./agents.ts";
 import { createGitProbe } from "./git-probe.ts";
 import { createHeaderComponent } from "./header.ts";
 import { formatStatusline, type StatuslineState } from "./statusline.ts";
 
 const STATUS_KEY = "ky-statusline";
-const DEFAULT_ROUTE = "cheap";
+const PROBE_TRIGGER_TOOLS = new Set(["edit", "write", "bash"]);
 
 // NEVER THROWS: a missing or malformed package.json only drops the version from the header.
 function readHarnessVersion(): string | undefined {
@@ -28,17 +29,27 @@ function readHarnessVersion(): string | undefined {
 
 const harnessVersion = readHarnessVersion();
 
+function routeOf(data: unknown): { mode: string; escalated: boolean } | undefined {
+	if (typeof data !== "object" || data === null) return undefined;
+	const { mode, escalated } = data as { mode?: unknown; escalated?: unknown };
+	return typeof mode === "string" ? { mode, escalated: escalated === true } : undefined;
+}
+
 function restoreRoute(ctx: ExtensionContext): { mode: string; escalated: boolean } {
-	let mode = DEFAULT_ROUTE;
-	let escalated = false;
+	let route = { mode: DEFAULT_MODE as string, escalated: false };
 	for (const entry of ctx.sessionManager.getBranch()) {
-		if (entry.type !== "custom" || entry.customType !== "ky:mode") continue;
-		const data = entry.data as { mode?: unknown; escalated?: unknown } | null | undefined;
-		if (typeof data !== "object" || data === null || typeof data.mode !== "string") continue;
-		mode = data.mode;
-		escalated = data.escalated === true;
+		if (entry.type === "custom" && entry.customType === MODE_ENTRY_TYPE) route = routeOf(entry.data) ?? route;
 	}
-	return { mode, escalated };
+	return route;
+}
+
+// NEVER THROWS: an unknown keybinding falls back to the default key name.
+function interruptKeyText(): string {
+	try {
+		return keyText("app.interrupt");
+	} catch {
+		return "esc";
+	}
 }
 
 // NEVER THROWS: chrome must not break a turn, yet a stale context after /reload throws, as may a malformed event.
@@ -61,10 +72,7 @@ export default function (pi: ExtensionAPI): void {
 		guard(() => {
 			if (!ctx.hasUI) return;
 			const usage = ctx.getContextUsage();
-			const left =
-				usage === undefined || usage.tokens === null || usage.tokens === undefined
-					? undefined
-					: Math.max(0, usage.contextWindow - usage.tokens);
+			const left = typeof usage?.tokens === "number" ? Math.max(0, usage.contextWindow - usage.tokens) : undefined;
 			const text = formatStatusline(
 				{ ...state, contextLeftTokens: left, agentsRunning: tracker.running() },
 				(color, s) => ctx.ui.theme.fg(color, s),
@@ -73,14 +81,17 @@ export default function (pi: ExtensionAPI): void {
 		});
 	}
 
+	function track(ctx: ExtensionContext, changed = true): void {
+		lastCtx = ctx;
+		if (changed) refresh();
+	}
+
 	pi.on("session_start", (_event, ctx) => guard(() => {
-		generation += 1;
-		const gen = generation;
+		const gen = ++generation;
 		lastCtx = ctx;
 		tracker.reset();
 		probe?.dispose();
-		const route = restoreRoute(ctx);
-		state = { mode: route.mode, escalated: route.escalated };
+		state = restoreRoute(ctx);
 		// Without a UI nothing shows the count, so headless and child sessions spawn no git at all.
 		probe = ctx.hasUI
 			? createGitProbe({
@@ -93,11 +104,7 @@ export default function (pi: ExtensionAPI): void {
 				})
 			: undefined;
 		if (ctx.mode === "tui" && ctx.hasUI) {
-			let interruptKey = "esc";
-			// NEVER THROWS: an unknown keybinding falls back to the default key name.
-			try {
-				interruptKey = keyText("app.interrupt");
-			} catch {}
+			const interruptKey = interruptKeyText();
 			ctx.ui.setHeader((_tui, theme) =>
 				createHeaderComponent(
 					() => ({ harnessVersion, piVersion: VERSION, mode: state.mode, escalated: state.escalated, interruptKey }),
@@ -116,38 +123,24 @@ export default function (pi: ExtensionAPI): void {
 	}));
 
 	pi.on("turn_end", (_event, ctx) => guard(() => {
-		lastCtx = ctx;
-		refresh();
+		track(ctx);
 		probe?.trigger();
 	}));
-
-	pi.on("model_select", (_event, ctx) => guard(() => {
-		lastCtx = ctx;
-		refresh();
-	}));
-
-	pi.on("session_compact", (_event, ctx) => guard(() => {
-		lastCtx = ctx;
-		refresh();
-	}));
-
-	pi.on("tool_execution_start", (event, ctx) => guard(() => {
-		lastCtx = ctx;
-		if (tracker.onToolStart(event.toolName, event.toolCallId, event.args)) refresh();
-	}));
-
+	pi.on("model_select", (_event, ctx) => guard(() => track(ctx)));
+	pi.on("session_compact", (_event, ctx) => guard(() => track(ctx)));
+	pi.on("tool_execution_start", (event, ctx) =>
+		guard(() => track(ctx, tracker.onToolStart(event.toolName, event.toolCallId, event.args))),
+	);
 	pi.on("tool_execution_end", (event, ctx) => guard(() => {
-		lastCtx = ctx;
-		if (tracker.onToolEnd(event.toolName, event.toolCallId)) refresh();
-		if (event.toolName === "edit" || event.toolName === "write" || event.toolName === "bash") probe?.trigger();
+		track(ctx, tracker.onToolEnd(event.toolName, event.toolCallId));
+		if (PROBE_TRIGGER_TOOLS.has(event.toolName)) probe?.trigger();
 	}));
 
-	pi.events.on("ky.routing.mode_changed", (payload) => guard(() => {
-		if (typeof payload !== "object" || payload === null) return;
-		const p = payload as { mode?: unknown; escalated?: unknown };
-		if (typeof p.mode !== "string") return;
-		state.mode = p.mode;
-		state.escalated = p.escalated === true;
+	pi.events.on(ROUTING_EVENT, (payload) => guard(() => {
+		const route = routeOf(payload);
+		if (route === undefined) return;
+		state.mode = route.mode;
+		state.escalated = route.escalated;
 		refresh();
 	}));
 

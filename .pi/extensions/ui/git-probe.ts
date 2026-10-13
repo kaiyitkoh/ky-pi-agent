@@ -42,26 +42,13 @@ export function createGitProbe(opts: ProbeOptions) {
   let lastDurationMs = 0;
   let cancelScheduled: (() => void) | undefined;
 
-  function clearScheduled(): void {
-    cancelScheduled?.();
-    cancelScheduled = undefined;
-  }
-
   function finish(gen: number, started: number, result: ProbeResult | undefined): void {
     // A superseded run must not touch state the new generation now owns.
     if (gen !== generation) return;
     lastDurationMs = Math.max(0, now() - started);
     inFlight = false;
-    if (result?.code === 128) {
-      disabled = true;
-      opts.onResult(undefined);
-      return;
-    }
-    if (result !== undefined && result.code === 0 && !result.killed) {
-      opts.onResult(parsePorcelain(result.stdout));
-    } else {
-      opts.onResult(undefined);
-    }
+    if (result?.code === 128) disabled = true;
+    opts.onResult(result?.code === 0 && !result.killed ? parsePorcelain(result.stdout) : undefined);
     if (pending) {
       pending = false;
       trigger();
@@ -78,9 +65,8 @@ export function createGitProbe(opts: ProbeOptions) {
     let promise: Promise<ProbeResult>;
     try {
       promise = opts.exec(GIT_STATUS_ARGS);
-    } catch {
-      finish(gen, started, undefined);
-      return;
+    } catch (err) {
+      promise = Promise.reject(err);
     }
     promise.then(
       (result) => finish(gen, started, result),
@@ -106,22 +92,22 @@ export function createGitProbe(opts: ProbeOptions) {
     run();
   }
 
+  function reset(): void {
+    generation++;
+    cancelScheduled?.();
+    cancelScheduled = undefined;
+    inFlight = false;
+    pending = false;
+    disabled = false;
+    lastStart = undefined;
+    lastDurationMs = 0;
+  }
+
   return {
     trigger,
-    reset(): void {
-      generation++;
-      clearScheduled();
-      inFlight = false;
-      pending = false;
-      disabled = false;
-      lastStart = undefined;
-      lastDurationMs = 0;
-    },
+    reset,
     dispose(): void {
-      generation++;
-      clearScheduled();
-      inFlight = false;
-      pending = false;
+      reset();
       disabled = true;
     },
   };
