@@ -195,7 +195,7 @@ describe("evaluate(): config is trusted only for a push that runs on its own", (
 	});
 });
 
-describe("tool_call hook: ask confirms in the TUI only, and the wrapper honours the answer once", () => {
+describe("tool_call hook: ask confirms in the TUI and RPC only, and the wrapper honours the answer once", () => {
 	function load(): { hook: (event: unknown, ctx: ExtensionContext) => Promise<{ block?: boolean; reason?: string } | undefined>; bash: ToolDefinition<never, unknown> } {
 		const handlers = new Map<string, unknown>();
 		const tools = new Map<string, ToolDefinition<never, unknown>>();
@@ -211,7 +211,7 @@ describe("tool_call hook: ask confirms in the TUI only, and the wrapper honours 
 		git(cwd, "remote", "add", "origin", "./.no-such-remote.git");
 	}
 
-	function ctxOf(cwd: string, ui: { hasUI: boolean; mode: string; confirm?: (title: string, message: string) => Promise<boolean> }): ExtensionContext {
+	function ctxOf(cwd: string, ui: { hasUI: boolean; mode: string; confirm?: (title: string, message: string, opts?: { timeout?: number }) => Promise<boolean> }): ExtensionContext {
 		return { cwd, hasUI: ui.hasUI, mode: ui.mode, ui: { confirm: ui.confirm } } as unknown as ExtensionContext;
 	}
 
@@ -221,13 +221,28 @@ describe("tool_call hook: ask confirms in the TUI only, and the wrapper honours 
 			initRepo(cwd);
 			let asked = 0;
 			const confirm = async (): Promise<boolean> => (asked++, true);
-			for (const [hasUI, mode] of [[false, "json"], [false, "print"], [true, "rpc"]] as const) {
+			for (const [hasUI, mode] of [[false, "json"], [false, "print"], [false, "rpc"]] as const) {
 				const result = await hook({ toolName: "bash", input: { command: "git push origin feat" }, toolCallId: `tc-${mode}` }, ctxOf(cwd, { hasUI, mode, confirm }));
 				expect(result?.block, `${mode} must refuse`).toBe(true);
 			}
 			expect(asked).toBe(0);
 		});
 	});
+
+	it("rpc with a UI confirms with a 5 minute timeout; a decline or a timeout refuses", async () => {
+		const { hook } = load();
+		await withTempLogCwd(async (cwd) => {
+			initRepo(cwd);
+			const command = "git push origin feat:feat";
+			const timeouts: (number | undefined)[] = [];
+			const answer = (value: boolean) => async (_t: string, _m: string, opts?: { timeout?: number }) => (timeouts.push(opts?.timeout), value);
+			const declined = await hook({ toolName: "bash", input: { command }, toolCallId: "tc-rpc-no" }, ctxOf(cwd, { hasUI: true, mode: "rpc", confirm: answer(false) }));
+			expect(declined?.block).toBe(true);
+			const approved = await hook({ toolName: "bash", input: { command }, toolCallId: "tc-rpc-yes" }, ctxOf(cwd, { hasUI: true, mode: "rpc", confirm: answer(true) }));
+			expect(approved).toBeUndefined();
+			expect(timeouts).toEqual([300_000, 300_000]);
+		});
+	}, 30_000);
 
 	it("a protected push never prompts", async () => {
 		const { hook } = load();

@@ -90,12 +90,12 @@ describe("the safety extension's entry point registers exactly what it claims to
 		).toEqual(["bash", "read", "write", "edit", "approve_ky_command"]);
 	});
 
-	it("registers exactly two hooks: tool_call and session_start", () => {
+	it("registers exactly three hooks: tool_call, session_start and session_shutdown", () => {
 		expect(
 			hooks,
 			"an extra hook here is new surface this test did not expect; a missing one means the " +
 				"guard or the retention job silently stopped registering",
-		).toEqual(["tool_call", "session_start"]);
+		).toEqual(["tool_call", "session_start", "session_shutdown"]);
 	});
 
 	it("names APPROVE_TOOL_NAME consistently with what was actually registered", () => {
@@ -212,13 +212,15 @@ describe("the safety extension's source order matches its own documented guarant
 		).toBeGreaterThan(1000);
 	});
 
-	it("calls ctx.ui.confirm( exactly once in code, only for a feature-branch push and only in the TUI", () => {
+	it("calls ctx.ui.confirm( exactly once in code, behind canConfirm for both the push ask and subagent management", () => {
 		expect(
 			(codeOnly.match(/ctx\.ui\.confirm\(/g) ?? []).length,
-			"infra confirmations go block -> approval-tool -> re-issue; the one inline dialog is the git push ask",
+			"infra confirmations go block -> approval-tool -> re-issue; the one inline dialog helper serves the git push ask and subagent management",
 		).toBe(1);
-		const askBranch = codeOnly.slice(codeOnly.indexOf('if (verdict.kind === "ask") {'), codeOnly.indexOf("ctx.ui.confirm("));
-		expect(askBranch, "the dialog must sit behind the hasUI && tui gate").toContain('!ctx.hasUI || ctx.mode !== "tui"');
+		expect((codeOnly.match(/askUser\(ctx,/g) ?? []).length, "both inline dialogs go through askUser").toBe(2);
+		const askBranch = codeOnly.slice(codeOnly.indexOf('if (verdict.kind === "ask") {'));
+		expect(askBranch, "the push dialog must sit behind the canConfirm gate").toContain("!canConfirm(ctx)");
+		expect(codeOnly, "canConfirm admits only a UI in tui or rpc mode").toContain('ctx.hasUI && (ctx.mode === "tui" || ctx.mode === "rpc")');
 	});
 
 	it("calls ctx.ui.select( exactly once in code, inside approve_ky_command's own execute()", () => {

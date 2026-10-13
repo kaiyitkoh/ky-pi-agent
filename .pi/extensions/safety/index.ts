@@ -4,6 +4,7 @@
  * Tools register before the hook: tool-name collisions resolve first-registration-wins (pi 1.1.0 runner.js:410-417).
  */
 import { homedir } from "node:os";
+import { fileURLToPath } from "node:url";
 
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI, ExtensionContext, ToolCallEventResult } from "@earendil-works/pi-coding-agent";
@@ -16,6 +17,7 @@ import type { AuditVerdict } from "./schema.ts";
 import { currentBranch, gitConfigValues, resolveLocalBranch } from "./git.ts";
 import { canonicalisePathArg } from "./paths.ts";
 import { evaluate, type PolicyFacts, type Verdict } from "./policy.ts";
+import { classifySubagentCall, disposeChildGuard, isChildGuardRegistered, registerChildGuard } from "./subagents.ts";
 
 // Exported so tests import these literals instead of retyping them.
 export const APPROVE_TOOL_NAME = "approve_ky_command";
@@ -31,6 +33,26 @@ export const PROTECTED_BRANCHES: readonly string[] = ["main", "master"];
 
 /** A push may never reach these; a commit on staging is not refused, only pushing to it. */
 export const PUSH_PROTECTED_BRANCHES: readonly string[] = [...PROTECTED_BRANCHES, "staging"];
+
+/** An unanswered confirm refuses after this long; Pi dismisses the dialog with false on timeout. */
+export const CONFIRM_TIMEOUT_MS = 300_000;
+
+/** Only the TUI and an RPC front-end can answer a dialog; json, print and subagent children cannot. */
+function canConfirm(ctx: ExtensionContext): boolean {
+	return ctx.hasUI && (ctx.mode === "tui" || ctx.mode === "rpc");
+}
+
+async function askUser(ctx: ExtensionContext, title: string, message: string): Promise<boolean> {
+	return (await ctx.ui.confirm(title, message, { timeout: CONFIRM_TIMEOUT_MS })) === true;
+}
+
+function sessionIdOf(ctx: ExtensionContext): string | undefined {
+	try {
+		return ctx.sessionManager.getSessionId();
+	} catch {
+		return undefined;
+	}
+}
 
 const APPROVE_CHOICE = "Approve";
 const DENY_CHOICE = "Deny";
@@ -83,10 +105,7 @@ function extractCommandOrPath(toolName: string, input: unknown): string {
 	return "";
 }
 
-/**
- * NEVER THROWS: a classification bug becomes a block verdict, because Pi swallows handler exceptions
- * (core/extensions/runner.js) and a swallowed guard error would allow.
- */
+/** NEVER THROWS: a classification bug becomes an explicit block verdict instead of relying on Pi turning a handler failure into a block. */
 function classifyAtWrapper(toolName: string, input: unknown, ctx: ExtensionContext): Verdict {
 	try {
 		return evaluate(toolName, input, buildFacts(ctx));
@@ -357,6 +376,39 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 			return { block: true, reason: bg.reason };
 		}
 
+		if (event.toolName === "subagent") {
+			const call = classifySubagentCall(event.input);
+			const input = safeStringify(event.input).slice(0, DENY_COMMAND_MAX);
+			if (call.kind === "read") {
+				audit("subagent", input, "allow", `hook: read-only subagent action "${call.action}"`);
+				return undefined;
+			}
+			if (call.kind === "launch") {
+				const sessionId = sessionIdOf(ctx);
+				if (sessionId !== undefined && isChildGuardRegistered(sessionId)) {
+					audit("subagent", input, "allow", "hook: subagent launch with the required child guard registered");
+					return undefined;
+				}
+				const reason = "subagent launch refused: the safety guard could not be registered as a required child extension, so children would run unguarded";
+				audit("subagent", input, "block", reason);
+				return { block: true, reason };
+			}
+			if (!canConfirm(ctx)) {
+				const reason = `subagent action "${call.action}" changes agent definitions or schedules and needs a human confirm; none is available (mode "${ctx.mode}")`;
+				audit("subagent", input, "block", reason);
+				return { block: true, reason };
+			}
+			if (!(await askUser(ctx, "Allow this subagent definition change?", `action: ${call.action}
+
+${input}`))) {
+				const reason = `subagent action "${call.action}" was declined by the user`;
+				audit("subagent", input, "block", reason);
+				return { block: true, reason };
+			}
+			audit("subagent", input, "allow", `hook: subagent action "${call.action}" confirmed by the user`);
+			return undefined;
+		}
+
 		if (!HOOKED_TOOL_NAMES.has(event.toolName)) return undefined;
 		const toolName = event.toolName;
 		const command = extractCommandOrPath(toolName, event.input);
@@ -372,14 +424,14 @@ function registerToolCallHook(pi: ExtensionAPI): void {
 				audit(toolName, command, "allow", `hook: a confirmation grant is present for this exact push -- deferring to the wrapper -- ${verdict.reason}`);
 				return undefined;
 			}
-			// Only the interactive TUI can ask; rpc, json, print and subagent children refuse (fail closed).
-			if (!ctx.hasUI || ctx.mode !== "tui") {
+			if (!canConfirm(ctx)) {
 				const reason = `${verdict.reason} -- no interactive UI to confirm it (mode "${ctx.mode}"), so it is refused`;
 				audit(toolName, command, "block", reason);
 				return { block: true, reason };
 			}
-			const approved = await ctx.ui.confirm("Allow this git push?", `${command}\n\n${verdict.prompt}`);
-			if (approved !== true) {
+			if (!(await askUser(ctx, "Allow this git push?", `${command}
+
+${verdict.prompt}`))) {
 				const reason = `${verdict.reason} -- the user declined it`;
 				audit(toolName, command, "block", reason);
 				return { block: true, reason };
@@ -433,6 +485,18 @@ export default function (pi: ExtensionAPI): void {
 			pruneAuditLogs(ctx.cwd);
 		} catch {
 			// Swallowed deliberately.
+		}
+		const sessionId = sessionIdOf(ctx);
+		if (sessionId !== undefined) {
+			// A failed registration is not fatal here: the subagent launch branch fails closed on its own.
+			await registerChildGuard(sessionId, fileURLToPath(new URL("./index.ts", import.meta.url)), ctx.cwd);
+		}
+	});
+
+	pi.on("session_shutdown", async (_event, ctx) => {
+		const sessionId = sessionIdOf(ctx);
+		if (sessionId !== undefined) {
+			disposeChildGuard(sessionId);
 		}
 	});
 }
